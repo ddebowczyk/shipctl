@@ -25,11 +25,6 @@ const MAX_TODO_FILES: usize = 20;
 /// Skip parsing files larger than this — a real todo list is never 1 MB.
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
-/// Skill directory name written by `setup_todo_skill`.
-const SKILL_NAME: &str = "shep-todos";
-
-const SKILL_MD: &str = include_str!("todo_skill.md");
-
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TodoItem {
@@ -273,54 +268,6 @@ pub fn add_todo(
         joined.push('\n');
     }
     fs::write(&path, joined).map_err(|e| format!("Failed to write {}: {e}", path.display()))
-}
-
-// ── Agent skill ──────────────────────────────────────────────────────
-
-/// Whether the repo already has the shep-todos agent skill installed.
-pub fn has_todo_skill(repo_path: &str) -> bool {
-    Path::new(repo_path)
-        .join(".agents/skills")
-        .join(SKILL_NAME)
-        .join("SKILL.md")
-        .is_file()
-}
-
-/// Write the shep-todos skill at the cross-agent standard location
-/// (`.agents/skills/`) and point `.claude/skills/` at it so Claude Code,
-/// Codex, and OpenCode all pick it up from a single source file.
-pub fn setup_todo_skill(repo_path: &str) -> Result<(), String> {
-    let root = Path::new(repo_path);
-    if !root.is_dir() {
-        return Err(format!("Not a directory: {repo_path}"));
-    }
-
-    let skill_dir = root.join(".agents/skills").join(SKILL_NAME);
-    fs::create_dir_all(&skill_dir)
-        .map_err(|e| format!("Failed to create {}: {e}", skill_dir.display()))?;
-    fs::write(skill_dir.join("SKILL.md"), SKILL_MD)
-        .map_err(|e| format!("Failed to write SKILL.md: {e}"))?;
-
-    let claude_skills = root.join(".claude/skills");
-    let pointer = claude_skills.join(SKILL_NAME);
-    if pointer.symlink_metadata().is_ok() {
-        return Ok(()); // Something already there — leave the user's setup alone.
-    }
-    fs::create_dir_all(&claude_skills)
-        .map_err(|e| format!("Failed to create {}: {e}", claude_skills.display()))?;
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(
-        Path::new("../../.agents/skills").join(SKILL_NAME),
-        &pointer,
-    )
-    .map_err(|e| format!("Failed to link Claude skill: {e}"))?;
-    #[cfg(not(unix))]
-    {
-        fs::create_dir_all(&pointer).map_err(|e| format!("Failed to create skill dir: {e}"))?;
-        fs::write(pointer.join("SKILL.md"), SKILL_MD)
-            .map_err(|e| format!("Failed to write SKILL.md: {e}"))?;
-    }
-    Ok(())
 }
 
 // ── Parsing ──────────────────────────────────────────────────────────
@@ -701,26 +648,5 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn skill_setup_writes_standard_location_and_claude_pointer() {
-        let dir = temp_repo("skill");
-        let repo = dir.to_string_lossy().to_string();
-
-        assert!(!has_todo_skill(&repo));
-        setup_todo_skill(&repo).unwrap();
-        assert!(has_todo_skill(&repo));
-
-        let real = dir.join(".agents/skills/shep-todos/SKILL.md");
-        assert!(real.is_file());
-        assert!(fs::read_to_string(&real).unwrap().contains("name: shep-todos"));
-
-        // The Claude pointer resolves to the same skill.
-        let pointer = dir.join(".claude/skills/shep-todos/SKILL.md");
-        assert!(fs::read_to_string(&pointer).unwrap().contains("name: shep-todos"));
-
-        // Idempotent — a second run doesn't fail on the existing pointer.
-        setup_todo_skill(&repo).unwrap();
-        let _ = fs::remove_dir_all(&dir);
-    }
 }
 

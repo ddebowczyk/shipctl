@@ -184,6 +184,7 @@ export default function SettingsPanel() {
     };
   }, [fontPickerOpen]);
 
+
   // Assemble the searchable list: always surface the bundled MesloLGS NF
   // (the default) even if CoreText didn't return it as a system-installed
   // family, then append everything from Rust. Dedupe by family name.

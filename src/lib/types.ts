@@ -217,6 +217,15 @@ export interface TodoFile {
   items: TodoItem[];
 }
 
+// ── Agent skills ─────────────────────────────────────────────────────
+
+export interface SkillInfo {
+  name: string;
+  title: string;
+  description: string;
+  installed: boolean;
+}
+
 // ── Git diff stats ───────────────────────────────────────────────────
 
 export interface DiffFileStat {

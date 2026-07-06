@@ -5,6 +5,7 @@ import type { TodoFile, TodoItem, TodoSection } from "../../lib/types";
 import { renderInlineMarkdown } from "../../lib/inlineMarkdown";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useTodoStore } from "../../stores/useTodoStore";
+import { useSkillStore } from "../../stores/useSkillStore";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
 import { useNoticeStore } from "../../stores/useNoticeStore";
 import { getErrorMessage } from "../../lib/errors";
@@ -236,9 +237,11 @@ export default function TodosPanel() {
     activeProjectPath ? s.projectTodos[activeProjectPath] : undefined,
   );
   // Unknown (not yet checked) counts as present so the button doesn't flash.
-  const skillPresent = useTodoStore((s) =>
-    activeProjectPath ? (s.skillPresent[activeProjectPath] ?? true) : true,
-  );
+  const skillPresent = useSkillStore((s) => {
+    if (!activeProjectPath) return true;
+    const skills = s.skillsByRepo[activeProjectPath];
+    return skills ? skills.some((sk) => sk.name === "shep-todos" && sk.installed) : true;
+  });
   const todoFileStyle = useProjectSettingsStore((s) => s.settings.todoFileStyle);
   const pushNotice = useNoticeStore((s) => s.pushNotice);
   const [draft, setDraft] = useState("");
@@ -336,7 +339,7 @@ export default function TodosPanel() {
     if (installingSkill) return;
     setInstallingSkill(true);
     try {
-      await useTodoStore.getState().installSkill(activeProjectPath);
+      await useSkillStore.getState().install(activeProjectPath, "shep-todos");
       pushNotice({
         tone: "info",
         title: "Agent skill added",

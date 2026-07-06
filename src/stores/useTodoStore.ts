@@ -1,20 +1,11 @@
 import { create } from "zustand";
 import type { TodoFile } from "../lib/types";
-import {
-  readTodos,
-  toggleTodo,
-  addTodo,
-  moveTodo,
-  hasTodoSkill,
-  setupTodoSkill,
-} from "../lib/tauri";
+import { readTodos, toggleTodo, addTodo, moveTodo } from "../lib/tauri";
 
 interface TodoStore {
   /** TODO.md files per repo. The file on disk is the source of truth — this
    *  is only a render cache, refreshed from fs events and after every write. */
   projectTodos: Record<string, TodoFile[]>;
-  /** Whether the repo has the shep-todos agent skill installed. */
-  skillPresent: Record<string, boolean>;
   refreshTodos: (repoPath: string) => Promise<void>;
   refreshAll: (repoPaths: string[]) => Promise<void>;
   toggleItem: (
@@ -39,7 +30,6 @@ interface TodoStore {
     targetSectionLine: number,
     setChecked: boolean | null,
   ) => Promise<void>;
-  installSkill: (repoPath: string) => Promise<void>;
   removeProject: (repoPath: string) => void;
 }
 
@@ -65,24 +55,15 @@ function todoFilesEqual(a: TodoFile[] | undefined, b: TodoFile[]): boolean {
 
 export const useTodoStore = create<TodoStore>((set, get) => ({
   projectTodos: {},
-  skillPresent: {},
 
   refreshTodos: async (repoPath: string) => {
     try {
-      const [files, skill] = await Promise.all([readTodos(repoPath), hasTodoSkill(repoPath)]);
-      set((state) => {
-        const filesChanged = !todoFilesEqual(state.projectTodos[repoPath], files);
-        const skillChanged = state.skillPresent[repoPath] !== skill;
-        if (!filesChanged && !skillChanged) return state;
-        return {
-          projectTodos: filesChanged
-            ? { ...state.projectTodos, [repoPath]: files }
-            : state.projectTodos,
-          skillPresent: skillChanged
-            ? { ...state.skillPresent, [repoPath]: skill }
-            : state.skillPresent,
-        };
-      });
+      const files = await readTodos(repoPath);
+      set((state) =>
+        todoFilesEqual(state.projectTodos[repoPath], files)
+          ? state
+          : { projectTodos: { ...state.projectTodos, [repoPath]: files } },
+      );
     } catch {
       // Repo may have been removed from disk — leave the cache untouched
     }
@@ -90,12 +71,10 @@ export const useTodoStore = create<TodoStore>((set, get) => ({
 
   refreshAll: async (repoPaths: string[]) => {
     const results = await Promise.allSettled(repoPaths.map((p) => readTodos(p)));
-    const skills = await Promise.allSettled(repoPaths.map((p) => hasTodoSkill(p)));
 
     set((state) => {
       let changed = false;
       const nextTodos = { ...state.projectTodos };
-      const nextSkills = { ...state.skillPresent };
 
       for (let i = 0; i < repoPaths.length; i++) {
         const result = results[i];
@@ -103,14 +82,9 @@ export const useTodoStore = create<TodoStore>((set, get) => ({
           nextTodos[repoPaths[i]] = result.value;
           changed = true;
         }
-        const skill = skills[i];
-        if (skill.status === "fulfilled" && state.skillPresent[repoPaths[i]] !== skill.value) {
-          nextSkills[repoPaths[i]] = skill.value;
-          changed = true;
-        }
       }
 
-      return changed ? { projectTodos: nextTodos, skillPresent: nextSkills } : state;
+      return changed ? { projectTodos: nextTodos } : state;
     });
   },
 
@@ -137,16 +111,10 @@ export const useTodoStore = create<TodoStore>((set, get) => ({
     }
   },
 
-  installSkill: async (repoPath) => {
-    await setupTodoSkill(repoPath);
-    set((state) => ({ skillPresent: { ...state.skillPresent, [repoPath]: true } }));
-  },
-
   removeProject: (repoPath: string) => {
     set((state) => {
       const { [repoPath]: _, ...rest } = state.projectTodos;
-      const { [repoPath]: __, ...restSkills } = state.skillPresent;
-      return { projectTodos: rest, skillPresent: restSkills };
+      return { projectTodos: rest };
     });
   },
 }));
