@@ -4,6 +4,7 @@ mod git;
 mod menu;
 mod pi_config;
 mod pty;
+mod skills;
 mod todos;
 mod usage;
 mod watcher;
@@ -135,8 +136,9 @@ pub fn run() {
             commands::toggle_todo,
             commands::add_todo,
             commands::move_todo,
-            commands::has_todo_skill,
-            commands::setup_todo_skill,
+            commands::list_skills,
+            commands::setup_skill,
+            commands::remove_skill,
             commands::check_command_exists,
             commands::get_usage_settings,
             commands::save_usage_settings,

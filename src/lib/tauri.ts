@@ -27,6 +27,7 @@ import type {
   PiSettings,
   DiffFileStat,
   TodoFile,
+  SkillInfo,
 } from "./types";
 
 // ── Workspace commands ──────────────────────────────────────────────
@@ -249,12 +250,16 @@ export function moveTodo(
   return invoke("move_todo", { filePath, line, expectedText, targetSectionLine, setChecked });
 }
 
-export function hasTodoSkill(repoPath: string): Promise<boolean> {
-  return invoke("has_todo_skill", { repoPath });
+export function listSkills(repoPath: string): Promise<SkillInfo[]> {
+  return invoke("list_skills", { repoPath });
 }
 
-export function setupTodoSkill(repoPath: string): Promise<void> {
-  return invoke("setup_todo_skill", { repoPath });
+export function setupSkill(repoPath: string, name: string): Promise<void> {
+  return invoke("setup_skill", { repoPath, name });
+}
+
+export function removeSkill(repoPath: string, name: string): Promise<void> {
+  return invoke("remove_skill", { repoPath, name });
 }
 
 export function gitListWorktrees(path: string): Promise<WorktreeEntry[]> {

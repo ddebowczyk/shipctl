@@ -13,6 +13,7 @@ use crate::git;
 use crate::git::{ChangedFile, CreatedWorktree, DiffFileStat, GitStatus, WorktreeEntry};
 use crate::pty::manager::PtyManager;
 use crate::pty::session::{PtyColorTheme, PtyOutput};
+use crate::skills;
 use crate::todos::{self, TodoFile};
 use crate::usage::{
     LocalUsageDetails, ProviderUsageSnapshot, UsageDb, UsageOverview, UsageProjectAliasReviewItem,
@@ -496,13 +497,18 @@ pub fn move_todo(
 }
 
 #[tauri::command]
-pub fn has_todo_skill(repo_path: &str) -> bool {
-    todos::has_todo_skill(repo_path)
+pub fn list_skills(repo_path: &str) -> Vec<skills::SkillInfo> {
+    skills::list_skills(repo_path)
 }
 
 #[tauri::command]
-pub fn setup_todo_skill(repo_path: &str) -> Result<(), String> {
-    todos::setup_todo_skill(repo_path)
+pub fn setup_skill(repo_path: &str, name: &str) -> Result<(), String> {
+    skills::setup_skill(repo_path, name)
+}
+
+#[tauri::command]
+pub fn remove_skill(repo_path: &str, name: &str) -> Result<(), String> {
+    skills::remove_skill(repo_path, name)
 }
 
 #[tauri::command]
