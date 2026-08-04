@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 
 #[derive(Clone, Serialize)]
@@ -34,6 +34,15 @@ pub struct PtySession {
     alive: Arc<AtomicBool>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     child_pid: Option<u32>,
+    termination_tree: Option<ProcessTree>,
+}
+
+/// The original process and descendants that must receive the same shutdown
+/// signals. Capture this before graceful termination, since a dying parent can
+/// otherwise re-parent escaped children before the force-kill phase.
+struct ProcessTree {
+    pid: i32,
+    descendants: Vec<i32>,
 }
 
 fn is_light_background(hex: &str) -> bool {
@@ -455,6 +464,7 @@ impl PtySession {
             alive,
             killer,
             child_pid,
+            termination_tree: None,
         })
     }
 
@@ -505,42 +515,74 @@ impl PtySession {
     }
 
     pub fn kill(&mut self) -> Result<(), String> {
+        self.kill_until(Instant::now() + Duration::from_secs(3))
+    }
+
+    /// Stop one process tree, allowing the CLI to handle a normal termination
+    /// before force-killing survivors. `PtyManager::kill_all` uses the split
+    /// primitives below so every PTY receives the graceful signal first.
+    pub fn kill_until(&mut self, deadline: Instant) -> Result<(), String> {
+        self.request_termination();
+        while Instant::now() < deadline && self.is_termination_tree_alive() {
+            thread::sleep(Duration::from_millis(50));
+        }
+        self.force_kill()
+    }
+
+    /// Signal the complete process tree without waiting. This makes it
+    /// possible for a manager-wide shutdown to give all PTYs the same grace
+    /// window, rather than granting one full window per terminal.
+    pub fn request_termination(&mut self) {
         self.alive.store(false, Ordering::SeqCst);
 
-        if let Some(pid) = self.child_pid {
-            let pid = pid as i32;
+        if self.termination_tree.is_none() {
+            if let Some(pid) = self.child_pid {
+                let pid = pid as i32;
+                self.termination_tree = Some(ProcessTree {
+                    // Collect descendants before signaling anything, since a
+                    // dying parent can otherwise scramble the process tree.
+                    descendants: get_all_descendants(pid),
+                    pid,
+                });
+            }
+        }
 
-            // Collect all descendant PIDs before killing anything, since
-            // dying parents cause reparenting which scrambles the tree.
-            let descendants = get_all_descendants(pid);
-
+        if let Some(tree) = self.termination_tree.as_ref() {
             unsafe {
                 // Signal the process group (covers children that stayed in group)
-                if libc::kill(pid, 0) == 0 {
-                    libc::killpg(pid, libc::SIGHUP);
-                    libc::killpg(pid, libc::SIGTERM);
+                if libc::kill(tree.pid, 0) == 0 {
+                    libc::killpg(tree.pid, libc::SIGHUP);
+                    libc::killpg(tree.pid, libc::SIGTERM);
                 }
 
                 // Also signal descendants that escaped to their own process
                 // group or session (e.g. opencode, which calls setsid).
-                for &child in &descendants {
+                for &child in &tree.descendants {
                     if libc::kill(child, 0) == 0 {
                         libc::kill(child, libc::SIGTERM);
                     }
                 }
             }
+        }
+    }
 
-            // Give processes a moment to exit gracefully, then SIGKILL survivors.
-            thread::sleep(Duration::from_millis(100));
+    pub fn is_termination_tree_alive(&self) -> bool {
+        self.termination_tree
+            .as_ref()
+            .is_some_and(|tree| process_tree_is_alive(tree.pid, &tree.descendants))
+    }
 
+    /// Force-kill only processes that survived `request_termination`.
+    pub fn force_kill(&mut self) -> Result<(), String> {
+        if let Some(tree) = self.termination_tree.as_ref() {
             unsafe {
-                for &child in &descendants {
+                for &child in &tree.descendants {
                     if libc::kill(child, 0) == 0 {
                         libc::kill(child, libc::SIGKILL);
                     }
                 }
-                if libc::kill(pid, 0) == 0 {
-                    libc::kill(pid, libc::SIGKILL);
+                if libc::kill(tree.pid, 0) == 0 {
+                    libc::kill(tree.pid, libc::SIGKILL);
                 }
             }
         }
@@ -549,6 +591,10 @@ impl PtySession {
             .kill()
             .map_err(|e| format!("Failed to kill PTY: {e}"))
     }
+}
+
+fn process_tree_is_alive(pid: i32, descendants: &[i32]) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 || descendants.iter().any(|child| libc::kill(*child, 0) == 0) }
 }
 
 #[cfg(test)]

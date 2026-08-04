@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 
 use super::session::{PtyColorTheme, PtyOutput, PtySession};
@@ -88,13 +89,34 @@ impl PtyManager {
     }
 
     pub fn child_pids(&self) -> Vec<u32> {
-        self.sessions.lock().unwrap().values().filter_map(|s| s.pid()).collect()
+        self.sessions
+            .lock()
+            .unwrap()
+            .values()
+            .filter_map(|s| s.pid())
+            .collect()
     }
 
     pub fn kill_all(&self) {
         let mut sessions = self.sessions.lock().unwrap();
-        for (_, mut session) in sessions.drain() {
-            let _ = session.kill();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut draining_sessions: Vec<_> = sessions.drain().map(|(_, session)| session).collect();
+
+        // Ask every process tree to terminate before starting the shared grace
+        // window. Waiting inside the drain loop would leave later terminals
+        // without any opportunity to flush their own session state.
+        for session in &mut draining_sessions {
+            session.request_termination();
+        }
+        while Instant::now() < deadline
+            && draining_sessions
+                .iter()
+                .any(PtySession::is_termination_tree_alive)
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        for session in &mut draining_sessions {
+            let _ = session.force_kill();
         }
     }
 }

@@ -24,6 +24,11 @@ export default function AssistantButton({
   const logoUrl = tab.assistantId ? assistantLogoSrc[tab.assistantId] : null;
   const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.ptyId]);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const restoreStatus = tab.captureState === "pending"
+    ? { label: "saving", title: "Identifying this session for restore", color: "var(--text-muted)" }
+    : tab.captureState === "failed"
+      ? { label: "not saved", title: "This live session cannot be restored", color: "var(--status-attention)" }
+      : null;
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -54,6 +59,15 @@ export default function AssistantButton({
       >
         {logoUrl && <img src={logoUrl} alt="" width={14} height={14} className={tab.assistantId ? getAssistantLogoClass(tab.assistantId) : undefined} />}
         <span className="truncate text-left">{tab.label}</span>
+        {restoreStatus && (
+          <span
+            className="ml-auto shrink-0 text-[10px]"
+            style={{ color: restoreStatus.color }}
+            title={restoreStatus.title}
+          >
+            {restoreStatus.label}
+          </span>
+        )}
         <ActivityIndicator status={getTabActivityStatus(activity)} activity={activity} />
       </div>
       {menu && (

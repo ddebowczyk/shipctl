@@ -109,6 +109,28 @@ Supported today:
 - Claude Code
 - Antigravity CLI (`agy`)
 
+### Assistant session restore
+
+On a normal Shep quit, Claude Code and Codex tabs launched by Shep are stopped
+and restored on the next launch with the provider's own resume command. Shep
+keeps the original working directory, tab label, mode, and any project you moved
+the tab to. A record saved while an app is running is not auto-resumed after a
+crash, because Shep cannot safely assume the original provider process stopped.
+
+- Closing an assistant tab or letting its CLI exit normally means it will not be
+  restored.
+- Claude sessions are assigned an ID before launch. Codex sessions are restored
+  only when Shep can identify one new matching session without ambiguity; a live
+  but ambiguous Codex tab stays unprotected rather than risking the wrong chat.
+- If a saved session cannot be resumed or its placement project is unavailable,
+  Shep leaves the record in place and shows a notice. It never substitutes a new
+  conversation.
+- Canceling the quit confirmation leaves terminals running and their restore
+  records unchanged.
+- The restore manifest stores session IDs and tab metadata only, never terminal
+  output, prompts, credentials, command text, or PTY IDs.
+- This does not modify your Claude or Codex global configuration or hooks.
+
 Gemini CLI was removed from the launcher after Google deprecated it in favor of Antigravity CLI (consumer requests stop June 18, 2026). If you still use it (e.g. on an enterprise license), run `gemini` from any Shep terminal — historical Gemini usage stays visible in the usage panel.
 
 ## Build From Source

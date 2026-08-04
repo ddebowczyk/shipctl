@@ -34,6 +34,7 @@ interface ProjectListProps {
   onRenameGroup: (groupId: string, newName: string) => void;
   onDeleteGroup: (groupId: string) => void;
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
+  tabDropProjectPath: string | null;
 }
 
 export default function ProjectList({
@@ -54,6 +55,7 @@ export default function ProjectList({
   onRenameGroup,
   onDeleteGroup,
   onMoveToGroup,
+  tabDropProjectPath,
 }: ProjectListProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
     () => new Set(activeRepoPath ? [activeRepoPath] : []),
@@ -246,6 +248,7 @@ export default function ProjectList({
           onClick={() => handleProjectClick(repo.path)}
           onAddProject={onAddProject}
           onMoveToGroup={onMoveToGroup}
+          isDropTarget={tabDropProjectPath === repo.path}
           onNewGroupForRepo={(repoPath) => {
             pendingMoveRepoPath.current = repoPath;
             createGroupSubmittedRef.current = false;

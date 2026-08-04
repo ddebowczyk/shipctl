@@ -2,11 +2,18 @@ import { create } from "zustand";
 
 export type NoticeTone = "info" | "success" | "error";
 
+export interface NoticeAction {
+  label: string;
+  variant?: "primary" | "secondary";
+  onClick: () => void | Promise<void>;
+}
+
 export interface Notice {
   id: number;
   title: string;
   message?: string;
   tone: NoticeTone;
+  actions?: NoticeAction[];
 }
 
 interface NoticeStore {
@@ -30,11 +37,13 @@ export const useNoticeStore = create<NoticeStore>((set) => ({
     set((state) => ({ notices: [...state.notices, nextNotice] }));
 
     const durationMs = options?.durationMs ?? 3600;
-    window.setTimeout(() => {
-      set((state) => ({
-        notices: state.notices.filter((entry) => entry.id !== id),
-      }));
-    }, durationMs);
+    if (durationMs > 0) {
+      window.setTimeout(() => {
+        set((state) => ({
+          notices: state.notices.filter((entry) => entry.id !== id),
+        }));
+      }, durationMs);
+    }
 
     return id;
   },

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useCallback, useRef, useMemo } from "react";
+import { Suspense, lazy, useEffect, useCallback, useRef, useMemo, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Sidebar from "../sidebar/Sidebar";
 import TabBar from "./TabBar";
@@ -20,7 +20,19 @@ import { useGitWatcher } from "../../hooks/useGitWatcher";
 import { computeTerminalSize } from "../../lib/terminalMeasure";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { getUsername, getComputerName, openInEditor, saveWorkspace, shutdownAndQuit, refreshUsageData } from "../../lib/tauri";
+import {
+  getUsername,
+  getComputerName,
+  openInEditor,
+  refreshUsageData,
+  saveWorkspace,
+  shutdownAndQuit,
+  discardAssistantSession,
+  listRestorableAssistantSessions,
+  takeAssistantSessionStartupWarning,
+  updateAssistantSessionLabel,
+  updateAssistantSessionPlacement,
+} from "../../lib/tauri";
 import { useEditorStore } from "../../stores/useEditorStore";
 import { useTerminalSettingsStore } from "../../stores/useTerminalSettingsStore";
 import { useUsageStore } from "../../stores/useUsageStore";
@@ -30,7 +42,15 @@ import { initNotifications } from "../../lib/notifications";
 import { getErrorMessage } from "../../lib/errors";
 import { useNoticeStore } from "../../stores/useNoticeStore";
 
-import type { CommandConfig, CommandState, TerminalTabData, UnifiedTab, SessionMode, WorkspaceConfig } from "../../lib/types";
+import type {
+  AssistantSessionRecord,
+  CommandConfig,
+  CommandState,
+  TerminalTabData,
+  UnifiedTab,
+  SessionMode,
+  WorkspaceConfig,
+} from "../../lib/types";
 const LAST_REPO_STORAGE_KEY = "shep:last-repo-path";
 
 // Stable empty arrays to avoid infinite re-render loops with zustand v5's
@@ -72,11 +92,13 @@ export default function AppShell() {
   const activeConfig = useRepoStore((s) => s.activeConfig);
   const setActiveConfig = useRepoStore((s) => s.setActiveConfig);
   const pushNotice = useNoticeStore((s) => s.pushNotice);
-  const { startCommand, stopCommand, spawnBlankShell, launchAssistant, closeTab, killProjectPtys } =
+  const { startCommand, stopCommand, spawnBlankShell, launchAssistant, resumeAssistant, closeTab, killProjectPtys } =
     usePty();
 
-  const restoreAttemptedRef = useRef(false);
+  const initialProjectAttemptedRef = useRef(false);
+  const assistantRestoreAttemptedRef = useRef(false);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
 
   const getTerminalDimensions = useCallback(() => {
     const el = terminalContainerRef.current;
@@ -105,11 +127,11 @@ export default function AppShell() {
   useGitWatcher(gitRepoPaths);
   // Collect only PTY-backed tabs for TerminalView rendering (panel tabs have no terminal)
   const allTerminalTabs = useMemo(() => {
-    const all: TerminalTabData[] = [];
-    for (const ps of Object.values(projectState)) {
+    const all: Array<{ tab: TerminalTabData; projectPath: string }> = [];
+    for (const [projectPath, ps] of Object.entries(projectState)) {
       for (const tab of ps.tabs) {
         if (tab.kind === "terminal" || tab.kind === "assistant") {
-          all.push(tab);
+          all.push({ tab, projectPath });
         }
       }
     }
@@ -117,7 +139,7 @@ export default function AppShell() {
     // Keep terminal DOM order stable even when the visible tab order changes.
     // xterm renderers can fail to repaint cleanly when their mounted nodes are
     // shuffled around in the document during tab drag/reorder operations.
-    return all.sort((a, b) => a.ptyId - b.ptyId || a.id.localeCompare(b.id));
+    return all.sort((a, b) => a.tab.ptyId - b.tab.ptyId || a.tab.id.localeCompare(b.tab.id));
   }, [projectState]);
 
   const commands = useCommandStore(
@@ -229,7 +251,7 @@ export default function AppShell() {
 
         useUIStore.getState().deactivateAllOverlays();
         const config = await openRepo(repoPath);
-        restoreAttemptedRef.current = true;
+        initialProjectAttemptedRef.current = true;
         window.localStorage.setItem(LAST_REPO_STORAGE_KEY, repoPath);
         useTerminalStore.getState().switchProject(repoPath);
         useCommandStore.getState().switchProject(repoPath);
@@ -255,6 +277,72 @@ export default function AppShell() {
     [activeRepoPath, openRepo, startCommand, getTerminalDimensions, pushNotice],
   );
 
+  const handleMoveTab = useCallback(
+    async (tabId: string, destinationPath: string) => {
+      const store = useTerminalStore.getState();
+      const sourcePath = store.activeProjectPath;
+      if (!sourcePath || sourcePath === destinationPath) return;
+      const tab = store.projectState[sourcePath]?.tabs.find((entry) => entry.id === tabId);
+      if (!tab || (tab.kind !== "terminal" && tab.kind !== "assistant")) return;
+
+      await handleSelectRepo(destinationPath);
+      const destinationStore = useTerminalStore.getState();
+      if (destinationStore.activeProjectPath !== destinationPath) return;
+      if (tab.restoreRecordId) {
+        try {
+          await updateAssistantSessionPlacement(tab.restoreRecordId, destinationPath);
+        } catch (error) {
+          pushNotice({
+            tone: "error",
+            title: "Couldn’t move assistant session",
+            message: getErrorMessage(error),
+          });
+          return;
+        }
+      }
+      if (!destinationStore.moveTab(tabId, destinationPath)) {
+        if (tab.restoreRecordId) {
+          void updateAssistantSessionPlacement(tab.restoreRecordId, sourcePath).catch(() => {});
+        }
+        return;
+      }
+      destinationStore.setActiveTab(tabId);
+      pushNotice({
+        tone: "success",
+        title: `Moved “${tab.label}”`,
+        message: tab.repoPath === destinationPath
+          ? "The session is now available in this project."
+          : "The session keeps its original working directory.",
+      });
+    },
+    [handleSelectRepo, pushNotice],
+  );
+
+  const handleRenameTab = useCallback(
+    async (tabId: string, label: string) => {
+      const store = useTerminalStore.getState();
+      const tab = Object.values(store.projectState)
+        .flatMap((project) => project.tabs)
+        .find((entry) => entry.id === tabId);
+      if (!tab) return;
+
+      if ((tab.kind === "terminal" || tab.kind === "assistant") && tab.restoreRecordId) {
+        try {
+          await updateAssistantSessionLabel(tab.restoreRecordId, label);
+        } catch (error) {
+          pushNotice({
+            tone: "error",
+            title: "Couldn’t rename assistant session",
+            message: getErrorMessage(error),
+          });
+          return;
+        }
+      }
+      store.updateTab(tabId, { label });
+    },
+    [pushNotice],
+  );
+
   const handleAddProject = useCallback(
     async (repoPath: string) => {
       try {
@@ -263,7 +351,7 @@ export default function AppShell() {
         // addRepo sets activeRepoPath in the repo store, get the canonical path
         const canonicalPath = useRepoStore.getState().activeRepoPath;
         if (!canonicalPath) return;
-        restoreAttemptedRef.current = true;
+        initialProjectAttemptedRef.current = true;
         window.localStorage.setItem(LAST_REPO_STORAGE_KEY, canonicalPath);
         useTerminalStore.getState().switchProject(canonicalPath);
         useCommandStore.getState().switchProject(canonicalPath);
@@ -529,9 +617,9 @@ export default function AppShell() {
   }, [pushNotice]);
 
   useEffect(() => {
-    if (restoreAttemptedRef.current || activeRepoPath || repos.length === 0) return;
+    if (initialProjectAttemptedRef.current || activeRepoPath || repos.length === 0) return;
 
-    restoreAttemptedRef.current = true;
+    initialProjectAttemptedRef.current = true;
 
     const storedRepoPath = window.localStorage.getItem(LAST_REPO_STORAGE_KEY);
     const initialRepo =
@@ -543,7 +631,93 @@ export default function AppShell() {
     }
   }, [repos, activeRepoPath, handleSelectRepo]);
 
-  // Listen for backend "quit-requested" event (red close button or Cmd+Q with active PTYs)
+  // Restore provider sessions independently of the currently selected project.
+  // Records whose placement project is no longer registered stay on disk and
+  // are reported to the user instead of being silently discarded.
+  useEffect(() => {
+    if (assistantRestoreAttemptedRef.current || repos.length === 0) return;
+    assistantRestoreAttemptedRef.current = true;
+
+    const restoreSessions = async () => {
+      function showRestoreRecovery(record: AssistantSessionRecord, message: string) {
+        pushNotice(
+          {
+            tone: "info",
+            title: `Couldn’t restore ${record.label}`,
+            message: `${message} The saved session was kept for a future retry.`,
+            actions: [
+              {
+                label: "Retry",
+                onClick: () => void restoreRecord(record),
+              },
+              {
+                label: "Discard saved session",
+                variant: "secondary",
+                onClick: () => void discardSavedRecord(record),
+              },
+            ],
+          },
+          { durationMs: 0 },
+        );
+      }
+
+      async function discardSavedRecord(record: AssistantSessionRecord) {
+        try {
+          await discardAssistantSession(record.recordId);
+          pushNotice({
+            tone: "success",
+            title: `Discarded ${record.label}`,
+            message: "Shep will not attempt to restore this saved session again.",
+          });
+        } catch (error) {
+          showRestoreRecovery(record, getErrorMessage(error));
+        }
+      }
+
+      async function restoreRecord(record: AssistantSessionRecord) {
+        if (!repos.some((repo) => repo.path === record.placementProjectPath)) {
+          showRestoreRecovery(
+            record,
+            "Its placement project is no longer registered in Shep.",
+          );
+          return;
+        }
+
+        try {
+          const { cols, rows } = getTerminalDimensions();
+          await resumeAssistant(record.recordId, cols, rows);
+        } catch (error) {
+          showRestoreRecovery(record, getErrorMessage(error));
+        }
+      }
+
+      try {
+        const startupWarning = await takeAssistantSessionStartupWarning();
+        if (startupWarning) {
+          pushNotice({
+            tone: "info",
+            title: "Assistant sessions were not restored",
+            message: startupWarning,
+          });
+        }
+
+        const records = await listRestorableAssistantSessions();
+        for (const record of records) {
+          await restoreRecord(record);
+        }
+      } catch (error) {
+        pushNotice({
+          tone: "info",
+          title: "Assistant sessions were not restored",
+          message: getErrorMessage(error),
+        });
+      }
+    };
+
+    void restoreSessions();
+  }, [getTerminalDimensions, pushNotice, repos, resumeAssistant]);
+
+  // All native exit routes are confirmed, including Cmd+Q with no active PTYs.
   const quitDialogOpenRef = useRef(false);
   useEffect(() => {
     const unlisten = listen<number>("quit-requested", async (event) => {
@@ -552,18 +726,28 @@ export default function AppShell() {
       try {
         const count = event.payload;
         const confirmed = await ask(
-          `Quit Shep and stop ${count} running session${count === 1 ? "" : "s"}?`,
+          count > 0
+            ? `Quit Shep and stop ${count} running session${count === 1 ? "" : "s"}?`
+            : "Quit Shep?",
           { title: "Quit Shep", kind: "warning", okLabel: "Quit", cancelLabel: "Cancel" },
         );
         if (confirmed) {
-          await shutdownAndQuit();
+          try {
+            await shutdownAndQuit();
+          } catch (error) {
+            pushNotice({
+              tone: "error",
+              title: "Couldn’t safely stop sessions",
+              message: getErrorMessage(error),
+            });
+          }
         }
       } finally {
         quitDialogOpenRef.current = false;
       }
     });
     return () => { unlisten.then((f) => f()); };
-  }, []);
+  }, [pushNotice]);
 
   // Handle native menu events (accelerators for Cmd+T, Cmd+Shift+T, Cmd+B, Cmd+E, Cmd+, etc.)
   useEffect(() => {
@@ -670,6 +854,7 @@ export default function AppShell() {
             onRenameGroup={handleRenameGroup}
             onDeleteGroup={handleDeleteGroup}
             onMoveToGroup={handleMoveToGroup}
+            tabDropProjectPath={tabDropProjectPath}
           />
         )}
 
@@ -681,6 +866,9 @@ export default function AppShell() {
             onNewCommands={() => useTerminalStore.getState().addPanelTab("commands")}
             onNewGit={() => useTerminalStore.getState().addPanelTab("git")}
             onOpenInEditor={() => { const p = useTerminalStore.getState().activeProjectPath; if (p) handleOpenInEditor(p); }}
+            onRenameTab={handleRenameTab}
+            onMoveTab={handleMoveTab}
+            onDragProjectChange={setTabDropProjectPath}
           />
 
           <div ref={terminalContainerRef} className="terminal-stage">
@@ -739,13 +927,13 @@ export default function AppShell() {
                   : "Select or add a project to begin"}
               </div>
             )}
-            {allTerminalTabs.map((tab) => (
+            {allTerminalTabs.map(({ tab, projectPath }) => (
               <div
                 key={tab.id}
                 className="absolute inset-0"
                 style={{
                   display:
-                    !showOverlay && tab.repoPath === activeProjectPath && tab.id === activeTabId
+                    !showOverlay && projectPath === activeProjectPath && tab.id === activeTabId
                       ? "block"
                       : "none",
                 }}
@@ -753,7 +941,7 @@ export default function AppShell() {
                 <TerminalErrorBoundary>
                   <TerminalView
                     ptyId={tab.ptyId}
-                    visible={!showOverlay && tab.repoPath === activeProjectPath && tab.id === activeTabId}
+                    visible={!showOverlay && projectPath === activeProjectPath && tab.id === activeTabId}
                   />
                 </TerminalErrorBoundary>
               </div>

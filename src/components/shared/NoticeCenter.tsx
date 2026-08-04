@@ -16,6 +16,23 @@ export default function NoticeCenter() {
           <div className="notice-card__copy">
             <strong>{notice.title}</strong>
             {notice.message ? <span>{notice.message}</span> : null}
+            {notice.actions?.length ? (
+              <div className="notice-card__actions">
+                {notice.actions.map((action) => (
+                  <button
+                    key={action.label}
+                    type="button"
+                    className={`notice-card__action notice-card__action--${action.variant ?? "primary"}`}
+                    onClick={() => {
+                      removeNotice(notice.id);
+                      void action.onClick();
+                    }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
           <button
             type="button"

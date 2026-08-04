@@ -1,3 +1,4 @@
+mod assistant_sessions;
 mod commands;
 mod fonts;
 mod git;
@@ -12,6 +13,7 @@ mod workspace;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
+use assistant_sessions::AssistantSessionRegistry;
 use pty::manager::PtyManager;
 use usage::UsageDb;
 use watcher::GitWatcher;
@@ -26,6 +28,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(PtyManager::new())
+        .manage(AssistantSessionRegistry::new())
         .manage(WorkspaceManager::new())
         .manage(UsageDb::open().unwrap_or_else(|e| {
             eprintln!("Usage database failed to open ({e}), using in-memory fallback");
@@ -70,12 +73,11 @@ pub fn run() {
                     return;
                 }
                 let count = pty.session_count();
-                if count > 0 {
-                    api.prevent_close();
-                    let _ = window.emit("quit-requested", count);
-                } else {
-                    pty.kill_all();
-                }
+                // Never let a window-close bypass the confirmation dialog.
+                // With no PTYs it is still easy to lose the active workspace
+                // by accidentally pressing Cmd+Q or the red window button.
+                api.prevent_close();
+                let _ = window.emit("quit-requested", count);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -106,6 +108,18 @@ pub fn run() {
             commands::update_pty_color_theme,
             commands::resize_pty,
             commands::kill_pty,
+            commands::spawn_assistant_session,
+            commands::resume_assistant_session,
+            commands::prepare_assistant_session,
+            commands::confirm_assistant_session_capture,
+            commands::try_capture_codex_assistant_session,
+            commands::fail_assistant_session_capture,
+            commands::update_assistant_session_placement,
+            commands::update_assistant_session_label,
+            commands::discard_assistant_session,
+            commands::list_restorable_assistant_sessions,
+            commands::take_assistant_session_startup_warning,
+            commands::begin_assistant_session_preserving_shutdown,
             commands::get_pty_session_count,
             commands::shutdown_and_quit,
             commands::get_username,
@@ -170,13 +184,10 @@ pub fn run() {
                 return;
             }
             let count = pty.session_count();
-            if count > 0 {
-                api.prevent_exit();
-                let _ = app_handle.emit("quit-requested", count);
-            } else {
-                app_handle.state::<GitWatcher>().shutdown();
-                pty.kill_all();
-            }
+            // Cmd+Q must use the same explicit confirmation as a window close,
+            // regardless of whether a PTY happens to be active right now.
+            api.prevent_exit();
+            let _ = app_handle.emit("quit-requested", count);
         }
     });
 }

@@ -96,6 +96,54 @@ export interface CommandState {
 
 export type SessionMode = "standard" | "yolo";
 
+export type RestorableAssistantProvider = "claude" | "codex";
+export type AssistantCaptureState = "pending" | "ready" | "failed";
+
+/** Backend-owned data needed to resume an assistant, never PTY state. */
+export interface AssistantSessionRecord {
+  recordId: string;
+  provider: RestorableAssistantProvider;
+  providerSessionId: string | null;
+  launchRepoPath: string;
+  placementProjectPath: string;
+  label: string;
+  sessionMode: SessionMode;
+  model: string | null;
+  captureState: AssistantCaptureState;
+  restoreOnNextLaunch: boolean;
+  startedAt: number;
+  updatedAt: number;
+}
+
+export interface PrepareAssistantSessionRequest {
+  provider: RestorableAssistantProvider;
+  launchRepoPath: string;
+  placementProjectPath: string;
+  label: string;
+  sessionMode: SessionMode;
+  model?: string;
+}
+
+export interface SpawnAssistantSessionRequest extends PrepareAssistantSessionRequest {
+  env: Record<string, string>;
+  cols: number;
+  rows: number;
+  colorTheme: PtyColorTheme;
+}
+
+export interface SpawnedAssistantSession {
+  ptyId: number;
+  record: AssistantSessionRecord;
+}
+
+export interface ResumeAssistantSessionRequest {
+  recordId: string;
+  env: Record<string, string>;
+  cols: number;
+  rows: number;
+  colorTheme: PtyColorTheme;
+}
+
 // ── Unified tab model ──────────────────────────────────────────────
 
 export type PanelTabKind = "git" | "commands" | "launcher" | "todos";
@@ -114,6 +162,10 @@ export interface TerminalTabData extends TabBase {
   commandName: string | null;
   assistantId: string | null;
   sessionMode: SessionMode | null;
+  /** Durable backend record for a Claude/Codex tab, never a transcript. */
+  restoreRecordId: string | null;
+  providerSessionId: string | null;
+  captureState: AssistantCaptureState | null;
 }
 
 export interface PanelTabData extends TabBase {

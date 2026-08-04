@@ -9,6 +9,7 @@ import ActivityIndicator, { getTabActivityStatus } from "./ActivityIndicator";
 
 export interface AgentSessionItem {
   tab: TerminalTabData;
+  projectPath: string;
   projectName: string;
   branchName: string | null;
 }
@@ -101,10 +102,10 @@ export default function AgentSessionList({
         <div className="sidebar-section__list">
           {visibleSessions.map((item) => (
             <AgentSessionRow
-              key={`${item.tab.repoPath}:${item.tab.id}`}
+              key={`${item.projectPath}:${item.tab.id}`}
               item={item}
-              isActive={item.tab.repoPath === activeRepoPath && item.tab.id === activeTabId}
-              onSelect={() => onSelectSession(item.tab.repoPath, item.tab.id)}
+              isActive={item.projectPath === activeRepoPath && item.tab.id === activeTabId}
+              onSelect={() => onSelectSession(item.projectPath, item.tab.id)}
             />
           ))}
           {overflowCount > 0 && (

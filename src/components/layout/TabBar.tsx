@@ -3,10 +3,13 @@ import { createPortal } from "react-dom";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { useShallow } from "zustand/shallow";
-import { GitBranch } from "lucide-react";
+import { FolderInput, GitBranch } from "lucide-react";
 import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
 import { handleActionKey } from "../../lib/a11y";
 import { useGitStore } from "../../stores/useGitStore";
+import { useRepoStore } from "../../stores/useRepoStore";
+import ContextMenu from "../shared/ContextMenu";
+import type { ContextMenuItem } from "../shared/ContextMenu";
 import tabKindMeta, { extraActions } from "../../lib/tabKindMeta";
 import type { UnifiedTab } from "../../lib/types";
 
@@ -101,6 +104,9 @@ interface TabBarProps {
   onNewCommands: () => void;
   onNewGit: () => void;
   onOpenInEditor: () => void;
+  onRenameTab: (tabId: string, label: string) => void | Promise<void>;
+  onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
+  onDragProjectChange: (projectPath: string | null) => void;
 }
 
 export default function TabBar({
@@ -110,11 +116,15 @@ export default function TabBar({
   onNewCommands,
   onNewGit,
   onOpenInEditor,
+  onRenameTab,
+  onMoveTab,
+  onDragProjectChange,
 }: TabBarProps) {
   const { activeProjectPath, projectState } = useTerminalStore(
     useShallow((s) => ({ activeProjectPath: s.activeProjectPath, projectState: s.activeProjectPath ? s.projectState[s.activeProjectPath] : null })),
   );
   const projectTerminals = projectState;
+  const repos = useRepoStore((s) => s.repos);
   const projectName = activeProjectPath ? activeProjectPath.split("/").pop() : null;
   const gitStatus = useGitStore((s) => activeProjectPath ? s.projectGitStatus[activeProjectPath] : null);
   const branch = gitStatus?.branch ?? null;
@@ -125,12 +135,18 @@ export default function TabBar({
       : "var(--status-clean)";
   const tabs = projectTerminals?.tabs ?? [];
   const activeTabId = projectTerminals?.activeTabId ?? null;
-  const { setActiveTab, reorderTab, updateTab } = useTerminalStore.getState();
+  const { setActiveTab, reorderTab } = useTerminalStore.getState();
 
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
-  const dragRef = useRef({ startX: 0, didDrag: false, dropIndex: null as number | null });
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
+  const dragRef = useRef({
+    startX: 0,
+    didDrag: false,
+    dropIndex: null as number | null,
+    dropProjectPath: null as string | null,
+  });
   const containerRef = useRef<HTMLDivElement>(null);
 
   const computeDropIndex = useCallback((clientX: number) => {
@@ -144,7 +160,13 @@ export default function TabBar({
     return tabEls.length;
   }, []);
 
+  const getProjectPathAt = useCallback((clientX: number, clientY: number) => {
+    const target = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>("[data-project-path]");
+    return target?.dataset.projectPath ?? null;
+  }, []);
+
   const handlePointerDown = useCallback((e: React.PointerEvent, tabId: string) => {
+    if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest(".icon-btn")) return;
     const d = dragRef.current;
     d.startX = e.clientX;
@@ -157,7 +179,9 @@ export default function TabBar({
       window.removeEventListener("pointercancel", onCancel);
       setDragTabId(null);
       setDropIndex(null);
+      onDragProjectChange(null);
       d.didDrag = false;
+      d.dropProjectPath = null;
     };
 
     const onMove = (ev: PointerEvent) => {
@@ -166,14 +190,29 @@ export default function TabBar({
         setDragTabId(tabId);
       }
       if (d.didDrag) {
-        const idx = computeDropIndex(ev.clientX);
-        d.dropIndex = idx;
-        setDropIndex(idx);
+        const draggedTab = tabs.find((tab) => tab.id === tabId);
+        const projectPath = draggedTab && (draggedTab.kind === "terminal" || draggedTab.kind === "assistant")
+          ? getProjectPathAt(ev.clientX, ev.clientY)
+          : null;
+        const canMoveToProject = Boolean(projectPath && projectPath !== activeProjectPath);
+        d.dropProjectPath = canMoveToProject ? projectPath : null;
+        onDragProjectChange(d.dropProjectPath);
+
+        if (d.dropProjectPath) {
+          d.dropIndex = null;
+          setDropIndex(null);
+        } else {
+          const idx = computeDropIndex(ev.clientX);
+          d.dropIndex = idx;
+          setDropIndex(idx);
+        }
       }
     };
 
     const onUp = () => {
-      if (d.didDrag && d.dropIndex !== null) {
+      if (d.didDrag && d.dropProjectPath) {
+        void onMoveTab(tabId, d.dropProjectPath);
+      } else if (d.didDrag && d.dropIndex !== null) {
         reorderTab(tabId, d.dropIndex);
       }
       cleanup();
@@ -184,7 +223,7 @@ export default function TabBar({
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
-  }, [computeDropIndex, reorderTab]);
+  }, [activeProjectPath, computeDropIndex, getProjectPathAt, onDragProjectChange, onMoveTab, reorderTab, tabs]);
 
   // Only subscribe to global overlay state (Settings, Usage, Ports)
   const { settingsActive, usagePanelActive, portsPanelActive } = useUIStore(useShallow((s) => ({
@@ -205,6 +244,27 @@ export default function TabBar({
   };
 
   const isRenameable = (tab: UnifiedTab) => tab.kind === "terminal" || tab.kind === "assistant";
+  const tabMenuTab = tabMenu ? tabs.find((tab) => tab.id === tabMenu.tabId) : null;
+  const moveTargets = repos.filter((repo) => repo.path !== activeProjectPath);
+  const tabMenuItems: ContextMenuItem[] = tabMenuTab
+    ? [
+        ...(isRenameable(tabMenuTab) && moveTargets.length > 0
+          ? [{
+              label: "Move to project",
+              icon: <FolderInput size={14} />,
+              children: moveTargets.map((repo) => ({
+                label: repo.name,
+                onClick: () => { void onMoveTab(tabMenuTab.id, repo.path); },
+              })),
+            }]
+          : []),
+        ...(isRenameable(tabMenuTab) && moveTargets.length > 0 ? [{ separator: true, label: "_separator_close" }] : []),
+        {
+          label: "Close tab",
+          onClick: () => onClose(tabMenuTab.id),
+        },
+      ]
+    : [];
 
   return (
     <div className="tab-bar">
@@ -231,6 +291,10 @@ export default function TabBar({
               }}
               onKeyDown={(event) => handleActionKey(event, () => handleSelectTab(tab.id))}
               onPointerDown={(e) => handlePointerDown(e, tab.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setTabMenu({ x: event.clientX, y: event.clientY, tabId: tab.id });
+              }}
               role="tab"
               tabIndex={0}
               aria-selected={isActive}
@@ -248,7 +312,7 @@ export default function TabBar({
                   onFocus={(e) => e.target.select()}
                   onBlur={(e) => {
                     const val = e.target.value.trim();
-                    if (val && val !== tab.label) updateTab(tab.id, { label: val });
+                    if (val && val !== tab.label) void onRenameTab(tab.id, val);
                     setEditingTabId(null);
                   }}
                   onKeyDown={(e) => {
@@ -301,6 +365,17 @@ export default function TabBar({
             </>
           )}
         </span>
+      )}
+      {tabMenu && tabMenuTab && (
+        createPortal(
+          <ContextMenu
+            x={tabMenu.x}
+            y={tabMenu.y}
+            items={tabMenuItems}
+            onClose={() => setTabMenu(null)}
+          />,
+          document.body,
+        )
       )}
     </div>
   );

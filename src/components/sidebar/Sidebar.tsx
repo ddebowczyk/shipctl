@@ -28,6 +28,7 @@ interface SidebarProps {
   onRenameGroup: (groupId: string, newName: string) => void;
   onDeleteGroup: (groupId: string) => void;
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
+  tabDropProjectPath: string | null;
 }
 
 export default function Sidebar({
@@ -48,6 +49,7 @@ export default function Sidebar({
   onRenameGroup,
   onDeleteGroup,
   onMoveToGroup,
+  tabDropProjectPath,
 }: SidebarProps) {
   // Projects always starts expanded on launch; collapsing is per-session only.
   const [projectsCollapsed, setProjectsCollapsed] = useState(false);
@@ -115,13 +117,13 @@ export default function Sidebar({
         if (tab.kind !== "assistant") continue;
         const activity = tabActivity[tab.ptyId];
         if (activity && !activity.alive && activity.exitCode === 0) continue;
-        sessions.push({ tab, projectName, branchName });
+        sessions.push({ tab, projectPath: repoPath, projectName, branchName });
       }
     }
 
     return sessions.sort((a, b) => {
-      const aIsActive = a.tab.repoPath === activeRepoPath && a.tab.id === activeTabId;
-      const bIsActive = b.tab.repoPath === activeRepoPath && b.tab.id === activeTabId;
+      const aIsActive = a.projectPath === activeRepoPath && a.tab.id === activeTabId;
+      const bIsActive = b.projectPath === activeRepoPath && b.tab.id === activeTabId;
       if (aIsActive !== bIsActive) return aIsActive ? -1 : 1;
 
       const aActivity = tabActivity[a.tab.ptyId];
@@ -187,6 +189,7 @@ export default function Sidebar({
               onRenameGroup={onRenameGroup}
               onDeleteGroup={onDeleteGroup}
               onMoveToGroup={onMoveToGroup}
+              tabDropProjectPath={tabDropProjectPath}
             />
           )}
         </div>

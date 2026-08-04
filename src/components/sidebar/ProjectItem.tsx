@@ -39,6 +39,7 @@ interface ProjectItemProps {
   onAddProject: (repoPath: string) => Promise<void>;
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
   onNewGroupForRepo: (repoPath: string) => void;
+  isDropTarget: boolean;
 }
 
 export default function ProjectItem({
@@ -54,6 +55,7 @@ export default function ProjectItem({
   onAddProject,
   onMoveToGroup,
   onNewGroupForRepo,
+  isDropTarget,
 }: ProjectItemProps) {
   const activityStatus = getAggregateActivityStatus({
     hasCrash: activity?.hasCrash,
@@ -260,7 +262,8 @@ export default function ProjectItem({
   return (
     <>
       <div
-        className={`list-item ${isActive ? "project-active" : ""}`}
+        className={`list-item ${isActive ? "project-active" : ""}${isDropTarget ? " project-drop-target" : ""}`}
+        data-project-path={repo.path}
         onClick={onClick}
         onContextMenu={handleContextMenu}
         onKeyDown={(event) => handleActionKey(event, onClick)}
