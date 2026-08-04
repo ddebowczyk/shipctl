@@ -133,6 +133,37 @@ This starts the Vite frontend and the Tauri shell together.
 pnpm tauri build
 ```
 
+### Build an unsigned Apple Silicon app (Mac Studio)
+
+```bash
+pnpm tauri build --target aarch64-apple-darwin --bundles app,dmg --no-sign
+```
+
+This writes an installable DMG to:
+
+```text
+src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+```
+
+Open the DMG and drag `shep.app` to Applications when you are ready to replace
+an existing installation. It is intentionally unsigned, so macOS may require
+an explicit confirmation the first time it opens.
+
+### Archive local Mac Studio builds
+
+```bash
+pnpm build:local
+```
+
+This creates the unsigned Apple Silicon app and DMG, then copies both into an
+ignored `builds/<timestamp>-.../` directory together with `build.json`. The
+manifest records the source commit, whether the worktree was dirty, and
+SHA-256 checksums. To archive the current Tauri output without rebuilding:
+
+```bash
+pnpm build:local -- --archive-only
+```
+
 ### Create a debug-packaged build
 
 ```bash
