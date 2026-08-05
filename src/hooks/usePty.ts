@@ -4,6 +4,7 @@ import {
   failAssistantSessionCapture,
   getDefaultShell,
   killPty,
+  rearmAssistantSession,
   resumeAssistantSession,
   spawnAssistantSession,
   spawnPty,
@@ -51,6 +52,11 @@ const stoppingPtys = new Set<number>();
 const codexCaptureTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const CODEX_CAPTURE_RETRY_MS = 500;
 const CODEX_CAPTURE_MAX_ATTEMPTS = 20;
+const RESTORE_PROBATION_MS = 5000;
+const restoreProbations = new Map<
+  number,
+  { recordId: string; timer: ReturnType<typeof setTimeout> }
+>();
 
 function cleanupActivityState(ptyId: number) {
   const timer = activityTimers.get(ptyId);
@@ -62,6 +68,13 @@ function clearCodexCaptureTimer(recordId: string) {
   const timer = codexCaptureTimers.get(recordId);
   if (timer) clearTimeout(timer);
   codexCaptureTimers.delete(recordId);
+}
+
+function clearRestoreProbation(ptyId: number) {
+  const probation = restoreProbations.get(ptyId);
+  if (probation) clearTimeout(probation.timer);
+  restoreProbations.delete(ptyId);
+  return probation;
 }
 
 function restorableProvider(assistantId: string): RestorableAssistantProvider | null {
@@ -185,13 +198,29 @@ export function usePty() {
         cleanupActivityState(ptyId);
         setTabExited(ptyId, msg.data.code);
         const stoppedByUser = stoppingPtys.delete(ptyId);
+        const restoreProbation = clearRestoreProbation(ptyId);
         const tab = findTabByPtyId(ptyId);
         if (tab?.restoreRecordId && !stoppedByUser) {
           clearCodexCaptureTimer(tab.restoreRecordId);
-          // A naturally exited provider has no live session to restore. During
-          // app shutdown the backend freezes this mutation before signals are
-          // sent, so the failed discard is intentionally ignored there.
-          void discardAssistantSession(tab.restoreRecordId).catch(() => {});
+          if (restoreProbation?.recordId === tab.restoreRecordId) {
+            // Spawning the provider only proves that the executable started.
+            // A quick natural exit usually means the resume itself failed, so
+            // keep the durable record available instead of consuming it.
+            void rearmAssistantSession(tab.restoreRecordId)
+              .then(() => {
+                pushNotice({
+                  tone: "info",
+                  title: `Couldn’t restore ${tab.label}`,
+                  message: "The resumed process exited immediately. The saved session was kept for the next launch.",
+                });
+              })
+              .catch(() => {});
+          } else {
+            // A naturally exited established provider has no live session to
+            // restore. During app shutdown the backend freezes this mutation
+            // before signals are sent, so the failed discard is intentional.
+            void discardAssistantSession(tab.restoreRecordId).catch(() => {});
+          }
         }
         if (commandName) {
           const command = useCommandStore.getState().projectCommands[repoPath]
@@ -206,6 +235,7 @@ export function usePty() {
     },
     [
       findTabByPtyId,
+      pushNotice,
       setCommandStatusForProject,
       setCommandPtyIdForProject,
       setTabActive,
@@ -614,6 +644,14 @@ export function usePty() {
       resolvedPtyId = spawned.ptyId;
       initActivity(spawned.ptyId);
 
+      const probationTimer = setTimeout(() => {
+        restoreProbations.delete(spawned.ptyId);
+      }, RESTORE_PROBATION_MS);
+      restoreProbations.set(spawned.ptyId, {
+        recordId: spawned.record.recordId,
+        timer: probationTimer,
+      });
+
       const id = nextTabId();
       addTabToProject(spawned.record.placementProjectPath, {
         id,
@@ -659,6 +697,7 @@ export function usePty() {
           });
         }
       }
+      clearRestoreProbation(tab.ptyId);
       cleanupActivityState(tab.ptyId);
       stoppingPtys.add(tab.ptyId);
       await killPty(tab.ptyId).catch(() => {
@@ -699,6 +738,7 @@ export function usePty() {
           });
         });
       }
+      clearRestoreProbation(tab.ptyId);
       cleanupActivityState(tab.ptyId);
       stoppingPtys.add(tab.ptyId);
       await killPty(tab.ptyId).catch(() => {

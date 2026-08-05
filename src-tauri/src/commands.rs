@@ -540,6 +540,14 @@ pub fn discard_assistant_session(
 }
 
 #[tauri::command]
+pub fn rearm_assistant_session(
+    record_id: &str,
+    registry: State<'_, AssistantSessionRegistry>,
+) -> Result<(), String> {
+    registry.rearm_for_restore(record_id)
+}
+
+#[tauri::command]
 pub fn list_restorable_assistant_sessions(
     registry: State<'_, AssistantSessionRegistry>,
 ) -> Vec<AssistantSessionRecord> {

@@ -118,6 +118,7 @@ pub fn run() {
             commands::update_assistant_session_placement,
             commands::update_assistant_session_label,
             commands::discard_assistant_session,
+            commands::rearm_assistant_session,
             commands::list_restorable_assistant_sessions,
             commands::take_assistant_session_startup_warning,
             commands::begin_assistant_session_preserving_shutdown,

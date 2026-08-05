@@ -254,6 +254,10 @@ export function discardAssistantSession(recordId: string): Promise<void> {
   return invoke("discard_assistant_session", { recordId });
 }
 
+export function rearmAssistantSession(recordId: string): Promise<void> {
+  return invoke("rearm_assistant_session", { recordId });
+}
+
 export function listRestorableAssistantSessions(): Promise<AssistantSessionRecord[]> {
   return invoke("list_restorable_assistant_sessions");
 }
