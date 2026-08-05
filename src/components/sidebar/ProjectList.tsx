@@ -15,6 +15,7 @@ import TerminalList from "./TerminalList";
 import CommandsRow from "./CommandsRow";
 import GitStatusRow from "./GitStatusRow";
 import TodoRow from "./TodoRow";
+import { groupProjects } from "../../lib/projectGrouping";
 
 interface ProjectListProps {
   repos: RepoInfo[];
@@ -30,6 +31,7 @@ interface ProjectListProps {
   onOpenInEditor: (repoPath: string) => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
   onNewShell: () => void;
   onRenameGroup: (groupId: string, newName: string) => void;
   onDeleteGroup: (groupId: string) => void;
@@ -51,6 +53,7 @@ export default function ProjectList({
   onOpenInEditor,
   onSelectTab,
   onCloseTab,
+  onMoveTab,
   onNewShell,
   onRenameGroup,
   onDeleteGroup,
@@ -170,48 +173,14 @@ export default function ProjectList({
   const gitStatuses = useGitStore((s) => s.projectGitStatus);
 
   // Build grouped layout
-  const { sortedGroups, groupedRepos, ungroupedRepos } = useMemo(() => {
-    const validGroupIds = new Set(groups.map((g) => g.id));
-    const grouped = new Map<string, RepoInfo[]>();
-    const ungrouped: RepoInfo[] = [];
-
-    for (const repo of repos) {
-      if (repo.group && validGroupIds.has(repo.group)) {
-        const list = grouped.get(repo.group) ?? [];
-        list.push(repo);
-        grouped.set(repo.group, list);
-      } else {
-        ungrouped.push(repo);
-      }
-    }
-
-    // Sort repos within each group (worktree-aware)
-    const sortFn = (a: RepoInfo, b: RepoInfo) => {
-      const aWt = gitStatuses[a.path]?.worktree_parent ?? null;
-      const bWt = gitStatuses[b.path]?.worktree_parent ?? null;
-      const aGroup = aWt ?? a.name;
-      const bGroup = bWt ?? b.name;
-      const groupCompare = aGroup.localeCompare(bGroup);
-      if (groupCompare !== 0) return groupCompare;
-      if (aWt == null && bWt != null) return -1;
-      if (aWt != null && bWt == null) return 1;
-      return a.name.localeCompare(b.name);
-    };
-
-    for (const list of grouped.values()) {
-      list.sort(sortFn);
-    }
-    ungrouped.sort(sortFn);
-
-    const allSorted = [...groups].sort((a, b) => a.order - b.order);
-
-    return { sortedGroups: allSorted, groupedRepos: grouped, ungroupedRepos: ungrouped };
-  }, [repos, groups, gitStatuses]);
+  const { sections: groupedSections, ungroupedRepos } = useMemo(
+    () => groupProjects(repos, groups, gitStatuses),
+    [repos, groups, gitStatuses],
+  );
 
   const groupActivity = useMemo(() => {
     const result: Record<string, { hasAttention: boolean; hasCrash: boolean; hasActivity: boolean; hasActive: boolean }> = {};
-    for (const group of sortedGroups) {
-      const groupRepos = groupedRepos.get(group.id) ?? [];
+    for (const { group, repos: groupRepos } of groupedSections) {
       let hasAttention = false;
       let hasCrash = false;
       let hasActivity = false;
@@ -228,7 +197,7 @@ export default function ProjectList({
       result[group.id] = { hasAttention, hasCrash, hasActivity, hasActive };
     }
     return result;
-  }, [sortedGroups, groupedRepos, projectActivity]);
+  }, [groupedSections, projectActivity]);
 
   const renderRepoItem = (repo: RepoInfo) => {
     const isActive = repo.path === activeRepoPath;
@@ -269,6 +238,8 @@ export default function ProjectList({
                 activeTabId={activeTabId}
                 onSelectTab={onSelectTab}
                 onCloseTab={onCloseTab}
+                projectPath={repo.path}
+                onMoveTab={onMoveTab}
               />
             </CollapsibleSection>
 
@@ -284,6 +255,8 @@ export default function ProjectList({
                 activeTabId={activeTabId}
                 onSelectTab={onSelectTab}
                 onCloseTab={onCloseTab}
+                projectPath={repo.path}
+                onMoveTab={onMoveTab}
               />
             </CollapsibleSection>
 
@@ -298,8 +271,7 @@ export default function ProjectList({
 
   return (
     <div className="flex flex-col gap-0.5 pb-2">
-      {sortedGroups.map((group) => {
-        const groupRepos = groupedRepos.get(group.id) ?? [];
+      {groupedSections.map(({ group, repos: groupRepos }) => {
         const isGroupExpanded = expandedGroups.has(group.id);
         return (
           <div key={group.id}>

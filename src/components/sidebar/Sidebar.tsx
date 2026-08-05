@@ -25,6 +25,7 @@ interface SidebarProps {
   onSelectTab: (tabId: string) => void;
   onSelectProjectTab: (repoPath: string, tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
   onNewShell: () => void;
   onRenameGroup: (groupId: string, newName: string) => void;
   onDeleteGroup: (groupId: string) => void;
@@ -46,6 +47,7 @@ export default function Sidebar({
   onSelectTab,
   onSelectProjectTab,
   onCloseTab,
+  onMoveTab,
   onNewShell,
   onRenameGroup,
   onDeleteGroup,
@@ -181,6 +183,7 @@ export default function Sidebar({
             activeRepoPath={activeRepoPath}
             activeTabId={activeTabId}
             onSelectSession={onSelectProjectTab}
+            onMoveTab={onMoveTab}
           />
         )}
         <div className="sidebar-section px-2 pb-2">
@@ -205,6 +208,7 @@ export default function Sidebar({
               onOpenInEditor={onOpenInEditor}
               onSelectTab={onSelectTab}
               onCloseTab={onCloseTab}
+              onMoveTab={onMoveTab}
               onNewShell={onNewShell}
               onRenameGroup={onRenameGroup}
               onDeleteGroup={onDeleteGroup}

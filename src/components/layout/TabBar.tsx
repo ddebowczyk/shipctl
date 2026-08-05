@@ -12,6 +12,7 @@ import ContextMenu from "../shared/ContextMenu";
 import type { ContextMenuItem } from "../shared/ContextMenu";
 import tabKindMeta, { extraActions } from "../../lib/tabKindMeta";
 import type { UnifiedTab } from "../../lib/types";
+import { buildProjectMoveMenuItems } from "../shared/projectMoveMenu";
 
 
 function NewSessionButton({ onNewAssistant, onNewShell, onNewCommands, onNewGit, onOpenInEditor }: { onNewAssistant: () => void; onNewShell: () => void; onNewCommands: () => void; onNewGit: () => void; onOpenInEditor: () => void }) {
@@ -125,8 +126,10 @@ export default function TabBar({
   );
   const projectTerminals = projectState;
   const repos = useRepoStore((s) => s.repos);
+  const groups = useRepoStore((s) => s.groups);
   const projectName = activeProjectPath ? activeProjectPath.split("/").pop() : null;
   const gitStatus = useGitStore((s) => activeProjectPath ? s.projectGitStatus[activeProjectPath] : null);
+  const gitStatuses = useGitStore((s) => s.projectGitStatus);
   const branch = gitStatus?.branch ?? null;
   const branchIconColor = !gitStatus || !gitStatus.is_git_repo
     ? undefined
@@ -245,20 +248,25 @@ export default function TabBar({
 
   const isRenameable = (tab: UnifiedTab) => tab.kind === "terminal" || tab.kind === "assistant";
   const tabMenuTab = tabMenu ? tabs.find((tab) => tab.id === tabMenu.tabId) : null;
-  const moveTargets = repos.filter((repo) => repo.path !== activeProjectPath);
+  const moveToChildren = buildProjectMoveMenuItems({
+    repos,
+    groups,
+    gitStatuses,
+    currentProjectPath: activeProjectPath,
+    onMove: (destinationPath) => {
+      if (tabMenuTab) void onMoveTab(tabMenuTab.id, destinationPath);
+    },
+  });
   const tabMenuItems: ContextMenuItem[] = tabMenuTab
     ? [
-        ...(isRenameable(tabMenuTab) && moveTargets.length > 0
+        ...(isRenameable(tabMenuTab) && moveToChildren.length > 0
           ? [{
               label: "Move to project",
               icon: <FolderInput size={14} />,
-              children: moveTargets.map((repo) => ({
-                label: repo.name,
-                onClick: () => { void onMoveTab(tabMenuTab.id, repo.path); },
-              })),
+              children: moveToChildren,
             }]
           : []),
-        ...(isRenameable(tabMenuTab) && moveTargets.length > 0 ? [{ separator: true, label: "_separator_close" }] : []),
+        ...(isRenameable(tabMenuTab) && moveToChildren.length > 0 ? [{ separator: true, label: "_separator_close" }] : []),
         {
           label: "Close tab",
           onClick: () => onClose(tabMenuTab.id),

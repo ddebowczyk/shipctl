@@ -3,9 +3,12 @@ import type { TerminalTabData, TabActivity } from "../../lib/types";
 import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { handleActionKey } from "../../lib/a11y";
-import { X } from "lucide-react";
+import { FolderInput, X } from "lucide-react";
 import ContextMenu from "../shared/ContextMenu";
 import type { ContextMenuItem } from "../shared/ContextMenu";
+import { buildProjectMoveMenuItems } from "../shared/projectMoveMenu";
+import { useRepoStore } from "../../stores/useRepoStore";
+import { useGitStore } from "../../stores/useGitStore";
 import ActivityIndicator, { getTabActivityStatus } from "./ActivityIndicator";
 
 interface AssistantButtonProps {
@@ -13,6 +16,8 @@ interface AssistantButtonProps {
   isActive: boolean;
   onClick: () => void;
   onClose: () => void;
+  projectPath: string;
+  onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
 }
 
 export default function AssistantButton({
@@ -20,9 +25,14 @@ export default function AssistantButton({
   isActive,
   onClick,
   onClose,
+  projectPath,
+  onMoveTab,
 }: AssistantButtonProps) {
   const logoUrl = tab.assistantId ? assistantLogoSrc[tab.assistantId] : null;
   const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.ptyId]);
+  const repos = useRepoStore((s) => s.repos);
+  const groups = useRepoStore((s) => s.groups);
+  const gitStatuses = useGitStore((s) => s.projectGitStatus);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const restoreStatus = tab.captureState === "pending"
     ? { label: "saving", title: "Identifying this session for restore", color: "var(--text-muted)" }
@@ -35,7 +45,24 @@ export default function AssistantButton({
     setMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
+  const moveToChildren = buildProjectMoveMenuItems({
+    repos,
+    groups,
+    gitStatuses,
+    currentProjectPath: projectPath,
+    onMove: (destinationPath) => { void onMoveTab(tab.id, destinationPath); },
+  });
   const menuItems: ContextMenuItem[] = [
+    ...(moveToChildren.length > 0
+      ? [
+          {
+            label: "Move to project",
+            icon: <FolderInput size={14} />,
+            children: moveToChildren,
+          },
+          { separator: true, label: "_separator_close" },
+        ]
+      : []),
     {
       label: "Close",
       icon: <X size={14} />,

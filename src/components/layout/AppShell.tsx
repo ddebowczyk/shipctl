@@ -280,9 +280,12 @@ export default function AppShell() {
   const handleMoveTab = useCallback(
     async (tabId: string, destinationPath: string) => {
       const store = useTerminalStore.getState();
-      const sourcePath = store.activeProjectPath;
-      if (!sourcePath || sourcePath === destinationPath) return;
-      const tab = store.projectState[sourcePath]?.tabs.find((entry) => entry.id === tabId);
+      const sourceEntry = Object.entries(store.projectState).find(([, project]) =>
+        project.tabs.some((entry) => entry.id === tabId),
+      );
+      if (!sourceEntry || sourceEntry[0] === destinationPath) return;
+      const [sourcePath, sourceProject] = sourceEntry;
+      const tab = sourceProject.tabs.find((entry) => entry.id === tabId);
       if (!tab || (tab.kind !== "terminal" && tab.kind !== "assistant")) return;
 
       await handleSelectRepo(destinationPath);
@@ -852,6 +855,7 @@ export default function AppShell() {
             onSelectTab={handleSelectSidebarTab}
             onSelectProjectTab={handleSelectSidebarProjectTab}
             onCloseTab={handleCloseTab}
+            onMoveTab={handleMoveTab}
             onNewShell={handleNewShell}
             onRenameGroup={handleRenameGroup}
             onDeleteGroup={handleDeleteGroup}

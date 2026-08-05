@@ -6,6 +6,8 @@ interface TerminalListProps {
   activeTabId: string | null;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  projectPath: string;
+  onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
 }
 
 export default function TerminalList({
@@ -13,6 +15,8 @@ export default function TerminalList({
   activeTabId,
   onSelectTab,
   onCloseTab,
+  projectPath,
+  onMoveTab,
 }: TerminalListProps) {
   return (
     <>
@@ -23,6 +27,8 @@ export default function TerminalList({
             isActive={tab.id === activeTabId}
             onClick={() => onSelectTab(tab.id)}
             onClose={() => onCloseTab(tab.id)}
+            projectPath={projectPath}
+            onMoveTab={onMoveTab}
           />
         </div>
       ))}
