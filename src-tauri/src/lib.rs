@@ -99,6 +99,7 @@ pub fn run() {
             commands::save_keybinding_settings,
             commands::get_terminal_settings,
             commands::save_terminal_settings,
+            commands::get_sidebar_settings,
             commands::list_monospace_families,
             commands::load_font_family,
             commands::open_in_editor,

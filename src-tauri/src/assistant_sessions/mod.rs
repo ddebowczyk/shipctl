@@ -306,28 +306,15 @@ impl AssistantSessionRegistry {
             .pending_codex_transcripts
             .get(record_id)
             .ok_or_else(|| "Codex capture snapshot was not available".to_string())?;
-        let launch_path = PathBuf::from(&record.launch_repo_path);
-        let mut candidates = Vec::new();
-        for transcript_path in codex_transcript_paths()? {
-            if known_paths.contains(&transcript_path) {
-                continue;
-            }
-            let Ok(metadata) = parse_codex_session_metadata(&transcript_path) else {
-                // Codex can create the file before it writes session_meta.
-                continue;
-            };
-            let Some(cwd) = metadata.cwd.as_ref() else {
-                continue;
-            };
-            if cwd.canonicalize().ok().as_deref() == Some(launch_path.as_path()) {
-                candidates.push(metadata);
-            }
-        }
+        let candidate = select_codex_capture_candidate(
+            known_paths,
+            Path::new(&record.launch_repo_path),
+            codex_transcript_paths()?,
+        )?;
 
-        match candidates.len() {
-            0 => Ok(None),
-            1 => {
-                let metadata = candidates.pop().expect("one candidate checked above");
+        match candidate {
+            None => Ok(None),
+            Some(metadata) => {
                 let updated = find_record_mut(&mut state, record_id)?;
                 updated.provider_session_id = Some(metadata.session_id);
                 updated.capture_state = CaptureState::Ready;
@@ -337,9 +324,6 @@ impl AssistantSessionRegistry {
                 manifest::write_atomically(&self.path, &state.manifest)?;
                 Ok(Some(updated))
             }
-            count => Err(format!(
-                "Found {count} new Codex sessions for this directory; restore was not enabled so Shep will not guess which one to resume"
-            )),
         }
     }
 
@@ -516,6 +500,41 @@ fn codex_transcript_paths() -> Result<HashSet<PathBuf>, String> {
     Ok(paths)
 }
 
+/// Return the only safe new Codex transcript candidate for a launch. A
+/// transcript must be absent from the pre-spawn snapshot and identify the
+/// exact canonical launch directory. More than one match is deliberately an
+/// error: concurrent sessions in the same directory cannot be associated
+/// safely without changing the user's Codex configuration.
+fn select_codex_capture_candidate(
+    known_paths: &HashSet<PathBuf>,
+    launch_path: &Path,
+    transcript_paths: HashSet<PathBuf>,
+) -> Result<Option<capture::ProviderSessionMetadata>, String> {
+    let mut candidates = Vec::new();
+    for transcript_path in transcript_paths {
+        if known_paths.contains(&transcript_path) {
+            continue;
+        }
+        let Ok(metadata) = parse_codex_session_metadata(&transcript_path) else {
+            // Codex can create the file before it writes session_meta.
+            continue;
+        };
+        let Some(cwd) = metadata.cwd.as_ref() else {
+            continue;
+        };
+        if cwd.canonicalize().ok().as_deref() == Some(launch_path) {
+            candidates.push(metadata);
+        }
+    }
+    match candidates.len() {
+        0 => Ok(None),
+        1 => Ok(candidates.pop()),
+        count => Err(format!(
+            "Found {count} new Codex sessions for this directory; restore was not enabled so Shep will not guess which one to resume"
+        )),
+    }
+}
+
 fn collect_jsonl_files(root: &Path, paths: &mut HashSet<PathBuf>) -> Result<(), String> {
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
@@ -587,9 +606,10 @@ fn now_epoch_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssistantProvider, AssistantSessionRegistry, CaptureState, PrepareAssistantSession,
-        SessionMode,
+        select_codex_capture_candidate, AssistantProvider, AssistantSessionRegistry, CaptureState,
+        PrepareAssistantSession, SessionMode,
     };
+    use std::collections::HashSet;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -707,6 +727,39 @@ mod tests {
     }
 
     #[test]
+    fn rejects_ambiguous_new_codex_transcripts_for_the_same_directory() {
+        let directory = fixture_dir("ambiguous-codex");
+        let launch_path = directory.canonicalize().unwrap();
+        let first = directory.join("first.jsonl");
+        let second = directory.join("second.jsonl");
+        let cwd = directory.to_string_lossy();
+        fs::write(
+            &first,
+            format!(
+                r#"{{"type":"session_meta","payload":{{"id":"first-session","cwd":"{cwd}"}}}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            &second,
+            format!(
+                r#"{{"type":"session_meta","payload":{{"id":"second-session","cwd":"{cwd}"}}}}"#
+            ),
+        )
+        .unwrap();
+
+        let error = select_codex_capture_candidate(
+            &HashSet::new(),
+            &launch_path,
+            HashSet::from([first, second]),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("will not guess"));
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn isolates_corrupt_manifest_without_breaking_startup() {
         let directory = fixture_dir("corrupt");
         let path = directory.join("assistant-sessions.json");
@@ -753,6 +806,28 @@ mod tests {
 
         assert!(registry.discard(&record.record_id).is_err());
         assert!(registry.list_restorable().is_empty());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn keeps_the_registry_writable_until_shutdown_is_confirmed() {
+        let directory = fixture_dir("cancel-quit");
+        let path = directory.join("assistant-sessions.json");
+        let registry = AssistantSessionRegistry::new_at(path);
+        let pending = registry.prepare(request(&directory)).unwrap();
+        registry
+            .confirm_capture(
+                &pending.record_id,
+                pending.provider_session_id.clone().unwrap(),
+            )
+            .unwrap();
+
+        let renamed = registry
+            .update_label(&pending.record_id, "Keep running".to_string())
+            .unwrap();
+
+        assert_eq!(renamed.label, "Keep running");
+        assert!(registry.discard(&pending.record_id).is_ok());
         let _ = fs::remove_dir_all(directory);
     }
 }

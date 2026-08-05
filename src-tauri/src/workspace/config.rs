@@ -20,6 +20,8 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub terminal: TerminalSettings,
     #[serde(default)]
+    pub sidebar: SidebarSettings,
+    #[serde(default)]
     pub usage: UsageSettings,
 }
 
@@ -37,6 +39,7 @@ impl Default for GlobalConfig {
             editor: EditorSettings::default(),
             keybindings: KeybindingSettings::default(),
             terminal: TerminalSettings::default(),
+            sidebar: SidebarSettings::default(),
             usage: UsageSettings::default(),
         }
     }
@@ -157,6 +160,50 @@ pub fn normalize_terminal_settings(settings: &mut TerminalSettings) {
     settings.url_allowlist = normalize_url_allowlist(&settings.url_allowlist);
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SidebarSettings {
+    #[serde(default = "default_sidebar_font_size", rename = "fontSize")]
+    pub font_size: u32,
+    #[serde(default = "default_sidebar_font_family", rename = "fontFamily")]
+    pub font_family: String,
+    #[serde(default = "default_sidebar_width")]
+    pub width: u32,
+}
+
+fn default_sidebar_font_size() -> u32 {
+    13
+}
+
+fn default_sidebar_font_family() -> String {
+    "SF Pro Display, IBM Plex Sans, Segoe UI, sans-serif".to_string()
+}
+
+fn default_sidebar_width() -> u32 {
+    288
+}
+
+impl Default for SidebarSettings {
+    fn default() -> Self {
+        SidebarSettings {
+            font_size: default_sidebar_font_size(),
+            font_family: default_sidebar_font_family(),
+            width: default_sidebar_width(),
+        }
+    }
+}
+
+pub fn normalize_sidebar_settings(settings: &mut SidebarSettings) {
+    settings.font_size = settings.font_size.clamp(10, 24);
+    settings.width = settings.width.clamp(224, 560);
+
+    let trimmed = settings.font_family.trim();
+    settings.font_family = if trimmed.is_empty() {
+        default_sidebar_font_family()
+    } else {
+        trimmed.to_string()
+    };
+}
+
 fn normalize_url_allowlist(schemes: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
@@ -258,7 +305,10 @@ impl Default for UsageSettings {
             claude: ProviderBudgetConfig::default_subscription(),
             codex: ProviderBudgetConfig::default_subscription(),
             antigravity: ProviderBudgetConfig::default_subscription(),
-            gemini: ProviderBudgetConfig { show: false, ..ProviderBudgetConfig::default_subscription() },
+            gemini: ProviderBudgetConfig {
+                show: false,
+                ..ProviderBudgetConfig::default_subscription()
+            },
             opencode: ProviderBudgetConfig {
                 monthly_budget: Some(100.0),
                 ..ProviderBudgetConfig::default_custom()

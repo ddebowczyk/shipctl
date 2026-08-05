@@ -379,6 +379,33 @@ select {
   border-style: solid;
 }
 
+/* The app sidebar shadows these shared typography tokens from ~/.shep/config.yml.
+ * Keeping the scope on the sidebar prevents manual sidebar tuning from changing
+ * the workspace, tabs, settings panel, or terminal renderer. */
+.app-sidebar {
+  font-size: var(--text-body);
+}
+.app-sidebar button,
+.app-sidebar input {
+  font-family: inherit;
+}
+.app-sidebar .group-header {
+  font-size: var(--text-body);
+}
+.app-sidebar .agent-session-row__branch,
+.app-sidebar .group-empty-hint,
+.app-sidebar .sidebar-usage__window-btn,
+.app-sidebar .sidebar-usage__tooltip-row {
+  font-size: var(--text-label);
+}
+.app-sidebar .sidebar-usage__tooltip-header {
+  font-size: var(--text-body);
+}
+.app-sidebar .sidebar-usage__tooltip-window,
+.app-sidebar .sidebar-footer-btn > span {
+  font-size: var(--text-badge) !important;
+}
+
 /* Sidebar status dots — unified right-aligned indicator */
 .sidebar-status-dot {
   width: 6px;

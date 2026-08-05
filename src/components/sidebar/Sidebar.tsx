@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { RepoInfo, RepoGroup, CommandState } from "../../lib/types";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useCommandStore } from "../../stores/useCommandStore";
 import { useGitStore } from "../../stores/useGitStore";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
+import { useSidebarSettingsStore } from "../../stores/useSidebarSettingsStore";
 import ProjectList from "./ProjectList";
 import SidebarFooter from "./SidebarFooter";
 import SidebarUsage from "./SidebarUsage";
@@ -60,6 +61,9 @@ export default function Sidebar({
   const projectSettings = useProjectSettingsStore((s) => s.settings);
   const projectSettingsLoaded = useProjectSettingsStore((s) => s.hasLoaded);
   const loadProjectSettings = useProjectSettingsStore((s) => s.loadSettings);
+  const sidebarSettings = useSidebarSettingsStore((s) => s.settings);
+  const sidebarSettingsLoaded = useSidebarSettingsStore((s) => s.hasLoaded);
+  const loadSidebarSettings = useSidebarSettingsStore((s) => s.loadSettings);
 
   // Only subscribe to the fields that affect the sidebar activity indicators.
   // Returns a stable string so the selector doesn't trigger re-renders when
@@ -152,8 +156,24 @@ export default function Sidebar({
     if (!projectSettingsLoaded) void loadProjectSettings();
   }, [projectSettingsLoaded, loadProjectSettings]);
 
+  useEffect(() => {
+    if (!sidebarSettingsLoaded) void loadSidebarSettings();
+  }, [sidebarSettingsLoaded, loadSidebarSettings]);
+
+  const sidebarStyle = useMemo(() => ({
+    width: `${sidebarSettings.width}px`,
+    fontFamily: sidebarSettings.fontFamily,
+    "--text-body": `${sidebarSettings.fontSize}px`,
+    "--text-label": `${Math.max(10, sidebarSettings.fontSize - 2)}px`,
+    "--text-badge": `${Math.max(9, sidebarSettings.fontSize - 3)}px`,
+  }) as CSSProperties, [sidebarSettings]);
+
   return (
-    <div className="w-72 shrink-0 flex flex-col h-full pr-4 mr-4 border-r border-[var(--glass-border)]" onContextMenu={(e) => e.preventDefault()}>
+    <div
+      className="app-sidebar shrink-0 flex flex-col h-full pr-4 mr-4 border-r border-[var(--glass-border)]"
+      style={sidebarStyle}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <div className="flex-1 overflow-y-auto min-h-0">
         {projectSettings.showAgentSessionsInSidebar && (
           <AgentSessionList

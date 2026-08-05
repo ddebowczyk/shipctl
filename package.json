@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:local": "bash scripts/build-local.sh",
     "preview": "vite preview",
     "tauri": "tauri"
   },

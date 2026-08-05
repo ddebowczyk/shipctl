@@ -148,3 +148,109 @@ fn sync_directory(path: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{read, write_atomically, AssistantSessionManifest, MANIFEST_VERSION};
+    use crate::assistant_sessions::{
+        AssistantProvider, AssistantSessionRecord, CaptureState, SessionMode,
+    };
+    use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    fn fixture_dir(name: &str) -> std::path::PathBuf {
+        let sequence = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let directory = std::env::temp_dir().join(format!(
+            "shep-assistant-session-manifest-test-{}-{sequence}-{name}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    fn sample_record() -> AssistantSessionRecord {
+        AssistantSessionRecord {
+            record_id: "record-1".to_string(),
+            provider: AssistantProvider::Claude,
+            provider_session_id: Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
+            launch_repo_path: "/tmp/launch".to_string(),
+            placement_project_path: "/tmp/placement".to_string(),
+            label: "Claude Code".to_string(),
+            session_mode: SessionMode::Standard,
+            model: Some("sonnet".to_string()),
+            capture_state: CaptureState::Ready,
+            restore_on_next_launch: true,
+            started_at: 1,
+            updated_at: 2,
+        }
+    }
+
+    #[test]
+    fn atomically_replaces_a_manifest_without_leaving_a_temporary_file() {
+        let directory = fixture_dir("atomic-replace");
+        let path = directory.join("assistant-sessions.json");
+        write_atomically(&path, &AssistantSessionManifest::default()).unwrap();
+
+        let replacement = AssistantSessionManifest {
+            version: MANIFEST_VERSION,
+            sessions: vec![sample_record()],
+        };
+        write_atomically(&path, &replacement).unwrap();
+
+        let loaded = read(&path).unwrap();
+        assert_eq!(loaded.sessions.len(), 1);
+        assert_eq!(loaded.sessions[0].record_id, "record-1");
+        assert!(fs::read_dir(&directory)
+            .unwrap()
+            .flatten()
+            .all(|entry| !entry.file_name().to_string_lossy().contains(".tmp-")));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o077, 0);
+            assert_eq!(
+                fs::metadata(&directory).unwrap().permissions().mode() & 0o077,
+                0
+            );
+        }
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn serializes_only_the_explicit_restore_record_fields() {
+        let manifest = AssistantSessionManifest {
+            version: MANIFEST_VERSION,
+            sessions: vec![sample_record()],
+        };
+
+        let json = serde_json::to_value(manifest).unwrap();
+        let mut fields = json["sessions"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        fields.sort();
+
+        assert_eq!(
+            fields,
+            vec![
+                "captureState",
+                "label",
+                "launchRepoPath",
+                "model",
+                "placementProjectPath",
+                "provider",
+                "providerSessionId",
+                "recordId",
+                "restoreOnNextLaunch",
+                "sessionMode",
+                "startedAt",
+                "updatedAt",
+            ]
+        );
+    }
+}

@@ -92,6 +92,22 @@ Use the sidebar and tab bar to:
 - jump into git or commands views
 - switch projects without manually rebuilding your terminal layout
 
+### Global sidebar settings
+
+Machine-wide preferences live in `~/.shep/config.yml`. Restart Shep after
+editing the file manually. The sidebar accepts independent typography and width
+settings without changing the main workspace or terminal font:
+
+```yaml
+sidebar:
+  fontSize: 13
+  fontFamily: "SF Pro Display, IBM Plex Sans, Segoe UI, sans-serif"
+  width: 288
+```
+
+`fontSize` is constrained to 10–24px and `width` to 224–560px so an accidental
+value cannot make the navigation unusable.
+
 ## Assistant Modes
 
 Shep supports two session modes for supported coding agents:
@@ -130,6 +146,9 @@ crash, because Shep cannot safely assume the original provider process stopped.
 - The restore manifest stores session IDs and tab metadata only, never terminal
   output, prompts, credentials, command text, or PTY IDs.
 - This does not modify your Claude or Codex global configuration or hooks.
+- The restore adapters are verified with Claude Code 2.1.221 and Codex CLI
+  0.146.0. If either CLI cannot start, Shep reports its detected version and
+  suggests updating it or making it available on Shep's PATH.
 
 Gemini CLI was removed from the launcher after Google deprecated it in favor of Antigravity CLI (consumer requests stop June 18, 2026). If you still use it (e.g. on an enterprise license), run `gemini` from any Shep terminal — historical Gemini usage stays visible in the usage panel.
 
@@ -153,6 +172,37 @@ This starts the Vite frontend and the Tauri shell together.
 
 ```bash
 pnpm tauri build
+```
+
+### Build an unsigned Apple Silicon app (Mac Studio)
+
+```bash
+pnpm tauri build --target aarch64-apple-darwin --bundles app,dmg --no-sign
+```
+
+This writes an installable DMG to:
+
+```text
+src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+```
+
+Open the DMG and drag `shep.app` to Applications when you are ready to replace
+an existing installation. It is intentionally unsigned, so macOS may require
+an explicit confirmation the first time it opens.
+
+### Archive local Mac Studio builds
+
+```bash
+pnpm build:local
+```
+
+This creates the unsigned Apple Silicon app and DMG, then copies both into an
+ignored `builds/<timestamp>-.../` directory together with `build.json`. The
+manifest records the source commit, whether the worktree was dirty, and
+SHA-256 checksums. To archive the current Tauri output without rebuilding:
+
+```bash
+pnpm build:local -- --archive-only
 ```
 
 ### Create a debug-packaged build

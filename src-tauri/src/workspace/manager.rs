@@ -1,6 +1,6 @@
 use super::config::{
     EditorSettings, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo, RepoInfo,
-    TerminalSettings, UsageSettings, WorkspaceConfig,
+    SidebarSettings, TerminalSettings, UsageSettings, WorkspaceConfig,
 };
 use super::loader;
 
@@ -35,11 +35,7 @@ impl WorkspaceManager {
         loader::load_repo_workspace(repo_path)
     }
 
-    pub fn save_workspace(
-        &self,
-        repo_path: &str,
-        config: &WorkspaceConfig,
-    ) -> Result<(), String> {
+    pub fn save_workspace(&self, repo_path: &str, config: &WorkspaceConfig) -> Result<(), String> {
         loader::save_repo_workspace(repo_path, config)
     }
 
@@ -73,6 +69,10 @@ impl WorkspaceManager {
 
     pub fn save_terminal_settings(&self, settings: &TerminalSettings) -> Result<(), String> {
         loader::save_terminal_settings(settings)
+    }
+
+    pub fn load_sidebar_settings(&self) -> Result<SidebarSettings, String> {
+        loader::load_sidebar_settings()
     }
 
     pub fn load_usage_settings(&self) -> Result<UsageSettings, String> {

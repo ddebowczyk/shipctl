@@ -64,6 +64,12 @@ export interface TerminalSettings {
   urlAllowlist: string[];
 }
 
+export interface SidebarSettings {
+  fontSize: number;
+  fontFamily: string;
+  width: number;
+}
+
 export interface FontFamily {
   family: string;
   faceCount: number;

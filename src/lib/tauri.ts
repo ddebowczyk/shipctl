@@ -14,6 +14,7 @@ import type {
   EditorSettings,
   KeybindingSettings,
   TerminalSettings,
+  SidebarSettings,
   FontFamily,
   FontFaceData,
   PreferredEditor,
@@ -112,6 +113,10 @@ export function getTerminalSettings(): Promise<TerminalSettings> {
 
 export function saveTerminalSettings(settings: TerminalSettings): Promise<void> {
   return invoke("save_terminal_settings", { settings });
+}
+
+export function getSidebarSettings(): Promise<SidebarSettings> {
+  return invoke("get_sidebar_settings");
 }
 
 export function listMonospaceFamilies(): Promise<FontFamily[]> {

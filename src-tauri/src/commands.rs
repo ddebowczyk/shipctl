@@ -25,7 +25,7 @@ use crate::usage::{
 use crate::watcher::GitWatcher;
 use crate::workspace::config::{
     normalize_terminal_settings, EditorSettings, GroupEntry, KeybindingSettings, ProjectSettings,
-    RegisteredRepo, RepoInfo, TerminalSettings, UsageSettings, WorkspaceConfig,
+    RegisteredRepo, RepoInfo, SidebarSettings, TerminalSettings, UsageSettings, WorkspaceConfig,
 };
 use crate::workspace::manager::WorkspaceManager;
 
@@ -130,6 +130,13 @@ pub fn save_terminal_settings(
 ) -> Result<(), String> {
     normalize_terminal_settings(&mut settings);
     workspace.save_terminal_settings(&settings)
+}
+
+#[tauri::command]
+pub fn get_sidebar_settings(
+    workspace: State<'_, WorkspaceManager>,
+) -> Result<SidebarSettings, String> {
+    workspace.load_sidebar_settings()
 }
 
 #[tauri::command]

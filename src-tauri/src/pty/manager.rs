@@ -6,6 +6,28 @@ use tauri::ipc::Channel;
 
 use super::session::{PtyColorTheme, PtyOutput, PtySession};
 
+const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(3);
+
+trait TerminationTarget {
+    fn request_termination(&mut self);
+    fn is_termination_tree_alive(&self) -> bool;
+    fn force_kill(&mut self) -> Result<(), String>;
+}
+
+impl TerminationTarget for PtySession {
+    fn request_termination(&mut self) {
+        PtySession::request_termination(self);
+    }
+
+    fn is_termination_tree_alive(&self) -> bool {
+        PtySession::is_termination_tree_alive(self)
+    }
+
+    fn force_kill(&mut self) -> Result<(), String> {
+        PtySession::force_kill(self)
+    }
+}
+
 pub struct PtyManager {
     sessions: Mutex<HashMap<u32, PtySession>>,
     next_id: Mutex<u32>,
@@ -99,24 +121,88 @@ impl PtyManager {
 
     pub fn kill_all(&self) {
         let mut sessions = self.sessions.lock().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + SHUTDOWN_GRACE_PERIOD;
         let mut draining_sessions: Vec<_> = sessions.drain().map(|(_, session)| session).collect();
 
-        // Ask every process tree to terminate before starting the shared grace
-        // window. Waiting inside the drain loop would leave later terminals
-        // without any opportunity to flush their own session state.
-        for session in &mut draining_sessions {
-            session.request_termination();
+        terminate_all_before_deadline(&mut draining_sessions, deadline);
+    }
+}
+
+fn terminate_all_before_deadline<T: TerminationTarget>(sessions: &mut [T], deadline: Instant) {
+    // Ask every process tree to terminate before starting the shared grace
+    // window. Waiting inside the drain loop would leave later terminals
+    // without any opportunity to flush their own session state.
+    for session in sessions.iter_mut() {
+        session.request_termination();
+    }
+    while Instant::now() < deadline
+        && sessions
+            .iter()
+            .any(TerminationTarget::is_termination_tree_alive)
+    {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    for session in sessions.iter_mut() {
+        let _ = session.force_kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{terminate_all_before_deadline, TerminationTarget};
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+
+    struct FakeSession {
+        name: &'static str,
+        events: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl TerminationTarget for FakeSession {
+        fn request_termination(&mut self) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("request:{}", self.name));
         }
-        while Instant::now() < deadline
-            && draining_sessions
-                .iter()
-                .any(PtySession::is_termination_tree_alive)
-        {
-            std::thread::sleep(Duration::from_millis(50));
+
+        fn is_termination_tree_alive(&self) -> bool {
+            false
         }
-        for session in &mut draining_sessions {
-            let _ = session.force_kill();
+
+        fn force_kill(&mut self) -> Result<(), String> {
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("force:{}", self.name));
+            Ok(())
         }
+    }
+
+    #[test]
+    fn requests_every_pty_before_forcing_any_survivor() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut sessions = vec![
+            FakeSession {
+                name: "first",
+                events: events.clone(),
+            },
+            FakeSession {
+                name: "second",
+                events: events.clone(),
+            },
+        ];
+
+        terminate_all_before_deadline(&mut sessions, Instant::now());
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                "request:first",
+                "request:second",
+                "force:first",
+                "force:second"
+            ]
+        );
     }
 }

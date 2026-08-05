@@ -675,7 +675,9 @@ export default function AppShell() {
       }
 
       async function restoreRecord(record: AssistantSessionRecord) {
-        if (!repos.some((repo) => repo.path === record.placementProjectPath)) {
+        if (
+          !useRepoStore.getState().repos.some((repo) => repo.path === record.placementProjectPath)
+        ) {
           showRestoreRecovery(
             record,
             "Its placement project is no longer registered in Shep.",

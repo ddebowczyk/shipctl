@@ -4,9 +4,9 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::config::{
-    CommandConfig, EditorSettings, GlobalConfig, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo,
-    RepoEntry, RepoInfo, TerminalSettings, UsageSettings, WorkspaceConfig,
-    normalize_terminal_settings,
+    normalize_sidebar_settings, normalize_terminal_settings, CommandConfig, EditorSettings,
+    GlobalConfig, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo, RepoEntry,
+    RepoInfo, SidebarSettings, TerminalSettings, UsageSettings, WorkspaceConfig,
 };
 
 static CONFIG_CACHE: Mutex<Option<(GlobalConfig, SystemTime)>> = Mutex::new(None);
@@ -57,8 +57,8 @@ pub fn load_global_config() -> Result<GlobalConfig, String> {
 
     let content =
         fs::read_to_string(&path).map_err(|e| format!("Failed to read global config: {e}"))?;
-    let config: GlobalConfig =
-        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse global config: {e}"))?;
+    let config: GlobalConfig = serde_yaml::from_str(&content)
+        .map_err(|e| format!("Failed to parse global config: {e}"))?;
 
     if let Ok(mut guard) = CONFIG_CACHE.lock() {
         *guard = Some((config.clone(), mtime));
@@ -95,13 +95,15 @@ pub fn backfill_global_config_defaults() -> Result<(), String> {
     let content =
         fs::read_to_string(&path).map_err(|e| format!("Failed to read global config: {e}"))?;
     let needs_url_allowlist = !content.contains("urlAllowlist:");
+    let needs_sidebar = !content.contains("sidebar:");
 
-    if !needs_url_allowlist {
+    if !needs_url_allowlist && !needs_sidebar {
         return Ok(());
     }
 
     let mut config = load_global_config()?;
     normalize_terminal_settings(&mut config.terminal);
+    normalize_sidebar_settings(&mut config.sidebar);
     save_global_config(&config)
 }
 
@@ -145,6 +147,12 @@ pub fn save_terminal_settings(settings: &TerminalSettings) -> Result<(), String>
     save_global_config(&config)
 }
 
+pub fn load_sidebar_settings() -> Result<SidebarSettings, String> {
+    let mut settings = load_global_config()?.sidebar;
+    normalize_sidebar_settings(&mut settings);
+    Ok(settings)
+}
+
 pub fn load_usage_settings() -> Result<UsageSettings, String> {
     Ok(load_global_config()?.usage)
 }
@@ -160,7 +168,8 @@ pub fn save_usage_settings(settings: &UsageSettings) -> Result<(), String> {
 pub fn list_repos() -> Result<Vec<RepoInfo>, String> {
     let config = load_global_config()?;
 
-    let repos = config.repos
+    let repos = config
+        .repos
         .iter()
         .map(|entry| {
             let path = Path::new(&entry.path);
@@ -246,7 +255,8 @@ pub fn migrate_old_projects() -> Result<(), String> {
 
     let mut global_config = GlobalConfig::default();
 
-    let entries = fs::read_dir(&old_dir).map_err(|e| format!("Failed to read old projects: {e}"))?;
+    let entries =
+        fs::read_dir(&old_dir).map_err(|e| format!("Failed to read old projects: {e}"))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("Failed to read entry: {e}"))?;
@@ -315,7 +325,10 @@ pub fn migrate_old_projects() -> Result<(), String> {
         }
 
         // Add to global registry
-        global_config.repos.push(RepoEntry { path: cwd, group: None });
+        global_config.repos.push(RepoEntry {
+            path: cwd,
+            group: None,
+        });
     }
 
     if !global_config.repos.is_empty() {
@@ -444,10 +457,9 @@ fn ensure_repo_shep_dir(repo_path: &str) -> Result<(), String> {
 fn load_or_default_workspace(repo_path: &str) -> Result<WorkspaceConfig, String> {
     let path = repo_workspace_file(repo_path);
     if path.exists() {
-        let content = fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read workspace file: {e}"))?;
-        serde_yaml::from_str(&content)
-            .map_err(|e| format!("Failed to parse workspace YAML: {e}"))
+        let content =
+            fs::read_to_string(&path).map_err(|e| format!("Failed to read workspace file: {e}"))?;
+        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse workspace YAML: {e}"))
     } else {
         let name = Path::new(repo_path)
             .file_name()
