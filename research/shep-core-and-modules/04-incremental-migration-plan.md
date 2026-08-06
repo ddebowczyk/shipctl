@@ -2,10 +2,10 @@
 
 ## Strategy
 
-Do not reorganize the entire repository before delivering a useful module. Add
-the smallest real extension seam, prove it with Beads, then extract one existing
-vertical feature. Every phase must leave Shep buildable and preserve current
-behavior.
+Do not reorganize the entire repository before proving a useful seam. Add the
+smallest extension seam, prove it with a disposable fixture, then extract
+existing vertical capabilities one at a time. Every phase must leave Shep
+buildable and preserve current behavior.
 
 The roadmap separates three claims that are often conflated:
 
@@ -14,7 +14,11 @@ The roadmap separates three claims that are often conflated:
 3. **Replaceability:** the feature can be disabled/removed and the application
    still builds and recovers persisted state.
 
-The Beads experiment is complete only at level 3.
+The Phase 2 fixture proved level 3 for the package and composition rails. On
+2026-08-06, the Beads viewer was moved to deferred standalone epic `shep-r2z`.
+Its preserved stages below are no longer prerequisites for the migration. The
+master critical path now starts with TODOs, the smallest existing vertical
+capability that crosses frontend and native boundaries.
 
 ## Phase 0: freeze the evidence baseline
 
@@ -102,11 +106,11 @@ No Beads symbol should appear in these files.
 - modules cannot import application stores or private native modules;
 - removing the fixture after disablement leaves both builds green.
 
-## Phase 3: build the read-only Beads native adapter
+## Deferred Beads stage 1: build the read-only native adapter
 
 Keep this PR/backend slice useful without depending on finished UI.
 
-### Phase 3 work
+### Deferred stage 1 work
 
 1. Create the full `modules/beads/backend` package and fixtures.
 2. Implement project authorization against registered Shep projects.
@@ -117,7 +121,7 @@ Keep this PR/backend slice useful without depending on finished UI.
    limits, and structured errors.
 7. Add Tauri command permissions and a build feature.
 
-### Phase 3 exit evidence
+### Deferred stage 1 exit evidence
 
 - fixture tests cover argv, normalization, stderr warnings, timeout, output
   limit, and schema mismatch;
@@ -127,9 +131,9 @@ Keep this PR/backend slice useful without depending on finished UI.
   global `src/lib/tauri.ts`;
 - no mutation operation exists in the plugin command or permission surface.
 
-## Phase 4: build the Beads React module
+## Deferred Beads stage 2: build the React module
 
-### Phase 4 work
+### Deferred stage 2 work
 
 1. Register `beads.browser` from `modules/beads/frontend/src/index.ts`.
 2. Implement provider states and project-keyed module store.
@@ -143,7 +147,7 @@ Keep this PR/backend slice useful without depending on finished UI.
 7. Add keyboard navigation and accessible labels/focus behavior.
 8. Add pure hierarchy/filter/store tests.
 
-### Phase 4 exit evidence
+### Deferred stage 2 exit evidence
 
 - manual acceptance in `03-beads-browser-module.md` passes;
 - the panel changes project context correctly without leaking state;
@@ -153,7 +157,7 @@ Keep this PR/backend slice useful without depending on finished UI.
 - provider errors do not crash the host;
 - AppShell and global stores contain no Beads state or conditionals.
 
-## Phase 5: prove plug-out and decide whether to keep the experiment
+## Deferred Beads stage 3: prove plug-out and make a product decision
 
 Run the removal proof in a temporary branch or worktree:
 
@@ -174,7 +178,7 @@ Then make an explicit product decision:
 - **Remove:** delete the directory and enablement entries; do not leave dormant
   stores, commands, DTOs, or feature switches in core.
 
-## Phase 6: extract one existing capability
+## Phase 3: extract the first existing capability
 
 The architecture is not proven for existing code until one feature moves.
 
@@ -204,14 +208,15 @@ behavior and data format.
 Do not extract Git first. Its panel, tree, watcher, sidebar status, diff pane,
 and many commands make it a poor boundary-learning exercise.
 
-### Phase 6 exit evidence
+### Phase 3 exit evidence
 
 - no TODO implementation remains in global component/store/native directories;
 - TODOs can be disabled and removed;
 - the module API did not gain TODO-specific fields;
-- Beads and TODOs do not import each other.
+- TODO owns its UI, state, native implementation, client, permissions,
+  fixtures, and capability-specific resources.
 
-## Phase 7: move larger capabilities only when ports are stable
+## Phase 4: move larger capabilities only when ports are stable
 
 Suggested order:
 
@@ -235,10 +240,13 @@ Keep changes reviewable and reversible:
 | --- | --- | --- |
 | 1 | Generic panel registry and existing-panel adapters | No intended change. |
 | 2 | pnpm/Cargo module rails, API contracts, fixture module, boundary gates | Dev-only fixture. |
-| 3 | Beads native read-only plugin and fixtures | No user-facing panel yet. |
-| 4 | Beads React panel, hierarchy, paging, filtering, details | New experimental panel. |
-| 5 | Plug-out test/profile and recovery hardening | Validates removal. |
-| 6 | TODO extraction | No intended product change. |
+| 3 | TODO characterization, extraction, and plug-out proof | No intended change. |
+| 4 | Ports, then Skills | No intended change. |
+| 5 | Git, then Commands | No intended change. |
+| 6 | Assistant providers, then Usage | No intended change. |
+
+The Beads native adapter, browser, and product gate form a separate deferred
+PR sequence under `shep-r2z`.
 
 Do not mix mechanical host-directory moves into these PRs.
 
@@ -288,7 +296,7 @@ arbitrary native modules can be installed into an already signed app.
 | Build flags drift between frontend and Rust | One checked build-profile definition once multiple profiles exist; until then, a verification script checks both explicit lists. |
 | Disabled persisted tabs crash | Generic unavailable-module panel and versioned tab migration. |
 | Extraction stalls in a half-moved state | One capability per PR, delete old path in same extraction PR, enforce no duplicate implementation. |
-| Over-generalization delays value | Beads is the contract customer; add extension points only when Beads or the first extraction needs them. |
+| Over-generalization delays value | Add extension points only when the current existing-capability extraction demonstrates a concrete need. |
 
 ## Things not to build yet
 
@@ -305,7 +313,7 @@ arbitrary native modules can be installed into an already signed app.
 
 ## Recommended immediate next action
 
-Implement Phase 1 only: the generic panel registry with existing panel adapters
-and no Beads code. It is small enough to review, removes the primary frontend
-coupling hotspot, and gives the Beads experiment a real host contract instead
-of another hard-coded branch.
+Execute Phase 3 TODO characterization. Do not move files until current UI,
+state, native behavior, persistence, sidebar integration, and host dependencies
+are protected and mapped. Then extract TODO through the already-proven module
+rails in compile-green steps.

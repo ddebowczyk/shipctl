@@ -1,5 +1,9 @@
 # Project-local Beads browser module
 
+Status: deferred on 2026-08-06 under standalone epic `shep-r2z`. This design is
+preserved for later work and is not on the existing-capability modularization
+critical path.
+
 ## Goal and scope
 
 Build a project-scoped panel that lets a user inspect a repository's Beads

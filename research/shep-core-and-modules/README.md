@@ -9,10 +9,10 @@ vertical capability packages, explicit contribution contracts, and internal
 Tauri plugins for native code. It should not begin with a runtime marketplace
 or dynamically loaded third-party native code.
 
-The first proving module should be a read-only, project-local Beads browser. All
-Beads implementation code should live under `modules/beads/`; the only code
-outside that directory should be generic module-host infrastructure and small,
-declarative build-time enablement entries.
+The generic host and package rails were proven with a disposable internal
+fixture. Existing capabilities are now the migration priority, beginning with
+TODOs. The read-only project-local Beads browser remains a useful optional
+design, but its implementation is deferred under standalone epic `shep-r2z`.
 
 This direction gives Shep the properties needed for safe experimentation:
 
@@ -41,7 +41,7 @@ capability ceiling.
 | --- | --- |
 | Runtime plugins or compiled modules? | Compiled modules now; revisit runtime installation only after repeated demand. |
 | First extension point | Project-scoped panel contributions. |
-| First experimental module | Read-only Beads issue browser. |
+| First rail proof | Disposable internal TypeScript and Tauri fixture. |
 | Native boundary | One internal Tauri plugin crate per native-capable module. |
 | Frontend state | Module-owned state, normally keyed by project path. |
 | Host access | Narrow ports: project context, panel host, notices, theme, lifecycle. |
@@ -78,6 +78,9 @@ capability ceiling.
 - [08-phase-2-gate.md](./08-phase-2-gate.md) records the internal TypeScript and
   Tauri fixture contract, explicit permission, profile matrix, and reusable
   source-removal proof.
+- [09-existing-capabilities-first.md](./09-existing-capabilities-first.md)
+  records the decision to defer Beads and make fully isolated existing
+  capabilities the migration critical path.
 
 ## Target dependency shape
 
