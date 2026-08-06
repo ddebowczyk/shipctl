@@ -4,11 +4,13 @@ Date: 2026-08-06
 
 ## Result
 
-The generic panel host is structurally and automatically verified. The built
-macOS application launches alongside the user's existing Shep process under an
-isolated bundle identifier. The interactive portion of the Phase 0 smoke
-contract is not marked as passed because this execution environment lacks both
-macOS Accessibility and Screen Recording permission.
+The generic panel host is structurally and automatically verified. A browser
+smoke harness exercised the real registry, host, and four production panel
+components through mocked, read-only Tauri boundaries. The built macOS
+application also launches alongside the user's existing Shep process under an
+isolated bundle identifier. The native interactive portion of the Phase 0
+smoke contract is not marked as passed because this execution environment
+lacks both macOS Accessibility and Screen Recording permission.
 
 Phase 1 changes no PTY ownership, project storage, panel behavior, shortcuts,
 or global overlay placement. It replaces the four capability-specific render
@@ -69,6 +71,10 @@ criterion is also attached to the final host audit task `shep-3w1.8.7`.
 | Disabled ID | Pass: distinct from unknown; retry/remove available |
 | Malformed data | Pass: isolated; original value retained |
 | `pnpm build` | Pass: TypeScript and Vite production build |
+| Panel-host smoke typecheck | Pass |
+| Real component browser smoke | Pass: all four built-ins loaded |
+| Render failure containment | Pass: crash caught; retry/remove shown |
+| Missing contribution recovery | Pass: ID retained; retry/remove shown |
 | Isolated Tauri app build | Pass |
 | Built-app launch | Pass: separate process and window observed |
 | Registry primitive dependency inspection | Pass |
@@ -76,6 +82,33 @@ criterion is also attached to the final host audit task `shep-3w1.8.7`.
 
 The build retained the baseline's non-blocking Node deprecation and Vite chunk
 size warnings.
+
+### Browser runtime smoke
+
+`scripts/smoke/panel-host/` is a non-production Vite entry point. It uses
+Tauri's frontend IPC mocks and inert fixtures; it does not launch PTYs, mutate
+projects, or write settings. Run it with:
+
+```bash
+pnpm typecheck:panel-host-smoke
+pnpm smoke:panel-host
+```
+
+The browser run completed resource loading and exercised these real lazy
+contributions through `PanelHost`:
+
+- `core.git`: Files panel rendered its file-view controls.
+- `core.commands`: Commands rendered one running fixture and its controls.
+- `core.launcher`: New Agent rendered all providers; selecting Codex loaded the
+  mocked model picker.
+- `core.todos`: To-dos rendered one open and one completed fixture.
+- `smoke.crash`: an intentional render exception produced the contribution's
+  contained fallback with Retry and Remove tab actions.
+- `missing.panel`: an unregistered ID produced the generic unavailable state;
+  Remove tab invoked the supplied close port.
+
+This verifies the runtime path changed by Phase 1 without requiring a second
+desktop app to act on the user's real projects or sessions.
 
 ### Interactive smoke status
 
@@ -91,6 +124,12 @@ access (-25211)`, and screen capture was also denied. Consequently, no claim is
 made that scripted clicks exercised the full Phase 0 manual checklist. The
 interactive checklist remains the release/operator smoke contract; this is an
 environmental evidence gap, not a known panel regression.
+
+Phase 1 closure uses the browser runtime smoke for the changed frontend path,
+the isolated native launch for bundle integration, and the automated contract
+fixtures for persistence failures. Native PTY/session continuity and operating
+system window interactions remain final release smoke items because Phase 1
+did not change their ownership or implementation.
 
 ## Rollback and remaining adapters
 
