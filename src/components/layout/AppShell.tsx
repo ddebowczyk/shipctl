@@ -44,7 +44,7 @@ import { useNoticeStore } from "../../stores/useNoticeStore";
 import {
   BUILTIN_PANEL_LOADERS,
   BuiltinPanelRuntimeProvider,
-  createBuiltinPanelRegistry,
+  createEnabledPanelRegistry,
   panelIdForTabKind,
   PanelHost,
 } from "../../core/modules";
@@ -70,7 +70,7 @@ const SettingsPanel = lazy(() => import("../settings/SettingsPanel"));
 const UsagePanel = lazy(() => import("../usage/UsagePanel"));
 const PortsPanel = lazy(() => import("../ports/PortsPanel"));
 const DiffSummaryPanel = lazy(() => import("../git/DiffSummaryPanel"));
-const BUILTIN_PANEL_REGISTRY = createBuiltinPanelRegistry(BUILTIN_PANEL_LOADERS);
+const BUILTIN_PANEL_REGISTRY = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
 
 function toCommandConfig(command: CommandState): CommandConfig {
   return {

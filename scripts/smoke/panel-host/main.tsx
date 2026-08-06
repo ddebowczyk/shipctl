@@ -7,12 +7,12 @@ import "../../../src/styles/globals.css";
 import PanelHost from "../../../src/core/modules/PanelHost";
 import {
   BUILTIN_PANEL_DEFINITIONS,
-  createBuiltinPanelRegistry,
 } from "../../../src/core/modules/builtinPanelAdapters";
 import {
   BUILTIN_PANEL_LOADERS,
   BuiltinPanelRuntimeProvider,
 } from "../../../src/core/modules/builtinPanelRuntime";
+import { createEnabledPanelRegistry } from "../../../src/core/modules/moduleComposition";
 import type { CommandState, TodoFile } from "../../../src/lib/types";
 import { useGitStore } from "../../../src/stores/useGitStore";
 import { useRepoStore } from "../../../src/stores/useRepoStore";
@@ -152,7 +152,7 @@ useSkillStore.setState({
   },
 });
 
-const registry = createBuiltinPanelRegistry(BUILTIN_PANEL_LOADERS);
+const registry = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
 registry.register({
   id: "smoke.crash",
   moduleId: "smoke",

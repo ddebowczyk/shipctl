@@ -7,7 +7,6 @@ export {
   CORE_TAB_EXCEPTIONS,
   NON_TAB_PANEL_SURFACES,
   createBuiltinPanelContributions,
-  createBuiltinPanelRegistry,
 } from "./builtinPanelAdapters";
 export type {
   BuiltinPanelLoaders,
@@ -20,6 +19,11 @@ export {
   toPersistedPanelReference,
 } from "./panelPersistence";
 export { default as PanelHost } from "./PanelHost";
+export { ENABLED_MODULES } from "./enabledModules";
+export {
+  createEnabledPanelRegistry,
+  modulePanelContributions,
+} from "./moduleComposition";
 export {
   BUILTIN_PANEL_LOADERS,
   BuiltinPanelRuntimeProvider,

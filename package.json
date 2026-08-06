@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "pnpm check:module-boundaries && tsc && vite build",
     "build:local": "bash scripts/build-local.sh",
+    "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
+    "test:module-boundaries": "node --test scripts/tests/moduleBoundaries.test.mjs",
+    "test:module-composition": "node --test scripts/tests/moduleComposition.test.ts",
     "test:panel-persistence": "node --test scripts/tests/panelPersistence.test.ts",
     "test:panels": "node --test scripts/tests/panelRegistry.test.ts scripts/tests/panelPersistence.test.ts",
     "smoke:panel-host": "vite scripts/smoke/panel-host --config vite.config.ts --host 127.0.0.1 --port 4174",
