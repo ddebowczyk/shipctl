@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:local": "bash scripts/build-local.sh",
+    "test:panel-persistence": "node --test scripts/tests/panelPersistence.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },

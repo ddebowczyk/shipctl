@@ -12,6 +12,19 @@ export {
 export type {
   BuiltinPanelLoaders,
 } from "./builtinPanelAdapters";
+export {
+  hydratePanelReference,
+  LEGACY_PANEL_IDS,
+  PANEL_REFERENCE_SCHEMA_VERSION,
+  toPersistedPanelReference,
+} from "./panelPersistence";
+export type {
+  HydratedPanelReference,
+  HydratePanelReferenceOptions,
+  PanelReferenceRecovery,
+  PanelReferenceUnavailableReason,
+  PersistedPanelReference,
+} from "./panelPersistence";
 export type {
   ContributionId,
   ModuleId,

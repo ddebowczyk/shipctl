@@ -1,5 +1,6 @@
 import type { PanelTabKind, TabKind } from "../../lib/types";
 import { PanelRegistry } from "./panelRegistry";
+import { LEGACY_PANEL_IDS } from "./panelPersistence";
 import type { PanelContribution } from "./panels";
 
 type BuiltinPanelDefinition = Omit<PanelContribution, "load"> & {
@@ -12,7 +13,7 @@ export type BuiltinPanelLoaders = Readonly<
 
 export const BUILTIN_PANEL_DEFINITIONS = {
   git: {
-    id: "core.git",
+    id: LEGACY_PANEL_IDS.git,
     legacyKind: "git",
     moduleId: "core",
     scope: "project",
@@ -27,7 +28,7 @@ export const BUILTIN_PANEL_DEFINITIONS = {
     },
   },
   commands: {
-    id: "core.commands",
+    id: LEGACY_PANEL_IDS.commands,
     legacyKind: "commands",
     moduleId: "core",
     scope: "project",
@@ -42,7 +43,7 @@ export const BUILTIN_PANEL_DEFINITIONS = {
     },
   },
   launcher: {
-    id: "core.launcher",
+    id: LEGACY_PANEL_IDS.launcher,
     legacyKind: "launcher",
     moduleId: "core",
     scope: "project",
@@ -56,7 +57,7 @@ export const BUILTIN_PANEL_DEFINITIONS = {
     },
   },
   todos: {
-    id: "core.todos",
+    id: LEGACY_PANEL_IDS.todos,
     legacyKind: "todos",
     moduleId: "core",
     scope: "project",
