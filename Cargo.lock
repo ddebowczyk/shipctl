@@ -3991,6 +3991,7 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-notification",
  "tauri-plugin-process",
+ "tauri-plugin-shep-fixture",
  "tauri-plugin-updater",
  "url",
  "uuid",
@@ -4518,6 +4519,15 @@ version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55511a7bf6cd70c8767b02c97bf8134fa434daf3926cfc1be0a0f94132d165a"
 dependencies = [
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
+name = "tauri-plugin-shep-fixture"
+version = "0.0.0"
+dependencies = [
+ "shep-module-api",
  "tauri",
  "tauri-plugin",
 ]

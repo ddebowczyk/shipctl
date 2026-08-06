@@ -14,6 +14,10 @@ rust-version = "1.77.2"
 name = "shep_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+fixture-module = ["dep:shep-module-fixture"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
 
@@ -38,3 +42,4 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+shep-module-fixture = { package = "tauri-plugin-shep-fixture", path = "../modules/fixture/backend", optional = true }

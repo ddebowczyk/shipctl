@@ -1,5 +1,6 @@
 mod assistant_sessions;
 mod commands;
+mod enabled_modules;
 mod fonts;
 mod git;
 mod menu;
@@ -22,11 +23,12 @@ use workspace::manager::WorkspaceManager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = fix_path_env::fix();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_process::init());
+    let app = enabled_modules::install(builder)
         .manage(PtyManager::new())
         .manage(AssistantSessionRegistry::new())
         .manage(WorkspaceManager::new())

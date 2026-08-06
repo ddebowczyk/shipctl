@@ -1,0 +1,19 @@
+{
+  "build": {
+    "beforeBuildCommand": "pnpm build:module-fixture",
+    "frontendDist": "../scripts/smoke/module-fixture/dist"
+  },
+  "app": {
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "fixture",
+          "description": "Enables the inert internal module fixture command",
+          "windows": ["main"],
+          "permissions": ["shep-fixture:allow-ping"]
+        }
+      ]
+    }
+  }
+}

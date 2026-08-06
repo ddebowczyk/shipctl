@@ -32,6 +32,7 @@
       }
     ],
     "security": {
+      "capabilities": ["default"],
       "csp": {
         "default-src": "'self' customprotocol: asset:",
         "script-src": "'self' 'wasm-unsafe-eval'",
