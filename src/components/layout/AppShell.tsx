@@ -10,7 +10,6 @@ import { useRepoStore } from "../../stores/useRepoStore";
 import { useCommandStore } from "../../stores/useCommandStore";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useGitStore } from "../../stores/useGitStore";
-import { useSkillStore } from "../../stores/useSkillStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { useShallow } from "zustand/shallow";
 import { usePty } from "../../hooks/usePty";
@@ -399,7 +398,6 @@ export default function AppShell() {
         useCommandStore.getState().removeProject(repoPath);
         useGitStore.getState().removeProject(repoPath);
         await notifyModulesProjectRemoved(repoPath, MODULE_HOST_SERVICES);
-        useSkillStore.getState().removeProject(repoPath);
       } catch (error) {
         pushNotice({
           tone: "error",

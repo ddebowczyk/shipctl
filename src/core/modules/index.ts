@@ -39,6 +39,12 @@ export {
   ModuleSettingsSurfaces,
 } from "./ModuleSurfaces";
 export { MODULE_HOST_SERVICES } from "./moduleHostServices";
+export {
+  refreshProjectActions,
+  resolveProjectActionGroups,
+  subscribeProjectActions,
+  useModuleProjectActions,
+} from "./projectActions";
 export { ENABLED_MODULES } from "./enabledModules";
 export {
   createEnabledGlobalSurfaceRegistry,
@@ -47,7 +53,9 @@ export {
   moduleGlobalSurfaceContributions,
   moduleLegacyPanelDefinitions,
   modulePanelContributions,
+  moduleProjectActionContributions,
   moduleProjectNavigationContributions,
+  moduleSkillsProvider,
   moduleSettingsContributions,
   notifyModulesFilesystemChanged,
   notifyModulesProjectRemoved,
@@ -81,10 +89,14 @@ export type {
   PanelHostPort,
   PanelIconDescriptor,
   PanelUnavailableMetadata,
+  ProjectAction,
+  ProjectActionContribution,
+  ProjectActionGroup,
   ProjectNavigationContribution,
   ProjectNavigationContributionProps,
   ProjectRef,
   SettingsContribution,
   SettingsContributionProps,
   ShepModule,
+  SkillsProviderContribution,
 } from "@shep/module-api";

@@ -110,6 +110,9 @@ capability ceiling.
 - [19-skills-characterization-and-seam.md](./19-skills-characterization-and-seam.md)
   protects the fixed project-scoped catalog and defines the Skills extraction
   boundary.
+- [20-skills-host-rails.md](./20-skills-host-rails.md) records the generic
+  project-action contribution, optional Skills provider, and temporary
+  compatibility boundary used for safe extraction.
 
 ## Target dependency shape
 

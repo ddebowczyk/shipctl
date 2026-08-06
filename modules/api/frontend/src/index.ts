@@ -24,6 +24,9 @@ export type {
   GlobalSurfaceContribution,
   GlobalSurfaceContributionProps,
   ModuleProjectLifecycle,
+  ProjectAction,
+  ProjectActionContribution,
+  ProjectActionGroup,
   ProjectNavigationContribution,
   ProjectNavigationContributionProps,
   SettingsContribution,
@@ -33,4 +36,5 @@ export type {
   ModuleDeactivation,
   ModuleHost,
   ShepModule,
+  SkillsProviderContribution,
 } from "./module";

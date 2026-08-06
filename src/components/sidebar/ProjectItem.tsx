@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { RepoInfo, RepoGroup } from "../../lib/types";
 import { getEditorLabel } from "../../lib/editors";
 import { useEditorStore } from "../../stores/useEditorStore";
@@ -18,13 +18,11 @@ import { createPortal } from "react-dom";
 import ContextMenu from "../shared/ContextMenu";
 import type { ContextMenuItem } from "../shared/ContextMenu";
 import { useNoticeStore } from "../../stores/useNoticeStore";
-import { useSkillStore } from "../../stores/useSkillStore";
 import { getErrorMessage } from "../../lib/errors";
 import { handleActionKey } from "../../lib/a11y";
 import { gitCreateWorktree, revealInFinder } from "../../lib/tauri";
+import { useModuleProjectActions } from "../../core/modules";
 import ActivityIndicator, { getAggregateActivityStatus } from "./ActivityIndicator";
-
-const EMPTY_SKILLS: never[] = [];
 
 interface ProjectItemProps {
   repo: RepoInfo;
@@ -64,7 +62,12 @@ export default function ProjectItem({
     hasRunning: Boolean(activity && (activity.terminalCount > 0 || activity.runningCount > 0)),
   });
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const skills = useSkillStore((s) => s.skillsByRepo[repo.path] ?? EMPTY_SKILLS);
+  const projectRef = useMemo(() => ({
+    id: repo.path,
+    name: repo.name,
+    path: repo.path,
+  }), [repo.name, repo.path]);
+  const projectActions = useModuleProjectActions(projectRef);
   const preferredEditor = useEditorStore((s) => s.settings.preferredEditor);
   const pushNotice = useNoticeStore((s) => s.pushNotice);
   const preferredEditorLabel = getEditorLabel(preferredEditor);
@@ -102,9 +105,8 @@ export default function ProjectItem({
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setMenu({ x: e.clientX, y: e.clientY });
-    // Skill state can change outside Shep (agents, git) — re-check on open.
-    void useSkillStore.getState().refresh(repo.path);
-  }, [repo.path]);
+    void projectActions.refresh();
+  }, [projectActions]);
 
   const handleClose = useCallback(() => {
     setMenu(null);
@@ -172,23 +174,22 @@ export default function ProjectItem({
       : []),
   ];
 
-  const skillChildren: ContextMenuItem[] = skills.map((skill) => ({
-    label: skill.title,
-    icon: <Check size={14} className={skill.installed ? "opacity-100" : "opacity-0"} />,
-    keepOpen: true,
-    onClick: () => {
-      const store = useSkillStore.getState();
-      const action = skill.installed
-        ? store.uninstall(repo.path, skill.name)
-        : store.install(repo.path, skill.name);
-      void action.catch((error) => {
-        pushNotice({
-          tone: "error",
-          title: skill.installed ? "Couldn't remove agent skill" : "Couldn't add agent skill",
-          message: getErrorMessage(error),
-        });
-      });
-    },
+  const contributedActionItems: ContextMenuItem[] = projectActions.groups.map((group) => ({
+    label: group.label,
+    icon: group.icon?.name === "sparkles" ? <Sparkles size={14} /> : undefined,
+    children: group.actions.map((action) => ({
+      label: action.label,
+      icon: action.selected === undefined
+        ? undefined
+        : <Check size={14} className={action.selected ? "opacity-100" : "opacity-0"} />,
+      keepOpen: action.keepOpen,
+      danger: action.danger,
+      onClick: () => {
+        void Promise.resolve()
+          .then(() => action.run())
+          .catch(() => undefined);
+      },
+    })),
   }));
 
   const menuItems: ContextMenuItem[] = [
@@ -237,15 +238,7 @@ export default function ProjectItem({
       icon: <FolderInput size={14} />,
       children: moveToChildren,
     },
-    ...(skillChildren.length > 0
-      ? [
-          {
-            label: "Agent Skills",
-            icon: <Sparkles size={14} />,
-            children: skillChildren,
-          },
-        ]
-      : []),
+    ...contributedActionItems,
     {
       label: "Create Worktree",
       icon: <Plus size={14} />,

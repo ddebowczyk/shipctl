@@ -1,9 +1,15 @@
-import type { ModuleId, PanelContribution, PanelHostPort } from "./panels";
-import type { ModuleHostServices } from "./services";
+import type {
+  ContributionId,
+  ModuleId,
+  PanelContribution,
+  PanelHostPort,
+} from "./panels";
+import type { ModuleHostServices, ModuleSkillsPort } from "./services";
 import type {
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
   ModuleProjectLifecycle,
+  ProjectActionContribution,
   ProjectNavigationContribution,
   SettingsContribution,
 } from "./surfaces";
@@ -17,6 +23,12 @@ export interface ModuleHost {
   readonly services: ModuleHostServices;
 }
 
+export interface SkillsProviderContribution {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  readonly port: ModuleSkillsPort;
+}
+
 export interface ShepModule {
   readonly id: ModuleId;
   readonly version: string;
@@ -24,7 +36,9 @@ export interface ShepModule {
   readonly globalSurfaces?: readonly GlobalSurfaceContribution[];
   readonly globalNavigation?: readonly GlobalNavigationContribution[];
   readonly projectNavigation?: readonly ProjectNavigationContribution[];
+  readonly projectActions?: readonly ProjectActionContribution[];
   readonly settings?: readonly SettingsContribution[];
+  readonly skillsProvider?: SkillsProviderContribution;
   readonly projectLifecycle?: ModuleProjectLifecycle;
   activate?(host: ModuleHost): void | ModuleDeactivation;
 }

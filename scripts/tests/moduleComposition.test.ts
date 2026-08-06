@@ -18,7 +18,9 @@ let vite: ViteDevServer;
 let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
 let createEnabledGlobalSurfaceRegistry: ModuleComposition["createEnabledGlobalSurfaceRegistry"];
 let moduleProjectNavigationContributions: ModuleComposition["moduleProjectNavigationContributions"];
+let moduleProjectActionContributions: ModuleComposition["moduleProjectActionContributions"];
 let moduleSettingsContributions: ModuleComposition["moduleSettingsContributions"];
+let moduleSkillsProvider: ModuleComposition["moduleSkillsProvider"];
 let moduleLegacyPanelDefinitions: ModuleComposition["moduleLegacyPanelDefinitions"];
 let notifyModulesFilesystemChanged: ModuleComposition["notifyModulesFilesystemChanged"];
 
@@ -32,8 +34,10 @@ before(async () => {
   ({
     createEnabledPanelRegistry,
     createEnabledGlobalSurfaceRegistry,
+    moduleProjectActionContributions,
     moduleProjectNavigationContributions,
     moduleSettingsContributions,
+    moduleSkillsProvider,
     moduleLegacyPanelDefinitions,
     notifyModulesFilesystemChanged,
   } = await vite.ssrLoadModule(
@@ -55,6 +59,12 @@ const builtinGlobalSurfaceLoaders: BuiltinGlobalSurfaceLoaders = {
   settings: async () => ({ default: () => null }),
   usage: async () => ({ default: () => null }),
 };
+
+const fixtureSkills = {
+  getSnapshot: () => ({ byProject: {} }),
+  subscribe: () => () => undefined,
+  install: async () => undefined,
+} satisfies ModuleHostServices["skills"];
 
 const fixtureModule: ShepModule = {
   id: "shep.fixture",
@@ -95,6 +105,14 @@ const fixtureModule: ShepModule = {
       load: async () => ({ default: () => null }),
     },
   ],
+  projectActions: [
+    {
+      id: "fixture.project-actions",
+      moduleId: "shep.fixture",
+      order: 5,
+      getGroup: () => ({ label: "Fixture", actions: [] }),
+    },
+  ],
   settings: [
     {
       id: "fixture.settings",
@@ -102,6 +120,11 @@ const fixtureModule: ShepModule = {
       load: async () => ({ default: () => null }),
     },
   ],
+  skillsProvider: {
+    id: "fixture.skills-provider",
+    moduleId: "shep.fixture",
+    port: fixtureSkills,
+  },
 };
 
 const services = {
@@ -110,11 +133,7 @@ const services = {
     subscribe: () => () => undefined,
     update: async () => undefined,
   },
-  skills: {
-    getSnapshot: () => ({ byProject: {} }),
-    subscribe: () => () => undefined,
-    install: async () => undefined,
-  },
+  skills: fixtureSkills,
   notices: { push: () => undefined },
   externalLinks: { open: async () => undefined },
 } satisfies ModuleHostServices;
@@ -185,9 +204,34 @@ test("module surfaces compose without feature-specific host branches", () => {
     ["fixture.project-navigation"],
   );
   assert.deepEqual(
+    moduleProjectActionContributions([fixtureModule]).map(({ id }) => id),
+    ["fixture.project-actions"],
+  );
+  assert.deepEqual(
     moduleSettingsContributions([fixtureModule]).map(({ id }) => id),
     ["fixture.settings"],
   );
+});
+
+test("Skills provider selection is optional, singular, and module-owned", () => {
+  assert.equal(moduleSkillsProvider([fixtureModule]), services.skills);
+  assert.equal(moduleSkillsProvider([]), null);
+  assert.throws(
+    () => moduleSkillsProvider([fixtureModule, { ...fixtureModule, id: "shep.other" }]),
+    /belongs to shep.fixture, not shep.other/,
+  );
+  assert.throws(
+    () => moduleSkillsProvider([fixtureModule, fixtureModule]),
+    /Only one enabled module/,
+  );
+});
+
+test("default composition exposes Skills through generic rails", () => {
+  assert.deepEqual(
+    moduleProjectActionContributions().map(({ id }) => id),
+    ["skills.project-actions"],
+  );
+  assert.notEqual(moduleSkillsProvider(), null);
 });
 
 test("project lifecycle dispatch isolates module failures", async () => {

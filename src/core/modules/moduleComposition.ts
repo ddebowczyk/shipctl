@@ -2,7 +2,9 @@ import type {
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
   ModuleHostServices,
+  ModuleSkillsPort,
   PanelContribution,
+  ProjectActionContribution,
   ProjectNavigationContribution,
   SettingsContribution,
   ShepModule,
@@ -56,6 +58,33 @@ export function moduleProjectNavigationContributions(
   return modules
     .flatMap((module) => module.projectNavigation ?? [])
     .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+}
+
+export function moduleProjectActionContributions(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): readonly ProjectActionContribution[] {
+  return modules
+    .flatMap((module) => module.projectActions ?? [])
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+}
+
+export function moduleSkillsProvider(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): ModuleSkillsPort | null {
+  const providers = modules.flatMap((module) => {
+    const provider = module.skillsProvider;
+    if (!provider) return [];
+    if (provider.moduleId !== module.id) {
+      throw new Error(
+        `Skills provider ${provider.id} belongs to ${provider.moduleId}, not ${module.id}`,
+      );
+    }
+    return [provider.port];
+  });
+  if (providers.length > 1) {
+    throw new Error("Only one enabled module may provide the Skills service");
+  }
+  return providers[0] ?? null;
 }
 
 export function moduleSettingsContributions(

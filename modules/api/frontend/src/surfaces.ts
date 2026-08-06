@@ -49,6 +49,39 @@ export interface ProjectNavigationContribution {
   }>;
 }
 
+export interface ProjectAction {
+  readonly id: ContributionId;
+  readonly label: string;
+  readonly selected?: boolean;
+  readonly keepOpen?: boolean;
+  readonly danger?: boolean;
+  run(): void | Promise<void>;
+}
+
+export interface ProjectActionGroup {
+  readonly label: string;
+  readonly icon?: PanelIconDescriptor;
+  readonly actions: readonly ProjectAction[];
+}
+
+export interface ProjectActionContribution {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  readonly order?: number;
+  subscribe?(
+    listener: () => void,
+    services: ModuleHostServices,
+  ): () => void;
+  refresh?(
+    project: ProjectRef,
+    services: ModuleHostServices,
+  ): void | Promise<void>;
+  getGroup(
+    project: ProjectRef,
+    services: ModuleHostServices,
+  ): ProjectActionGroup | null;
+}
+
 export interface SettingsContributionProps {
   readonly projectPaths: readonly string[];
   readonly services: ModuleHostServices;
