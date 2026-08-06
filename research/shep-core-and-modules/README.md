@@ -72,6 +72,9 @@ capability ceiling.
 - [06-pi-self-modification-and-future-shep.md](./06-pi-self-modification-and-future-shep.md)
   distinguishes Pi's reloadable extensions from core replacement and maps a
   safe, local-only TypeScript self-modification path onto a thin Tauri shell.
+- [07-phase-1-gate.md](./07-phase-1-gate.md) records the generic panel host's
+  verified contract, deviations, rollback points, compatibility adapters, and
+  interactive smoke evidence gap.
 
 ## Target dependency shape
 
