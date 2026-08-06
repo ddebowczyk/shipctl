@@ -1,7 +1,36 @@
 import type { ComponentType } from "react";
 
-import type { ContributionId, ModuleId, ProjectRef } from "./panels";
+import type {
+  ContributionId,
+  ModuleId,
+  PanelIconDescriptor,
+  PanelUnavailableMetadata,
+  ProjectRef,
+} from "./panels";
 import type { ModuleHostServices } from "./services";
+
+export interface GlobalSurfaceContributionProps {
+  readonly close: () => void;
+  readonly services: ModuleHostServices;
+}
+
+export interface GlobalSurfaceContribution {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  readonly unavailable?: PanelUnavailableMetadata;
+  readonly load: () => Promise<{
+    readonly default: ComponentType<GlobalSurfaceContributionProps>;
+  }>;
+}
+
+export interface GlobalNavigationContribution {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  readonly surfaceId: ContributionId;
+  readonly label: string;
+  readonly icon: PanelIconDescriptor;
+  readonly order?: number;
+}
 
 export interface ProjectNavigationContributionProps {
   readonly project: ProjectRef;

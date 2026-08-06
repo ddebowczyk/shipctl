@@ -1,53 +1,31 @@
 import { create } from "zustand";
+import type { ContributionId } from "@shep/module-api";
 
 interface UIStore {
-  settingsActive: boolean;
-  usagePanelActive: boolean;
-  portsPanelActive: boolean;
+  activeGlobalSurfaceId: ContributionId | null;
   sidebarVisible: boolean;
   diffPanelVisible: boolean;
   username: string | null;
   computerName: string | null;
-  toggleSettings: () => void;
-  toggleUsagePanel: () => void;
-  togglePortsPanel: () => void;
-  deactivateAllOverlays: () => void;
+  toggleGlobalSurface: (surfaceId: ContributionId) => void;
+  closeGlobalSurface: () => void;
   toggleSidebar: () => void;
   toggleDiffPanel: () => void;
   setUsername: (name: string) => void;
   setComputerName: (name: string) => void;
 }
 
-const deactivateAll = {
-  settingsActive: false,
-  usagePanelActive: false,
-  portsPanelActive: false,
-};
-
 export const useUIStore = create<UIStore>((set) => ({
-  settingsActive: false,
-  usagePanelActive: false,
-  portsPanelActive: false,
+  activeGlobalSurfaceId: null,
   sidebarVisible: true,
   diffPanelVisible: true,
   username: null,
   computerName: null,
-  toggleSettings: () =>
-    set((s) => {
-      if (s.settingsActive) return { settingsActive: false };
-      return { ...deactivateAll, settingsActive: true };
-    }),
-  toggleUsagePanel: () =>
-    set((s) => {
-      if (s.usagePanelActive) return { usagePanelActive: false };
-      return { ...deactivateAll, usagePanelActive: true };
-    }),
-  togglePortsPanel: () =>
-    set((s) => {
-      if (s.portsPanelActive) return { portsPanelActive: false };
-      return { ...deactivateAll, portsPanelActive: true };
-    }),
-  deactivateAllOverlays: () => set(deactivateAll),
+  toggleGlobalSurface: (surfaceId) =>
+    set((state) => ({
+      activeGlobalSurfaceId: state.activeGlobalSurfaceId === surfaceId ? null : surfaceId,
+    })),
+  closeGlobalSurface: () => set({ activeGlobalSurfaceId: null }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   toggleDiffPanel: () => set((s) => ({ diffPanelVisible: !s.diffPanelVisible })),
   setUsername: (name: string) => set({ username: name }),

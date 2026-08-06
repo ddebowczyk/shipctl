@@ -179,7 +179,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   },
 
   cycleTab: (direction: TabCycleDirection) => {
-    useUIStore.getState().deactivateAllOverlays();
+    useUIStore.getState().closeGlobalSurface();
     set((state) => {
       const path = state.activeProjectPath;
       if (!path) return state;
@@ -329,7 +329,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   },
 
   addPanelTab: (kind: PanelTabKind) => {
-    useUIStore.getState().deactivateAllOverlays();
+    useUIStore.getState().closeGlobalSurface();
     set((state) => {
       const path = state.activeProjectPath;
       if (!path) return state;
@@ -355,7 +355,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   },
 
   addContributedPanelTab: (panelId: `${string}.${string}`, label: string) => {
-    useUIStore.getState().deactivateAllOverlays();
+    useUIStore.getState().closeGlobalSurface();
     set((state) => {
       const path = state.activeProjectPath;
       if (!path) return state;
@@ -394,7 +394,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     if (existing && ps?.activeTabId === id) {
       get().removeTab(id);
     } else if (existing) {
-      useUIStore.getState().deactivateAllOverlays();
+      useUIStore.getState().closeGlobalSurface();
       set((s) => {
         const p = s.projectState[path];
         if (!p) return s;

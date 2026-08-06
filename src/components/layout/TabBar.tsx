@@ -228,17 +228,10 @@ export default function TabBar({
     window.addEventListener("pointercancel", onCancel);
   }, [activeProjectPath, computeDropIndex, getProjectPathAt, onDragProjectChange, onMoveTab, reorderTab, tabs]);
 
-  // Only subscribe to global overlay state (Settings, Usage, Ports)
-  const { settingsActive, usagePanelActive, portsPanelActive } = useUIStore(useShallow((s) => ({
-    settingsActive: s.settingsActive,
-    usagePanelActive: s.usagePanelActive,
-    portsPanelActive: s.portsPanelActive,
-  })));
-
-  const anyOverlay = settingsActive || usagePanelActive || portsPanelActive;
+  const anyGlobalSurface = useUIStore((state) => state.activeGlobalSurfaceId !== null);
 
   const handleSelectTab = (tabId: string) => {
-    useUIStore.getState().deactivateAllOverlays();
+    useUIStore.getState().closeGlobalSurface();
     setActiveTab(tabId);
     const tab = tabs.find((t) => t.id === tabId);
     if (tab && (tab.kind === "terminal" || tab.kind === "assistant")) {
@@ -283,7 +276,7 @@ export default function TabBar({
         aria-label="Workspace tabs"
       >
         {tabs.map((tab, i) => {
-          const isActive = tab.id === activeTabId && !anyOverlay;
+          const isActive = tab.id === activeTabId && !anyGlobalSurface;
           const isDragging = tab.id === dragTabId;
 
           const showDropBefore = dropIndex !== null && dragTabId && tab.id !== dragTabId && dropIndex === i;

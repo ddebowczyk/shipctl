@@ -9,6 +9,20 @@ import { PanelRegistry } from "../../../src/core/modules/panelRegistry";
 import { FIXTURE_PING_COMMAND } from "@shep/module-fixture";
 import { ENABLED_MODULES } from "./enabledModules";
 
+const services = {
+  settings: {
+    getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
+    subscribe: () => () => undefined,
+    update: async () => undefined,
+  },
+  skills: {
+    getSnapshot: () => ({ byProject: {} }),
+    subscribe: () => () => undefined,
+    install: async () => undefined,
+  },
+  notices: { push: () => undefined },
+};
+
 mockIPC((command) => {
   const commandOutput = document.querySelector("[data-testid='fixture-command']");
   if (commandOutput) commandOutput.textContent = command;
@@ -31,6 +45,7 @@ createRoot(document.getElementById("root")!).render(
       visible
       close={() => undefined}
       setTitle={() => undefined}
+      services={services}
     />
   </StrictMode>,
 );

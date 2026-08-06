@@ -19,6 +19,9 @@ export type {
   ModuleSkillsSnapshot,
 } from "./services";
 export type {
+  GlobalNavigationContribution,
+  GlobalSurfaceContribution,
+  GlobalSurfaceContributionProps,
   ModuleProjectLifecycle,
   ProjectNavigationContribution,
   ProjectNavigationContributionProps,

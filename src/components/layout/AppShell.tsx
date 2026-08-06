@@ -41,9 +41,13 @@ import { initNotifications } from "../../lib/notifications";
 import { getErrorMessage } from "../../lib/errors";
 import { useNoticeStore } from "../../stores/useNoticeStore";
 import {
+  BUILTIN_GLOBAL_SURFACE_IDS,
+  BUILTIN_GLOBAL_SURFACE_LOADERS,
   BUILTIN_PANEL_LOADERS,
   BuiltinPanelRuntimeProvider,
+  createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
+  GlobalSurfaceHost,
   MODULE_HOST_SERVICES,
   notifyModulesProjectRemoved,
   panelIdForTab,
@@ -67,11 +71,11 @@ const LAST_REPO_STORAGE_KEY = "shep:last-repo-path";
 // useSyncExternalStore — selectors must return the same reference for the same state.
 const EMPTY_TABS: UnifiedTab[] = [];
 const EMPTY_COMMANDS: CommandState[] = [];
-const SettingsPanel = lazy(() => import("../settings/SettingsPanel"));
-const UsagePanel = lazy(() => import("../usage/UsagePanel"));
-const PortsPanel = lazy(() => import("../ports/PortsPanel"));
 const DiffSummaryPanel = lazy(() => import("../git/DiffSummaryPanel"));
 const PANEL_REGISTRY = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
+const GLOBAL_SURFACE_REGISTRY = createEnabledGlobalSurfaceRegistry(
+  BUILTIN_GLOBAL_SURFACE_LOADERS,
+);
 
 function toCommandConfig(command: CommandState): CommandConfig {
   return {
@@ -85,10 +89,6 @@ function toCommandConfig(command: CommandState): CommandConfig {
 
 function fallbackWorkspaceName(repoPath: string) {
   return repoPath.split("/").filter(Boolean).pop() ?? "Project";
-}
-
-function PanelLoader() {
-  return <div className="terminal-empty">Loading panel…</div>;
 }
 
 export default function AppShell() {
@@ -194,12 +194,8 @@ export default function AppShell() {
     [activeConfig, activeRepoPath, pushNotice, setActiveConfig],
   );
 
-  const {
-    settingsActive, usagePanelActive, portsPanelActive, sidebarVisible, diffPanelVisible,
-  } = useUIStore(useShallow((s) => ({
-    settingsActive: s.settingsActive,
-    usagePanelActive: s.usagePanelActive,
-    portsPanelActive: s.portsPanelActive,
+  const { activeGlobalSurfaceId, sidebarVisible, diffPanelVisible } = useUIStore(useShallow((s) => ({
+    activeGlobalSurfaceId: s.activeGlobalSurfaceId,
     sidebarVisible: s.sidebarVisible,
     diffPanelVisible: s.diffPanelVisible,
   })));
@@ -266,7 +262,7 @@ export default function AppShell() {
       try {
         const isFirstVisit = !useCommandStore.getState().hasProject(repoPath);
 
-        useUIStore.getState().deactivateAllOverlays();
+        useUIStore.getState().closeGlobalSurface();
         const config = await openRepo(repoPath);
         initialProjectAttemptedRef.current = true;
         window.localStorage.setItem(LAST_REPO_STORAGE_KEY, repoPath);
@@ -366,7 +362,7 @@ export default function AppShell() {
   const handleAddProject = useCallback(
     async (repoPath: string) => {
       try {
-        useUIStore.getState().deactivateAllOverlays();
+        useUIStore.getState().closeGlobalSurface();
         const config = await addRepo(repoPath);
         // addRepo sets activeRepoPath in the repo store, get the canonical path
         const canonicalPath = useRepoStore.getState().activeRepoPath;
@@ -492,7 +488,7 @@ export default function AppShell() {
   );
 
   const handleSelectSidebarTab = useCallback((tabId: string) => {
-    useUIStore.getState().deactivateAllOverlays();
+    useUIStore.getState().closeGlobalSurface();
     setActiveTab(tabId);
     const store = useTerminalStore.getState();
     const allTabs = activeRepoPath ? store.getAllProjectTabs(activeRepoPath) : [];
@@ -503,7 +499,7 @@ export default function AppShell() {
   }, [setActiveTab, activeRepoPath]);
 
   const handleSelectSidebarProjectTab = useCallback(async (repoPath: string, tabId: string) => {
-    useUIStore.getState().deactivateAllOverlays();
+    useUIStore.getState().closeGlobalSurface();
     if (repoPath !== activeRepoPath) {
       await handleSelectRepo(repoPath);
     }
@@ -540,7 +536,7 @@ export default function AppShell() {
       if (ptyId) {
         // Remove the launcher panel tab — the new terminal tab is now active
         useTerminalStore.getState().removePanelTab("launcher");
-        useUIStore.getState().deactivateAllOverlays();
+        useUIStore.getState().closeGlobalSurface();
         return true;
       }
       return false;
@@ -549,7 +545,7 @@ export default function AppShell() {
   );
 
   const handleNewShell = useCallback(() => {
-    useUIStore.getState().deactivateAllOverlays();
+    useUIStore.getState().closeGlobalSurface();
     const { cols, rows } = getTerminalDimensions();
     spawnBlankShell(cols, rows);
   }, [spawnBlankShell, getTerminalDimensions]);
@@ -618,7 +614,7 @@ export default function AppShell() {
   const handleOpenInEditor = useCallback(async (repoPath: string) => {
     const preferredEditor = useEditorStore.getState().settings.preferredEditor;
     if (!preferredEditor) {
-      useUIStore.getState().toggleSettings();
+      useUIStore.getState().toggleGlobalSurface(BUILTIN_GLOBAL_SURFACE_IDS.settings);
       return;
     }
 
@@ -802,7 +798,7 @@ export default function AppShell() {
           break;
         }
         case "settings":
-          useUIStore.getState().toggleSettings();
+          useUIStore.getState().toggleGlobalSurface(BUILTIN_GLOBAL_SURFACE_IDS.settings);
           break;
         case "check_updates":
           void useUpdateStore.getState().checkForUpdate().then(() => {
@@ -836,7 +832,7 @@ export default function AppShell() {
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [cycleTabs]);
 
-  const showOverlay = settingsActive || usagePanelActive || portsPanelActive;
+  const showGlobalSurface = activeGlobalSurfaceId !== null;
   const activePanelId = activeTab ? panelIdForTab(activeTab) : null;
   const activePanelProject = useMemo(() => activeRepoPath ? {
     id: activeRepoPath,
@@ -909,7 +905,7 @@ export default function AppShell() {
             repos={repos}
             groups={groups}
             activeRepoPath={activeRepoPath}
-            activeTabId={showOverlay ? null : activeTabId}
+            activeTabId={showGlobalSurface ? null : activeTabId}
             commands={commands}
             onSelectRepo={handleSelectRepo}
             onAddProject={handleAddProject}
@@ -925,6 +921,7 @@ export default function AppShell() {
             onDeleteGroup={handleDeleteGroup}
             onMoveToGroup={handleMoveToGroup}
             tabDropProjectPath={tabDropProjectPath}
+            globalNavigation={GLOBAL_SURFACE_REGISTRY.navigation()}
           />
         )}
 
@@ -942,25 +939,17 @@ export default function AppShell() {
           />
 
           <div ref={terminalContainerRef} className="terminal-stage">
-            {/* Global overlays (Settings, Usage, Ports) */}
-            {settingsActive && (
-              <Suspense fallback={<PanelLoader />}>
-                <SettingsPanel />
-              </Suspense>
-            )}
-            {usagePanelActive && (
-              <Suspense fallback={<PanelLoader />}>
-                <UsagePanel />
-              </Suspense>
-            )}
-            {portsPanelActive && (
-              <Suspense fallback={<PanelLoader />}>
-                <PortsPanel />
-              </Suspense>
+            {activeGlobalSurfaceId && (
+              <GlobalSurfaceHost
+                registry={GLOBAL_SURFACE_REGISTRY}
+                surfaceId={activeGlobalSurfaceId}
+                close={() => useUIStore.getState().closeGlobalSurface()}
+                services={MODULE_HOST_SERVICES}
+              />
             )}
 
             {/* Project panel tabs resolve through the contribution registry. */}
-            {!showOverlay && activeTab && activePanelId && (
+            {!showGlobalSurface && activeTab && activePanelId && (
               <BuiltinPanelRuntimeProvider value={builtinPanelRuntime}>
                 <PanelHost
                   registry={PANEL_REGISTRY}
@@ -977,7 +966,7 @@ export default function AppShell() {
               </BuiltinPanelRuntimeProvider>
             )}
 
-            {!showOverlay && !activeTab && tabs.length === 0 && (
+            {!showGlobalSurface && !activeTab && tabs.length === 0 && (
               <div className="terminal-empty">
                 {activeRepoPath
                   ? "Launch an assistant or open a terminal"
@@ -990,7 +979,7 @@ export default function AppShell() {
                 className="absolute inset-0"
                 style={{
                   display:
-                    !showOverlay && projectPath === activeProjectPath && tab.id === activeTabId
+                    !showGlobalSurface && projectPath === activeProjectPath && tab.id === activeTabId
                       ? "block"
                       : "none",
                 }}
@@ -998,7 +987,7 @@ export default function AppShell() {
                 <TerminalErrorBoundary>
                   <TerminalView
                     ptyId={tab.ptyId}
-                    visible={!showOverlay && projectPath === activeProjectPath && tab.id === activeTabId}
+                    visible={!showGlobalSurface && projectPath === activeProjectPath && tab.id === activeTabId}
                   />
                 </TerminalErrorBoundary>
               </div>

@@ -1,6 +1,8 @@
 import type { ModuleId, PanelContribution, PanelHostPort } from "./panels";
 import type { ModuleHostServices } from "./services";
 import type {
+  GlobalNavigationContribution,
+  GlobalSurfaceContribution,
   ModuleProjectLifecycle,
   ProjectNavigationContribution,
   SettingsContribution,
@@ -19,6 +21,8 @@ export interface ShepModule {
   readonly id: ModuleId;
   readonly version: string;
   readonly panels?: readonly PanelContribution[];
+  readonly globalSurfaces?: readonly GlobalSurfaceContribution[];
+  readonly globalNavigation?: readonly GlobalNavigationContribution[];
   readonly projectNavigation?: readonly ProjectNavigationContribution[];
   readonly settings?: readonly SettingsContribution[];
   readonly projectLifecycle?: ModuleProjectLifecycle;

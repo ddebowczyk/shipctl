@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import type { GlobalNavigationContribution } from "@shep/module-api";
 import type { RepoInfo, RepoGroup, CommandState } from "../../lib/types";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useCommandStore } from "../../stores/useCommandStore";
@@ -31,6 +32,7 @@ interface SidebarProps {
   onDeleteGroup: (groupId: string) => void;
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
   tabDropProjectPath: string | null;
+  globalNavigation: readonly GlobalNavigationContribution[];
 }
 
 export default function Sidebar({
@@ -53,6 +55,7 @@ export default function Sidebar({
   onDeleteGroup,
   onMoveToGroup,
   tabDropProjectPath,
+  globalNavigation,
 }: SidebarProps) {
   // Projects always starts expanded on launch; collapsing is per-session only.
   const [projectsCollapsed, setProjectsCollapsed] = useState(false);
@@ -219,7 +222,7 @@ export default function Sidebar({
         </div>
       </div>
       <SidebarUsage />
-      <SidebarFooter />
+      <SidebarFooter navigation={globalNavigation} />
     </div>
   );
 }

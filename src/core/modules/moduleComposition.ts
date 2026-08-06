@@ -1,4 +1,6 @@
 import type {
+  GlobalNavigationContribution,
+  GlobalSurfaceContribution,
   ModuleHostServices,
   PanelContribution,
   ProjectNavigationContribution,
@@ -6,10 +8,16 @@ import type {
   ShepModule,
 } from "@shep/module-api";
 
+import type { BuiltinGlobalSurfaceLoaders } from "./builtinGlobalSurfaceAdapters";
 import type { BuiltinPanelLoaders } from "./builtinPanelAdapters";
 import type { LegacyPanelDefinition } from "./panelPersistence";
 import { createBuiltinPanelContributions } from "./builtinPanelAdapters";
+import {
+  BUILTIN_GLOBAL_NAVIGATION,
+  createBuiltinGlobalSurfaceContributions,
+} from "./builtinGlobalSurfaceAdapters";
 import { ENABLED_MODULES } from "./enabledModules";
+import { GlobalSurfaceRegistry } from "./globalSurfaceRegistry";
 import { PanelRegistry } from "./panelRegistry";
 
 export function modulePanelContributions(
@@ -28,6 +36,18 @@ export function moduleLegacyPanelDefinitions(
         label: panel.legacyTab.label ?? panel.label,
       }]
     : []);
+}
+
+export function moduleGlobalSurfaceContributions(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): readonly GlobalSurfaceContribution[] {
+  return modules.flatMap((module) => module.globalSurfaces ?? []);
+}
+
+export function moduleGlobalNavigationContributions(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): readonly GlobalNavigationContribution[] {
+  return modules.flatMap((module) => module.globalNavigation ?? []);
 }
 
 export function moduleProjectNavigationContributions(
@@ -95,4 +115,20 @@ export function createEnabledPanelRegistry(
     ...createBuiltinPanelContributions(builtinLoaders),
     ...modulePanelContributions(modules),
   ]);
+}
+
+export function createEnabledGlobalSurfaceRegistry(
+  builtinLoaders: BuiltinGlobalSurfaceLoaders,
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): GlobalSurfaceRegistry {
+  return GlobalSurfaceRegistry.create({
+    surfaces: [
+      ...createBuiltinGlobalSurfaceContributions(builtinLoaders),
+      ...moduleGlobalSurfaceContributions(modules),
+    ],
+    navigation: [
+      ...BUILTIN_GLOBAL_NAVIGATION,
+      ...moduleGlobalNavigationContributions(modules),
+    ],
+  });
 }

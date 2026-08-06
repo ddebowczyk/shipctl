@@ -1,5 +1,6 @@
 import { CodeXml } from "lucide-react";
 import { useUIStore } from "../../stores/useUIStore";
+import { BUILTIN_GLOBAL_SURFACE_IDS } from "../../core/modules/builtinGlobalSurfaceAdapters";
 
 interface IdeLaunchRowProps {
   repoPath: string;
@@ -10,12 +11,14 @@ export default function IdeLaunchRow({
   repoPath,
   onOpenInEditor,
 }: IdeLaunchRowProps) {
-  const settingsActive = useUIStore((s) => s.settingsActive);
+  const isSettingsSurfaceActive = useUIStore(
+    (state) => state.activeGlobalSurfaceId === BUILTIN_GLOBAL_SURFACE_IDS.settings,
+  );
 
   return (
     <button
       onClick={() => onOpenInEditor(repoPath)}
-      className={`section-toggle ${settingsActive ? "!text-[var(--text-primary)] !bg-white/6" : ""}`}
+      className={`section-toggle ${isSettingsSurfaceActive ? "!text-[var(--text-primary)] !bg-white/6" : ""}`}
     >
       <CodeXml size={14} className="shrink-0" />
       <span className="truncate">IDE</span>

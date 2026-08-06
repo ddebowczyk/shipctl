@@ -98,6 +98,9 @@ capability ceiling.
 - [14-ports-characterization-and-seam.md](./14-ports-characterization-and-seam.md)
   records the real global-overlay, process-observation, project-matching, and
   termination behavior before Ports extraction.
+- [15-global-surface-contribution-rail.md](./15-global-surface-contribution-rail.md)
+  records the generic surface/navigation contract, host cutover, failure
+  containment, and preserved process-local behavior.
 
 ## Target dependency shape
 

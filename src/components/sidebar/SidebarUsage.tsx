@@ -2,6 +2,7 @@ import { useMemo, useState, useCallback } from "react";
 import { useUsageStore, type TimeWindow } from "../../stores/useUsageStore";
 import { useUsageSettingsStore } from "../../stores/useUsageSettingsStore";
 import { useUIStore } from "../../stores/useUIStore";
+import { BUILTIN_GLOBAL_SURFACE_IDS } from "../../core/modules/builtinGlobalSurfaceAdapters";
 import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
 import {
   ALL_USAGE_PROVIDERS,
@@ -226,7 +227,6 @@ export default function SidebarUsage() {
   const window = useUsageStore((s) => s.sidebarWindow);
   const usageSettings = useUsageSettingsStore((s) => s.settings);
   const { setSidebarWindow } = useUsageStore.getState();
-  const { toggleUsagePanel } = useUIStore.getState();
 
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
@@ -267,7 +267,9 @@ export default function SidebarUsage() {
               key={item.id}
               type="button"
               className="sidebar-usage__row"
-              onClick={toggleUsagePanel}
+              onClick={() => {
+                useUIStore.getState().toggleGlobalSurface(BUILTIN_GLOBAL_SURFACE_IDS.usage);
+              }}
               onMouseEnter={(e) => setTooltip({ item, rect: e.currentTarget.getBoundingClientRect() })}
               onMouseLeave={handleMouseLeave}
             >

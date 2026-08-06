@@ -11,6 +11,7 @@
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
     "test:module-boundaries": "node --test scripts/tests/moduleBoundaries.test.mjs",
     "test:module-composition": "node --test scripts/tests/moduleComposition.test.ts",
+    "test:global-surfaces": "node --test scripts/tests/globalSurfaces.test.ts",
     "test:panel-persistence": "node --test scripts/tests/panelPersistence.test.ts",
     "test:panels": "node --test scripts/tests/panelRegistry.test.ts scripts/tests/panelPersistence.test.ts scripts/tests/panelTabs.test.ts",
     "test:ports-characterization": "node --test scripts/tests/portsCharacterization.test.ts && cargo test --manifest-path src-tauri/Cargo.toml ports_characterization_tests",

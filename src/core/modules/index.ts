@@ -3,9 +3,22 @@ export {
   PanelRegistry,
 } from "./panelRegistry";
 export {
+  GlobalSurfaceRegistrationError,
+  GlobalSurfaceRegistry,
+} from "./globalSurfaceRegistry";
+export {
+  BUILTIN_GLOBAL_NAVIGATION,
+  BUILTIN_GLOBAL_SURFACE_IDS,
+  createBuiltinGlobalSurfaceContributions,
+} from "./builtinGlobalSurfaceAdapters";
+export type {
+  BuiltinGlobalSurfaceKind,
+  BuiltinGlobalSurfaceLoaders,
+} from "./builtinGlobalSurfaceAdapters";
+export {
   BUILTIN_PANEL_DEFINITIONS,
   CORE_TAB_EXCEPTIONS,
-  NON_TAB_PANEL_SURFACES,
+  CORE_SURFACE_EXCEPTIONS,
   createBuiltinPanelContributions,
 } from "./builtinPanelAdapters";
 export type {
@@ -20,6 +33,7 @@ export {
   toPersistedPanelReference,
 } from "./panelPersistence";
 export { default as PanelHost } from "./PanelHost";
+export { default as GlobalSurfaceHost } from "./GlobalSurfaceHost";
 export {
   ModuleProjectNavigationSurfaces,
   ModuleSettingsSurfaces,
@@ -27,7 +41,10 @@ export {
 export { MODULE_HOST_SERVICES } from "./moduleHostServices";
 export { ENABLED_MODULES } from "./enabledModules";
 export {
+  createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
+  moduleGlobalNavigationContributions,
+  moduleGlobalSurfaceContributions,
   moduleLegacyPanelDefinitions,
   modulePanelContributions,
   moduleProjectNavigationContributions,
@@ -36,6 +53,7 @@ export {
   notifyModulesProjectRemoved,
   notifyModulesProjectsChanged,
 } from "./moduleComposition";
+export { BUILTIN_GLOBAL_SURFACE_LOADERS } from "./builtinGlobalSurfaceRuntime";
 export {
   BUILTIN_PANEL_LOADERS,
   BuiltinPanelRuntimeProvider,
@@ -51,6 +69,9 @@ export type {
 } from "./panelPersistence";
 export type {
   ContributionId,
+  GlobalNavigationContribution,
+  GlobalSurfaceContribution,
+  GlobalSurfaceContributionProps,
   ModuleId,
   ModuleDeactivation,
   ModuleHost,

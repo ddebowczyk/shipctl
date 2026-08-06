@@ -64,10 +64,7 @@ export const CORE_TAB_EXCEPTIONS = {
   assistant: "PTY-backed assistant tabs remain owned by terminal infrastructure.",
 } as const satisfies Record<Exclude<TabKind, PanelTabKind | "panel">, string>;
 
-export const NON_TAB_PANEL_SURFACES = {
-  settings: "global-overlay",
-  usage: "global-overlay",
-  ports: "global-overlay",
+export const CORE_SURFACE_EXCEPTIONS = {
   "diff-summary": "layout-slot",
   skills: "embedded-settings-and-sidebar-capability",
 } as const;

@@ -6,6 +6,7 @@ import type { ModuleHostServices, ShepModule } from "@shep/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 import type { BuiltinPanelLoaders } from "../../src/core/modules/builtinPanelAdapters.ts";
+import type { BuiltinGlobalSurfaceLoaders } from "../../src/core/modules/builtinGlobalSurfaceAdapters.ts";
 import {
   hydratePanelReference,
   PANEL_REFERENCE_SCHEMA_VERSION,
@@ -15,6 +16,7 @@ type ModuleComposition = typeof import("../../src/core/modules/moduleComposition
 
 let vite: ViteDevServer;
 let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
+let createEnabledGlobalSurfaceRegistry: ModuleComposition["createEnabledGlobalSurfaceRegistry"];
 let moduleProjectNavigationContributions: ModuleComposition["moduleProjectNavigationContributions"];
 let moduleSettingsContributions: ModuleComposition["moduleSettingsContributions"];
 let moduleLegacyPanelDefinitions: ModuleComposition["moduleLegacyPanelDefinitions"];
@@ -29,6 +31,7 @@ before(async () => {
   });
   ({
     createEnabledPanelRegistry,
+    createEnabledGlobalSurfaceRegistry,
     moduleProjectNavigationContributions,
     moduleSettingsContributions,
     moduleLegacyPanelDefinitions,
@@ -48,6 +51,12 @@ const builtinPanelLoaders: BuiltinPanelLoaders = {
   launcher: async () => ({ default: () => null }),
 };
 
+const builtinGlobalSurfaceLoaders: BuiltinGlobalSurfaceLoaders = {
+  settings: async () => ({ default: () => null }),
+  usage: async () => ({ default: () => null }),
+  ports: async () => ({ default: () => null }),
+};
+
 const fixtureModule: ShepModule = {
   id: "shep.fixture",
   version: "0.0.0",
@@ -61,6 +70,22 @@ const fixtureModule: ShepModule = {
       singleton: "per-project",
       legacyTab: { kind: "fixture", label: "Legacy fixture" },
       load: async () => ({ default: () => null }),
+    },
+  ],
+  globalSurfaces: [
+    {
+      id: "fixture.global-surface",
+      moduleId: "shep.fixture",
+      load: async () => ({ default: () => null }),
+    },
+  ],
+  globalNavigation: [
+    {
+      id: "fixture.global-navigation",
+      moduleId: "shep.fixture",
+      surfaceId: "fixture.global-surface",
+      label: "Fixture",
+      icon: { name: "test" },
     },
   ],
   projectNavigation: [
@@ -97,6 +122,32 @@ const services = {
 test("enabled profile contributes module panels", () => {
   const registry = createEnabledPanelRegistry(builtinPanelLoaders, [fixtureModule]);
   assert.equal(registry.has("fixture.panel"), true);
+});
+
+test("enabled profile composes global surfaces and navigation", () => {
+  const registry = createEnabledGlobalSurfaceRegistry(
+    builtinGlobalSurfaceLoaders,
+    [fixtureModule],
+  );
+  assert.equal(registry.has("fixture.global-surface"), true);
+  assert.deepEqual(
+    registry.navigation().map(({ id, surfaceId }) => ({ id, surfaceId })),
+    [
+      { id: "fixture.global-navigation", surfaceId: "fixture.global-surface" },
+      { id: "core.settings-navigation", surfaceId: "core.settings" },
+      { id: "core.usage-navigation", surfaceId: "core.usage" },
+      { id: "core.ports-navigation", surfaceId: "core.ports" },
+    ],
+  );
+});
+
+test("disabled profile removes module global surfaces and navigation", () => {
+  const registry = createEnabledGlobalSurfaceRegistry(builtinGlobalSurfaceLoaders, []);
+  assert.equal(registry.has("fixture.global-surface"), false);
+  assert.equal(
+    registry.navigation().some(({ id }) => id === "fixture.global-navigation"),
+    false,
+  );
 });
 
 test("default profile enables the extracted TODO panel", () => {

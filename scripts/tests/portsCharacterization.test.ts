@@ -6,6 +6,7 @@ import { createServer, type ViteDevServer } from "vite";
 
 import { PORT_COMMANDS } from "../../src/lib/tauri.ts";
 import type { PortInfo } from "../../src/lib/types.ts";
+import { BUILTIN_GLOBAL_SURFACE_IDS } from "../../src/core/modules/builtinGlobalSurfaceAdapters.ts";
 
 type PortsPanelModule = typeof import("../../src/components/ports/PortsPanel.tsx");
 type TerminalStoreModule = typeof import("../../src/stores/useTerminalStore.ts");
@@ -56,9 +57,7 @@ beforeEach(() => {
     tabActivity: {},
   });
   useUIStore.setState({
-    settingsActive: false,
-    usagePanelActive: false,
-    portsPanelActive: false,
+    activeGlobalSurfaceId: null,
   });
 });
 
@@ -123,16 +122,17 @@ test("ports group by matched project with unmatched listeners last", () => {
   assert.equal(portsPanel.formatUptime(" 01:02 "), "01:02");
 });
 
-test("Ports is a global in-memory overlay and survives project switches", () => {
+test("Ports is a global in-memory surface and survives project switches", () => {
   useTerminalStore.getState().switchProject("/work/alpha");
-  useUIStore.getState().togglePortsPanel();
+  useUIStore.getState().toggleGlobalSurface(BUILTIN_GLOBAL_SURFACE_IDS.ports);
   useTerminalStore.getState().switchProject("/work/beta");
 
   assert.equal(useTerminalStore.getState().activeProjectPath, "/work/beta");
-  assert.equal(useUIStore.getState().portsPanelActive, true);
-  assert.equal(useUIStore.getState().settingsActive, false);
-  assert.equal(useUIStore.getState().usagePanelActive, false);
+  assert.equal(
+    useUIStore.getState().activeGlobalSurfaceId,
+    BUILTIN_GLOBAL_SURFACE_IDS.ports,
+  );
 
-  useUIStore.getState().deactivateAllOverlays();
-  assert.equal(useUIStore.getState().portsPanelActive, false);
+  useUIStore.getState().closeGlobalSurface();
+  assert.equal(useUIStore.getState().activeGlobalSurfaceId, null);
 });
