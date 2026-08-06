@@ -3,15 +3,15 @@ import test from "node:test";
 
 import {
   hydratePanelReference,
-  LEGACY_PANEL_IDS,
+  BUILTIN_PANEL_IDS,
   PANEL_REFERENCE_SCHEMA_VERSION,
   toPersistedPanelReference,
 } from "../../src/core/modules/panelPersistence.ts";
 
-const allBuiltinPanels = Object.values(LEGACY_PANEL_IDS);
+const allBuiltinPanels = Object.values(BUILTIN_PANEL_IDS);
 
 test("legacy panel tabs migrate to equivalent stable references", () => {
-  for (const [kind, panelId] of Object.entries(LEGACY_PANEL_IDS)) {
+  for (const [kind, panelId] of Object.entries(BUILTIN_PANEL_IDS)) {
     const raw = { id: `panel-${kind}`, kind, label: `Custom ${kind}` };
     const result = hydratePanelReference(raw, { availablePanelIds: allBuiltinPanels });
 

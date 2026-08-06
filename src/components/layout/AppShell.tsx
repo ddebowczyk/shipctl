@@ -41,6 +41,14 @@ import { useUpdateStore } from "../../stores/useUpdateStore";
 import { initNotifications } from "../../lib/notifications";
 import { getErrorMessage } from "../../lib/errors";
 import { useNoticeStore } from "../../stores/useNoticeStore";
+import {
+  BUILTIN_PANEL_LOADERS,
+  BuiltinPanelRuntimeProvider,
+  createBuiltinPanelRegistry,
+  panelIdForTabKind,
+  PanelHost,
+} from "../../core/modules";
+import type { BuiltinPanelRuntimeValue } from "../../core/modules";
 
 import type {
   AssistantSessionRecord,
@@ -59,13 +67,10 @@ const LAST_REPO_STORAGE_KEY = "shep:last-repo-path";
 const EMPTY_TABS: UnifiedTab[] = [];
 const EMPTY_COMMANDS: CommandState[] = [];
 const SettingsPanel = lazy(() => import("../settings/SettingsPanel"));
-const GitPanel = lazy(() => import("../git/GitPanel"));
-const CommandsPanel = lazy(() => import("../commands/CommandsPanel"));
-const SessionLauncher = lazy(() => import("../session/SessionLauncher"));
 const UsagePanel = lazy(() => import("../usage/UsagePanel"));
 const PortsPanel = lazy(() => import("../ports/PortsPanel"));
 const DiffSummaryPanel = lazy(() => import("../git/DiffSummaryPanel"));
-const TodosPanel = lazy(() => import("../todos/TodosPanel"));
+const BUILTIN_PANEL_REGISTRY = createBuiltinPanelRegistry(BUILTIN_PANEL_LOADERS);
 
 function toCommandConfig(command: CommandState): CommandConfig {
   return {
@@ -831,6 +836,33 @@ export default function AppShell() {
   }, [cycleTabs]);
 
   const showOverlay = settingsActive || usagePanelActive || portsPanelActive;
+  const activePanelId = activeTab ? panelIdForTabKind(activeTab.kind) : null;
+  const activePanelProject = useMemo(() => activeRepoPath ? {
+    id: activeRepoPath,
+    name: fallbackWorkspaceName(activeRepoPath),
+    path: activeRepoPath,
+  } : null, [activeRepoPath]);
+  const builtinPanelRuntime = useMemo<BuiltinPanelRuntimeValue>(() => ({
+    commands,
+    onStartCommand: handleStartCommand,
+    onStopCommand: stopCommand,
+    onCreateCommand: handleCreateCommand,
+    onUpdateCommand: handleUpdateCommand,
+    onDeleteCommand: handleDeleteCommand,
+    onStartAllCommands: handleStartAllCommands,
+    onStopAllCommands: handleStopAllCommands,
+    onStartSession: handleStartSession,
+  }), [
+    commands,
+    handleCreateCommand,
+    handleDeleteCommand,
+    handleStartAllCommands,
+    handleStartCommand,
+    handleStartSession,
+    handleStopAllCommands,
+    handleUpdateCommand,
+    stopCommand,
+  ]);
 
   return (
     <div className="app-shell">
@@ -926,35 +958,21 @@ export default function AppShell() {
               </Suspense>
             )}
 
-            {/* Local panel tabs (Git, Commands, Launcher) */}
-            {!showOverlay && activeTab?.kind === "git" && (
-              <Suspense fallback={<PanelLoader />}>
-                <GitPanel />
-              </Suspense>
-            )}
-            {!showOverlay && activeTab?.kind === "commands" && (
-              <Suspense fallback={<PanelLoader />}>
-                <CommandsPanel
-                  commands={commands}
-                  onStartCommand={handleStartCommand}
-                  onStopCommand={stopCommand}
-                  onCreateCommand={handleCreateCommand}
-                  onUpdateCommand={handleUpdateCommand}
-                  onDeleteCommand={handleDeleteCommand}
-                  onStartAllCommands={handleStartAllCommands}
-                  onStopAllCommands={handleStopAllCommands}
+            {/* Project panel tabs resolve through the contribution registry. */}
+            {!showOverlay && activeTab && activePanelId && (
+              <BuiltinPanelRuntimeProvider value={builtinPanelRuntime}>
+                <PanelHost
+                  registry={BUILTIN_PANEL_REGISTRY}
+                  panelId={activePanelId}
+                  instanceId={activeTab.id}
+                  project={activePanelProject}
+                  visible
+                  close={() => handleCloseTab(activeTab.id)}
+                  setTitle={(title) => {
+                    if (title) useTerminalStore.getState().updateTab(activeTab.id, { label: title });
+                  }}
                 />
-              </Suspense>
-            )}
-            {!showOverlay && activeTab?.kind === "launcher" && (
-              <Suspense fallback={<PanelLoader />}>
-                <SessionLauncher onStartSession={handleStartSession} />
-              </Suspense>
-            )}
-            {!showOverlay && activeTab?.kind === "todos" && (
-              <Suspense fallback={<PanelLoader />}>
-                <TodosPanel />
-              </Suspense>
+              </BuiltinPanelRuntimeProvider>
             )}
 
             {!showOverlay && !activeTab && tabs.length === 0 && (

@@ -14,10 +14,17 @@ export type {
 } from "./builtinPanelAdapters";
 export {
   hydratePanelReference,
-  LEGACY_PANEL_IDS,
+  BUILTIN_PANEL_IDS,
   PANEL_REFERENCE_SCHEMA_VERSION,
+  panelIdForTabKind,
   toPersistedPanelReference,
 } from "./panelPersistence";
+export { default as PanelHost } from "./PanelHost";
+export {
+  BUILTIN_PANEL_LOADERS,
+  BuiltinPanelRuntimeProvider,
+} from "./builtinPanelRuntime";
+export type { BuiltinPanelRuntimeValue } from "./builtinPanelRuntime";
 export type {
   HydratedPanelReference,
   HydratePanelReferenceOptions,

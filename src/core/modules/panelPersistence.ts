@@ -2,7 +2,7 @@ import type { PanelTabKind } from "../../lib/types";
 
 export const PANEL_REFERENCE_SCHEMA_VERSION = 1 as const;
 
-export const LEGACY_PANEL_IDS = {
+export const BUILTIN_PANEL_IDS = {
   git: "core.git",
   commands: "core.commands",
   launcher: "core.launcher",
@@ -62,7 +62,7 @@ interface LegacyPanelTabShape {
   readonly label: string;
 }
 
-const BUILTIN_PANEL_IDS = new Set<string>(Object.values(LEGACY_PANEL_IDS));
+const KNOWN_BUILTIN_PANEL_IDS = new Set<string>(Object.values(BUILTIN_PANEL_IDS));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -77,7 +77,7 @@ function isPanelId(value: unknown): value is string {
 }
 
 function isLegacyPanelKind(value: unknown): value is PanelTabKind {
-  return typeof value === "string" && value in LEGACY_PANEL_IDS;
+  return typeof value === "string" && value in BUILTIN_PANEL_IDS;
 }
 
 function readLegacyPanelTab(value: unknown): LegacyPanelTabShape | null {
@@ -139,12 +139,16 @@ export function toPersistedPanelReference(
   };
 }
 
+export function panelIdForTabKind(kind: string): `${string}.${string}` | null {
+  return isLegacyPanelKind(kind) ? BUILTIN_PANEL_IDS[kind] : null;
+}
+
 export function hydratePanelReference(
   raw: unknown,
   options: HydratePanelReferenceOptions,
 ): HydratedPanelReference {
   const availablePanelIds = new Set(options.availablePanelIds);
-  const knownPanelIds = new Set(options.knownPanelIds ?? BUILTIN_PANEL_IDS);
+  const knownPanelIds = new Set(options.knownPanelIds ?? KNOWN_BUILTIN_PANEL_IDS);
   const current = readCurrentPanelReference(raw);
   const legacy = current === null ? readLegacyPanelTab(raw) : null;
 
@@ -171,7 +175,7 @@ export function hydratePanelReference(
   const reference = current ?? {
     schemaVersion: PANEL_REFERENCE_SCHEMA_VERSION,
     instanceId: legacy!.id,
-    panelId: LEGACY_PANEL_IDS[legacy!.kind],
+    panelId: BUILTIN_PANEL_IDS[legacy!.kind],
     label: legacy!.label,
     legacyKind: legacy!.kind,
   };
