@@ -5,7 +5,7 @@ import { useNoticeStore } from "../../stores/useNoticeStore";
 import { getErrorMessage } from "../../lib/errors";
 import type { PortInfo } from "../../lib/types";
 
-function formatMemory(kb: number): string {
+export function formatMemory(kb: number): string {
   if (kb === 0) return "—";
   if (kb < 1024) return `${kb} KB`;
   const mb = kb / 1024;
@@ -13,9 +13,83 @@ function formatMemory(kb: number): string {
   return `${(mb / 1024).toFixed(1)} GB`;
 }
 
-function formatUptime(raw: string): string {
+export function formatUptime(raw: string): string {
   if (!raw) return "—";
   return raw.trim();
+}
+
+export function groupPortsByProject(ports: readonly PortInfo[]): Record<string, PortInfo[]> {
+  return ports.reduce<Record<string, PortInfo[]>>((groups, port) => {
+    const key = port.project || "Other";
+    (groups[key] ??= []).push(port);
+    return groups;
+  }, {});
+}
+
+export function sortPortGroupKeys(groups: Readonly<Record<string, readonly PortInfo[]>>): string[] {
+  return Object.keys(groups).sort((a, b) => {
+    if (a === "Other") return 1;
+    if (b === "Other") return -1;
+    return a.localeCompare(b);
+  });
+}
+
+export type PortScanResult =
+  | { readonly status: "ready"; readonly ports: readonly PortInfo[] }
+  | { readonly status: "error"; readonly message: string };
+
+export async function scanPorts(
+  scan: () => Promise<PortInfo[]> = listListeningPorts,
+): Promise<PortScanResult> {
+  try {
+    return { status: "ready", ports: await scan() };
+  } catch (error) {
+    return { status: "error", message: getErrorMessage(error) };
+  }
+}
+
+export type StopPortResult =
+  | {
+      readonly status: "stopped";
+      readonly notice: {
+        readonly tone: "success";
+        readonly title: "Process killed";
+        readonly message: string;
+      };
+    }
+  | {
+      readonly status: "error";
+      readonly notice: {
+        readonly tone: "error";
+        readonly title: "Kill failed";
+        readonly message: string;
+      };
+    };
+
+export async function stopPort(
+  port: PortInfo,
+  stop: (pid: number) => Promise<void> = killPort,
+): Promise<StopPortResult> {
+  try {
+    await stop(port.pid);
+    return {
+      status: "stopped",
+      notice: {
+        tone: "success",
+        title: "Process killed",
+        message: `Stopped ${port.process} (pid ${port.pid}) on port ${port.port}`,
+      },
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      notice: {
+        tone: "error",
+        title: "Kill failed",
+        message: getErrorMessage(error),
+      },
+    };
+  }
 }
 
 export default function PortsPanel() {
@@ -28,16 +102,14 @@ export default function PortsPanel() {
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      const result = await listListeningPorts();
-      setPorts(result);
-    } catch (err) {
-      const msg = getErrorMessage(err);
-      setError(msg);
-      if (import.meta.env.DEV) console.error("Port scan failed:", msg);
-    } finally {
-      setLoading(false);
+    const result = await scanPorts();
+    if (result.status === "ready") {
+      setPorts([...result.ports]);
+    } else {
+      setError(result.message);
+      if (import.meta.env.DEV) console.error("Port scan failed:", result.message);
     }
+    setLoading(false);
   }, []);
 
   // Load once when panel mounts
@@ -48,19 +120,11 @@ export default function PortsPanel() {
   const handleKill = useCallback(async (port: PortInfo) => {
     setKilling((prev) => new Set(prev).add(port.pid));
     try {
-      await killPort(port.pid);
-      pushNotice({
-        tone: "success",
-        title: "Process killed",
-        message: `Stopped ${port.process} (pid ${port.pid}) on port ${port.port}`,
-      });
-      window.setTimeout(() => void refresh(), 500);
-    } catch (err) {
-      pushNotice({
-        tone: "error",
-        title: "Kill failed",
-        message: getErrorMessage(err),
-      });
+      const result = await stopPort(port);
+      pushNotice(result.notice);
+      if (result.status === "stopped") {
+        window.setTimeout(() => void refresh(), 500);
+      }
     } finally {
       setKilling((prev) => {
         const next = new Set(prev);
@@ -75,17 +139,8 @@ export default function PortsPanel() {
   }, []);
 
   // Group by project
-  const grouped = ports.reduce<Record<string, PortInfo[]>>((acc, port) => {
-    const key = port.project || "Other";
-    (acc[key] ??= []).push(port);
-    return acc;
-  }, {});
-
-  const groupKeys = Object.keys(grouped).sort((a, b) => {
-    if (a === "Other") return 1;
-    if (b === "Other") return -1;
-    return a.localeCompare(b);
-  });
+  const grouped = groupPortsByProject(ports);
+  const groupKeys = sortPortGroupKeys(grouped);
 
   return (
     <div className="absolute inset-0 overflow-y-auto pt-3 pb-6">

@@ -95,6 +95,9 @@ capability ceiling.
   and removal of flat command forwarding.
 - [13-todos-plugout-gate.md](./13-todos-plugout-gate.md) records the generic
   tab/settings cutover and enabled, disabled, and source-absent proof.
+- [14-ports-characterization-and-seam.md](./14-ports-characterization-and-seam.md)
+  records the real global-overlay, process-observation, project-matching, and
+  termination behavior before Ports extraction.
 
 ## Target dependency shape
 

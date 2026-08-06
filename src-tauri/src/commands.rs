@@ -1029,6 +1029,9 @@ fn editor_app_name(editor_id: &str) -> Option<&'static str> {
 
 // ── Port commands ─────────────────────────────────────────────────
 
+#[cfg(test)]
+mod ports_characterization_tests;
+
 #[derive(serde::Serialize, Clone)]
 pub struct PortInfo {
     pub port: u16,
