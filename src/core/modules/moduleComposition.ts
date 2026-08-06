@@ -7,14 +7,27 @@ import type {
 } from "@shep/module-api";
 
 import type { BuiltinPanelLoaders } from "./builtinPanelAdapters";
+import type { LegacyPanelDefinition } from "./panelPersistence";
 import { createBuiltinPanelContributions } from "./builtinPanelAdapters";
 import { ENABLED_MODULES } from "./enabledModules";
 import { PanelRegistry } from "./panelRegistry";
 
 export function modulePanelContributions(
-  modules: readonly ShepModule[],
+  modules: readonly ShepModule[] = ENABLED_MODULES,
 ): readonly PanelContribution[] {
   return modules.flatMap((module) => module.panels ?? []);
+}
+
+export function moduleLegacyPanelDefinitions(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): readonly LegacyPanelDefinition[] {
+  return modulePanelContributions(modules).flatMap((panel) => panel.legacyTab
+    ? [{
+        kind: panel.legacyTab.kind,
+        panelId: panel.id,
+        label: panel.legacyTab.label ?? panel.label,
+      }]
+    : []);
 }
 
 export function moduleProjectNavigationContributions(

@@ -37,14 +37,11 @@ export interface EditorSettings {
   preferredEditor: PreferredEditor | null;
 }
 
-export type TodoFileStyle = "kanban" | "list";
-
 export interface ProjectSettings {
   autoImportWorktrees: boolean;
   showAgentSessionsInSidebar: boolean;
-  showTodos: boolean;
-  /** Shape of a lazily created TODO.md. */
-  todoFileStyle: TodoFileStyle;
+  /** Capability-owned values are preserved without becoming host contracts. */
+  [key: string]: unknown;
 }
 
 export interface KeybindingSettings {
@@ -152,8 +149,8 @@ export interface ResumeAssistantSessionRequest {
 
 // ── Unified tab model ──────────────────────────────────────────────
 
-export type PanelTabKind = "git" | "commands" | "launcher" | "todos";
-export type TabKind = "terminal" | "assistant" | PanelTabKind;
+export type PanelTabKind = "git" | "commands" | "launcher";
+export type TabKind = "terminal" | "assistant" | "panel" | PanelTabKind;
 
 interface TabBase {
   id: string;
@@ -174,10 +171,16 @@ export interface TerminalTabData extends TabBase {
   captureState: AssistantCaptureState | null;
 }
 
-export interface PanelTabData extends TabBase {
+export interface BuiltinPanelTabData extends TabBase {
   kind: PanelTabKind;
 }
 
+export interface ContributedPanelTabData extends TabBase {
+  kind: "panel";
+  panelId: `${string}.${string}`;
+}
+
+export type PanelTabData = BuiltinPanelTabData | ContributedPanelTabData;
 export type UnifiedTab = TerminalTabData | PanelTabData;
 
 export type TabCycleDirection = 1 | -1;
@@ -186,11 +189,14 @@ export function panelTabId(kind: PanelTabKind): string {
   return `panel-${kind}`;
 }
 
+export function contributedPanelTabId(panelId: `${string}.${string}`): string {
+  return `panel-${panelId}`;
+}
+
 export const panelTabDefaults: Record<PanelTabKind, { label: string }> = {
   git: { label: "Files" },
   commands: { label: "Commands" },
   launcher: { label: "New Agent" },
-  todos: { label: "To-dos" },
 };
 
 

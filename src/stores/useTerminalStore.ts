@@ -8,6 +8,7 @@ import type {
   TabCycleDirection,
 } from "../lib/types";
 import { panelTabId, panelTabDefaults } from "../lib/types";
+import { contributedPanelTabId } from "../lib/types";
 import { useUIStore } from "./useUIStore";
 
 interface ProjectTerminalState {
@@ -37,6 +38,7 @@ interface TerminalStore {
   moveTab: (tabId: string, destinationPath: string) => boolean;
   removeTabFromProject: (repoPath: string, id: string) => void;
   addPanelTab: (kind: PanelTabKind) => void;
+  addContributedPanelTab: (panelId: `${string}.${string}`, label: string) => void;
   removePanelTab: (kind: PanelTabKind) => void;
   togglePanelTab: (kind: PanelTabKind) => void;
   findTabByCommand: (commandName: string) => TerminalTabData | undefined;
@@ -347,6 +349,32 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         projectState: {
           ...state.projectState,
           [path]: { tabs: [...ps.tabs, tab], activeTabId: id },
+        },
+      };
+    });
+  },
+
+  addContributedPanelTab: (panelId: `${string}.${string}`, label: string) => {
+    useUIStore.getState().deactivateAllOverlays();
+    set((state) => {
+      const path = state.activeProjectPath;
+      if (!path) return state;
+      const project = state.projectState[path] ?? emptyState();
+      const id = contributedPanelTabId(panelId);
+      const existing = project.tabs.find((tab) => tab.id === id);
+      if (existing) {
+        return {
+          projectState: {
+            ...state.projectState,
+            [path]: { ...project, activeTabId: id },
+          },
+        };
+      }
+      const tab: PanelTabData = { id, kind: "panel", panelId, label };
+      return {
+        projectState: {
+          ...state.projectState,
+          [path]: { tabs: [...project.tabs, tab], activeTabId: id },
         },
       };
     });

@@ -7,7 +7,7 @@ type BuiltinPanelDefinition = Omit<PanelContribution, "load"> & {
   readonly legacyKind: CoreBuiltinPanelKind;
 };
 
-export type CoreBuiltinPanelKind = Exclude<PanelTabKind, "todos">;
+export type CoreBuiltinPanelKind = PanelTabKind;
 export type BuiltinPanelLoaders = Readonly<
   Record<CoreBuiltinPanelKind, PanelContribution["load"]>
 >;
@@ -62,7 +62,7 @@ export const BUILTIN_PANEL_DEFINITIONS = {
 export const CORE_TAB_EXCEPTIONS = {
   terminal: "PTY-backed tabs remain owned by terminal infrastructure.",
   assistant: "PTY-backed assistant tabs remain owned by terminal infrastructure.",
-} as const satisfies Record<Exclude<TabKind, PanelTabKind>, string>;
+} as const satisfies Record<Exclude<TabKind, PanelTabKind | "panel">, string>;
 
 export const NON_TAB_PANEL_SURFACES = {
   settings: "global-overlay",

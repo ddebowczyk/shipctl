@@ -57,15 +57,9 @@ pub struct ProjectSettings {
     pub auto_import_worktrees: bool,
     #[serde(default = "default_true", rename = "showAgentSessionsInSidebar")]
     pub show_agent_sessions_in_sidebar: bool,
-    #[serde(default = "default_true", rename = "showTodos")]
-    pub show_todos: bool,
-    /// Shape of a lazily created TODO.md: "kanban" (columned board) or "list".
-    #[serde(default = "default_todo_file_style", rename = "todoFileStyle")]
-    pub todo_file_style: String,
-}
-
-fn default_todo_file_style() -> String {
-    "kanban".to_string()
+    /// Capability-owned settings remain human-editable without expanding the host schema.
+    #[serde(default, flatten)]
+    pub extensions: HashMap<String, serde_json::Value>,
 }
 
 impl Default for ProjectSettings {
@@ -73,8 +67,7 @@ impl Default for ProjectSettings {
         ProjectSettings {
             auto_import_worktrees: true,
             show_agent_sessions_in_sidebar: true,
-            show_todos: true,
-            todo_file_style: default_todo_file_style(),
+            extensions: HashMap::new(),
         }
     }
 }
@@ -377,4 +370,25 @@ pub struct WorkspaceConfig {
     pub commands: Vec<CommandConfig>,
     #[serde(default)]
     pub assistants: Vec<AssistantConfig>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProjectSettings;
+
+    #[test]
+    fn project_settings_preserve_capability_owned_values_without_host_fields() {
+        let settings: ProjectSettings = serde_yaml::from_str(
+            "autoImportWorktrees: true\nshowAgentSessionsInSidebar: false\nexampleModuleValue: compact\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.extensions.get("exampleModuleValue"),
+            Some(&serde_json::Value::String("compact".to_string())),
+        );
+
+        let serialized = serde_yaml::to_string(&settings).unwrap();
+        assert!(serialized.contains("exampleModuleValue: compact"));
+    }
 }

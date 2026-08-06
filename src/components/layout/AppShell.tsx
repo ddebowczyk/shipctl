@@ -46,7 +46,7 @@ import {
   createEnabledPanelRegistry,
   MODULE_HOST_SERVICES,
   notifyModulesProjectRemoved,
-  panelIdForTabKind,
+  panelIdForTab,
   PanelHost,
 } from "../../core/modules";
 import type { BuiltinPanelRuntimeValue } from "../../core/modules";
@@ -71,7 +71,7 @@ const SettingsPanel = lazy(() => import("../settings/SettingsPanel"));
 const UsagePanel = lazy(() => import("../usage/UsagePanel"));
 const PortsPanel = lazy(() => import("../ports/PortsPanel"));
 const DiffSummaryPanel = lazy(() => import("../git/DiffSummaryPanel"));
-const BUILTIN_PANEL_REGISTRY = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
+const PANEL_REGISTRY = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
 
 function toCommandConfig(command: CommandState): CommandConfig {
   return {
@@ -837,7 +837,7 @@ export default function AppShell() {
   }, [cycleTabs]);
 
   const showOverlay = settingsActive || usagePanelActive || portsPanelActive;
-  const activePanelId = activeTab ? panelIdForTabKind(activeTab.kind) : null;
+  const activePanelId = activeTab ? panelIdForTab(activeTab) : null;
   const activePanelProject = useMemo(() => activeRepoPath ? {
     id: activeRepoPath,
     name: fallbackWorkspaceName(activeRepoPath),
@@ -963,7 +963,7 @@ export default function AppShell() {
             {!showOverlay && activeTab && activePanelId && (
               <BuiltinPanelRuntimeProvider value={builtinPanelRuntime}>
                 <PanelHost
-                  registry={BUILTIN_PANEL_REGISTRY}
+                  registry={PANEL_REGISTRY}
                   panelId={activePanelId}
                   instanceId={activeTab.id}
                   project={activePanelProject}

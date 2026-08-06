@@ -41,17 +41,18 @@ surface boundary. Filesystem and project lifecycle dispatch uses
 
 ## Compatibility
 
-The existing persisted tab kind remains `todos`, while its stable contribution
-identity is now `todos.board`. The compatibility mapping is bidirectional:
+At this historical gate, the persisted tab kind remained `todos`, while its
+stable contribution identity was `todos.board`. The compatibility mapping was
+bidirectional:
 
 - legacy `todos` tabs hydrate as `todos.board`;
 - the module's project row opens the existing `todos` tab shape;
 - when the module is disabled, the same saved reference is retained and shown
   through generic unavailable-panel recovery.
 
-This adapter remains intentionally until the generic tab model replaces
-`PanelTabKind` in the final host audit. It contains compatibility vocabulary
-without giving the module a dependency on host tab or terminal stores.
+The final host audit subsequently replaced this adapter with generic panel
+tabs and module-owned legacy migration metadata. That cutover is recorded in
+`13-todos-plugout-gate.md`.
 
 ## Native seam at this gate
 

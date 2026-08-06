@@ -17,6 +17,7 @@ let vite: ViteDevServer;
 let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
 let moduleProjectNavigationContributions: ModuleComposition["moduleProjectNavigationContributions"];
 let moduleSettingsContributions: ModuleComposition["moduleSettingsContributions"];
+let moduleLegacyPanelDefinitions: ModuleComposition["moduleLegacyPanelDefinitions"];
 let notifyModulesFilesystemChanged: ModuleComposition["notifyModulesFilesystemChanged"];
 
 before(async () => {
@@ -30,6 +31,7 @@ before(async () => {
     createEnabledPanelRegistry,
     moduleProjectNavigationContributions,
     moduleSettingsContributions,
+    moduleLegacyPanelDefinitions,
     notifyModulesFilesystemChanged,
   } = await vite.ssrLoadModule(
     "/src/core/modules/moduleComposition.ts",
@@ -57,6 +59,7 @@ const fixtureModule: ShepModule = {
       label: "Fixture",
       icon: { name: "test" },
       singleton: "per-project",
+      legacyTab: { kind: "fixture", label: "Legacy fixture" },
       load: async () => ({ default: () => null }),
     },
   ],
@@ -99,6 +102,22 @@ test("enabled profile contributes module panels", () => {
 test("default profile enables the extracted TODO panel", () => {
   const registry = createEnabledPanelRegistry(builtinPanelLoaders);
   assert.equal(registry.has("todos.board"), true);
+  assert.equal(registry.panel("todos.board")?.legacyTab?.kind, "todos");
+});
+
+test("modules own legacy tab migration metadata", () => {
+  const result = hydratePanelReference(
+    { id: "panel-fixture", kind: "fixture", label: "Saved fixture" },
+    {
+      availablePanelIds: ["fixture.panel"],
+      legacyPanels: moduleLegacyPanelDefinitions([fixtureModule]),
+    },
+  );
+
+  assert.equal(result.status, "available");
+  assert.equal(result.source, "legacy");
+  assert.equal(result.panelId, "fixture.panel");
+  assert.equal(result.legacyKind, "fixture");
 });
 
 test("module surfaces compose without feature-specific host branches", () => {

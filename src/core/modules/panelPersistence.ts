@@ -1,4 +1,4 @@
-import type { PanelTabKind } from "../../lib/types";
+import type { PanelTabKind, UnifiedTab } from "../../lib/types";
 
 export const PANEL_REFERENCE_SCHEMA_VERSION = 1 as const;
 
@@ -6,14 +6,12 @@ export const BUILTIN_PANEL_IDS = {
   git: "core.git",
   commands: "core.commands",
   launcher: "core.launcher",
-  todos: "todos.board",
 } as const satisfies Record<PanelTabKind, `${string}.${string}`>;
 
 const LEGACY_PANEL_LABELS = {
   git: "Files",
   commands: "Commands",
   launcher: "New Agent",
-  todos: "To-dos",
 } as const satisfies Record<PanelTabKind, string>;
 
 export interface PersistedPanelReference {
@@ -22,7 +20,7 @@ export interface PersistedPanelReference {
   readonly panelId: string;
   readonly label: string;
   /** Retained while legacy tab shapes remain readable. */
-  readonly legacyKind?: PanelTabKind;
+  readonly legacyKind?: string;
   /** Opaque module-owned state. The host must preserve it without interpretation. */
   readonly state?: unknown;
 }
@@ -43,7 +41,7 @@ export interface HydratedPanelReference {
   readonly instanceId: string;
   readonly panelId: string | null;
   readonly label: string;
-  readonly legacyKind: PanelTabKind | null;
+  readonly legacyKind: string | null;
   readonly state: unknown;
   /** Original persisted value, retained even when it cannot currently resolve. */
   readonly raw: unknown;
@@ -53,14 +51,30 @@ export interface HydratedPanelReference {
 export interface HydratePanelReferenceOptions {
   readonly availablePanelIds: Iterable<string>;
   readonly knownPanelIds?: Iterable<string>;
+  readonly legacyPanels?: Iterable<LegacyPanelDefinition>;
   readonly fallbackInstanceId?: string;
+}
+
+export interface LegacyPanelDefinition {
+  readonly kind: string;
+  readonly panelId: string;
+  readonly label: string;
 }
 
 interface LegacyPanelTabShape {
   readonly id: string;
-  readonly kind: PanelTabKind;
+  readonly kind: string;
   readonly label: string;
+  readonly panelId: string;
 }
+
+const BUILTIN_LEGACY_PANELS: readonly LegacyPanelDefinition[] = Object.entries(
+  BUILTIN_PANEL_IDS,
+).map(([kind, panelId]) => ({
+  kind,
+  panelId,
+  label: LEGACY_PANEL_LABELS[kind as PanelTabKind],
+}));
 
 const KNOWN_BUILTIN_PANEL_IDS = new Set<string>(Object.values(BUILTIN_PANEL_IDS));
 
@@ -76,17 +90,19 @@ function isPanelId(value: unknown): value is string {
   return isNonEmptyString(value) && /^[^.\s]+\.[^.\s]+(?:\.[^.\s]+)*$/.test(value);
 }
 
-function isLegacyPanelKind(value: unknown): value is PanelTabKind {
-  return typeof value === "string" && value in BUILTIN_PANEL_IDS;
-}
-
-function readLegacyPanelTab(value: unknown): LegacyPanelTabShape | null {
+function readLegacyPanelTab(
+  value: unknown,
+  legacyPanels: ReadonlyMap<string, LegacyPanelDefinition>,
+): LegacyPanelTabShape | null {
   if (!isRecord(value)) return null;
-  if (!isNonEmptyString(value.id) || !isLegacyPanelKind(value.kind)) return null;
+  if (!isNonEmptyString(value.id) || !isNonEmptyString(value.kind)) return null;
+  const definition = legacyPanels.get(value.kind);
+  if (!definition) return null;
   return {
     id: value.id,
     kind: value.kind,
-    label: isNonEmptyString(value.label) ? value.label : LEGACY_PANEL_LABELS[value.kind],
+    label: isNonEmptyString(value.label) ? value.label : definition.label,
+    panelId: definition.panelId,
   };
 }
 
@@ -95,7 +111,7 @@ function readCurrentPanelReference(value: unknown): PersistedPanelReference | nu
   if (value.schemaVersion !== PANEL_REFERENCE_SCHEMA_VERSION) return null;
   if (!isNonEmptyString(value.instanceId) || !isPanelId(value.panelId)) return null;
   if (!isNonEmptyString(value.label)) return null;
-  if (value.legacyKind !== undefined && !isLegacyPanelKind(value.legacyKind)) return null;
+  if (value.legacyKind !== undefined && !isNonEmptyString(value.legacyKind)) return null;
 
   return {
     schemaVersion: PANEL_REFERENCE_SCHEMA_VERSION,
@@ -140,12 +156,14 @@ export function toPersistedPanelReference(
 }
 
 export function panelIdForTabKind(kind: string): `${string}.${string}` | null {
-  return isLegacyPanelKind(kind) ? BUILTIN_PANEL_IDS[kind] : null;
+  return kind in BUILTIN_PANEL_IDS
+    ? BUILTIN_PANEL_IDS[kind as PanelTabKind]
+    : null;
 }
 
-export function tabKindForPanelId(panelId: string): PanelTabKind | null {
-  const match = Object.entries(BUILTIN_PANEL_IDS).find(([, id]) => id === panelId);
-  return match ? match[0] as PanelTabKind : null;
+export function panelIdForTab(tab: UnifiedTab): `${string}.${string}` | null {
+  if (tab.kind === "panel") return tab.panelId;
+  return panelIdForTabKind(tab.kind);
 }
 
 export function hydratePanelReference(
@@ -154,8 +172,12 @@ export function hydratePanelReference(
 ): HydratedPanelReference {
   const availablePanelIds = new Set(options.availablePanelIds);
   const knownPanelIds = new Set(options.knownPanelIds ?? KNOWN_BUILTIN_PANEL_IDS);
+  const legacyPanels = new Map(
+    [...BUILTIN_LEGACY_PANELS, ...(options.legacyPanels ?? [])]
+      .map((definition) => [definition.kind, definition] as const),
+  );
   const current = readCurrentPanelReference(raw);
-  const legacy = current === null ? readLegacyPanelTab(raw) : null;
+  const legacy = current === null ? readLegacyPanelTab(raw, legacyPanels) : null;
 
   if (current === null && legacy === null) {
     const fallbackId = isRecord(raw) && isNonEmptyString(raw.id)
@@ -180,7 +202,7 @@ export function hydratePanelReference(
   const reference = current ?? {
     schemaVersion: PANEL_REFERENCE_SCHEMA_VERSION,
     instanceId: legacy!.id,
-    panelId: BUILTIN_PANEL_IDS[legacy!.kind],
+    panelId: legacy!.panelId,
     label: legacy!.label,
     legacyKind: legacy!.kind,
   };

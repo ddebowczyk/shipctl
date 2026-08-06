@@ -42,6 +42,11 @@ export interface PanelContribution {
   readonly order?: number;
   readonly requiredCapabilities?: readonly ContributionId[];
   readonly unavailable?: PanelUnavailableMetadata;
+  /** Module-owned migration metadata for tabs persisted before generic panels. */
+  readonly legacyTab?: {
+    readonly kind: string;
+    readonly label?: string;
+  };
   readonly load: () => Promise<{
     readonly default: ComponentType<ModulePanelProps>;
   }>;

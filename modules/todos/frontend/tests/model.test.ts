@@ -8,9 +8,9 @@ import type {
   TodoFile,
   TodoItem,
   TodoSection,
-} from "../../modules/todos/frontend/src/types.ts";
+} from "../src/types.ts";
 
-type TodosPanelModule = typeof import("../../modules/todos/frontend/src/TodosPanel.tsx");
+type TodosPanelModule = typeof import("../src/TodosPanel.tsx");
 
 let vite: ViteDevServer;
 let buildColumns: TodosPanelModule["buildColumns"];
@@ -20,7 +20,7 @@ before(async () => {
   vite = await createServer({
     configFile: false,
     optimizeDeps: { noDiscovery: true },
-    root: fileURLToPath(new URL("../..", import.meta.url)),
+    root: fileURLToPath(new URL("../../../..", import.meta.url)),
     server: { hmr: false, middlewareMode: true },
   });
   ({ buildColumns, isDoneColumn } = await vite.ssrLoadModule(

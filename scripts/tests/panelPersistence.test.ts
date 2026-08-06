@@ -64,14 +64,13 @@ test("unknown panel IDs remain retryable and removable", () => {
 test("known but disabled panels are distinguished from unknown panels", () => {
   const raw = {
     schemaVersion: PANEL_REFERENCE_SCHEMA_VERSION,
-    instanceId: "panel-todos",
-    panelId: BUILTIN_PANEL_IDS.todos,
-    label: "To-dos",
-    legacyKind: "todos",
+    instanceId: "timeline-1",
+    panelId: "example.timeline",
+    label: "Timeline",
   };
   const result = hydratePanelReference(raw, {
     availablePanelIds: ["core.git"],
-    knownPanelIds: allBuiltinPanels,
+    knownPanelIds: [...allBuiltinPanels, "example.timeline"],
   });
 
   assert.equal(result.status, "unavailable");

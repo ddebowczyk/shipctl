@@ -15,8 +15,8 @@ export {
   hydratePanelReference,
   BUILTIN_PANEL_IDS,
   PANEL_REFERENCE_SCHEMA_VERSION,
+  panelIdForTab,
   panelIdForTabKind,
-  tabKindForPanelId,
   toPersistedPanelReference,
 } from "./panelPersistence";
 export { default as PanelHost } from "./PanelHost";
@@ -28,6 +28,7 @@ export { MODULE_HOST_SERVICES } from "./moduleHostServices";
 export { ENABLED_MODULES } from "./enabledModules";
 export {
   createEnabledPanelRegistry,
+  moduleLegacyPanelDefinitions,
   modulePanelContributions,
   moduleProjectNavigationContributions,
   moduleSettingsContributions,
@@ -43,6 +44,7 @@ export type { BuiltinPanelRuntimeValue } from "./builtinPanelRuntime";
 export type {
   HydratedPanelReference,
   HydratePanelReferenceOptions,
+  LegacyPanelDefinition,
   PanelReferenceRecovery,
   PanelReferenceUnavailableReason,
   PersistedPanelReference,

@@ -6,14 +6,14 @@ import type {
   SettingsContribution,
 } from "@shep/module-api";
 
-import { panelTabId } from "../../lib/types";
+import { contributedPanelTabId } from "../../lib/types";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices";
 import {
+  modulePanelContributions,
   moduleProjectNavigationContributions,
   moduleSettingsContributions,
 } from "./moduleComposition";
-import { tabKindForPanelId } from "./panelPersistence";
 
 class ModuleSurfaceBoundary extends Component<
   { readonly children: ReactNode },
@@ -46,8 +46,10 @@ function ProjectNavigationSurface({
   readonly activeTabId: string | null;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
-  const legacyKind = tabKindForPanelId(contribution.panelId);
-  const active = legacyKind !== null && activeTabId === panelTabId(legacyKind);
+  const panel = modulePanelContributions().find(({ id }) => id === contribution.panelId);
+  if (!panel) return null;
+  const instanceId = contributedPanelTabId(contribution.panelId);
+  const active = activeTabId === instanceId;
 
   return (
     <ModuleSurfaceBoundary>
@@ -56,7 +58,10 @@ function ProjectNavigationSurface({
           project={project}
           active={active}
           open={() => {
-            if (legacyKind) useTerminalStore.getState().addPanelTab(legacyKind);
+            useTerminalStore.getState().addContributedPanelTab(
+              contribution.panelId,
+              panel.label,
+            );
           }}
           services={MODULE_HOST_SERVICES}
         />

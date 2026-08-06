@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
-import type { TodoFile } from "../../modules/todos/frontend/src/types.ts";
+import type { TodoFile } from "../src/types.ts";
 
-type TodoStoreModule = typeof import("../../modules/todos/frontend/src/store.ts");
+type TodoStoreModule = typeof import("../src/store.ts");
 
 interface NativeMock {
   readTodos: (repoPath: string) => Promise<TodoFile[]>;
@@ -83,7 +83,7 @@ before(async () => {
     configFile: false,
     optimizeDeps: { noDiscovery: true },
     plugins: [nativePlugin],
-    root: fileURLToPath(new URL("../..", import.meta.url)),
+    root: fileURLToPath(new URL("../../../..", import.meta.url)),
     server: { hmr: false, middlewareMode: true },
   });
   ({ useTodoStore } = await vite.ssrLoadModule(

@@ -1,4 +1,4 @@
-import { FolderTree, Terminal, SquareTerminal, List, ListTodo, ExternalLink } from "lucide-react";
+import { FolderTree, Terminal, SquareTerminal, List, PanelsTopLeft, ExternalLink } from "lucide-react";
 import type { TabKind } from "./types";
 
 export interface TabKindMeta {
@@ -32,9 +32,9 @@ const meta: Record<TabKind, TabKindMeta> = {
     label: "New Agent",
     icon: (size) => <SquareTerminal size={size} />,
   },
-  todos: {
-    label: "To-dos",
-    icon: (size) => <ListTodo size={size} />,
+  panel: {
+    label: "Panel",
+    icon: (size) => <PanelsTopLeft size={size} />,
   },
 };
 

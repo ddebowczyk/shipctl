@@ -93,6 +93,8 @@ capability ceiling.
 - [12-todos-native-extraction.md](./12-todos-native-extraction.md) records the
   namespaced internal plugin, explicit permissions, native feature profile,
   and removal of flat command forwarding.
+- [13-todos-plugout-gate.md](./13-todos-plugout-gate.md) records the generic
+  tab/settings cutover and enabled, disabled, and source-absent proof.
 
 ## Target dependency shape
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { TODO_COMMANDS } from "../../modules/todos/frontend/src/client.ts";
+import { TODO_COMMANDS } from "../src/client.ts";
 
 test("TODO frontend targets only namespaced plugin commands", () => {
   assert.deepEqual(TODO_COMMANDS, {
