@@ -46,6 +46,7 @@ import type {
   AssistantSessionRecord,
   CommandConfig,
   CommandState,
+  TabCycleDirection,
   TerminalTabData,
   UnifiedTab,
   SessionMode,
@@ -99,6 +100,16 @@ export default function AppShell() {
   const assistantRestoreAttemptedRef = useRef(false);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
+  const lastTabCycleAtRef = useRef(0);
+
+  const cycleTabs = useCallback((direction: TabCycleDirection) => {
+    // Native menu accelerators and the renderer fallback can both receive the
+    // same shortcut on some platforms. Avoid advancing twice in that case.
+    const now = performance.now();
+    if (now - lastTabCycleAtRef.current < 100) return;
+    lastTabCycleAtRef.current = now;
+    useTerminalStore.getState().cycleTab(direction);
+  }, []);
 
   const getTerminalDimensions = useCallback(() => {
     const el = terminalContainerRef.current;
@@ -758,6 +769,12 @@ export default function AppShell() {
   useEffect(() => {
     const unlisten = listen<string>("menu-event", (event) => {
       switch (event.payload) {
+        case "next_tab":
+          cycleTabs(1);
+          break;
+        case "previous_tab":
+          cycleTabs(-1);
+          break;
         case "new_terminal":
           handleNewShell();
           break;
@@ -797,7 +814,21 @@ export default function AppShell() {
       }
     });
     return () => { unlisten.then((f) => f()); };
-  }, [handleNewShell, handleNewAssistant, handleOpenInEditor, pushNotice]);
+  }, [cycleTabs, handleNewShell, handleNewAssistant, handleOpenInEditor, pushNotice]);
+
+  // Renderer fallback for platforms/webviews that deliver the shortcut to the
+  // page instead of the native application menu.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || (!event.metaKey && !event.ctrlKey) || event.altKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cycleTabs(event.shiftKey ? -1 : 1);
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [cycleTabs]);
 
   const showOverlay = settingsActive || usagePanelActive || portsPanelActive;
 

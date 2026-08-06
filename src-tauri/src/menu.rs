@@ -5,13 +5,15 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let version = app.config().version.clone();
 
     // -- App (Shep) submenu --
-    let about_meta = AboutMetadataBuilder::new()
-        .version(version)
-        .build();
-    let check_updates =
-        MenuItem::with_id(app, "check_updates", "Check for Updates…", true, None::<&str>)?;
-    let settings =
-        MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
+    let about_meta = AboutMetadataBuilder::new().version(version).build();
+    let check_updates = MenuItem::with_id(
+        app,
+        "check_updates",
+        "Check for Updates…",
+        true,
+        None::<&str>,
+    )?;
+    let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
 
     let app_menu = SubmenuBuilder::new(app, "Shep")
         .about(Some(about_meta))
@@ -30,8 +32,13 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
         .build()?;
 
     // -- File --
-    let new_terminal =
-        MenuItem::with_id(app, "new_terminal", "New Terminal", true, Some("CmdOrCtrl+T"))?;
+    let new_terminal = MenuItem::with_id(
+        app,
+        "new_terminal",
+        "New Terminal",
+        true,
+        Some("CmdOrCtrl+T"),
+    )?;
     let new_agent = MenuItem::with_id(
         app,
         "new_agent",
@@ -46,13 +53,7 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+Shift+C"),
     )?;
-    let new_git = MenuItem::with_id(
-        app,
-        "new_git",
-        "New Git Panel",
-        true,
-        Some("CmdOrCtrl+G"),
-    )?;
+    let new_git = MenuItem::with_id(app, "new_git", "New Git Panel", true, Some("CmdOrCtrl+G"))?;
     let open_in_editor = MenuItem::with_id(
         app,
         "open_in_editor",
@@ -92,8 +93,25 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+B"),
     )?;
+    let next_tab = MenuItem::with_id(
+        app,
+        "next_tab",
+        "Next Tab",
+        true,
+        Some("CmdOrCtrl+Tab"),
+    )?;
+    let previous_tab = MenuItem::with_id(
+        app,
+        "previous_tab",
+        "Previous Tab",
+        true,
+        Some("CmdOrCtrl+Shift+Tab"),
+    )?;
 
     let view_menu = SubmenuBuilder::new(app, "View")
+        .item(&next_tab)
+        .item(&previous_tab)
+        .separator()
         .item(&toggle_sidebar)
         .separator()
         .fullscreen()

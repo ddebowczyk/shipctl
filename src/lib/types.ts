@@ -180,6 +180,8 @@ export interface PanelTabData extends TabBase {
 
 export type UnifiedTab = TerminalTabData | PanelTabData;
 
+export type TabCycleDirection = 1 | -1;
+
 export function panelTabId(kind: PanelTabKind): string {
   return `panel-${kind}`;
 }

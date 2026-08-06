@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { TerminalTabData, TabActivity, UnifiedTab, PanelTabKind, PanelTabData } from "../lib/types";
+import type {
+  TerminalTabData,
+  TabActivity,
+  UnifiedTab,
+  PanelTabKind,
+  PanelTabData,
+  TabCycleDirection,
+} from "../lib/types";
 import { panelTabId, panelTabDefaults } from "../lib/types";
 import { useUIStore } from "./useUIStore";
 
@@ -23,6 +30,7 @@ interface TerminalStore {
   addTabToProject: (repoPath: string, tab: UnifiedTab) => void;
   removeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
+  cycleTab: (direction: TabCycleDirection) => void;
   updateTab: (id: string, patch: Partial<Pick<UnifiedTab, "label">>) => void;
   updateTerminalTabById: (id: string, patch: TerminalTabPatch) => void;
   reorderTab: (tabId: string, toIndex: number) => void;
@@ -166,6 +174,36 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
         },
       };
     });
+  },
+
+  cycleTab: (direction: TabCycleDirection) => {
+    useUIStore.getState().deactivateAllOverlays();
+    set((state) => {
+      const path = state.activeProjectPath;
+      if (!path) return state;
+      const project = state.projectState[path];
+      if (!project || project.tabs.length === 0) return state;
+
+      const currentIndex = project.tabs.findIndex((tab) => tab.id === project.activeTabId);
+      const startIndex = currentIndex === -1 ? 0 : currentIndex;
+      const nextIndex = (startIndex + direction + project.tabs.length) % project.tabs.length;
+      const nextTab = project.tabs[nextIndex];
+
+      return {
+        projectState: {
+          ...state.projectState,
+          [path]: { ...project, activeTabId: nextTab.id },
+        },
+      };
+    });
+
+    const state = get();
+    const path = state.activeProjectPath;
+    const project = path ? state.projectState[path] : null;
+    const tab = project?.tabs.find((entry) => entry.id === project.activeTabId);
+    if (tab && (tab.kind === "terminal" || tab.kind === "assistant")) {
+      state.clearTabBell(tab.ptyId);
+    }
   },
 
   updateTab: (id: string, patch: Partial<Pick<UnifiedTab, "label">>) => {
