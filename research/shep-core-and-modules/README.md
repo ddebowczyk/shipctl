@@ -75,6 +75,9 @@ capability ceiling.
 - [07-phase-1-gate.md](./07-phase-1-gate.md) records the generic panel host's
   verified contract, deviations, rollback points, compatibility adapters, and
   interactive smoke evidence gap.
+- [08-phase-2-gate.md](./08-phase-2-gate.md) records the internal TypeScript and
+  Tauri fixture contract, explicit permission, profile matrix, and reusable
+  source-removal proof.
 
 ## Target dependency shape
 

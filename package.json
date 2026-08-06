@@ -13,6 +13,7 @@
     "test:module-composition": "node --test scripts/tests/moduleComposition.test.ts",
     "test:panel-persistence": "node --test scripts/tests/panelPersistence.test.ts",
     "test:panels": "node --test scripts/tests/panelRegistry.test.ts scripts/tests/panelPersistence.test.ts",
+    "verify:module-fixture-plugout": "node scripts/verify-module-fixture-plugout.mjs",
     "smoke:panel-host": "vite scripts/smoke/panel-host --config vite.config.ts --host 127.0.0.1 --port 4174",
     "smoke:module-fixture": "vite scripts/smoke/module-fixture --config scripts/smoke/module-fixture/vite.config.ts --host 127.0.0.1 --port 4175",
     "typecheck:panel-host-smoke": "tsc -p scripts/smoke/panel-host/tsconfig.json",
