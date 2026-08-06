@@ -1,10 +1,11 @@
 import { create } from "zustand";
-import type { SkillInfo } from "../lib/types";
-import { listSkills, setupSkill, removeSkill } from "../lib/tauri";
+
+import { listSkills, removeSkill, setupSkill } from "./client";
+import type { SkillInfo } from "./types";
 
 interface SkillStore {
   /** Built-in agent skills with install state, per repo. The files on disk
-   *  (.agents/skills/) are the source of truth — this is only a render cache. */
+   *  (`.agents/skills/`) are the source of truth; this is a render cache. */
   skillsByRepo: Record<string, SkillInfo[]>;
   refresh: (repoPath: string) => Promise<void>;
   refreshAll: (repoPaths: string[]) => Promise<void>;
@@ -33,19 +34,22 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
           : { skillsByRepo: { ...state.skillsByRepo, [repoPath]: skills } },
       );
     } catch {
-      // Repo may have been removed from disk — leave the cache untouched
+      // Repo may have been removed from disk; leave the cache untouched.
     }
   },
 
   refreshAll: async (repoPaths) => {
-    const results = await Promise.allSettled(repoPaths.map((p) => listSkills(p)));
+    const results = await Promise.allSettled(repoPaths.map((path) => listSkills(path)));
     set((state) => {
       let changed = false;
       const next = { ...state.skillsByRepo };
-      for (let i = 0; i < repoPaths.length; i++) {
-        const result = results[i];
-        if (result.status === "fulfilled" && !skillsEqual(state.skillsByRepo[repoPaths[i]], result.value)) {
-          next[repoPaths[i]] = result.value;
+      for (let index = 0; index < repoPaths.length; index++) {
+        const result = results[index];
+        if (
+          result.status === "fulfilled"
+          && !skillsEqual(state.skillsByRepo[repoPaths[index]], result.value)
+        ) {
+          next[repoPaths[index]] = result.value;
           changed = true;
         }
       }
@@ -65,7 +69,7 @@ export const useSkillStore = create<SkillStore>((set, get) => ({
 
   removeProject: (repoPath) => {
     set((state) => {
-      const { [repoPath]: _, ...rest } = state.skillsByRepo;
+      const { [repoPath]: _removed, ...rest } = state.skillsByRepo;
       return { skillsByRepo: rest };
     });
   },

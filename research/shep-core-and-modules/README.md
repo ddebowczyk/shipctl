@@ -116,6 +116,9 @@ capability ceiling.
 - [21-skills-native-extraction.md](./21-skills-native-extraction.md) records the
   namespaced Skills plugin, module-owned policy and resources, exact project
   authority port, and Skills-disabled native profile.
+- [22-skills-frontend-extraction.md](./22-skills-frontend-extraction.md) records
+  the module-owned client, DTO, cache, project actions, lifecycle, and public
+  composition cutover.
 
 ## Target dependency shape
 

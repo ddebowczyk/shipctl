@@ -1,8 +1,7 @@
 import type { ShepModule } from "@shep/module-api";
 import { portsModule } from "@shep/module-ports";
+import { skillsModule } from "@shep/module-skills";
 import { todosModule } from "@shep/module-todos";
-
-import { SKILLS_COMPATIBILITY_MODULE } from "./skillsCompatibilityAdapter";
 
 /**
  * Compile-time frontend module profile. Optional modules are imported here,
@@ -11,5 +10,5 @@ import { SKILLS_COMPATIBILITY_MODULE } from "./skillsCompatibilityAdapter";
 export const ENABLED_MODULES = [
   portsModule,
   todosModule,
-  SKILLS_COMPATIBILITY_MODULE,
+  skillsModule,
 ] as const satisfies readonly ShepModule[];

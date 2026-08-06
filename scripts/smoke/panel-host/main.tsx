@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import type { ContributionId, ProjectRef } from "@shep/module-api";
+import { skillsModule } from "@shep/module-skills";
 
 import "../../../src/styles/globals.css";
 import PanelHost from "../../../src/core/modules/PanelHost";
@@ -17,7 +18,6 @@ import { MODULE_HOST_SERVICES } from "../../../src/core/modules/moduleHostServic
 import type { CommandState } from "../../../src/lib/types";
 import { useGitStore } from "../../../src/stores/useGitStore";
 import { useRepoStore } from "../../../src/stores/useRepoStore";
-import { useSkillStore } from "../../../src/stores/useSkillStore";
 import { useTerminalStore } from "../../../src/stores/useTerminalStore";
 
 const PROJECT_PATH = "/smoke/shep";
@@ -64,7 +64,7 @@ mockIPC(
         return "@@ -1 +1 @@\n-old\n+new";
       case "plugin:shep-todos|read_todos":
         return [];
-      case "list_skills":
+      case "plugin:shep-skills|list_skills":
         return [
           {
             name: "shep-todos",
@@ -109,18 +109,7 @@ useGitStore.setState({
     },
   },
 });
-useSkillStore.setState({
-  skillsByRepo: {
-    [PROJECT_PATH]: [
-      {
-        name: "shep-todos",
-        title: "Shep to-dos",
-        description: "Smoke fixture",
-        installed: true,
-      },
-    ],
-  },
-});
+await skillsModule.projectLifecycle.onProjectsChanged([PROJECT_PATH]);
 
 const registry = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
 registry.register({

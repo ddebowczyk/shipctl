@@ -26,7 +26,6 @@ import type {
   PiConfig,
   PiSettings,
   DiffFileStat,
-  SkillInfo,
   AssistantSessionRecord,
   PrepareAssistantSessionRequest,
   SpawnAssistantSessionRequest,
@@ -300,18 +299,6 @@ export function gitCurrentBranch(path: string): Promise<string> {
 
 export function gitListBranches(path: string): Promise<string[]> {
   return invoke("git_list_branches", { path });
-}
-
-export function listSkills(repoPath: string): Promise<SkillInfo[]> {
-  return invoke("plugin:shep-skills|list_skills", { repoPath });
-}
-
-export function setupSkill(repoPath: string, name: string): Promise<void> {
-  return invoke("plugin:shep-skills|setup_skill", { repoPath, name });
-}
-
-export function removeSkill(repoPath: string, name: string): Promise<void> {
-  return invoke("plugin:shep-skills|remove_skill", { repoPath, name });
 }
 
 export function gitListWorktrees(path: string): Promise<WorktreeEntry[]> {

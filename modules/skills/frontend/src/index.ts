@@ -1,10 +1,6 @@
-import type {
-  ModuleSkillsSnapshot,
-  ShepModule,
-} from "@shep/module-api";
+import type { ModuleSkillsSnapshot, ShepModule } from "@shep/module-api";
 
-import { getErrorMessage } from "../../lib/errors";
-import { useSkillStore } from "../../stores/useSkillStore";
+import { useSkillStore } from "./store";
 
 let skillsSource: ReturnType<typeof useSkillStore.getState> | null = null;
 let skillsSnapshot: ModuleSkillsSnapshot = { byProject: {} };
@@ -18,9 +14,24 @@ function getSkillsSnapshot(): ModuleSkillsSnapshot {
   return skillsSnapshot;
 }
 
-export const SKILLS_COMPATIBILITY_MODULE: ShepModule = {
+function errorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (
+    typeof error === "object"
+    && error !== null
+    && "message" in error
+    && typeof error.message === "string"
+    && error.message.trim()
+  ) {
+    return error.message;
+  }
+  return "Something went wrong.";
+}
+
+export const skillsModule = {
   id: "shep.skills",
-  version: "0.0.0-compatibility",
+  version: "0.0.0",
   skillsProvider: {
     id: "skills.provider",
     moduleId: "shep.skills",
@@ -60,7 +71,7 @@ export const SKILLS_COMPATIBILITY_MODULE: ShepModule = {
                   title: skill.installed
                     ? "Couldn't remove agent skill"
                     : "Couldn't add agent skill",
-                  message: getErrorMessage(error),
+                  message: errorMessage(error),
                 });
               }
             },
@@ -74,4 +85,7 @@ export const SKILLS_COMPATIBILITY_MODULE: ShepModule = {
     onFilesystemChanged: (projectPaths) => useSkillStore.getState().refreshAll([...projectPaths]),
     onProjectRemoved: (projectPath) => useSkillStore.getState().removeProject(projectPath),
   },
-};
+} as const satisfies ShepModule;
+
+export { SKILL_COMMANDS } from "./client";
+export type { SkillInfo } from "./types";

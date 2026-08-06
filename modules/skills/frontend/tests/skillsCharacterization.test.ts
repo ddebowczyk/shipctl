@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
-import type { SkillInfo } from "../../src/lib/types.ts";
+import type { ModuleHostServices } from "@shep/module-api";
+import { SKILL_COMMANDS } from "../src/client.ts";
+import type { SkillInfo } from "../src/types.ts";
 
-type SkillStoreModule = typeof import("../../src/stores/useSkillStore.ts");
+type SkillStoreModule = typeof import("../src/store.ts");
+type SkillsEntryModule = typeof import("../src/index.ts");
 
 interface NativeMock {
   listSkills(repoPath: string): Promise<SkillInfo[]>;
@@ -24,7 +26,7 @@ const nativePlugin: Plugin = {
   name: "skills-native-characterization",
   enforce: "pre",
   resolveId(source, importer) {
-    if (source === "../lib/tauri" && importer?.endsWith("/src/stores/useSkillStore.ts")) {
+    if (source === "./client" && importer?.endsWith("/modules/skills/frontend/src/store.ts")) {
       return virtualNativeId;
     }
     return null;
@@ -42,6 +44,7 @@ const nativePlugin: Plugin = {
 
 let vite: ViteDevServer;
 let useSkillStore: SkillStoreModule["useSkillStore"];
+let skillsModule: SkillsEntryModule["skillsModule"];
 let calls: Array<{ operation: string; args: string[] }>;
 let listImplementations: Map<string, () => Promise<SkillInfo[]>>;
 let setupError: Error | null;
@@ -69,12 +72,15 @@ before(async () => {
     configFile: false,
     optimizeDeps: { noDiscovery: true },
     plugins: [nativePlugin],
-    root: fileURLToPath(new URL("../..", import.meta.url)),
+    root: fileURLToPath(new URL("../../../..", import.meta.url)),
     server: { hmr: false, middlewareMode: true },
   });
   ({ useSkillStore } = await vite.ssrLoadModule(
-    "/src/stores/useSkillStore.ts",
+    "/modules/skills/frontend/src/store.ts",
   ) as SkillStoreModule);
+  ({ skillsModule } = await vite.ssrLoadModule(
+    "/modules/skills/frontend/src/index.ts",
+  ) as SkillsEntryModule);
 });
 
 after(async () => {
@@ -189,12 +195,54 @@ test("removing a project evicts only its process-local render cache", () => {
   assert.deepEqual(useSkillStore.getState().skillsByRepo, { "/beta": beta });
 });
 
-test("native client uses only namespaced Skills plugin commands", async () => {
-  const clientPath = fileURLToPath(new URL("../../src/lib/tauri.ts", import.meta.url));
-  const client = await readFile(clientPath, "utf8");
+test("module entry owns the provider, project action, and error notice", async () => {
+  const repoSkills = catalog();
+  useSkillStore.setState({ skillsByRepo: { "/repo": repoSkills } });
+  setupError = new Error("write denied");
+  const notices: Array<{ tone: string; title: string; message?: string }> = [];
+  const services = {
+    settings: {
+      getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
+      subscribe: () => () => undefined,
+      update: async () => undefined,
+    },
+    skills: skillsModule.skillsProvider.port,
+    notices: { push: (notice) => notices.push(notice) },
+    externalLinks: { open: async () => undefined },
+  } satisfies ModuleHostServices;
 
-  for (const command of ["list_skills", "setup_skill", "remove_skill"]) {
-    assert.match(client, new RegExp(`invoke\\(\"plugin:shep-skills\\|${command}\"`));
-    assert.doesNotMatch(client, new RegExp(`invoke\\(\"${command}\"`));
-  }
+  assert.equal(skillsModule.id, "shep.skills");
+  assert.equal(skillsModule.skillsProvider.id, "skills.provider");
+  assert.equal(skillsModule.projectActions[0].id, "skills.project-actions");
+  assert.equal(
+    skillsModule.skillsProvider.port.getSnapshot().byProject["/repo"],
+    repoSkills,
+  );
+
+  const group = skillsModule.projectActions[0].getGroup(
+    { id: "repo", name: "Repo", path: "/repo" },
+    services,
+  );
+  assert.equal(group?.label, "Agent Skills");
+  assert.equal(group?.actions[0].selected, false);
+  await group?.actions[0].run();
+
+  assert.deepEqual(calls, [
+    { operation: "setupSkill", args: ["/repo", "shep-todos"] },
+  ]);
+  assert.deepEqual(notices, [
+    {
+      tone: "error",
+      title: "Couldn't add agent skill",
+      message: "write denied",
+    },
+  ]);
+});
+
+test("native client uses only namespaced Skills plugin commands", () => {
+  assert.deepEqual(SKILL_COMMANDS, {
+    list: "plugin:shep-skills|list_skills",
+    setup: "plugin:shep-skills|setup_skill",
+    remove: "plugin:shep-skills|remove_skill",
+  });
 });
