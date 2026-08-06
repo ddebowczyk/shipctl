@@ -19,6 +19,7 @@
     "verify:module-fixture-plugout": "node scripts/verify-module-fixture-plugout.mjs",
     "verify:todos-native-disabled": "pnpm tauri build --debug --no-bundle --config profiles/todos-disabled/tauri.conf.json -- --no-default-features",
     "verify:ports-native-disabled": "pnpm tauri build --debug --no-bundle --config profiles/ports-disabled/tauri.conf.json -- --no-default-features --features todos-module",
+    "verify:ports-plugout": "node scripts/verify-ports-plugout.mjs",
     "verify:todos-plugout": "node scripts/verify-todos-plugout.mjs",
     "smoke:panel-host": "vite scripts/smoke/panel-host --config vite.config.ts --host 127.0.0.1 --port 4174",
     "smoke:module-fixture": "vite scripts/smoke/module-fixture --config scripts/smoke/module-fixture/vite.config.ts --host 127.0.0.1 --port 4175",

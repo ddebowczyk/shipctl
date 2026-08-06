@@ -82,13 +82,6 @@ function exportWorktree(repositoryRoot, destination) {
   }
 }
 
-function linkSharedBuildCaches(repositoryRoot, temporaryRoot) {
-  const sharedTarget = path.join(repositoryRoot, "src-tauri/target");
-  if (existsSync(sharedTarget)) {
-    symlinkSync(sharedTarget, path.join(temporaryRoot, "src-tauri/target"), "dir");
-  }
-}
-
 function assertDependencyGraphsAbsent(root, packages) {
   if (packages.pnpm) {
     const workspacePackages = JSON.parse(
@@ -116,7 +109,6 @@ function withDisposableCopy(repositoryRoot, prefix, callback) {
   const temporaryRoot = mkdtempSync(temporaryPrefix);
   try {
     exportWorktree(repositoryRoot, temporaryRoot);
-    linkSharedBuildCaches(repositoryRoot, temporaryRoot);
     callback(temporaryRoot);
   } finally {
     if (!temporaryRoot.startsWith(temporaryPrefix)) {
@@ -162,7 +154,8 @@ export function verifyModulePlugout({
     verifySourceAbsent(root);
   });
 
-  process.stdout.write(
-    `\n${moduleName} enabled, disabled, and source-absent profiles: OK\n`,
-  );
+  const verifiedProfiles = sourceAbsentOnly
+    ? "source-absent profile"
+    : "enabled, disabled, and source-absent profiles";
+  process.stdout.write(`\n${moduleName} ${verifiedProfiles}: OK\n`);
 }
