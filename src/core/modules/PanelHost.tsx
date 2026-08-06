@@ -1,8 +1,8 @@
 import { Component, lazy, Suspense, useMemo, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
+import type { ContributionId, ProjectRef } from "@shep/module-api";
 
 import type { PanelRegistry } from "./panelRegistry";
-import type { ContributionId, ProjectRef } from "./panels";
 
 interface PanelHostProps {
   readonly registry: PanelRegistry;

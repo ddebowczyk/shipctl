@@ -1,4 +1,4 @@
-import type { ContributionId, PanelContribution } from "./panels";
+import type { ContributionId, PanelContribution } from "@shep/module-api";
 
 export class PanelRegistrationError extends Error {
   readonly code: "duplicate-id" | "invalid-id";

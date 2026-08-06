@@ -1,7 +1,7 @@
 import type { PanelTabKind, TabKind } from "../../lib/types";
+import type { PanelContribution } from "@shep/module-api";
 import { PanelRegistry } from "./panelRegistry";
 import { BUILTIN_PANEL_IDS } from "./panelPersistence";
-import type { PanelContribution } from "./panels";
 
 type BuiltinPanelDefinition = Omit<PanelContribution, "load"> & {
   readonly legacyKind: PanelTabKind;

@@ -35,10 +35,13 @@ export type {
 export type {
   ContributionId,
   ModuleId,
+  ModuleDeactivation,
+  ModuleHost,
   ModulePanelProps,
   PanelContribution,
   PanelHostPort,
   PanelIconDescriptor,
   PanelUnavailableMetadata,
   ProjectRef,
-} from "./panels";
+  ShepModule,
+} from "@shep/module-api";

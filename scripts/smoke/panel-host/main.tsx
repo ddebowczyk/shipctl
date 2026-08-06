@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+import type { ContributionId, ProjectRef } from "@shep/module-api";
 
 import "../../../src/styles/globals.css";
 import PanelHost from "../../../src/core/modules/PanelHost";
@@ -12,7 +13,6 @@ import {
   BUILTIN_PANEL_LOADERS,
   BuiltinPanelRuntimeProvider,
 } from "../../../src/core/modules/builtinPanelRuntime";
-import type { ContributionId, ProjectRef } from "../../../src/core/modules/panels";
 import type { CommandState, TodoFile } from "../../../src/lib/types";
 import { useGitStore } from "../../../src/stores/useGitStore";
 import { useRepoStore } from "../../../src/stores/useRepoStore";
