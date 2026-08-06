@@ -3992,6 +3992,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-process",
  "tauri-plugin-shep-fixture",
+ "tauri-plugin-shep-ports",
  "tauri-plugin-shep-todos",
  "tauri-plugin-updater",
  "url",
@@ -4529,6 +4530,15 @@ name = "tauri-plugin-shep-fixture"
 version = "0.0.0"
 dependencies = [
  "shep-module-api",
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
+name = "tauri-plugin-shep-ports"
+version = "0.0.0"
+dependencies = [
+ "serde",
  "tauri",
  "tauri-plugin",
 ]

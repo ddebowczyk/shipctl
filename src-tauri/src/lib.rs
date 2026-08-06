@@ -5,6 +5,8 @@ mod fonts;
 mod git;
 mod menu;
 mod pi_config;
+#[cfg(feature = "ports-module")]
+mod ports_module;
 mod pty;
 mod skills;
 mod usage;

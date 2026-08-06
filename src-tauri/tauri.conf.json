@@ -44,6 +44,15 @@
             "shep-todos:allow-add-todo",
             "shep-todos:allow-move-todo"
           ]
+        },
+        {
+          "identifier": "ports",
+          "description": "Enables the internal Ports module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-ports:allow-list-listening-ports",
+            "shep-ports:allow-kill-port"
+          ]
         }
       ],
       "csp": {

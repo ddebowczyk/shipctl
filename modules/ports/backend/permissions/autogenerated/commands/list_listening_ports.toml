@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-list-listening-ports"
+description = "Enables the list_listening_ports command without any pre-configured scope."
+commands.allow = ["list_listening_ports"]
+
+[[permission]]
+identifier = "deny-list-listening-ports"
+description = "Denies the list_listening_ports command without any pre-configured scope."
+commands.deny = ["list_listening_ports"]

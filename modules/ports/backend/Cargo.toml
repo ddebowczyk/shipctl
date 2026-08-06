@@ -1,0 +1,21 @@
+[package]
+name = "tauri-plugin-shep-ports"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+links = "tauri-plugin-shep-ports"
+
+[lib]
+name = "shep_module_ports"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "2.10.3", default-features = false }
+
+[build-dependencies]
+tauri-plugin = { version = "2.5.4", features = ["build"] }
+
+[dev-dependencies]
+tauri = { version = "2.10.3", default-features = false, features = ["test"] }

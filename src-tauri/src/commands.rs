@@ -1029,10 +1029,12 @@ fn editor_app_name(editor_id: &str) -> Option<&'static str> {
 
 // ── Port commands ─────────────────────────────────────────────────
 
-#[cfg(test)]
-mod ports_characterization_tests;
+#[cfg(feature = "ports-module")]
+pub use shep_module_ports::PortInfo;
 
+#[cfg(not(feature = "ports-module"))]
 #[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct PortInfo {
     pub port: u16,
     pub pid: u32,
@@ -1044,262 +1046,33 @@ pub struct PortInfo {
     pub memory_kb: u64,
 }
 
-/// Run a command with a timeout. Returns stdout on success, empty string on
-/// failure or timeout. Prevents hangs from stalling the app (e.g. NFS mounts,
-/// broken pipes). Matches port-whisperer's 5-10s timeout pattern.
-fn run_with_timeout(cmd: &str, args: &[&str], timeout: std::time::Duration) -> String {
-    let mut child = match Command::new(cmd).args(args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn() {
-        Ok(c) => c,
-        Err(_) => return String::new(),
-    };
-
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    return String::new();
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(_) => return String::new(),
-        }
-    }
-
-    child.stdout.take()
-        .and_then(|mut out| {
-            let mut buf = String::new();
-            std::io::Read::read_to_string(&mut out, &mut buf).ok()?;
-            Some(buf)
-        })
-        .unwrap_or_default()
-}
-
+/// Transitional flat adapter. The frontend moves to the namespaced plugin
+/// command in the next task.
 #[tauri::command]
-pub async fn list_listening_ports(
-    workspace: State<'_, WorkspaceManager>,
-) -> Result<Vec<PortInfo>, String> {
-    let repos = workspace.list_repos().unwrap_or_default();
-    let repo_paths: Vec<String> = repos.iter().map(|r| r.path.clone()).collect();
-    let timeout = std::time::Duration::from_secs(5);
-
-    // ── Step 1: lsof to find listening ports ──────────────────────────
-    // Matching port-whisperer: parts[8] is the NAME field.
-    // fix_path_env already set PATH at startup, so lsof is findable.
-    let stdout = run_with_timeout("lsof", &["-iTCP", "-sTCP:LISTEN", "-P", "-n"], timeout);
-
-    let mut port_map: std::collections::HashSet<u16> = std::collections::HashSet::new();
-    struct Entry { port: u16, pid: u32, process_name: String }
-    let mut entries: Vec<Entry> = Vec::new();
-
-    for line in stdout.lines().skip(1) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 9 { continue; }
-
-        let process_name = parts[0].to_string();
-        let pid: u32 = match parts[1].parse() { Ok(p) => p, Err(_) => continue };
-
-        // NAME is at index 8 (fixed position), e.g. "*:3000" or "127.0.0.1:8080"
-        let port: u16 = match extract_port(parts[8]) {
-            Some(p) => p,
-            None => continue,
-        };
-
-        // Deduplicate by port (first entry wins, like port-whisperer)
-        if !port_map.insert(port) { continue; }
-
-        // Filter out system/desktop apps
-        if !is_dev_process(&process_name) { continue; }
-
-        entries.push(Entry { port, pid, process_name });
+pub async fn list_listening_ports() -> Result<Vec<PortInfo>, String> {
+    #[cfg(feature = "ports-module")]
+    {
+        return crate::ports_module::list_listening_ports().await;
     }
 
-    if entries.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // ── Step 2: Batch ps call for all PIDs ────────────────────────────
-    let pid_list: String = entries.iter().map(|e| e.pid.to_string()).collect::<Vec<_>>().join(",");
-    let ps_stdout = run_with_timeout("ps", &["-p", &pid_list, "-o", "pid=,rss=,etime=,command="], timeout);
-
-    let mut ps_map: std::collections::HashMap<u32, (u64, String, String)> = std::collections::HashMap::new();
-    for line in ps_stdout.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
-        let mut parts = trimmed.splitn(4, char::is_whitespace);
-        let pid: u32 = match parts.next().and_then(|s| s.parse().ok()) { Some(p) => p, None => continue };
-        let rss: u64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-        let etime = parts.next().unwrap_or("").to_string();
-        let command = parts.next().unwrap_or("").to_string();
-        ps_map.insert(pid, (rss, etime, command));
-    }
-
-    // ── Step 3: Batch cwd via single lsof call ───────────────────────
-    let cwd_stdout = run_with_timeout("lsof", &["-a", "-d", "cwd", "-p", &pid_list], timeout);
-
-    let mut cwd_map: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
-    for line in cwd_stdout.lines().skip(1) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 9 { continue; }
-        if let Ok(pid) = parts[1].parse::<u32>() {
-            let path = parts[8..].join(" ");
-            if path.starts_with('/') {
-                cwd_map.insert(pid, path);
-            }
-        }
-    }
-
-    // ── Step 4: Assemble results ─────────────────────────────────────
-    let mut results: Vec<PortInfo> = Vec::with_capacity(entries.len());
-
-    for entry in entries {
-        let (memory_kb, uptime, cmdline) = ps_map.get(&entry.pid)
-            .map(|(rss, etime, cmd)| (*rss, etime.as_str(), cmd.as_str()))
-            .unwrap_or((0, "", ""));
-        let raw_cwd = cwd_map.get(&entry.pid).cloned().unwrap_or_default();
-
-        let project_root = find_project_root(&raw_cwd);
-        let framework = detect_framework(&entry.process_name, cmdline, &project_root);
-        let project = match_project(&project_root, &repo_paths);
-
-        results.push(PortInfo {
-            port: entry.port,
-            pid: entry.pid,
-            process: entry.process_name,
-            cwd: project_root,
-            project,
-            framework,
-            uptime: uptime.to_string(),
-            memory_kb,
-        });
-    }
-
-    results.sort_by_key(|p| p.port);
-    Ok(results)
+    #[cfg(not(feature = "ports-module"))]
+    Err("Ports module is disabled".to_string())
 }
 
-/// Extract port number from lsof NAME field like "*:3000", "127.0.0.1:8080", "[::1]:5173"
-fn extract_port(name_field: &str) -> Option<u16> {
-    name_field.rsplit(':').next()?.parse().ok()
-}
-
-/// Filter out system/desktop apps — only show dev processes.
-/// Matches port-whisperer's isDevProcess systemApps list.
-fn is_dev_process(process_name: &str) -> bool {
-    let name = process_name.to_lowercase();
-    let system_apps = [
-        "spotify", "raycast", "tableplus", "postman", "linear", "controlce",
-        "rapportd", "superhuma", "setappage", "slack", "discord", "firefox",
-        "chrome", "google", "safari", "figma", "notion", "zoom", "teams",
-        "iterm2", "warp", "arc", "loginwindow", "windowserver", "systemuise",
-        "kernel_tas", "launchd", "mdworker", "mds_store", "cfprefsd",
-        "coreaudio", "corebrigh", "airportd", "bluetoothd", "sharingd",
-        "usernoted", "notificat", "cloudd",
-    ];
-    for app in &system_apps {
-        if name.starts_with(app) { return false; }
-    }
-    true
-}
-
-/// Walk up from cwd to find project root via marker files (package.json, Cargo.toml, etc.)
-/// Matches port-whisperer's findProjectRoot.
-fn find_project_root(cwd: &str) -> String {
-    if cwd.is_empty() { return String::new(); }
-    let markers = ["package.json", "Cargo.toml", "go.mod", "pyproject.toml", "Gemfile", "pom.xml", "build.gradle"];
-    let mut current = std::path::PathBuf::from(cwd);
-    for _ in 0..15 {
-        for marker in &markers {
-            if current.join(marker).exists() {
-                return current.to_string_lossy().to_string();
-            }
-        }
-        if !current.pop() { break; }
-    }
-    cwd.to_string()
-}
-
-/// Detect framework — first from command line, then from project files.
-/// Matches port-whisperer's detectFrameworkFromCommand + detectFramework.
-fn detect_framework(process: &str, cmdline: &str, project_root: &str) -> String {
-    // 1. Command line detection
-    let cmd = cmdline.to_lowercase();
-    if cmd.contains("next") { return "Next.js".to_string(); }
-    if cmd.contains("vite") { return "Vite".to_string(); }
-    if cmd.contains("nuxt") { return "Nuxt".to_string(); }
-    if cmd.contains("angular") || cmd.contains("ng serve") { return "Angular".to_string(); }
-    if cmd.contains("webpack") { return "Webpack".to_string(); }
-    if cmd.contains("remix") { return "Remix".to_string(); }
-    if cmd.contains("astro") { return "Astro".to_string(); }
-    if cmd.contains("gatsby") { return "Gatsby".to_string(); }
-    if cmd.contains("flask") { return "Flask".to_string(); }
-    if cmd.contains("django") || cmd.contains("manage.py") { return "Django".to_string(); }
-    if cmd.contains("uvicorn") { return "FastAPI".to_string(); }
-    if cmd.contains("rails") { return "Rails".to_string(); }
-    if cmd.contains("cargo") || cmd.contains("rustc") { return "Rust".to_string(); }
-    if cmd.contains("storybook") { return "Storybook".to_string(); }
-
-    // 2. Process name fallback
-    let name = process.to_lowercase();
-    if name == "node" { return "Node.js".to_string(); }
-    if name.starts_with("python") { return "Python".to_string(); }
-    if name.starts_with("ruby") { return "Ruby".to_string(); }
-    if name.starts_with("java") { return "Java".to_string(); }
-    if name == "go" { return "Go".to_string(); }
-    if name.contains("postgres") || name == "postmaster" { return "PostgreSQL".to_string(); }
-    if name.contains("redis") { return "Redis".to_string(); }
-    if name.contains("mongod") { return "MongoDB".to_string(); }
-    if name.contains("mysqld") { return "MySQL".to_string(); }
-    if name.contains("docker") || name.starts_with("com.docke") { return "Docker".to_string(); }
-    if name.contains("nginx") { return "nginx".to_string(); }
-
-    // 3. Project file detection (like port-whisperer's detectFramework)
-    if !project_root.is_empty() {
-        let root = Path::new(project_root);
-        if root.join("vite.config.ts").exists() || root.join("vite.config.js").exists() { return "Vite".to_string(); }
-        if root.join("next.config.js").exists() || root.join("next.config.mjs").exists() { return "Next.js".to_string(); }
-        if root.join("angular.json").exists() { return "Angular".to_string(); }
-        if root.join("Cargo.toml").exists() { return "Rust".to_string(); }
-        if root.join("go.mod").exists() { return "Go".to_string(); }
-        if root.join("manage.py").exists() { return "Django".to_string(); }
-        if root.join("Gemfile").exists() { return "Ruby".to_string(); }
-    }
-
-    String::new()
-}
-
-fn match_project(cwd: &str, repo_paths: &[String]) -> String {
-    if cwd.is_empty() { return String::new(); }
-    repo_paths
-        .iter()
-        .filter(|repo| cwd.starts_with(repo.as_str()))
-        .max_by_key(|repo| repo.len())
-        .and_then(|repo| repo.rsplit('/').next())
-        .unwrap_or("")
-        .to_string()
-}
-
+/// Transitional flat adapter. The frontend moves to the namespaced plugin
+/// command in the next task.
 #[tauri::command]
 pub async fn kill_port(pid: u32) -> Result<(), String> {
-    // SIGTERM first, then SIGKILL if needed
-    let pid_str = pid.to_string();
-    let status = Command::new("kill")
-        .arg(&pid_str)
-        .status()
-        .map_err(|e| format!("Failed to kill process {pid}: {e}"))?;
-
-    if !status.success() {
-        Command::new("kill")
-            .args(["-9", &pid_str])
-            .status()
-            .map_err(|e| format!("Failed to force-kill process {pid}: {e}"))?;
+    #[cfg(feature = "ports-module")]
+    {
+        return crate::ports_module::kill_port(pid).await;
     }
-    Ok(())
+
+    #[cfg(not(feature = "ports-module"))]
+    {
+        let _ = pid;
+        Err("Ports module is disabled".to_string())
+    }
 }
 
 // ── Pi config commands ─────────────────────────────────────────────

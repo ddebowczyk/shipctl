@@ -7,5 +7,8 @@ pub fn install<R: Runtime>(builder: Builder<R>) -> Builder<R> {
     #[cfg(feature = "todos-module")]
     let builder = builder.plugin(shep_module_todos::init());
 
+    #[cfg(feature = "ports-module")]
+    let builder = builder.plugin(shep_module_ports::init(crate::ports_module::host_services()));
+
     builder
 }
