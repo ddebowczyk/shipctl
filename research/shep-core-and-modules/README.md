@@ -101,6 +101,15 @@ capability ceiling.
 - [15-global-surface-contribution-rail.md](./15-global-surface-contribution-rail.md)
   records the generic surface/navigation contract, host cutover, failure
   containment, and preserved process-local behavior.
+- [16-ports-native-extraction.md](./16-ports-native-extraction.md) records the
+  namespaced native plugin, explicit permission resources, and disabled build.
+- [17-ports-frontend-extraction.md](./17-ports-frontend-extraction.md) records
+  the module-owned surface, state, client, and composition cutover.
+- [18-ports-plugout-gate.md](./18-ports-plugout-gate.md) records the enabled,
+  disabled, and physically source-absent verification matrix.
+- [19-skills-characterization-and-seam.md](./19-skills-characterization-and-seam.md)
+  protects the fixed project-scoped catalog and defines the Skills extraction
+  boundary.
 
 ## Target dependency shape
 

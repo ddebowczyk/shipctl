@@ -15,6 +15,7 @@
     "test:panel-persistence": "node --test scripts/tests/panelPersistence.test.ts",
     "test:panels": "node --test scripts/tests/panelRegistry.test.ts scripts/tests/panelPersistence.test.ts scripts/tests/panelTabs.test.ts",
     "test:ports-characterization": "node --test modules/ports/frontend/tests/*.test.ts && cargo test --manifest-path modules/ports/backend/Cargo.toml",
+    "test:skills-characterization": "node --test --test-concurrency=1 scripts/tests/skillsCharacterization.test.ts && cargo test --manifest-path src-tauri/Cargo.toml --test skills_characterization",
     "test:todos-characterization": "node --test --test-concurrency=1 modules/todos/frontend/tests/*.test.ts && cargo test --manifest-path modules/todos/backend/Cargo.toml",
     "verify:module-fixture-plugout": "node scripts/verify-module-fixture-plugout.mjs",
     "verify:todos-native-disabled": "pnpm tauri build --debug --no-bundle --config profiles/todos-disabled/tauri.conf.json -- --no-default-features",
