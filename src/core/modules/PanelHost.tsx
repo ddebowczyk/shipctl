@@ -1,6 +1,6 @@
 import { Component, lazy, Suspense, useMemo, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
-import type { ContributionId, ProjectRef } from "@shep/module-api";
+import type { ContributionId, ModuleHostServices, ProjectRef } from "@shep/module-api";
 
 import type { PanelRegistry } from "./panelRegistry";
 
@@ -12,6 +12,7 @@ interface PanelHostProps {
   readonly visible: boolean;
   readonly close: () => void;
   readonly setTitle: (title: string | null) => void;
+  readonly services: ModuleHostServices;
 }
 
 interface PanelRenderBoundaryProps {
@@ -74,6 +75,7 @@ export default function PanelHost({
   visible,
   close,
   setTitle,
+  services,
 }: PanelHostProps) {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const contribution = registry.panel(panelId);
@@ -117,6 +119,7 @@ export default function PanelHost({
           visible={visible}
           close={close}
           setTitle={setTitle}
+          services={services}
         />
       </Suspense>
     </PanelRenderBoundary>

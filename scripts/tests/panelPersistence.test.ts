@@ -65,7 +65,7 @@ test("known but disabled panels are distinguished from unknown panels", () => {
   const raw = {
     schemaVersion: PANEL_REFERENCE_SCHEMA_VERSION,
     instanceId: "panel-todos",
-    panelId: "core.todos",
+    panelId: BUILTIN_PANEL_IDS.todos,
     label: "To-dos",
     legacyKind: "todos",
   };

@@ -13,12 +13,12 @@ import {
   BuiltinPanelRuntimeProvider,
 } from "../../../src/core/modules/builtinPanelRuntime";
 import { createEnabledPanelRegistry } from "../../../src/core/modules/moduleComposition";
-import type { CommandState, TodoFile } from "../../../src/lib/types";
+import { MODULE_HOST_SERVICES } from "../../../src/core/modules/moduleHostServices";
+import type { CommandState } from "../../../src/lib/types";
 import { useGitStore } from "../../../src/stores/useGitStore";
 import { useRepoStore } from "../../../src/stores/useRepoStore";
 import { useSkillStore } from "../../../src/stores/useSkillStore";
 import { useTerminalStore } from "../../../src/stores/useTerminalStore";
-import { useTodoStore } from "../../../src/stores/useTodoStore";
 
 const PROJECT_PATH = "/smoke/shep";
 const PROJECT: ProjectRef = {
@@ -26,35 +26,6 @@ const PROJECT: ProjectRef = {
   name: "Shep smoke fixture",
   path: PROJECT_PATH,
 };
-
-const TODO_FILES: TodoFile[] = [
-  {
-    path: `${PROJECT_PATH}/TODO.md`,
-    relativePath: "TODO.md",
-    sections: [
-      { line: 0, title: "Ready", level: 2 },
-      { line: 3, title: "Done", level: 2 },
-    ],
-    items: [
-      {
-        line: 1,
-        text: "Verify generic panel host",
-        checked: false,
-        indent: 0,
-        section: "Ready",
-        sectionLine: 0,
-      },
-      {
-        line: 4,
-        text: "Register built-in panels",
-        checked: true,
-        indent: 0,
-        section: "Done",
-        sectionLine: 3,
-      },
-    ],
-  },
-];
 
 const COMMANDS: CommandState[] = [
   {
@@ -92,7 +63,7 @@ mockIPC(
       case "git_file_diff":
         return "@@ -1 +1 @@\n-old\n+new";
       case "read_todos":
-        return TODO_FILES;
+        return [];
       case "list_skills":
         return [
           {
@@ -138,7 +109,6 @@ useGitStore.setState({
     },
   },
 });
-useTodoStore.setState({ projectTodos: { [PROJECT_PATH]: TODO_FILES } });
 useSkillStore.setState({
   skillsByRepo: {
     [PROJECT_PATH]: [
@@ -172,7 +142,7 @@ registry.register({
 });
 
 const panelChoices = [
-  ...Object.values(BUILTIN_PANEL_DEFINITIONS).map(({ id, label }) => ({ id, label })),
+  ...registry.list().map(({ id, label }) => ({ id, label })),
   { id: "smoke.crash" as ContributionId, label: "Crash fixture" },
   { id: "missing.panel" as ContributionId, label: "Missing fixture" },
 ] as const;
@@ -225,6 +195,7 @@ function SmokeApp() {
             visible
             close={() => setRemovedCount((count) => count + 1)}
             setTitle={setTitle}
+            services={MODULE_HOST_SERVICES}
           />
         </section>
       </main>

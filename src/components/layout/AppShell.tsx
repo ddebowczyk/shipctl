@@ -10,7 +10,6 @@ import { useRepoStore } from "../../stores/useRepoStore";
 import { useCommandStore } from "../../stores/useCommandStore";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useGitStore } from "../../stores/useGitStore";
-import { useTodoStore } from "../../stores/useTodoStore";
 import { useSkillStore } from "../../stores/useSkillStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { useShallow } from "zustand/shallow";
@@ -45,6 +44,8 @@ import {
   BUILTIN_PANEL_LOADERS,
   BuiltinPanelRuntimeProvider,
   createEnabledPanelRegistry,
+  MODULE_HOST_SERVICES,
+  notifyModulesProjectRemoved,
   panelIdForTabKind,
   PanelHost,
 } from "../../core/modules";
@@ -401,7 +402,7 @@ export default function AppShell() {
         useTerminalStore.getState().removeProject(repoPath);
         useCommandStore.getState().removeProject(repoPath);
         useGitStore.getState().removeProject(repoPath);
-        useTodoStore.getState().removeProject(repoPath);
+        await notifyModulesProjectRemoved(repoPath, MODULE_HOST_SERVICES);
         useSkillStore.getState().removeProject(repoPath);
       } catch (error) {
         pushNotice({
@@ -971,6 +972,7 @@ export default function AppShell() {
                   setTitle={(title) => {
                     if (title) useTerminalStore.getState().updateTab(activeTab.id, { label: title });
                   }}
+                  services={MODULE_HOST_SERVICES}
                 />
               </BuiltinPanelRuntimeProvider>
             )}

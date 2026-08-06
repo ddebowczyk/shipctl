@@ -16,13 +16,24 @@ export {
   BUILTIN_PANEL_IDS,
   PANEL_REFERENCE_SCHEMA_VERSION,
   panelIdForTabKind,
+  tabKindForPanelId,
   toPersistedPanelReference,
 } from "./panelPersistence";
 export { default as PanelHost } from "./PanelHost";
+export {
+  ModuleProjectNavigationSurfaces,
+  ModuleSettingsSurfaces,
+} from "./ModuleSurfaces";
+export { MODULE_HOST_SERVICES } from "./moduleHostServices";
 export { ENABLED_MODULES } from "./enabledModules";
 export {
   createEnabledPanelRegistry,
   modulePanelContributions,
+  moduleProjectNavigationContributions,
+  moduleSettingsContributions,
+  notifyModulesFilesystemChanged,
+  notifyModulesProjectRemoved,
+  notifyModulesProjectsChanged,
 } from "./moduleComposition";
 export {
   BUILTIN_PANEL_LOADERS,
@@ -41,11 +52,16 @@ export type {
   ModuleId,
   ModuleDeactivation,
   ModuleHost,
+  ModuleHostServices,
   ModulePanelProps,
   PanelContribution,
   PanelHostPort,
   PanelIconDescriptor,
   PanelUnavailableMetadata,
+  ProjectNavigationContribution,
+  ProjectNavigationContributionProps,
   ProjectRef,
+  SettingsContribution,
+  SettingsContributionProps,
   ShepModule,
 } from "@shep/module-api";

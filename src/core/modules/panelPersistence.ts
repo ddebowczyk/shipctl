@@ -6,7 +6,7 @@ export const BUILTIN_PANEL_IDS = {
   git: "core.git",
   commands: "core.commands",
   launcher: "core.launcher",
-  todos: "core.todos",
+  todos: "todos.board",
 } as const satisfies Record<PanelTabKind, `${string}.${string}`>;
 
 const LEGACY_PANEL_LABELS = {
@@ -141,6 +141,11 @@ export function toPersistedPanelReference(
 
 export function panelIdForTabKind(kind: string): `${string}.${string}` | null {
   return isLegacyPanelKind(kind) ? BUILTIN_PANEL_IDS[kind] : null;
+}
+
+export function tabKindForPanelId(panelId: string): PanelTabKind | null {
+  const match = Object.entries(BUILTIN_PANEL_IDS).find(([, id]) => id === panelId);
+  return match ? match[0] as PanelTabKind : null;
 }
 
 export function hydratePanelReference(

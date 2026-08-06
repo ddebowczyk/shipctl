@@ -37,6 +37,8 @@ capability ceiling.
 
 ## Recommended decisions
 
+<!-- markdownlint-disable MD013 -->
+
 | Question | Recommendation |
 | --- | --- |
 | Runtime plugins or compiled modules? | Compiled modules now; revisit runtime installation only after repeated demand. |
@@ -51,6 +53,8 @@ capability ceiling.
 | First existing extraction | TODOs after the generic panel registry, then Ports or Skills. |
 | Hardest capabilities to move | Terminal/PTY, assistant continuity, usage, and workspace configuration. |
 | Future self-modification | Trusted local TypeScript module replacement behind an immutable shell/supervisor; no runtime native-code loading. |
+
+<!-- markdownlint-enable MD013 -->
 
 ## Study map
 
@@ -81,6 +85,11 @@ capability ceiling.
 - [09-existing-capabilities-first.md](./09-existing-capabilities-first.md)
   records the decision to defer Beads and make fully isolated existing
   capabilities the migration critical path.
+- [10-todos-characterization-and-seam.md](./10-todos-characterization-and-seam.md)
+  captures the pre-extraction TODO behavior, ownership, and compatibility seam.
+- [11-todos-frontend-extraction.md](./11-todos-frontend-extraction.md) records
+  the completed frontend extraction, host contracts, remaining native seam,
+  and verification evidence.
 
 ## Target dependency shape
 

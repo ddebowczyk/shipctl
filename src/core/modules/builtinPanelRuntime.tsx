@@ -70,8 +70,4 @@ export const BUILTIN_PANEL_LOADERS = {
       },
     };
   },
-  todos: async () => {
-    const { default: TodosPanel } = await import("../../components/todos/TodosPanel");
-    return { default: TodosPanel };
-  },
 } satisfies BuiltinPanelLoaders;

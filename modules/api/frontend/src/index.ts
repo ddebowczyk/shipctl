@@ -9,6 +9,23 @@ export type {
   ProjectRef,
 } from "./panels";
 export type {
+  ModuleHostServices,
+  ModuleNotice,
+  ModuleNoticesPort,
+  ModuleSettingsPort,
+  ModuleSettingsSnapshot,
+  ModuleSkillRef,
+  ModuleSkillsPort,
+  ModuleSkillsSnapshot,
+} from "./services";
+export type {
+  ModuleProjectLifecycle,
+  ProjectNavigationContribution,
+  ProjectNavigationContributionProps,
+  SettingsContribution,
+  SettingsContributionProps,
+} from "./surfaces";
+export type {
   ModuleDeactivation,
   ModuleHost,
   ShepModule,

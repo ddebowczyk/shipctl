@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import type { ShepModule } from "@shep/module-api";
+import type { ModuleHostServices, ShepModule } from "@shep/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 import type { BuiltinPanelLoaders } from "../../src/core/modules/builtinPanelAdapters.ts";
@@ -15,6 +15,9 @@ type ModuleComposition = typeof import("../../src/core/modules/moduleComposition
 
 let vite: ViteDevServer;
 let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
+let moduleProjectNavigationContributions: ModuleComposition["moduleProjectNavigationContributions"];
+let moduleSettingsContributions: ModuleComposition["moduleSettingsContributions"];
+let notifyModulesFilesystemChanged: ModuleComposition["notifyModulesFilesystemChanged"];
 
 before(async () => {
   vite = await createServer({
@@ -23,7 +26,12 @@ before(async () => {
     root: fileURLToPath(new URL("../..", import.meta.url)),
     server: { middlewareMode: true },
   });
-  ({ createEnabledPanelRegistry } = await vite.ssrLoadModule(
+  ({
+    createEnabledPanelRegistry,
+    moduleProjectNavigationContributions,
+    moduleSettingsContributions,
+    notifyModulesFilesystemChanged,
+  } = await vite.ssrLoadModule(
     "/src/core/modules/moduleComposition.ts",
   ) as ModuleComposition);
 });
@@ -36,7 +44,6 @@ const builtinPanelLoaders: BuiltinPanelLoaders = {
   git: async () => ({ default: () => null }),
   commands: async () => ({ default: () => null }),
   launcher: async () => ({ default: () => null }),
-  todos: async () => ({ default: () => null }),
 };
 
 const fixtureModule: ShepModule = {
@@ -53,11 +60,83 @@ const fixtureModule: ShepModule = {
       load: async () => ({ default: () => null }),
     },
   ],
+  projectNavigation: [
+    {
+      id: "fixture.project-navigation",
+      moduleId: "shep.fixture",
+      panelId: "fixture.panel",
+      load: async () => ({ default: () => null }),
+    },
+  ],
+  settings: [
+    {
+      id: "fixture.settings",
+      moduleId: "shep.fixture",
+      load: async () => ({ default: () => null }),
+    },
+  ],
 };
+
+const services = {
+  settings: {
+    getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
+    subscribe: () => () => undefined,
+    update: async () => undefined,
+  },
+  skills: {
+    getSnapshot: () => ({ byProject: {} }),
+    subscribe: () => () => undefined,
+    install: async () => undefined,
+  },
+  notices: { push: () => undefined },
+} satisfies ModuleHostServices;
 
 test("enabled profile contributes module panels", () => {
   const registry = createEnabledPanelRegistry(builtinPanelLoaders, [fixtureModule]);
   assert.equal(registry.has("fixture.panel"), true);
+});
+
+test("default profile enables the extracted TODO panel", () => {
+  const registry = createEnabledPanelRegistry(builtinPanelLoaders);
+  assert.equal(registry.has("todos.board"), true);
+});
+
+test("module surfaces compose without feature-specific host branches", () => {
+  assert.deepEqual(
+    moduleProjectNavigationContributions([fixtureModule]).map(({ id }) => id),
+    ["fixture.project-navigation"],
+  );
+  assert.deepEqual(
+    moduleSettingsContributions([fixtureModule]).map(({ id }) => id),
+    ["fixture.settings"],
+  );
+});
+
+test("project lifecycle dispatch isolates module failures", async () => {
+  const calls: string[][] = [];
+  const modules: ShepModule[] = [
+    {
+      id: "fixture.failing",
+      version: "0",
+      projectLifecycle: {
+        onFilesystemChanged: () => {
+          throw new Error("fixture failure");
+        },
+      },
+    },
+    {
+      id: "fixture.working",
+      version: "0",
+      projectLifecycle: {
+        onFilesystemChanged: (paths) => {
+          calls.push([...paths]);
+        },
+      },
+    },
+  ];
+
+  await notifyModulesFilesystemChanged(["/fixture"], services, modules);
+  assert.deepEqual(calls, [["/fixture"]]);
 });
 
 test("disabled profile omits implementation and retains recoverable identity", () => {

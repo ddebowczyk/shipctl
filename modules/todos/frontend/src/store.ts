@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { TodoFile } from "../lib/types";
-import { readTodos, toggleTodo, addTodo, moveTodo } from "../lib/tauri";
+import type { TodoFile } from "./types";
+import { readTodos, toggleTodo, addTodo, moveTodo } from "./client";
 
 interface TodoStore {
   /** TODO.md files per repo. The file on disk is the source of truth — this
@@ -33,7 +33,7 @@ interface TodoStore {
   removeProject: (repoPath: string) => void;
 }
 
-function todoFilesEqual(a: TodoFile[] | undefined, b: TodoFile[]): boolean {
+function todoFilesEqual(a: readonly TodoFile[] | undefined, b: readonly TodoFile[]): boolean {
   if (!a || a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i].path !== b[i].path || a[i].items.length !== b[i].items.length) return false;

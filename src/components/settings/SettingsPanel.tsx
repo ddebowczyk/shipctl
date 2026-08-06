@@ -9,7 +9,6 @@ import { useThemeStore } from "../../stores/useThemeStore";
 import { useKeybindingStore } from "../../stores/useKeybindingStore";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
 import { useRepoStore } from "../../stores/useRepoStore";
-import { useTodoStore } from "../../stores/useTodoStore";
 import { useTerminalSettingsStore } from "../../stores/useTerminalSettingsStore";
 import { useUsageSettingsStore } from "../../stores/useUsageSettingsStore";
 import { useUpdateStore } from "../../stores/useUpdateStore";
@@ -22,6 +21,7 @@ import { ALL_USAGE_PROVIDERS } from "../usage/usageHelpers";
 import type { CursorStyle, BudgetMode, FontFamily } from "../../lib/types";
 import { getErrorMessage } from "../../lib/errors";
 import { listMonospaceFamilies } from "../../lib/tauri";
+import { ModuleSettingsSurfaces } from "../../core/modules";
 
 interface AppMeta {
   name: string;
@@ -79,6 +79,8 @@ export default function SettingsPanel() {
   const projectError = useProjectSettingsStore((s) => s.error);
   const loadProjectSettings = useProjectSettingsStore((s) => s.loadSettings);
   const updateProjectSettings = useProjectSettingsStore((s) => s.updateSettings);
+  const repos = useRepoStore((s) => s.repos);
+  const moduleProjectPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
 
   const termSettings = useTerminalSettingsStore((s) => s.settings);
   const termHasLoaded = useTerminalSettingsStore((s) => s.hasLoaded);
@@ -403,51 +405,7 @@ export default function SettingsPanel() {
         {projectError && <div className="mt-2 text-sm text-red-300">{projectError}</div>}
       </section>
 
-      {/* ── To-dos ─────────────────────────────────────────── */}
-      <section className="settings-section">
-        <h2 className="section-label !p-0 settings-section__header">To-dos</h2>
-
-        <div className="settings-row">
-          <span className="settings-row__label flex items-center gap-2">
-            <span>Project To-dos</span>
-            <InfoTip text="Shows a To-dos row in each project that surfaces any TODO.md in the repo as a shared task list for you and your coding agents. Turning this off hides the row and stops scanning for todo files." />
-          </span>
-          <button
-            onClick={() => {
-              const enabling = !projectSettings.showTodos;
-              void updateProjectSettings({ showTodos: enabling });
-              if (enabling) {
-                const repoPaths = useRepoStore.getState().repos.map((repo) => repo.path);
-                void useTodoStore.getState().refreshAll(repoPaths);
-              }
-            }}
-            className={`option-card option-card--compact ${projectSettings.showTodos ? "selected" : ""}`}
-          >
-            {projectSettings.showTodos ? "On" : "Off"}
-          </button>
-        </div>
-
-        <div className="settings-row !mb-0">
-          <span className="settings-row__label flex items-center gap-2">
-            <span>New File Style</span>
-            <InfoTip text="The shape Shep gives a TODO.md it creates for you (when you add your first to-do in a project). Kanban board starts with Backlog / In Progress / Done columns and renders as a board; Simple list is a flat checklist. Existing files are never reformatted." />
-          </span>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => void updateProjectSettings({ todoFileStyle: "kanban" })}
-              className={`option-card option-card--compact ${projectSettings.todoFileStyle === "kanban" ? "selected" : ""}`}
-            >
-              Kanban board
-            </button>
-            <button
-              onClick={() => void updateProjectSettings({ todoFileStyle: "list" })}
-              className={`option-card option-card--compact ${projectSettings.todoFileStyle === "list" ? "selected" : ""}`}
-            >
-              Simple list
-            </button>
-          </div>
-        </div>
-      </section>
+      <ModuleSettingsSurfaces projectPaths={moduleProjectPaths} />
 
       {/* ── Terminal ───────────────────────────────────────── */}
       <section className="settings-section">

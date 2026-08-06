@@ -4,9 +4,13 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type ViteDevServer } from "vite";
 
-import type { TodoFile, TodoItem, TodoSection } from "../../src/lib/types.ts";
+import type {
+  TodoFile,
+  TodoItem,
+  TodoSection,
+} from "../../modules/todos/frontend/src/types.ts";
 
-type TodosPanelModule = typeof import("../../src/components/todos/TodosPanel.tsx");
+type TodosPanelModule = typeof import("../../modules/todos/frontend/src/TodosPanel.tsx");
 
 let vite: ViteDevServer;
 let buildColumns: TodosPanelModule["buildColumns"];
@@ -20,7 +24,7 @@ before(async () => {
     server: { hmr: false, middlewareMode: true },
   });
   ({ buildColumns, isDoneColumn } = await vite.ssrLoadModule(
-    "/src/components/todos/TodosPanel.tsx",
+    "/modules/todos/frontend/src/TodosPanel.tsx",
   ) as TodosPanelModule);
 });
 

@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
-import type { TodoFile } from "../../src/lib/types.ts";
+import type { TodoFile } from "../../modules/todos/frontend/src/types.ts";
 
-type TodoStoreModule = typeof import("../../src/stores/useTodoStore.ts");
+type TodoStoreModule = typeof import("../../modules/todos/frontend/src/store.ts");
 
 interface NativeMock {
   readTodos: (repoPath: string) => Promise<TodoFile[]>;
@@ -39,7 +39,7 @@ const nativePlugin: Plugin = {
   name: "todos-native-characterization",
   enforce: "pre",
   resolveId(source, importer) {
-    if (source === "../lib/tauri" && importer?.endsWith("/src/stores/useTodoStore.ts")) {
+    if (source === "./client" && importer?.endsWith("/modules/todos/frontend/src/store.ts")) {
       return virtualNativeId;
     }
     return null;
@@ -87,7 +87,7 @@ before(async () => {
     server: { hmr: false, middlewareMode: true },
   });
   ({ useTodoStore } = await vite.ssrLoadModule(
-    "/src/stores/useTodoStore.ts",
+    "/modules/todos/frontend/src/store.ts",
   ) as TodoStoreModule);
 });
 

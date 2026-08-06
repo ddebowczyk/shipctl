@@ -247,36 +247,6 @@ export interface CreatedWorktree {
   branch: string;
 }
 
-// ── Todos (TODO.md files) ────────────────────────────────────────────
-
-export interface TodoItem {
-  /** 0-based line index in the file; used for surgical edits. */
-  line: number;
-  /** Item text with wrapped continuation lines joined in. */
-  text: string;
-  checked: boolean;
-  /** Leading whitespace width, for rendering nested items. */
-  indent: number;
-  /** Nearest preceding markdown heading, if any. */
-  section: string | null;
-  /** Line index of that heading. */
-  sectionLine: number | null;
-}
-
-export interface TodoSection {
-  line: number;
-  title: string;
-  /** Heading level (number of #s). */
-  level: number;
-}
-
-export interface TodoFile {
-  path: string;
-  relativePath: string;
-  sections: TodoSection[];
-  items: TodoItem[];
-}
-
 // ── Agent skills ─────────────────────────────────────────────────────
 
 export interface SkillInfo {

@@ -4,11 +4,12 @@ import { PanelRegistry } from "./panelRegistry";
 import { BUILTIN_PANEL_IDS } from "./panelPersistence";
 
 type BuiltinPanelDefinition = Omit<PanelContribution, "load"> & {
-  readonly legacyKind: PanelTabKind;
+  readonly legacyKind: CoreBuiltinPanelKind;
 };
 
+export type CoreBuiltinPanelKind = Exclude<PanelTabKind, "todos">;
 export type BuiltinPanelLoaders = Readonly<
-  Record<PanelTabKind, PanelContribution["load"]>
+  Record<CoreBuiltinPanelKind, PanelContribution["load"]>
 >;
 
 export const BUILTIN_PANEL_DEFINITIONS = {
@@ -56,21 +57,7 @@ export const BUILTIN_PANEL_DEFINITIONS = {
       description: "The built-in agent launcher could not be loaded.",
     },
   },
-  todos: {
-    id: BUILTIN_PANEL_IDS.todos,
-    legacyKind: "todos",
-    moduleId: "core",
-    scope: "project",
-    label: "To-dos",
-    icon: { name: "list-todo" },
-    singleton: "per-project",
-    order: 40,
-    unavailable: {
-      title: "To-dos panel unavailable",
-      description: "The built-in project to-do browser could not be loaded.",
-    },
-  },
-} as const satisfies Record<PanelTabKind, BuiltinPanelDefinition>;
+} as const satisfies Record<CoreBuiltinPanelKind, BuiltinPanelDefinition>;
 
 export const CORE_TAB_EXCEPTIONS = {
   terminal: "PTY-backed tabs remain owned by terminal infrastructure.",

@@ -1,14 +1,21 @@
-import { useState, Fragment } from "react";
-import { Square, SquareCheckBig, SquareKanban, LayoutList, Sparkles } from "lucide-react";
-import tabKindMeta from "../../lib/tabKindMeta";
-import type { TodoFile, TodoItem, TodoSection } from "../../lib/types";
-import { renderInlineMarkdown } from "../../lib/inlineMarkdown";
-import { useTerminalStore } from "../../stores/useTerminalStore";
-import { useTodoStore } from "../../stores/useTodoStore";
-import { useSkillStore } from "../../stores/useSkillStore";
-import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
-import { useNoticeStore } from "../../stores/useNoticeStore";
-import { getErrorMessage } from "../../lib/errors";
+import { Fragment, useState, useSyncExternalStore } from "react";
+import type { ModulePanelProps } from "@shep/module-api";
+import {
+  LayoutList,
+  ListTodo,
+  Sparkles,
+  Square,
+  SquareCheckBig,
+  SquareKanban,
+} from "lucide-react";
+
+import { renderInlineMarkdown } from "./inlineMarkdown";
+import { useTodoStore } from "./store";
+import type { TodoFile, TodoItem, TodoSection } from "./types";
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 // ── Board model ──────────────────────────────────────────────────────
 
@@ -231,19 +238,26 @@ function TodoBoardView({ file, showFileLabel, columns, inbox, onToggle, onMove }
 
 // ── Panel ────────────────────────────────────────────────────────────
 
-export default function TodosPanel() {
-  const activeProjectPath = useTerminalStore((s) => s.activeProjectPath);
+export default function TodosPanel({ project, services }: ModulePanelProps) {
+  const activeProjectPath = project?.path ?? null;
   const files = useTodoStore((s) =>
     activeProjectPath ? s.projectTodos[activeProjectPath] : undefined,
   );
+  const skills = useSyncExternalStore(
+    services.skills.subscribe,
+    services.skills.getSnapshot,
+  );
   // Unknown (not yet checked) counts as present so the button doesn't flash.
-  const skillPresent = useSkillStore((s) => {
-    if (!activeProjectPath) return true;
-    const skills = s.skillsByRepo[activeProjectPath];
-    return skills ? skills.some((sk) => sk.name === "shep-todos" && sk.installed) : true;
-  });
-  const todoFileStyle = useProjectSettingsStore((s) => s.settings.todoFileStyle);
-  const pushNotice = useNoticeStore((s) => s.pushNotice);
+  const projectSkills = activeProjectPath ? skills.byProject[activeProjectPath] : undefined;
+  const skillPresent = projectSkills
+    ? projectSkills.some((skill) => skill.name === "shep-todos" && skill.installed)
+    : true;
+  const settings = useSyncExternalStore(
+    services.settings.subscribe,
+    services.settings.getSnapshot,
+  );
+  const todoFileStyle = settings.values.todoFileStyle === "list" ? "list" : "kanban";
+  const pushNotice = services.notices.push;
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [installingSkill, setInstallingSkill] = useState(false);
@@ -339,7 +353,7 @@ export default function TodosPanel() {
     if (installingSkill) return;
     setInstallingSkill(true);
     try {
-      await useSkillStore.getState().install(activeProjectPath, "shep-todos");
+      await services.skills.install(activeProjectPath, "shep-todos");
       pushNotice({
         tone: "info",
         title: "Agent skill added",
@@ -361,7 +375,7 @@ export default function TodosPanel() {
     <div className="commands-panel">
       <div className="commands-panel__header">
         <div className="commands-panel__title-wrap">
-          <span className="shrink-0">{tabKindMeta.todos.icon(15)}</span>
+          <span className="shrink-0"><ListTodo size={15} /></span>
           <div className="commands-panel__title-block">
             <div className="commands-panel__title">To-dos</div>
             <div className="commands-panel__subtitle">

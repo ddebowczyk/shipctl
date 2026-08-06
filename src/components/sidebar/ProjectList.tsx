@@ -14,7 +14,7 @@ import AssistantList from "./AssistantList";
 import TerminalList from "./TerminalList";
 import CommandsRow from "./CommandsRow";
 import GitStatusRow from "./GitStatusRow";
-import TodoRow from "./TodoRow";
+import { ModuleProjectNavigationSurfaces } from "../../core/modules";
 import { groupProjects } from "../../lib/projectGrouping";
 
 interface ProjectListProps {
@@ -261,7 +261,10 @@ export default function ProjectList({
             </CollapsibleSection>
 
             <CommandsRow badge={commandsBadge} />
-            <TodoRow repoPath={repo.path} />
+            <ModuleProjectNavigationSurfaces
+              project={{ id: repo.path, name: repo.name, path: repo.path }}
+              activeTabId={activeTabId}
+            />
             <GitStatusRow repoPath={repo.path} />
           </div>
         )}

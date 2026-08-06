@@ -1,5 +1,7 @@
 import type { ComponentType } from "react";
 
+import type { ModuleHostServices } from "./services";
+
 export type ModuleId = string;
 export type ContributionId = `${string}.${string}`;
 
@@ -26,6 +28,7 @@ export interface ModulePanelProps {
   readonly visible: boolean;
   readonly close: () => void;
   readonly setTitle: (title: string | null) => void;
+  readonly services: ModuleHostServices;
 }
 
 export interface PanelContribution {

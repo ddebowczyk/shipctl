@@ -2,9 +2,6 @@ import type { ReactNode } from "react";
 
 const MD_TOKEN = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
 
-/** Render the small subset of inline markdown that shows up in to-do items —
- *  `**bold**`, `` `code` ``, and `[text](url)` links (shown as styled text,
- *  not navigable, with the URL in the tooltip). Everything else is literal. */
 export function renderInlineMarkdown(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let last = 0;

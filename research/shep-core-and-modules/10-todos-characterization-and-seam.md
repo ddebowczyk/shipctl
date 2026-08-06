@@ -1,5 +1,9 @@
 # TODO capability characterization and seam
 
+> Historical baseline captured before frontend extraction. The resulting
+> module ownership and compatibility seam are recorded in
+> `11-todos-frontend-extraction.md`.
+
 Date: 2026-08-06
 
 Task: `shep-3w1.7.1`

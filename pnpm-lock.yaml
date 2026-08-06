@@ -17,6 +17,9 @@ importers:
       '@shep/module-api':
         specifier: workspace:*
         version: link:modules/api/frontend
+      '@shep/module-todos':
+        specifier: workspace:*
+        version: link:modules/todos/frontend
       '@shikijs/markdown-it':
         specifier: ^3.23.0
         version: 3.23.0
@@ -123,6 +126,24 @@ importers:
       react:
         specifier: ^19.2.4
         version: 19.2.4
+
+  modules/todos/frontend:
+    dependencies:
+      '@shep/module-api':
+        specifier: workspace:*
+        version: link:../../api/frontend
+      '@tauri-apps/api':
+        specifier: ^2.10.1
+        version: 2.10.1
+      lucide-react:
+        specifier: ^0.577.0
+        version: 0.577.0(react@19.2.4)
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+      zustand:
+        specifier: ^5.0.11
+        version: 5.0.11(@types/react@19.2.14)(react@19.2.4)
 
 packages:
 
