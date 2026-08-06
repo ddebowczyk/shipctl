@@ -13,12 +13,14 @@ import { createServer, type ViteDevServer } from "vite";
 type RegistryModule = typeof import("../../src/core/modules/globalSurfaceRegistry.ts");
 type HostModule = typeof import("../../src/core/modules/GlobalSurfaceHost.tsx");
 type UIStoreModule = typeof import("../../src/stores/useUIStore.ts");
+type TerminalStoreModule = typeof import("../../src/stores/useTerminalStore.ts");
 
 let vite: ViteDevServer;
 let GlobalSurfaceRegistry: RegistryModule["GlobalSurfaceRegistry"];
 let GlobalSurfaceRegistrationError: RegistryModule["GlobalSurfaceRegistrationError"];
 let GlobalSurfaceHost: HostModule["default"];
 let useUIStore: UIStoreModule["useUIStore"];
+let useTerminalStore: TerminalStoreModule["useTerminalStore"];
 
 const surface: GlobalSurfaceContribution = {
   id: "fixture.surface",
@@ -45,6 +47,7 @@ const services = {
     install: async () => undefined,
   },
   notices: { push: () => undefined },
+  externalLinks: { open: async () => undefined },
 };
 
 before(async () => {
@@ -63,6 +66,9 @@ before(async () => {
   ({ useUIStore } = await vite.ssrLoadModule(
     "/src/stores/useUIStore.ts",
   ) as UIStoreModule);
+  ({ useTerminalStore } = await vite.ssrLoadModule(
+    "/src/stores/useTerminalStore.ts",
+  ) as TerminalStoreModule);
 });
 
 after(async () => {
@@ -71,6 +77,11 @@ after(async () => {
 
 beforeEach(() => {
   useUIStore.setState({ activeGlobalSurfaceId: null });
+  useTerminalStore.setState({
+    projectState: {},
+    activeProjectPath: null,
+    tabActivity: {},
+  });
 });
 
 test("registry composes a namespaced surface and navigation action", () => {
@@ -133,6 +144,15 @@ test("global surface activation is mutually exclusive and toggles closed", () =>
 
   useUIStore.getState().toggleGlobalSurface("other.surface");
   assert.equal(useUIStore.getState().activeGlobalSurfaceId, null);
+});
+
+test("global surface activation survives project switches", () => {
+  useTerminalStore.getState().switchProject("/work/alpha");
+  useUIStore.getState().toggleGlobalSurface("fixture.surface");
+  useTerminalStore.getState().switchProject("/work/beta");
+
+  assert.equal(useTerminalStore.getState().activeProjectPath, "/work/beta");
+  assert.equal(useUIStore.getState().activeGlobalSurfaceId, "fixture.surface");
 });
 
 test("an unknown or disabled surface renders a recoverable host state", () => {

@@ -37,8 +37,13 @@ export interface ModuleNoticesPort {
   push(notice: ModuleNotice): void;
 }
 
+export interface ModuleExternalLinksPort {
+  open(url: string): Promise<void>;
+}
+
 export interface ModuleHostServices {
   readonly settings: ModuleSettingsPort;
   readonly skills: ModuleSkillsPort;
   readonly notices: ModuleNoticesPort;
+  readonly externalLinks: ModuleExternalLinksPort;
 }

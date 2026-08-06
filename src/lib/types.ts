@@ -279,8 +279,6 @@ export interface ChangedFile {
   old_path: string | null;
 }
 
-// ── Port info ───────────────────────────────────────────────────────
-
 // ── Pi config ──────────────────────────────────────────────────────
 
 export interface PiSettings {
@@ -292,17 +290,6 @@ export interface PiSettings {
 export interface PiConfig {
   settings: PiSettings;
   configuredProviders: string[];
-}
-
-export interface PortInfo {
-  port: number;
-  pid: number;
-  process: string;
-  cwd: string;
-  project: string;
-  framework: string;
-  uptime: string;
-  memory_kb: number;
 }
 
 // ── PTY output ──────────────────────────────────────────────────────

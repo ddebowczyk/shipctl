@@ -23,7 +23,6 @@ import type {
   UsageSettings,
   UsageOverview,
   UsageProjectAliasReviewItem,
-  PortInfo,
   PiConfig,
   PiSettings,
   DiffFileStat,
@@ -429,21 +428,6 @@ export interface MemoryStats {
 
 export function getMemoryStats(): Promise<MemoryStats> {
   return invoke("get_memory_stats");
-}
-
-// ── Port commands ─────────────────────────────────────────────────
-
-export const PORT_COMMANDS = {
-  list: "list_listening_ports",
-  kill: "kill_port",
-} as const;
-
-export function listListeningPorts(): Promise<PortInfo[]> {
-  return invoke(PORT_COMMANDS.list);
-}
-
-export function killPort(pid: number): Promise<void> {
-  return invoke(PORT_COMMANDS.kill, { pid });
 }
 
 // ── Pi config commands ────────────────────────────────────────────

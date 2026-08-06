@@ -1027,54 +1027,6 @@ fn editor_app_name(editor_id: &str) -> Option<&'static str> {
     }
 }
 
-// ── Port commands ─────────────────────────────────────────────────
-
-#[cfg(feature = "ports-module")]
-pub use shep_module_ports::PortInfo;
-
-#[cfg(not(feature = "ports-module"))]
-#[derive(serde::Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct PortInfo {
-    pub port: u16,
-    pub pid: u32,
-    pub process: String,
-    pub cwd: String,
-    pub project: String,
-    pub framework: String,
-    pub uptime: String,
-    pub memory_kb: u64,
-}
-
-/// Transitional flat adapter. The frontend moves to the namespaced plugin
-/// command in the next task.
-#[tauri::command]
-pub async fn list_listening_ports() -> Result<Vec<PortInfo>, String> {
-    #[cfg(feature = "ports-module")]
-    {
-        return crate::ports_module::list_listening_ports().await;
-    }
-
-    #[cfg(not(feature = "ports-module"))]
-    Err("Ports module is disabled".to_string())
-}
-
-/// Transitional flat adapter. The frontend moves to the namespaced plugin
-/// command in the next task.
-#[tauri::command]
-pub async fn kill_port(pid: u32) -> Result<(), String> {
-    #[cfg(feature = "ports-module")]
-    {
-        return crate::ports_module::kill_port(pid).await;
-    }
-
-    #[cfg(not(feature = "ports-module"))]
-    {
-        let _ = pid;
-        Err("Ports module is disabled".to_string())
-    }
-}
-
 // ── Pi config commands ─────────────────────────────────────────────
 
 #[tauri::command]

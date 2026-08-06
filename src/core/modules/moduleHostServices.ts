@@ -5,6 +5,7 @@ import type {
 } from "@shep/module-api";
 
 import type { ProjectSettings } from "../../lib/types";
+import { openUrl } from "../../lib/tauri";
 import { useNoticeStore } from "../../stores/useNoticeStore";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
 import { useSkillStore } from "../../stores/useSkillStore";
@@ -58,5 +59,8 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
     push: (notice) => {
       useNoticeStore.getState().pushNotice(notice);
     },
+  },
+  externalLinks: {
+    open: openUrl,
   },
 };

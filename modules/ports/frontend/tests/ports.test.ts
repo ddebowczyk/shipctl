@@ -1,21 +1,19 @@
 import assert from "node:assert/strict";
-import { after, before, beforeEach, test } from "node:test";
+import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createServer, type ViteDevServer } from "vite";
 
-import { PORT_COMMANDS } from "../../src/lib/tauri.ts";
-import type { PortInfo } from "../../src/lib/types.ts";
-import { BUILTIN_GLOBAL_SURFACE_IDS } from "../../src/core/modules/builtinGlobalSurfaceAdapters.ts";
+import { PORT_COMMANDS } from "../src/client.ts";
+import type { PortInfo } from "../src/types.ts";
 
-type PortsPanelModule = typeof import("../../src/components/ports/PortsPanel.tsx");
-type TerminalStoreModule = typeof import("../../src/stores/useTerminalStore.ts");
-type UIStoreModule = typeof import("../../src/stores/useUIStore.ts");
+type PortsPanelModule = typeof import("../src/PortsPanel.tsx");
+type PortsModuleEntry = typeof import("../src/index.ts");
 
 let vite: ViteDevServer;
 let portsPanel: PortsPanelModule;
-let useTerminalStore: TerminalStoreModule["useTerminalStore"];
-let useUIStore: UIStoreModule["useUIStore"];
+let portsModule: PortsModuleEntry["portsModule"];
+let PORTS_SURFACE_ID: PortsModuleEntry["PORTS_SURFACE_ID"];
 
 const fixturePort: PortInfo = {
   port: 5173,
@@ -32,39 +30,34 @@ before(async () => {
   vite = await createServer({
     configFile: false,
     optimizeDeps: { noDiscovery: true },
-    root: fileURLToPath(new URL("../..", import.meta.url)),
+    root: fileURLToPath(new URL("../../../..", import.meta.url)),
     server: { hmr: false, middlewareMode: true },
   });
   portsPanel = await vite.ssrLoadModule(
-    "/src/components/ports/PortsPanel.tsx",
+    "/modules/ports/frontend/src/PortsPanel.tsx",
   ) as PortsPanelModule;
-  ({ useTerminalStore } = await vite.ssrLoadModule(
-    "/src/stores/useTerminalStore.ts",
-  ) as TerminalStoreModule);
-  ({ useUIStore } = await vite.ssrLoadModule(
-    "/src/stores/useUIStore.ts",
-  ) as UIStoreModule);
+  ({ portsModule, PORTS_SURFACE_ID } = await vite.ssrLoadModule(
+    "/modules/ports/frontend/src/index.ts",
+  ) as PortsModuleEntry);
 });
 
 after(async () => {
   await vite.close();
 });
 
-beforeEach(() => {
-  useTerminalStore.setState({
-    projectState: {},
-    activeProjectPath: null,
-    tabActivity: {},
-  });
-  useUIStore.setState({
-    activeGlobalSurfaceId: null,
-  });
+test("Ports owns a global surface and navigation contribution", () => {
+  assert.equal(portsModule.globalSurfaces[0].id, PORTS_SURFACE_ID);
+  assert.equal(portsModule.globalSurfaces[0].moduleId, portsModule.id);
+  assert.deepEqual(
+    portsModule.globalNavigation.map(({ id, surfaceId }) => ({ id, surfaceId })),
+    [{ id: "ports.global-navigation", surfaceId: PORTS_SURFACE_ID }],
+  );
 });
 
-test("Ports frontend uses the current flat Tauri command contract", () => {
+test("Ports frontend uses the namespaced plugin command contract", () => {
   assert.deepEqual(PORT_COMMANDS, {
-    list: "list_listening_ports",
-    kill: "kill_port",
+    list: "plugin:shep-ports|list_listening_ports",
+    kill: "plugin:shep-ports|kill_port",
   });
 });
 
@@ -120,19 +113,4 @@ test("ports group by matched project with unmatched listeners last", () => {
   assert.equal(portsPanel.formatMemory(0), "—");
   assert.equal(portsPanel.formatMemory(2048), "2 MB");
   assert.equal(portsPanel.formatUptime(" 01:02 "), "01:02");
-});
-
-test("Ports is a global in-memory surface and survives project switches", () => {
-  useTerminalStore.getState().switchProject("/work/alpha");
-  useUIStore.getState().toggleGlobalSurface(BUILTIN_GLOBAL_SURFACE_IDS.ports);
-  useTerminalStore.getState().switchProject("/work/beta");
-
-  assert.equal(useTerminalStore.getState().activeProjectPath, "/work/beta");
-  assert.equal(
-    useUIStore.getState().activeGlobalSurfaceId,
-    BUILTIN_GLOBAL_SURFACE_IDS.ports,
-  );
-
-  useUIStore.getState().closeGlobalSurface();
-  assert.equal(useUIStore.getState().activeGlobalSurfaceId, null);
 });

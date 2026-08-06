@@ -167,8 +167,6 @@ pub fn run() {
             commands::get_memory_stats,
             commands::watch_repo,
             commands::unwatch_repo,
-            commands::list_listening_ports,
-            commands::kill_port,
             commands::open_url,
             commands::get_pi_config,
             commands::save_pi_settings,

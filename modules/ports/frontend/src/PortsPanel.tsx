@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCcw, Skull, ExternalLink, Folder } from "lucide-react";
-import { listListeningPorts, killPort, openUrl } from "../../lib/tauri";
-import { useNoticeStore } from "../../stores/useNoticeStore";
-import { getErrorMessage } from "../../lib/errors";
-import type { PortInfo } from "../../lib/types";
+import type { GlobalSurfaceContributionProps } from "@shep/module-api";
+
+import { listListeningPorts, killPort } from "./client";
+import type { PortInfo } from "./types";
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export function formatMemory(kb: number): string {
   if (kb === 0) return "—";
@@ -92,12 +96,11 @@ export async function stopPort(
   }
 }
 
-export default function PortsPanel() {
+export default function PortsPanel({ services }: GlobalSurfaceContributionProps) {
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [killing, setKilling] = useState<Set<number>>(new Set());
-  const pushNotice = useNoticeStore((s) => s.pushNotice);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -121,7 +124,7 @@ export default function PortsPanel() {
     setKilling((prev) => new Set(prev).add(port.pid));
     try {
       const result = await stopPort(port);
-      pushNotice(result.notice);
+      services.notices.push(result.notice);
       if (result.status === "stopped") {
         window.setTimeout(() => void refresh(), 500);
       }
@@ -132,11 +135,11 @@ export default function PortsPanel() {
         return next;
       });
     }
-  }, [pushNotice, refresh]);
+  }, [refresh, services.notices]);
 
   const handleOpenBrowser = useCallback((port: number) => {
-    void openUrl(`http://localhost:${port}`);
-  }, []);
+    void services.externalLinks.open(`http://localhost:${port}`);
+  }, [services.externalLinks]);
 
   // Group by project
   const grouped = groupPortsByProject(ports);

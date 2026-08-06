@@ -10,6 +10,7 @@ export type {
 } from "./panels";
 export type {
   ModuleHostServices,
+  ModuleExternalLinksPort,
   ModuleNotice,
   ModuleNoticesPort,
   ModuleSettingsPort,

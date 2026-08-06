@@ -13,10 +13,4 @@ export const BUILTIN_GLOBAL_SURFACE_LOADERS = {
     );
     return { default: UsagePanel };
   },
-  ports: async () => {
-    const { default: PortsPanel } = await import(
-      "../../components/ports/PortsPanel"
-    );
-    return { default: PortsPanel };
-  },
 } satisfies BuiltinGlobalSurfaceLoaders;

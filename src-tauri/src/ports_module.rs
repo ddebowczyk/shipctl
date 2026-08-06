@@ -75,14 +75,6 @@ pub fn host_services() -> HostServices {
     )
 }
 
-pub async fn list_listening_ports() -> Result<Vec<shep_module_ports::PortInfo>, String> {
-    shep_module_ports::scan_listening_ports(&host_services())
-}
-
-pub async fn kill_port(pid: u32) -> Result<(), String> {
-    shep_module_ports::terminate_port_process(&host_services(), pid)
-}
-
 fn joined_pids(pids: &[u32]) -> String {
     pids.iter()
         .map(u32::to_string)

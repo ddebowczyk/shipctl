@@ -54,7 +54,6 @@ const builtinPanelLoaders: BuiltinPanelLoaders = {
 const builtinGlobalSurfaceLoaders: BuiltinGlobalSurfaceLoaders = {
   settings: async () => ({ default: () => null }),
   usage: async () => ({ default: () => null }),
-  ports: async () => ({ default: () => null }),
 };
 
 const fixtureModule: ShepModule = {
@@ -117,6 +116,7 @@ const services = {
     install: async () => undefined,
   },
   notices: { push: () => undefined },
+  externalLinks: { open: async () => undefined },
 } satisfies ModuleHostServices;
 
 test("enabled profile contributes module panels", () => {
@@ -136,7 +136,6 @@ test("enabled profile composes global surfaces and navigation", () => {
       { id: "fixture.global-navigation", surfaceId: "fixture.global-surface" },
       { id: "core.settings-navigation", surfaceId: "core.settings" },
       { id: "core.usage-navigation", surfaceId: "core.usage" },
-      { id: "core.ports-navigation", surfaceId: "core.ports" },
     ],
   );
 });
@@ -154,6 +153,15 @@ test("default profile enables the extracted TODO panel", () => {
   const registry = createEnabledPanelRegistry(builtinPanelLoaders);
   assert.equal(registry.has("todos.board"), true);
   assert.equal(registry.panel("todos.board")?.legacyTab?.kind, "todos");
+});
+
+test("default profile enables the extracted Ports surface", () => {
+  const registry = createEnabledGlobalSurfaceRegistry(builtinGlobalSurfaceLoaders);
+  assert.equal(registry.has("ports.overview"), true);
+  assert.equal(
+    registry.navigation().some(({ id }) => id === "ports.global-navigation"),
+    true,
+  );
 });
 
 test("modules own legacy tab migration metadata", () => {

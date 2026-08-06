@@ -21,6 +21,7 @@ const services = {
     install: async () => undefined,
   },
   notices: { push: () => undefined },
+  externalLinks: { open: async () => undefined },
 };
 
 mockIPC((command) => {

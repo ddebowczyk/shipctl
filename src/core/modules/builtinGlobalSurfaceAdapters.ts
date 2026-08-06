@@ -3,7 +3,7 @@ import type {
   GlobalSurfaceContribution,
 } from "@shep/module-api";
 
-export type BuiltinGlobalSurfaceKind = "ports" | "settings" | "usage";
+export type BuiltinGlobalSurfaceKind = "settings" | "usage";
 export type BuiltinGlobalSurfaceLoaders = Readonly<
   Record<BuiltinGlobalSurfaceKind, GlobalSurfaceContribution["load"]>
 >;
@@ -11,7 +11,6 @@ export type BuiltinGlobalSurfaceLoaders = Readonly<
 export const BUILTIN_GLOBAL_SURFACE_IDS = {
   settings: "core.settings",
   usage: "core.usage",
-  ports: "core.ports",
 } as const;
 
 const BUILTIN_GLOBAL_SURFACE_DEFINITIONS = {
@@ -29,14 +28,6 @@ const BUILTIN_GLOBAL_SURFACE_DEFINITIONS = {
     unavailable: {
       title: "Usage unavailable",
       description: "The built-in usage surface could not be loaded.",
-    },
-  },
-  ports: {
-    id: BUILTIN_GLOBAL_SURFACE_IDS.ports,
-    moduleId: "core",
-    unavailable: {
-      title: "Ports unavailable",
-      description: "The built-in ports surface could not be loaded.",
     },
   },
 } as const satisfies Record<
@@ -60,14 +51,6 @@ export const BUILTIN_GLOBAL_NAVIGATION = [
     label: "Usage",
     icon: { name: "chart-no-axes-combined" },
     order: 20,
-  },
-  {
-    id: "core.ports-navigation",
-    moduleId: "core",
-    surfaceId: BUILTIN_GLOBAL_SURFACE_IDS.ports,
-    label: "Ports",
-    icon: { name: "radio" },
-    order: 30,
   },
 ] as const satisfies readonly GlobalNavigationContribution[];
 
