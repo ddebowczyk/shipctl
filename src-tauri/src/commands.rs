@@ -18,7 +18,6 @@ use crate::git::{ChangedFile, CreatedWorktree, DiffFileStat, GitStatus, Worktree
 use crate::pty::manager::PtyManager;
 use crate::pty::session::{PtyColorTheme, PtyOutput};
 use crate::skills;
-use crate::todos::{self, TodoFile};
 use crate::usage::{
     LocalUsageDetails, ProviderUsageSnapshot, UsageDb, UsageOverview, UsageProjectAliasReviewItem,
 };
@@ -738,45 +737,6 @@ pub fn get_computer_name() -> String {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
-}
-
-// ── Todo commands ───────────────────────────────────────────────────
-
-#[tauri::command]
-pub fn read_todos(repo_path: &str) -> Result<Vec<TodoFile>, String> {
-    todos::read_todos(repo_path)
-}
-
-#[tauri::command]
-pub fn toggle_todo(
-    file_path: &str,
-    line: usize,
-    expected_text: &str,
-    checked: bool,
-) -> Result<(), String> {
-    todos::toggle_todo(file_path, line, expected_text, checked)
-}
-
-#[tauri::command]
-pub fn add_todo(
-    repo_path: &str,
-    file_path: Option<&str>,
-    text: &str,
-    section_line: Option<usize>,
-    kanban: bool,
-) -> Result<(), String> {
-    todos::add_todo(repo_path, file_path, text, section_line, kanban)
-}
-
-#[tauri::command]
-pub fn move_todo(
-    file_path: &str,
-    line: usize,
-    expected_text: &str,
-    target_section_line: usize,
-    set_checked: Option<bool>,
-) -> Result<(), String> {
-    todos::move_todo(file_path, line, expected_text, target_section_line, set_checked)
 }
 
 #[tauri::command]

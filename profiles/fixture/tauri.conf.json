@@ -8,6 +8,17 @@
       "capabilities": [
         "default",
         {
+          "identifier": "todos",
+          "description": "Enables the internal TODO module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-todos:allow-read-todos",
+            "shep-todos:allow-toggle-todo",
+            "shep-todos:allow-add-todo",
+            "shep-todos:allow-move-todo"
+          ]
+        },
+        {
           "identifier": "fixture",
           "description": "Enables the inert internal module fixture command",
           "windows": ["main"],

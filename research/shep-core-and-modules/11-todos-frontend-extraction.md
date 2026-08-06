@@ -18,8 +18,9 @@ project lifecycle events.
 - `src/TodoProjectRow.tsx`: project-navigation contribution.
 - `src/TodoSettingsSection.tsx`: settings contribution.
 - `src/store.ts`: project-scoped render cache and mutations.
-- `src/client.ts`: compatibility client for the current flat Tauri command
-  names. Native namespacing follows in `shep-3w1.7.3`.
+- `src/client.ts`: module-local native client. At this historical frontend-only
+  gate it still used flat Tauri command names; `shep-3w1.7.3` subsequently
+  replaced them with namespaced plugin commands.
 - `src/types.ts`, `src/inlineMarkdown.tsx`, and `src/todos.css`: module-local
   data model and presentation resources.
 
@@ -52,13 +53,11 @@ This adapter remains intentionally until the generic tab model replaces
 `PanelTabKind` in the final host audit. It contains compatibility vocabulary
 without giving the module a dependency on host tab or terminal stores.
 
-## Remaining native seam
+## Native seam at this gate
 
-The Rust TODO commands still live in `src-tauri/src/todos.rs` and retain their
-flat invoke names for this compile-green stage. The next task moves those
-commands into `modules/todos/backend`, registers the plugin through the native
-module profile, and adds explicit capabilities without changing frontend
-behavior.
+The Rust TODO commands still lived in `src-tauri/src/todos.rs` and retained
+their flat invoke names at this compile-green gate. The subsequent native
+extraction is recorded in `12-todos-native-extraction.md`.
 
 ## Verification contract
 

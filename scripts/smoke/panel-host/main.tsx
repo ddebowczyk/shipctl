@@ -62,7 +62,7 @@ mockIPC(
         return "Panel host smoke fixture";
       case "git_file_diff":
         return "@@ -1 +1 @@\n-old\n+new";
-      case "read_todos":
+      case "plugin:shep-todos|read_todos":
         return [];
       case "list_skills":
         return [

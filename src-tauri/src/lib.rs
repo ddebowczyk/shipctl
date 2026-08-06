@@ -7,7 +7,6 @@ mod menu;
 mod pi_config;
 mod pty;
 mod skills;
-mod todos;
 mod usage;
 mod watcher;
 mod workspace;
@@ -150,10 +149,6 @@ pub fn run() {
             commands::git_switch_branch,
             commands::git_create_branch,
             commands::git_diff_stats,
-            commands::read_todos,
-            commands::toggle_todo,
-            commands::add_todo,
-            commands::move_todo,
             commands::list_skills,
             commands::setup_skill,
             commands::remove_skill,

@@ -90,6 +90,9 @@ capability ceiling.
 - [11-todos-frontend-extraction.md](./11-todos-frontend-extraction.md) records
   the completed frontend extraction, host contracts, remaining native seam,
   and verification evidence.
+- [12-todos-native-extraction.md](./12-todos-native-extraction.md) records the
+  namespaced internal plugin, explicit permissions, native feature profile,
+  and removal of flat command forwarding.
 
 ## Target dependency shape
 

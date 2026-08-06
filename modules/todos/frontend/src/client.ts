@@ -2,8 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { TodoFile } from "./types";
 
+export const TODO_COMMANDS = {
+  read: "plugin:shep-todos|read_todos",
+  toggle: "plugin:shep-todos|toggle_todo",
+  add: "plugin:shep-todos|add_todo",
+  move: "plugin:shep-todos|move_todo",
+} as const;
+
 export function readTodos(repoPath: string): Promise<TodoFile[]> {
-  return invoke("read_todos", { repoPath });
+  return invoke(TODO_COMMANDS.read, { repoPath });
 }
 
 export function toggleTodo(
@@ -12,7 +19,7 @@ export function toggleTodo(
   expectedText: string,
   checked: boolean,
 ): Promise<void> {
-  return invoke("toggle_todo", { filePath, line, expectedText, checked });
+  return invoke(TODO_COMMANDS.toggle, { filePath, line, expectedText, checked });
 }
 
 export function addTodo(
@@ -22,7 +29,7 @@ export function addTodo(
   sectionLine: number | null,
   kanban: boolean,
 ): Promise<void> {
-  return invoke("add_todo", { repoPath, filePath, text, sectionLine, kanban });
+  return invoke(TODO_COMMANDS.add, { repoPath, filePath, text, sectionLine, kanban });
 }
 
 export function moveTodo(
@@ -32,7 +39,7 @@ export function moveTodo(
   targetSectionLine: number,
   setChecked: boolean | null,
 ): Promise<void> {
-  return invoke("move_todo", {
+  return invoke(TODO_COMMANDS.move, {
     filePath,
     line,
     expectedText,

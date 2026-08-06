@@ -32,7 +32,20 @@
       }
     ],
     "security": {
-      "capabilities": ["default"],
+      "capabilities": [
+        "default",
+        {
+          "identifier": "todos",
+          "description": "Enables the internal TODO module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-todos:allow-read-todos",
+            "shep-todos:allow-toggle-todo",
+            "shep-todos:allow-add-todo",
+            "shep-todos:allow-move-todo"
+          ]
+        }
+      ],
       "csp": {
         "default-src": "'self' customprotocol: asset:",
         "script-src": "'self' 'wasm-unsafe-eval'",
