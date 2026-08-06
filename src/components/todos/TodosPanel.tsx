@@ -22,7 +22,7 @@ interface Column {
   cards: Card[];
 }
 
-function isDoneColumn(title: string): boolean {
+export function isDoneColumn(title: string): boolean {
   // Strip leading emoji/symbols so "✅ Done" matches like "Done".
   const plain = title.replace(/^[^\p{L}\p{N}]+/u, "").trim();
   return /^(done|complete|completed|shipped|finished)\b/i.test(plain);
@@ -41,7 +41,7 @@ function pushItem(cards: Card[], item: TodoItem) {
  *  common wins) and make every heading at that level a column. Items under
  *  deeper headings roll up into the enclosing column; items above the first
  *  column land in a read-only inbox. */
-function buildColumns(file: TodoFile): { columns: Column[]; inbox: Card[] } {
+export function buildColumns(file: TodoFile): { columns: Column[]; inbox: Card[] } {
   const ownerCounts = new Map<number, number>();
   for (const item of file.items) {
     if (item.sectionLine == null) continue;
