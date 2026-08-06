@@ -1,0 +1,4 @@
+[build]
+# Preserve the artifact paths consumed by the existing Tauri build, archive,
+# release, and documentation workflows after introducing the root workspace.
+target-dir = "src-tauri/target"
