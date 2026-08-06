@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -186,4 +187,14 @@ test("removing a project evicts only its process-local render cache", () => {
   useSkillStore.getState().removeProject("/alpha");
 
   assert.deepEqual(useSkillStore.getState().skillsByRepo, { "/beta": beta });
+});
+
+test("native client uses only namespaced Skills plugin commands", async () => {
+  const clientPath = fileURLToPath(new URL("../../src/lib/tauri.ts", import.meta.url));
+  const client = await readFile(clientPath, "utf8");
+
+  for (const command of ["list_skills", "setup_skill", "remove_skill"]) {
+    assert.match(client, new RegExp(`invoke\\(\"plugin:shep-skills\\|${command}\"`));
+    assert.doesNotMatch(client, new RegExp(`invoke\\(\"${command}\"`));
+  }
 });

@@ -113,6 +113,9 @@ capability ceiling.
 - [20-skills-host-rails.md](./20-skills-host-rails.md) records the generic
   project-action contribution, optional Skills provider, and temporary
   compatibility boundary used for safe extraction.
+- [21-skills-native-extraction.md](./21-skills-native-extraction.md) records the
+  namespaced Skills plugin, module-owned policy and resources, exact project
+  authority port, and Skills-disabled native profile.
 
 ## Target dependency shape
 

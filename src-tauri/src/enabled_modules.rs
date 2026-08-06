@@ -10,5 +10,10 @@ pub fn install<R: Runtime>(builder: Builder<R>) -> Builder<R> {
     #[cfg(feature = "ports-module")]
     let builder = builder.plugin(shep_module_ports::init(crate::ports_module::host_services()));
 
+    #[cfg(feature = "skills-module")]
+    let builder = builder.plugin(shep_module_skills::init(
+        crate::skills_module::host_services(),
+    ));
+
     builder
 }

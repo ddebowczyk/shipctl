@@ -8,7 +8,8 @@ mod pi_config;
 #[cfg(feature = "ports-module")]
 mod ports_module;
 mod pty;
-mod skills;
+#[cfg(feature = "skills-module")]
+mod skills_module;
 mod usage;
 mod watcher;
 mod workspace;
@@ -151,9 +152,6 @@ pub fn run() {
             commands::git_switch_branch,
             commands::git_create_branch,
             commands::git_diff_stats,
-            commands::list_skills,
-            commands::setup_skill,
-            commands::remove_skill,
             commands::check_command_exists,
             commands::get_usage_settings,
             commands::save_usage_settings,

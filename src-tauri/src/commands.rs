@@ -17,7 +17,6 @@ use crate::git;
 use crate::git::{ChangedFile, CreatedWorktree, DiffFileStat, GitStatus, WorktreeEntry};
 use crate::pty::manager::PtyManager;
 use crate::pty::session::{PtyColorTheme, PtyOutput};
-use crate::skills;
 use crate::usage::{
     LocalUsageDetails, ProviderUsageSnapshot, UsageDb, UsageOverview, UsageProjectAliasReviewItem,
 };
@@ -737,21 +736,6 @@ pub fn get_computer_name() -> String {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
-}
-
-#[tauri::command]
-pub fn list_skills(repo_path: &str) -> Vec<skills::SkillInfo> {
-    skills::list_skills(repo_path)
-}
-
-#[tauri::command]
-pub fn setup_skill(repo_path: &str, name: &str) -> Result<(), String> {
-    skills::setup_skill(repo_path, name)
-}
-
-#[tauri::command]
-pub fn remove_skill(repo_path: &str, name: &str) -> Result<(), String> {
-    skills::remove_skill(repo_path, name)
 }
 
 #[tauri::command]

@@ -15,10 +15,11 @@ name = "shep_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["todos-module", "ports-module"]
+default = ["todos-module", "ports-module", "skills-module"]
 fixture-module = ["dep:shep-module-fixture"]
 todos-module = ["dep:shep-module-todos"]
 ports-module = ["dep:shep-module-ports"]
+skills-module = ["dep:shep-module-skills"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
@@ -47,3 +48,4 @@ uuid = { version = "1", features = ["v4"] }
 shep-module-fixture = { package = "tauri-plugin-shep-fixture", path = "../modules/fixture/backend", optional = true }
 shep-module-todos = { package = "tauri-plugin-shep-todos", path = "../modules/todos/backend", optional = true }
 shep-module-ports = { package = "tauri-plugin-shep-ports", path = "../modules/ports/backend", optional = true }
+shep-module-skills = { package = "tauri-plugin-shep-skills", path = "../modules/skills/backend", optional = true }

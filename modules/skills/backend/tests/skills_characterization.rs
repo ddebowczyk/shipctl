@@ -1,9 +1,8 @@
-#[path = "../src/skills.rs"]
-mod skills;
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use shep_module_skills::{has_skill, inspect_skills, install_skill, uninstall_skill};
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
@@ -24,10 +23,6 @@ impl TempRoot {
     fn path(&self) -> &Path {
         &self.0
     }
-
-    fn as_string(&self) -> String {
-        self.0.to_string_lossy().into_owned()
-    }
 }
 
 impl Drop for TempRoot {
@@ -40,7 +35,7 @@ impl Drop for TempRoot {
 fn unavailable_project_still_returns_the_fixed_uninstalled_catalog() {
     let fixture = TempRoot::new("missing");
     let missing = fixture.path().join("not-present");
-    let catalog = skills::list_skills(&missing.to_string_lossy());
+    let catalog = inspect_skills(&missing);
 
     assert_eq!(
         catalog
@@ -63,14 +58,14 @@ fn installed_state_is_file_existence_not_metadata_validity() {
     )
     .unwrap();
 
-    let catalog = skills::list_skills(&fixture.as_string());
+    let catalog = inspect_skills(fixture.path());
     let todos = catalog
         .iter()
         .find(|skill| skill.name == "shep-todos")
         .unwrap();
 
     assert!(todos.installed);
-    assert!(!skills::has_skill(&fixture.as_string(), "orchestrate"));
+    assert!(!has_skill(fixture.path(), "orchestrate"));
 }
 
 #[test]
@@ -78,17 +73,17 @@ fn setup_and_remove_are_scoped_to_the_requested_project_root() {
     let alpha = TempRoot::new("alpha");
     let beta = TempRoot::new("beta");
 
-    skills::setup_skill(&alpha.as_string(), "shep-todos").unwrap();
+    install_skill(alpha.path(), "shep-todos").unwrap();
 
-    assert!(skills::has_skill(&alpha.as_string(), "shep-todos"));
-    assert!(!skills::has_skill(&beta.as_string(), "shep-todos"));
+    assert!(has_skill(alpha.path(), "shep-todos"));
+    assert!(!has_skill(beta.path(), "shep-todos"));
     assert!(alpha
         .path()
         .join(".claude/skills/shep-todos/SKILL.md")
         .is_file());
 
-    skills::remove_skill(&alpha.as_string(), "shep-todos").unwrap();
-    assert!(!skills::has_skill(&alpha.as_string(), "shep-todos"));
+    uninstall_skill(alpha.path(), "shep-todos").unwrap();
+    assert!(!has_skill(alpha.path(), "shep-todos"));
     assert!(!alpha.path().join(".claude/skills/shep-todos").exists());
 }
 
@@ -99,6 +94,6 @@ fn mutations_reject_unavailable_or_non_directory_roots() {
     let file = fixture.path().join("file");
     fs::write(&file, "not a project directory\n").unwrap();
 
-    assert!(skills::setup_skill(&missing.to_string_lossy(), "shep-todos").is_err());
-    assert!(skills::setup_skill(&file.to_string_lossy(), "shep-todos").is_err());
+    assert!(install_skill(&missing, "shep-todos").is_err());
+    assert!(install_skill(&file, "shep-todos").is_err());
 }

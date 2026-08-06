@@ -303,15 +303,15 @@ export function gitListBranches(path: string): Promise<string[]> {
 }
 
 export function listSkills(repoPath: string): Promise<SkillInfo[]> {
-  return invoke("list_skills", { repoPath });
+  return invoke("plugin:shep-skills|list_skills", { repoPath });
 }
 
 export function setupSkill(repoPath: string, name: string): Promise<void> {
-  return invoke("setup_skill", { repoPath, name });
+  return invoke("plugin:shep-skills|setup_skill", { repoPath, name });
 }
 
 export function removeSkill(repoPath: string, name: string): Promise<void> {
-  return invoke("remove_skill", { repoPath, name });
+  return invoke("plugin:shep-skills|remove_skill", { repoPath, name });
 }
 
 export function gitListWorktrees(path: string): Promise<WorktreeEntry[]> {
