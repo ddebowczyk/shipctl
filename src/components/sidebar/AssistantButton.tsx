@@ -1,6 +1,5 @@
 import { useState, useCallback } from "react";
 import type { TerminalTabData, TabActivity } from "../../lib/types";
-import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { handleActionKey } from "../../lib/a11y";
 import { FolderInput, X } from "lucide-react";
@@ -29,9 +28,8 @@ export default function AssistantButton({
   onMoveTab,
 }: AssistantButtonProps) {
   const contributedIcon = tab.modulePresentation?.icon;
-  const logoUrl = contributedIcon?.src ?? (tab.assistantId ? assistantLogoSrc[tab.assistantId] : null);
-  const logoClassName = contributedIcon?.className
-    ?? (tab.assistantId ? getAssistantLogoClass(tab.assistantId) : undefined);
+  const logoUrl = contributedIcon?.src ?? null;
+  const logoClassName = contributedIcon?.className;
   const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.ptyId]);
   const repos = useRepoStore((s) => s.repos);
   const groups = useRepoStore((s) => s.groups);

@@ -33,10 +33,21 @@ export interface ModuleNotice {
   readonly tone: "info" | "success" | "error";
   readonly title: string;
   readonly message?: string;
+  readonly actions?: readonly ModuleNoticeAction[];
+}
+
+export interface ModuleNoticeAction {
+  readonly label: string;
+  readonly variant?: "primary" | "secondary";
+  readonly onClick: () => void;
+}
+
+export interface ModuleNoticeOptions {
+  readonly durationMs?: number;
 }
 
 export interface ModuleNoticesPort {
-  push(notice: ModuleNotice): void;
+  push(notice: ModuleNotice, options?: ModuleNoticeOptions): void;
 }
 
 export interface ModuleExternalLinksPort {
@@ -102,6 +113,45 @@ export interface ModuleTerminalSessionUpdate {
   readonly presentation?: ModuleTerminalSessionPresentation;
 }
 
+export type ModuleTerminalOutputEvent =
+  | { readonly type: "data"; readonly data: string }
+  | { readonly type: "exit"; readonly exitCode: number | null };
+
+export interface ModuleTerminalColorTheme {
+  readonly foreground: string;
+  readonly background: string;
+  readonly palette: readonly string[];
+}
+
+export interface ModuleManagedTerminalStartContext {
+  readonly columns: number;
+  readonly rows: number;
+  readonly environment: Readonly<Record<string, string>>;
+  readonly colorTheme: ModuleTerminalColorTheme;
+}
+
+export interface ModuleManagedTerminalStartResult {
+  /** Native terminal identity; interpreted only by the host terminal adapter. */
+  readonly terminalId: number;
+  readonly ownerMetadata?: unknown;
+  readonly presentation?: ModuleTerminalSessionPresentation;
+}
+
+export interface ModuleManagedTerminalSessionLaunchRequest {
+  readonly projectPath: string;
+  readonly ownerKey: string;
+  readonly cwd: string;
+  readonly label: string;
+  readonly ownerMetadata?: unknown;
+  readonly presentation?: ModuleTerminalSessionPresentation;
+  readonly columns: number;
+  readonly rows: number;
+  readonly start: (
+    context: ModuleManagedTerminalStartContext,
+    onOutput: (event: ModuleTerminalOutputEvent) => void,
+  ) => Promise<ModuleManagedTerminalStartResult>;
+}
+
 export interface ModuleTerminalDimensions {
   readonly columns: number;
   readonly rows: number;
@@ -142,6 +192,9 @@ export type ModuleTerminalSessionLifecycleEvent =
 export interface ModuleTerminalSessionsPort {
   getDimensions(): ModuleTerminalDimensions;
   launch(request: ModuleTerminalSessionLaunchRequest): Promise<ModuleTerminalSession>;
+  launchManaged(
+    request: ModuleManagedTerminalSessionLaunchRequest,
+  ): Promise<ModuleTerminalSession>;
   update(
     sessionId: string,
     patch: ModuleTerminalSessionUpdate,

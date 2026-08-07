@@ -83,6 +83,7 @@ function fixtureServices(options: {
         listener?.({ type: "started", session });
         return session;
       },
+      launchManaged: async () => { throw new Error("not used"); },
       update: async (sessionId, patch) => ({
         id: sessionId,
         projectPath: "/repo",

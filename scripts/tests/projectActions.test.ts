@@ -60,6 +60,7 @@ const services = {
       ownerKey: request.ownerKey,
       label: request.label,
     }),
+    launchManaged: async () => { throw new Error("not used"); },
     update: async (sessionId, patch) => ({
       id: sessionId,
       projectPath: "/fixture",

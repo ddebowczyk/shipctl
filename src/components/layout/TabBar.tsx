@@ -5,7 +5,6 @@ import { useUIStore } from "../../stores/useUIStore";
 import { useShallow } from "zustand/shallow";
 import { Circle, FolderInput, FolderTree, GitBranch, List, PanelsTopLeft, SquareTerminal } from "lucide-react";
 import type { PanelContribution } from "@shep/module-api";
-import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
 import { handleActionKey } from "../../lib/a11y";
 import { useRepoStore } from "../../stores/useRepoStore";
 import { useProjectFactsMap } from "../../core/modules";
@@ -112,12 +111,6 @@ function TabIcon({ tab, panels }: { tab: UnifiedTab; panels: readonly PanelContr
   if ((tab.kind === "terminal" || tab.kind === "assistant") && tab.modulePresentation?.icon) {
     const icon = tab.modulePresentation.icon;
     return <img src={icon.src} alt={icon.alt ?? ""} width={12} height={12} className={icon.className} />;
-  }
-  if (tab.kind === "assistant" && tab.assistantId) {
-    const logoUrl = assistantLogoSrc[tab.assistantId];
-    if (logoUrl) {
-      return <img src={logoUrl} alt="" width={12} height={12} className={getAssistantLogoClass(tab.assistantId)} />;
-    }
   }
   if (tab.kind === "panel") {
     const panel = panels.find(({ id }) => id === tab.panelId);

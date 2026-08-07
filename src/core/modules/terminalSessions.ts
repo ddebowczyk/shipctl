@@ -7,7 +7,7 @@ import type {
 
 export type TerminalSessionsRuntime = Pick<
   ModuleTerminalSessionsPort,
-  "launch" | "update" | "stop" | "focus"
+  "launch" | "launchManaged" | "update" | "stop" | "focus"
 >;
 
 type TerminalSessionNotification = Extract<
@@ -87,6 +87,7 @@ export async function requestTerminalSessionOwnerAction(
 export const MODULE_TERMINAL_SESSIONS: ModuleTerminalSessionsPort = {
   getDimensions: () => dimensionsProvider(),
   launch: (request) => getRuntime().launch(request),
+  launchManaged: (request) => getRuntime().launchManaged(request),
   update: (sessionId, patch) => getRuntime().update(sessionId, patch),
   stop: (sessionId) => getRuntime().stop(sessionId),
   focus: (sessionId) => getRuntime().focus(sessionId),

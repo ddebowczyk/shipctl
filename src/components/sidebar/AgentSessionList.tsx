@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 import type { TabActivity, TerminalTabData } from "../../lib/types";
-import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
 import { handleActionKey } from "../../lib/a11y";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useRepoStore } from "../../stores/useRepoStore";
@@ -43,9 +42,8 @@ function AgentSessionRow({
 }) {
   const { tab, projectName, branchName } = item;
   const contributedIcon = tab.modulePresentation?.icon;
-  const logoUrl = contributedIcon?.src ?? (tab.assistantId ? assistantLogoSrc[tab.assistantId] : null);
-  const logoClassName = contributedIcon?.className
-    ?? (tab.assistantId ? getAssistantLogoClass(tab.assistantId) : undefined);
+  const logoUrl = contributedIcon?.src ?? null;
+  const logoClassName = contributedIcon?.className;
   const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.ptyId]);
   const repos = useRepoStore((s) => s.repos);
   const groups = useRepoStore((s) => s.groups);

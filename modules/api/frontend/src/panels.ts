@@ -43,6 +43,11 @@ export interface PanelContribution {
   readonly menuEvent?: string;
   readonly singleton: "per-project" | "global" | false;
   readonly order?: number;
+  /** Places this project panel in the generic new-session menu. */
+  readonly newSession?: {
+    readonly label?: string;
+    readonly order?: number;
+  };
   readonly requiredCapabilities?: readonly ContributionId[];
   readonly unavailable?: PanelUnavailableMetadata;
   /** Module-owned migration metadata for tabs persisted before generic panels. */

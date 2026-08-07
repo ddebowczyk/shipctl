@@ -22,11 +22,6 @@ import {
   openInEditor,
   refreshUsageData,
   shutdownAndQuit,
-  discardAssistantSession,
-  listRestorableAssistantSessions,
-  takeAssistantSessionStartupWarning,
-  updateAssistantSessionLabel,
-  updateAssistantSessionPlacement,
 } from "../../lib/tauri";
 import { useEditorStore } from "../../stores/useEditorStore";
 import { useTerminalSettingsStore } from "../../stores/useTerminalSettingsStore";
@@ -39,9 +34,8 @@ import { useNoticeStore } from "../../stores/useNoticeStore";
 import {
   BUILTIN_GLOBAL_SURFACE_IDS,
   BUILTIN_GLOBAL_SURFACE_LOADERS,
-  BUILTIN_PANEL_LOADERS,
+  activateModules,
   bindTerminalSessionDimensions,
-  BuiltinPanelRuntimeProvider,
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
   GlobalSurfaceHost,
@@ -50,25 +44,19 @@ import {
   notifyModulesBeforeShutdown,
   notifyModulesProjectOpened,
   notifyModulesProjectRemoved,
+  notifyModulesProjectsChanged,
   panelIdForTab,
   PanelHost,
 } from "../../core/modules";
-import type { BuiltinPanelRuntimeValue } from "../../core/modules";
 import { matchesPanelShortcut } from "../../core/modules/panelShortcuts";
 
-import type {
-  AssistantSessionRecord,
-  TabCycleDirection,
-  TerminalTabData,
-  UnifiedTab,
-  SessionMode,
-} from "../../lib/types";
+import type { TabCycleDirection, TerminalTabData, UnifiedTab } from "../../lib/types";
 const LAST_REPO_STORAGE_KEY = "shep:last-repo-path";
 
 // Stable empty arrays to avoid infinite re-render loops with zustand v5's
 // useSyncExternalStore — selectors must return the same reference for the same state.
 const EMPTY_TABS: UnifiedTab[] = [];
-const PANEL_REGISTRY = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
+const PANEL_REGISTRY = createEnabledPanelRegistry(null);
 const MODULE_PANEL_CONTRIBUTIONS = PANEL_REGISTRY.list()
   .filter((panel) => panel.moduleId !== "core");
 const GLOBAL_SURFACE_REGISTRY = createEnabledGlobalSurfaceRegistry(
@@ -87,8 +75,6 @@ export default function AppShell() {
   const pushNotice = useNoticeStore((s) => s.pushNotice);
   const {
     spawnBlankShell,
-    launchAssistant,
-    resumeAssistant,
     closeTab,
     killProjectPtys,
     requestTerminalSessionPlacement,
@@ -96,7 +82,6 @@ export default function AppShell() {
   } = usePty();
 
   const initialProjectAttemptedRef = useRef(false);
-  const assistantRestoreAttemptedRef = useRef(false);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
   const lastTabCycleAtRef = useRef(0);
@@ -170,6 +155,18 @@ export default function AppShell() {
   const { loadSettings: loadTerminalSettings } = useTerminalSettingsStore.getState();
   const { fetchSnapshots: fetchUsageSnapshots } = useUsageStore.getState();
   const { loadSettings: loadUsageSettings } = useUsageSettingsStore.getState();
+
+  useEffect(() => {
+    const deactivate = activateModules(MODULE_HOST_SERVICES);
+    return () => { void deactivate(); };
+  }, []);
+
+  useEffect(() => {
+    void notifyModulesProjectsChanged(
+      repos.map((repo) => repo.path),
+      MODULE_HOST_SERVICES,
+    );
+  }, [repos]);
 
   useEffect(() => {
     fetchRepos();
@@ -266,23 +263,10 @@ export default function AppShell() {
           });
           return;
         }
-      } else if (tab.restoreRecordId) {
-        try {
-          await updateAssistantSessionPlacement(tab.restoreRecordId, destinationPath);
-        } catch (error) {
-          pushNotice({
-            tone: "error",
-            title: "Couldn’t move assistant session",
-            message: getErrorMessage(error),
-          });
-          return;
-        }
       }
       if (!destinationStore.moveTab(tabId, destinationPath)) {
         if (tab.moduleSessionId) {
           void requestTerminalSessionPlacement(tab.moduleSessionId, sourcePath).catch(() => {});
-        } else if (tab.restoreRecordId) {
-          void updateAssistantSessionPlacement(tab.restoreRecordId, sourcePath).catch(() => {});
         }
         return;
       }
@@ -313,17 +297,6 @@ export default function AppShell() {
           pushNotice({
             tone: "error",
             title: "Couldn’t rename session",
-            message: getErrorMessage(error),
-          });
-          return;
-        }
-      } else if ((tab.kind === "terminal" || tab.kind === "assistant") && tab.restoreRecordId) {
-        try {
-          await updateAssistantSessionLabel(tab.restoreRecordId, label);
-        } catch (error) {
-          pushNotice({
-            tone: "error",
-            title: "Couldn’t rename assistant session",
             message: getErrorMessage(error),
           });
           return;
@@ -472,23 +445,20 @@ export default function AppShell() {
   }, [closeTab]);
 
   const handleNewAssistant = useCallback(() => {
-    useTerminalStore.getState().addPanelTab("launcher");
-  }, []);
-
-  const handleStartSession = useCallback(
-    async (assistantId: string, mode: SessionMode, model?: string) => {
-      const { cols, rows } = getTerminalDimensions();
-      const ptyId = await launchAssistant(assistantId, cols, rows, mode, model);
-      if (ptyId) {
-        // Remove the launcher panel tab — the new terminal tab is now active
-        useTerminalStore.getState().removePanelTab("launcher");
-        useUIStore.getState().closeGlobalSurface();
-        return true;
-      }
-      return false;
-    },
-    [launchAssistant, getTerminalDimensions],
-  );
+    const launcher = MODULE_PANEL_CONTRIBUTIONS
+      .filter((panel) => panel.newSession)
+      .sort((left, right) => (left.newSession?.order ?? 0) - (right.newSession?.order ?? 0))[0];
+    if (!launcher) {
+      pushNotice({
+        tone: "info",
+        title: "Agent launcher unavailable",
+        message: "No enabled module provides an agent session launcher.",
+      });
+      return;
+    }
+    useTerminalStore.getState().addContributedPanelTab(launcher.id, launcher.label);
+    useUIStore.getState().closeGlobalSurface();
+  }, [pushNotice]);
 
   const handleNewShell = useCallback(() => {
     useUIStore.getState().closeGlobalSurface();
@@ -531,94 +501,6 @@ export default function AppShell() {
       void handleSelectRepo(initialRepo.path);
     }
   }, [repos, activeRepoPath, handleSelectRepo]);
-
-  // Restore provider sessions independently of the currently selected project.
-  // Records whose placement project is no longer registered stay on disk and
-  // are reported to the user instead of being silently discarded.
-  useEffect(() => {
-    if (assistantRestoreAttemptedRef.current || repos.length === 0) return;
-    assistantRestoreAttemptedRef.current = true;
-
-    const restoreSessions = async () => {
-      function showRestoreRecovery(record: AssistantSessionRecord, message: string) {
-        pushNotice(
-          {
-            tone: "info",
-            title: `Couldn’t restore ${record.label}`,
-            message: `${message} The saved session was kept for a future retry.`,
-            actions: [
-              {
-                label: "Retry",
-                onClick: () => void restoreRecord(record),
-              },
-              {
-                label: "Discard saved session",
-                variant: "secondary",
-                onClick: () => void discardSavedRecord(record),
-              },
-            ],
-          },
-          { durationMs: 0 },
-        );
-      }
-
-      async function discardSavedRecord(record: AssistantSessionRecord) {
-        try {
-          await discardAssistantSession(record.recordId);
-          pushNotice({
-            tone: "success",
-            title: `Discarded ${record.label}`,
-            message: "Shep will not attempt to restore this saved session again.",
-          });
-        } catch (error) {
-          showRestoreRecovery(record, getErrorMessage(error));
-        }
-      }
-
-      async function restoreRecord(record: AssistantSessionRecord) {
-        if (
-          !useRepoStore.getState().repos.some((repo) => repo.path === record.placementProjectPath)
-        ) {
-          showRestoreRecovery(
-            record,
-            "Its placement project is no longer registered in Shep.",
-          );
-          return;
-        }
-
-        try {
-          const { cols, rows } = getTerminalDimensions();
-          await resumeAssistant(record.recordId, cols, rows);
-        } catch (error) {
-          showRestoreRecovery(record, getErrorMessage(error));
-        }
-      }
-
-      try {
-        const startupWarning = await takeAssistantSessionStartupWarning();
-        if (startupWarning) {
-          pushNotice({
-            tone: "info",
-            title: "Assistant sessions were not restored",
-            message: startupWarning,
-          });
-        }
-
-        const records = await listRestorableAssistantSessions();
-        for (const record of records) {
-          await restoreRecord(record);
-        }
-      } catch (error) {
-        pushNotice({
-          tone: "info",
-          title: "Assistant sessions were not restored",
-          message: getErrorMessage(error),
-        });
-      }
-    };
-
-    void restoreSessions();
-  }, [getTerminalDimensions, pushNotice, repos, resumeAssistant]);
 
   // All native exit routes are confirmed, including Cmd+Q with no active PTYs.
   const quitDialogOpenRef = useRef(false);
@@ -737,12 +619,6 @@ export default function AppShell() {
     name: fallbackWorkspaceName(activeRepoPath),
     path: activeRepoPath,
   } : null, [activeRepoPath]);
-  const builtinPanelRuntime = useMemo<BuiltinPanelRuntimeValue>(() => ({
-    onStartSession: handleStartSession,
-  }), [
-    handleStartSession,
-  ]);
-
   return (
     <div className="app-shell">
       <NoticeCenter />
@@ -831,8 +707,7 @@ export default function AppShell() {
 
             {/* Project panel tabs resolve through the contribution registry. */}
             {!showGlobalSurface && activeTab && activePanelId && (
-              <BuiltinPanelRuntimeProvider value={builtinPanelRuntime}>
-                <PanelHost
+              <PanelHost
                   registry={PANEL_REGISTRY}
                   panelId={activePanelId}
                   instanceId={activeTab.id}
@@ -843,8 +718,7 @@ export default function AppShell() {
                     if (title) useTerminalStore.getState().updateTab(activeTab.id, { label: title });
                   }}
                   services={MODULE_HOST_SERVICES}
-                />
-              </BuiltinPanelRuntimeProvider>
+              />
             )}
 
             {!showGlobalSurface && !activeTab && tabs.length === 0 && (

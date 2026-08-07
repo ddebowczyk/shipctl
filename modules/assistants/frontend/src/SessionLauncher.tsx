@@ -1,23 +1,15 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { CodingAssistant, SessionMode } from "../../lib/types";
-import { CODING_ASSISTANTS } from "../sidebar/constants";
-import { checkCommandExists, getModelsForProvider } from "../../lib/tauri";
-import { useRepoStore } from "../../stores/useRepoStore";
-import { usePiConfigStore } from "../../stores/usePiConfigStore";
+import type { ModulePanelProps } from "@shep/module-api";
+import type { CodingAssistant, SessionMode } from "./types";
+import { ASSISTANT_INSTALL_URLS, CODING_ASSISTANTS } from "./catalog";
+import { checkCommandExists, getModelsForProvider } from "./client";
+import { usePiConfigStore } from "./piConfigStore";
 import { HandMetal, ChevronDown, Check, Info, X } from "lucide-react";
-import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
-import { ASSISTANT_INSTALL_URLS } from "../sidebar/constants";
+import { assistantLogoSrc, getAssistantLogoClass } from "./branding";
+import { launchAssistant } from "./runtime";
 
-interface SessionLauncherProps {
-  onStartSession: (
-    assistantId: string,
-    mode: SessionMode,
-    model?: string,
-  ) => Promise<boolean>;
-}
-
-export default function SessionLauncher({ onStartSession }: SessionLauncherProps) {
-  const activeRepoPath = useRepoStore((s) => s.activeRepoPath);
+export default function SessionLauncher({ project, close, services }: ModulePanelProps) {
+  const activeRepoPath = project?.path ?? null;
 
   const [selectedAssistant, setSelectedAssistant] = useState<CodingAssistant | null>(null);
   const [available, setAvailable] = useState<Record<string, boolean>>({});
@@ -189,14 +181,15 @@ export default function SessionLauncher({ onStartSession }: SessionLauncherProps
     if (!selectedAssistant || !activeRepoPath || launching) return;
     setLaunching(true);
 
-    const started = await onStartSession(
+    const started = await launchAssistant(
+      activeRepoPath,
       selectedAssistant.id,
       mode,
       selectedModel ?? undefined,
+      services,
     );
-    if (!started) {
-      setLaunching(false);
-    }
+    if (started) close();
+    else setLaunching(false);
   };
 
   const supportsYolo = selectedAssistant?.yoloFlag != null;

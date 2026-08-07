@@ -155,6 +155,9 @@ capability ceiling.
 - [34-assistant-terminal-and-lifecycle-rails.md](./34-assistant-terminal-and-lifecycle-rails.md)
   records the generic session presentation, opaque owner data, transactional
   rename/move/stop requests, and ordered pre-shutdown lifecycle boundary.
+- [35-assistants-frontend-module.md](./35-assistants-frontend-module.md) records
+  the Assistant frontend/resource cutover, managed-terminal adoption seam,
+  module-owned continuity lifecycle, and enabled/disabled build evidence.
 
 ## Target dependency shape
 

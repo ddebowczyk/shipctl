@@ -168,6 +168,26 @@ export function moduleSettingsContributions(
     .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
 }
 
+export function activateModules(
+  services: ModuleHostServices,
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): () => Promise<void> {
+  const deactivations = modules.flatMap((module) => {
+    try {
+      const result = module.activate?.({ panels: services.panels, services });
+      return result ? [result] : [];
+    } catch (error) {
+      if (import.meta.env.DEV) console.error(`Module ${module.id} activation failed:`, error);
+      return [];
+    }
+  });
+  return async () => {
+    await Promise.allSettled(
+      [...deactivations].reverse().map(({ deactivate }) => deactivate()),
+    );
+  };
+}
+
 /**
  * Run sequentially in registration order. Shutdown is a transaction boundary:
  * a failed module preparation must prevent native PTYs from being signalled.
@@ -231,11 +251,11 @@ export function notifyModulesProjectRemoved(
 }
 
 export function createEnabledPanelRegistry(
-  builtinLoaders: BuiltinPanelLoaders,
+  builtinLoaders: BuiltinPanelLoaders | null,
   modules: readonly ShepModule[] = ENABLED_MODULES,
 ): PanelRegistry {
   return PanelRegistry.create([
-    ...createBuiltinPanelContributions(builtinLoaders),
+    ...(builtinLoaders ? createBuiltinPanelContributions(builtinLoaders) : []),
     ...modulePanelContributions(modules),
   ]);
 }

@@ -95,8 +95,14 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
   },
   skills: skillsProvider,
   notices: {
-    push: (notice) => {
-      useNoticeStore.getState().pushNotice(notice);
+    push: (notice, options) => {
+      useNoticeStore.getState().pushNotice(
+        {
+          ...notice,
+          actions: notice.actions ? [...notice.actions] : undefined,
+        },
+        options,
+      );
     },
   },
   externalLinks: {

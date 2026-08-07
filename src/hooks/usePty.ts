@@ -1,33 +1,22 @@
 import { useCallback, useEffect } from "react";
 import type {
+  ModuleManagedTerminalSessionLaunchRequest,
   ModuleTerminalSession,
   ModuleTerminalSessionLaunchRequest,
   ModuleTerminalSessionUpdate,
 } from "@shep/module-api";
 import {
-  discardAssistantSession,
-  failAssistantSessionCapture,
   getDefaultShell,
   killPty,
-  rearmAssistantSession,
-  resumeAssistantSession,
-  spawnAssistantSession,
   spawnPty,
-  tryCaptureCodexAssistantSession,
 } from "../lib/tauri";
 import { useThemeStore } from "../stores/useThemeStore";
 import { hexLuminance } from "../lib/themes";
-import type {
-  AssistantSessionRecord,
-  PtyOutput,
-  RestorableAssistantProvider,
-  SessionMode,
-} from "../lib/types";
+import type { PtyOutput } from "../lib/types";
 import { toPtyColorTheme } from "../lib/ptyColorTheme";
 import { useTerminalStore, nextTabId } from "../stores/useTerminalStore";
 import { useRepoStore } from "../stores/useRepoStore";
 import { useNoticeStore } from "../stores/useNoticeStore";
-import { CODING_ASSISTANTS } from "../components/sidebar/constants";
 import type { Terminal } from "@xterm/xterm";
 import { getErrorMessage } from "../lib/errors";
 import {
@@ -58,14 +47,6 @@ const activityTimers = new Map<number, ReturnType<typeof setTimeout>>();
 const activityActive = new Set<number>();
 const ACTIVITY_TIMEOUT = 3000;
 const stoppingPtys = new Set<number>();
-const codexCaptureTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const CODEX_CAPTURE_RETRY_MS = 500;
-const CODEX_CAPTURE_MAX_ATTEMPTS = 20;
-const RESTORE_PROBATION_MS = 5000;
-const restoreProbations = new Map<
-  number,
-  { recordId: string; timer: ReturnType<typeof setTimeout> }
->();
 interface HostTerminalSession {
   session: ModuleTerminalSession;
   ptyId: number;
@@ -109,23 +90,6 @@ function cleanupActivityState(ptyId: number) {
   const timer = activityTimers.get(ptyId);
   if (timer) { clearTimeout(timer); activityTimers.delete(ptyId); }
   activityActive.delete(ptyId);
-}
-
-function clearCodexCaptureTimer(recordId: string) {
-  const timer = codexCaptureTimers.get(recordId);
-  if (timer) clearTimeout(timer);
-  codexCaptureTimers.delete(recordId);
-}
-
-function clearRestoreProbation(ptyId: number) {
-  const probation = restoreProbations.get(ptyId);
-  if (probation) clearTimeout(probation.timer);
-  restoreProbations.delete(ptyId);
-  return probation;
-}
-
-function restorableProvider(assistantId: string): RestorableAssistantProvider | null {
-  return assistantId === "claude" || assistantId === "codex" ? assistantId : null;
 }
 
 export function registerTerminal(ptyId: number, term: Terminal) {
@@ -196,7 +160,6 @@ export function usePty() {
     setTabExited,
     removeActivity,
     updateTerminalTabById,
-    findTabByPtyId,
     addTabToProject,
   } =
     useTerminalStore.getState();
@@ -225,85 +188,12 @@ export function usePty() {
         setTabExited(ptyId, msg.data.code);
         const stoppedByUser = stoppingPtys.delete(ptyId);
         completeHostTerminalSession(ptyId, stoppedByUser, msg.data.code);
-        const restoreProbation = clearRestoreProbation(ptyId);
-        const tab = findTabByPtyId(ptyId);
-        if (tab?.restoreRecordId && !stoppedByUser) {
-          clearCodexCaptureTimer(tab.restoreRecordId);
-          if (restoreProbation?.recordId === tab.restoreRecordId) {
-            // Spawning the provider only proves that the executable started.
-            // A quick natural exit usually means the resume itself failed, so
-            // keep the durable record available instead of consuming it.
-            void rearmAssistantSession(tab.restoreRecordId)
-              .then(() => {
-                pushNotice({
-                  tone: "info",
-                  title: `Couldn’t restore ${tab.label}`,
-                  message: "The resumed process exited immediately. The saved session was kept for the next launch.",
-                });
-              })
-              .catch(() => {});
-          } else {
-            // A naturally exited established provider has no live session to
-            // restore. During app shutdown the backend freezes this mutation
-            // before signals are sent, so the failed discard is intentional.
-            void discardAssistantSession(tab.restoreRecordId).catch(() => {});
-          }
-        }
       }
     },
     [
-      findTabByPtyId,
-      pushNotice,
       setTabActive,
       setTabExited,
     ],
-  );
-
-  const captureCodexSession = useCallback(
-    (record: AssistantSessionRecord, tabId: string) => {
-      let attempts = 0;
-      const attemptCapture = async () => {
-        try {
-          const captured = await tryCaptureCodexAssistantSession(record.recordId);
-          if (captured) {
-            updateTerminalTabById(tabId, {
-              providerSessionId: captured.providerSessionId,
-              captureState: captured.captureState,
-            });
-            clearCodexCaptureTimer(record.recordId);
-            return;
-          }
-
-          attempts += 1;
-          if (attempts < CODEX_CAPTURE_MAX_ATTEMPTS) {
-            codexCaptureTimers.set(
-              record.recordId,
-              setTimeout(attemptCapture, CODEX_CAPTURE_RETRY_MS),
-            );
-            return;
-          }
-          const failed = await failAssistantSessionCapture(record.recordId);
-          updateTerminalTabById(tabId, { captureState: failed.captureState });
-          pushNotice({
-            tone: "info",
-            title: "Codex restore was not enabled",
-            message: "Shep could not identify this Codex session without guessing. The terminal is still running normally.",
-          });
-        } catch (error) {
-          clearCodexCaptureTimer(record.recordId);
-          const failed = await failAssistantSessionCapture(record.recordId).catch(() => null);
-          updateTerminalTabById(tabId, { captureState: failed?.captureState ?? "failed" });
-          pushNotice({
-            tone: "info",
-            title: "Codex restore was not enabled",
-            message: getErrorMessage(error),
-          });
-        }
-      };
-
-      void attemptCapture();
-    },
-    [pushNotice, updateTerminalTabById],
   );
 
   const spawnSession = useCallback(
@@ -408,6 +298,73 @@ export function usePty() {
     [addTabToProject, spawnSession],
   );
 
+  const launchManagedTerminalSession = useCallback(
+    async (request: ModuleManagedTerminalSessionLaunchRequest) => {
+      let resolvedPtyId: number | null = null;
+      const bufferedMessages: PtyOutput[] = [];
+      const theme = useThemeStore.getState().theme;
+      const colorfgbg = hexLuminance(theme.appBg) > 0.3 ? "0;15" : "15;0";
+      const started = await request.start(
+        {
+          columns: request.columns,
+          rows: request.rows,
+          environment: { COLORFGBG: colorfgbg },
+          colorTheme: toPtyColorTheme(theme),
+        },
+        (event) => {
+          const message: PtyOutput = event.type === "data"
+            ? { event: "data", data: event.data }
+            : { event: "exit", data: { code: event.exitCode ?? 1 } };
+          if (resolvedPtyId === null) {
+            bufferedMessages.push(message);
+            return;
+          }
+          handlePtyMessage(resolvedPtyId, message);
+        },
+      );
+      resolvedPtyId = started.terminalId;
+      initActivity(started.terminalId);
+
+      const session: ModuleTerminalSession = {
+        id: `terminal-session-${++hostTerminalSessionCounter}`,
+        projectPath: request.projectPath,
+        ownerKey: request.ownerKey,
+        label: request.label,
+        ownerMetadata: started.ownerMetadata ?? request.ownerMetadata,
+        presentation: started.presentation ?? request.presentation,
+      };
+      const tabId = nextTabId();
+      hostTerminalSessions.set(session.id, {
+        session,
+        ptyId: started.terminalId,
+        tabId,
+        state: "running",
+      });
+      hostTerminalSessionIdsByPty.set(started.terminalId, session.id);
+      addTabToProject(request.projectPath, {
+        id: tabId,
+        kind: session.presentation?.role ?? "terminal",
+        label: session.label,
+        ptyId: started.terminalId,
+        repoPath: request.cwd,
+        commandName: null,
+        assistantId: null,
+        sessionMode: null,
+        restoreRecordId: null,
+        providerSessionId: null,
+        captureState: null,
+        moduleSessionId: session.id,
+        modulePresentation: session.presentation,
+      });
+      publishTerminalSessionEvent({ type: "started", session });
+      for (const message of bufferedMessages) {
+        handlePtyMessage(started.terminalId, message);
+      }
+      return session;
+    },
+    [addTabToProject, handlePtyMessage, initActivity],
+  );
+
   const updateTerminalSession = useCallback(async (
     sessionId: string,
     patch: ModuleTerminalSessionUpdate,
@@ -499,10 +456,11 @@ export function usePty() {
 
   useEffect(() => bindTerminalSessionsRuntime({
     launch: launchTerminalSession,
+    launchManaged: launchManagedTerminalSession,
     update: updateTerminalSession,
     stop: stopTerminalSession,
     focus: focusTerminalSession,
-  }), [focusTerminalSession, launchTerminalSession, stopTerminalSession, updateTerminalSession]);
+  }), [focusTerminalSession, launchManagedTerminalSession, launchTerminalSession, stopTerminalSession, updateTerminalSession]);
 
   const spawnBlankShell = useCallback(
     async (cols: number, rows: number) => {
@@ -551,185 +509,6 @@ export function usePty() {
     [activeRepoPath, spawnSession, addTab, pushNotice],
   );
 
-  const launchAssistant = useCallback(
-    async (
-      assistantId: string,
-      cols: number,
-      rows: number,
-      mode: SessionMode = "standard",
-      model?: string,
-    ) => {
-      if (!activeRepoPath) return;
-      const assistant = CODING_ASSISTANTS.find((a) => a.id === assistantId);
-      if (!assistant) return;
-      const provider = restorableProvider(assistantId);
-
-      const commandArgs: string[] = [];
-      if (model) {
-        commandArgs.push(assistant.modelFlag, model);
-      }
-      if (mode === "yolo" && assistant.yoloFlag) {
-        commandArgs.push(assistant.yoloFlag);
-      }
-
-      try {
-        if (!provider) {
-          const ptyId = await spawnSession(
-            assistant.command,
-            commandArgs,
-            {},
-            cols,
-            rows,
-            activeRepoPath,
-          );
-          if (!ptyId) return;
-
-          const id = nextTabId();
-          addTab({
-            id,
-            kind: "assistant",
-            label: assistant.name,
-            ptyId,
-            repoPath: activeRepoPath,
-            commandName: null,
-            assistantId,
-            sessionMode: mode,
-            restoreRecordId: null,
-            providerSessionId: null,
-            captureState: null,
-          });
-          return ptyId;
-        }
-
-        let resolvedPtyId: number | null = null;
-        const bufferedMessages: PtyOutput[] = [];
-        const theme = useThemeStore.getState().theme;
-        const colorfgbg = hexLuminance(theme.appBg) > 0.3 ? "0;15" : "15;0";
-        const spawned = await spawnAssistantSession(
-          {
-            provider,
-            launchRepoPath: activeRepoPath,
-            placementProjectPath: activeRepoPath,
-            label: assistant.name,
-            sessionMode: mode,
-            model,
-            env: { COLORFGBG: colorfgbg },
-            cols,
-            rows,
-            colorTheme: toPtyColorTheme(theme),
-          },
-          (msg) => {
-            if (resolvedPtyId === null) {
-              bufferedMessages.push(msg);
-              return;
-            }
-            handlePtyMessage(resolvedPtyId, msg);
-          },
-        );
-        resolvedPtyId = spawned.ptyId;
-        initActivity(spawned.ptyId);
-
-        const id = nextTabId();
-        addTab({
-          id,
-          kind: "assistant",
-          label: assistant.name,
-          ptyId: spawned.ptyId,
-          repoPath: spawned.record.launchRepoPath,
-          commandName: null,
-          assistantId,
-          sessionMode: mode,
-          restoreRecordId: spawned.record.recordId,
-          providerSessionId: spawned.record.providerSessionId,
-          captureState: spawned.record.captureState,
-        });
-        for (const message of bufferedMessages) {
-          handlePtyMessage(spawned.ptyId, message);
-        }
-        if (provider === "codex") {
-          captureCodexSession(spawned.record, id);
-        }
-
-        return spawned.ptyId;
-      } catch (e) {
-        if (import.meta.env.DEV) {
-          console.error(`Failed to launch ${assistant.name}:`, e);
-        }
-        pushNotice({
-          tone: "error",
-          title: `Couldn’t launch ${assistant.name}`,
-          message: getErrorMessage(e),
-        });
-        return null;
-      }
-    },
-    [
-      activeRepoPath,
-      spawnSession,
-      addTab,
-      captureCodexSession,
-      handlePtyMessage,
-      initActivity,
-      pushNotice,
-    ],
-  );
-
-  const resumeAssistant = useCallback(
-    async (recordId: string, cols: number, rows: number) => {
-      let resolvedPtyId: number | null = null;
-      const bufferedMessages: PtyOutput[] = [];
-      const theme = useThemeStore.getState().theme;
-      const colorfgbg = hexLuminance(theme.appBg) > 0.3 ? "0;15" : "15;0";
-
-      const spawned = await resumeAssistantSession(
-        {
-          recordId,
-          env: { COLORFGBG: colorfgbg },
-          cols,
-          rows,
-          colorTheme: toPtyColorTheme(theme),
-        },
-        (msg) => {
-          if (resolvedPtyId === null) {
-            bufferedMessages.push(msg);
-            return;
-          }
-          handlePtyMessage(resolvedPtyId, msg);
-        },
-      );
-      resolvedPtyId = spawned.ptyId;
-      initActivity(spawned.ptyId);
-
-      const probationTimer = setTimeout(() => {
-        restoreProbations.delete(spawned.ptyId);
-      }, RESTORE_PROBATION_MS);
-      restoreProbations.set(spawned.ptyId, {
-        recordId: spawned.record.recordId,
-        timer: probationTimer,
-      });
-
-      const id = nextTabId();
-      addTabToProject(spawned.record.placementProjectPath, {
-        id,
-        kind: "assistant",
-        label: spawned.record.label,
-        ptyId: spawned.ptyId,
-        repoPath: spawned.record.launchRepoPath,
-        commandName: null,
-        assistantId: spawned.record.provider,
-        sessionMode: spawned.record.sessionMode,
-        restoreRecordId: spawned.record.recordId,
-        providerSessionId: spawned.record.providerSessionId,
-        captureState: spawned.record.captureState,
-      });
-      for (const message of bufferedMessages) {
-        handlePtyMessage(spawned.ptyId, message);
-      }
-      return spawned.ptyId;
-    },
-    [addTabToProject, handlePtyMessage, initActivity],
-  );
-
   const closeTab = useCallback(
     async (tabId: string) => {
       const state = useTerminalStore.getState();
@@ -761,19 +540,6 @@ export function usePty() {
         return;
       }
 
-      if (tab.restoreRecordId) {
-        clearCodexCaptureTimer(tab.restoreRecordId);
-        try {
-          await discardAssistantSession(tab.restoreRecordId);
-        } catch (error) {
-          pushNotice({
-            tone: "info",
-            title: "Couldn’t remove restore data",
-            message: getErrorMessage(error),
-          });
-        }
-      }
-      clearRestoreProbation(tab.ptyId);
       cleanupActivityState(tab.ptyId);
       stoppingPtys.add(tab.ptyId);
       await killPty(tab.ptyId).catch(() => {
@@ -810,17 +576,6 @@ export function usePty() {
         await stopTerminalSession(tab.moduleSessionId);
         continue;
       }
-      if (tab.restoreRecordId) {
-        clearCodexCaptureTimer(tab.restoreRecordId);
-        await discardAssistantSession(tab.restoreRecordId).catch((error) => {
-          pushNotice({
-            tone: "info",
-            title: "Couldn’t remove restore data",
-            message: getErrorMessage(error),
-          });
-        });
-      }
-      clearRestoreProbation(tab.ptyId);
       cleanupActivityState(tab.ptyId);
       stoppingPtys.add(tab.ptyId);
       await killPty(tab.ptyId).catch(() => {
@@ -830,12 +585,10 @@ export function usePty() {
       unregisterTerminal(tab.ptyId);
       removeActivity(tab.ptyId);
     }
-  }, [removeActivity, pushNotice, stopTerminalSession]);
+  }, [removeActivity, stopTerminalSession]);
 
   return {
     spawnBlankShell,
-    launchAssistant,
-    resumeAssistant,
     closeTab,
     killProjectPtys,
     requestTerminalSessionPlacement,

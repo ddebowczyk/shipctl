@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { getPiConfig, savePiSettings, savePiApiKey, deletePiApiKey } from "../lib/tauri";
-import type { PiConfig, PiSettings } from "../lib/types";
+import { deletePiApiKey, getPiConfig, savePiApiKey, savePiSettings } from "./client";
+import type { PiConfig, PiSettings } from "./types";
 
 const DEFAULT_CONFIG: PiConfig = {
   settings: { defaultProvider: null, defaultModel: null, defaultThinkingLevel: null },

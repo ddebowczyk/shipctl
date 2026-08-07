@@ -57,6 +57,7 @@ export {
 export type { ProjectFactsByPath } from "./projectFacts";
 export { ENABLED_MODULES } from "./enabledModules";
 export {
+  activateModules,
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
   discoverRelatedProjectPaths,

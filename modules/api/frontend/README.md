@@ -26,11 +26,18 @@ host internals ─────────────────────�
   The host owns PTY, xterm, tab placement, and focus mechanics; the module owns
   opaque session metadata, optional presentation, and policy for rename, move,
   stop, and pre-shutdown requests.
+- A module that must prepare a native process before adoption can use the
+  managed-launch callback. The callback receives only dimensions, environment,
+  color theme, and an output sink; it returns a native terminal identity plus
+  opaque metadata and presentation. Provider records remain invisible to core.
 - Owner requests are awaited in registration order. A rejected request stops
   the host mutation, while process-started and process-exited notifications are
   best-effort because the process event cannot be rolled back.
 - `beforeShutdown` hooks run sequentially before native PTYs are signalled. A
   failure aborts shutdown so a module can protect continuity data.
+- Module activation owns runtime subscriptions, and project-lifecycle callbacks
+  receive project paths after host state changes. Notices may include bounded
+  actions so retry and recovery policy can stay inside the module.
 
 The host's boundary and profile tests enforce this dependency direction. A
 capability may be disabled without requiring placeholder implementations in the

@@ -48,6 +48,7 @@ test("the stable port forwards complete launch, stop, and focus requests", async
       calls.push(["launch", received]);
       return session;
     },
+    launchManaged: async () => session,
     update: async (sessionId, patch) => {
       calls.push(["update", sessionId, patch]);
       return { ...session, ...patch };
@@ -167,12 +168,14 @@ test("exit classification distinguishes manual, zero, and nonzero outcomes", () 
 test("a stale React cleanup cannot unbind a newer runtime", async () => {
   const firstCleanup = bindTerminalSessionsRuntime({
     launch: async () => ({ ...session, id: "first" }),
+    launchManaged: async () => ({ ...session, id: "first" }),
     update: async () => ({ ...session, id: "first" }),
     stop: async () => undefined,
     focus: async () => undefined,
   });
   const secondCleanup = bindTerminalSessionsRuntime({
     launch: async () => ({ ...session, id: "second" }),
+    launchManaged: async () => ({ ...session, id: "second" }),
     update: async () => ({ ...session, id: "second" }),
     stop: async () => undefined,
     focus: async () => undefined,

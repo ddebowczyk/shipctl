@@ -222,6 +222,7 @@ test("module entry owns the provider, project action, and error notice", async (
         ownerKey: request.ownerKey,
         label: request.label,
       }),
+      launchManaged: async () => { throw new Error("not used"); },
       update: async (sessionId, patch) => ({
         id: sessionId,
         projectPath: "/fixture",
