@@ -149,6 +149,9 @@ capability ceiling.
 - [32-commands-frontend-module-and-plugout.md](./32-commands-frontend-module-and-plugout.md)
   records module-owned Commands UI, state, runtime, lifecycle, resources, the
   To-dos CSS isolation correction, and the disabled/source-absent proof.
+- [33-assistant-providers-characterization-and-seam.md](./33-assistant-providers-characterization-and-seam.md)
+  protects provider launch, identity capture, resume, placement, recovery, and
+  shutdown behavior and defines the Assistant module boundary.
 
 ## Target dependency shape
 
