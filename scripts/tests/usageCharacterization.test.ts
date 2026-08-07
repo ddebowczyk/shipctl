@@ -106,7 +106,9 @@ test("snapshot and persisted-settings stores bound success and failure behavior"
   assert.match(snapshots, /error instanceof Error \? error\.message : "Failed to fetch usage snapshots"/);
   assert.match(settings, /const prev = get\(\)\.settings/);
   assert.match(settings, /set\(\{ settings: next, isSaving: true \}\)/);
-  assert.match(settings, /await saveUsageSettings\(next\)/);
+  assert.match(settings, /persistence\(\)\.read\(USAGE_SETTINGS_KEY\)/);
+  assert.match(settings, /persistence\(\)\.replace\(USAGE_SETTINGS_KEY, document\)/);
+  assert.match(settings, /\.\.\.asRecord\(persistedDocument\[provider\]\)/);
   assert.match(settings, /settings: prev,[\s\S]*"Failed to save usage settings"/);
 });
 
@@ -127,7 +129,7 @@ test("Usage remains global across project switches and refreshes on module caden
   assert.match(adapter, /slot: "terminal\.after"/);
 });
 
-test("native cache, unavailable states, and persisted config remain bounded", () => {
+test("native cache, unavailable states, and capability-owned config remain bounded", () => {
   const usage = source("../../modules/usage/backend/src/usage/mod.rs");
   const config = source("../../src-tauri/src/workspace/config.rs");
   const loader = source("../../src-tauri/src/workspace/loader.rs");
@@ -140,13 +142,10 @@ test("native cache, unavailable states, and persisted config remain bounded", ()
   assert.match(usage, /"unavailable"\.to_string\(\)/);
   assert.match(usage, /error = if cached_data\.is_none\(\) && !cache\.antigravity\.last_error\.is_empty\(\)/);
 
-  assert.match(config, /pub usage: UsageSettings/);
-  assert.match(config, /rename = "budgetMode"/);
-  assert.match(config, /rename = "monthlyBudget"/);
-  assert.match(
-    loader,
-    /pub fn save_usage_settings[\s\S]*mutate_global_config\(\|config\|[\s\S]*config\.usage = settings\.clone\(\)/,
-  );
+  assert.doesNotMatch(config, /pub usage: UsageSettings|struct UsageSettings|ProviderBudgetConfig/);
+  assert.match(config, /fn usage_document_is_opaque_capability_data/);
+  assert.match(loader, /pub fn replace_global_capability_data/);
+  assert.doesNotMatch(loader, /load_usage_settings|save_usage_settings/);
 });
 
 test("native ownership seam includes ingestion, query DB, and provider subprocess access", () => {
@@ -167,10 +166,12 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
   assert.match(plugin, /"plugin:shep-usage\|get_all_usage_snapshots"/);
   assert.match(client, /invoke\("plugin:shep-usage\|get_all_usage_snapshots"\)/);
   assert.match(client, /invoke\("plugin:shep-usage\|refresh_usage_data"\)/);
-  assert.match(commands, /pub async fn get_all_usage_snapshots/);
-  assert.match(commands, /pub fn refresh_usage_data/);
+  assert.doesNotMatch(commands, /get_all_usage_snapshots|get_usage_settings|refresh_usage_data/);
   assert.doesNotMatch(host, /commands::get_all_usage_snapshots/);
   assert.doesNotMatch(host, /commands::refresh_usage_data/);
+  assert.doesNotMatch(host, /mod usage;/);
+  assert.match(plugin, /trait GlobalCapabilityDataAuthority/);
+  assert.doesNotMatch(plugin, /ProviderSettingsAuthority|get_observed_models_for_provider|Transitional/);
   assert.match(usage, /queries::usage_overview\(&conn, window\)/);
   assert.match(providers, /run_command\(\s*"curl"/);
   assert.match(providers, /find-generic-password/);

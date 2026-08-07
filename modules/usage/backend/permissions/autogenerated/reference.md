@@ -36,32 +36,6 @@ Denies the get_all_usage_snapshots command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:allow-get-observed-models-for-provider`
-
-</td>
-<td>
-
-Enables the get_observed_models_for_provider command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`shep-usage:deny-get-observed-models-for-provider`
-
-</td>
-<td>
-
-Denies the get_observed_models_for_provider command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
 `shep-usage:allow-get-project-alias-review-queue`
 
 </td>

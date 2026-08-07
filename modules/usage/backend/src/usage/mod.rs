@@ -163,11 +163,6 @@ pub fn get_project_alias_review_queue(db: &UsageDb) -> Vec<UsageProjectAliasRevi
     queries::project_alias_review_queue(&conn)
 }
 
-pub fn get_models_for_provider(db: &UsageDb, provider: &str) -> Vec<String> {
-    let conn = db.conn.lock().unwrap();
-    queries::models_for_provider(&conn, provider)
-}
-
 /// Run background ingestion in a loop until fully caught up.
 /// Processes a small batch per cycle and releases the DB lock between cycles
 /// so UI queries (usage snapshots, etc.) aren't starved.

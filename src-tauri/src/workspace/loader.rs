@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::config::{
     normalize_sidebar_settings, normalize_terminal_settings, CommandConfig, EditorSettings,
     GlobalConfig, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo, RepoEntry,
-    RepoInfo, SidebarSettings, TerminalSettings, UsageSettings, WorkspaceConfig,
+    RepoInfo, SidebarSettings, TerminalSettings, WorkspaceConfig,
 };
 
 static CONFIG_CACHE: Mutex<Option<(GlobalConfig, SystemTime)>> = Mutex::new(None);
@@ -193,17 +193,6 @@ pub fn load_sidebar_settings() -> Result<SidebarSettings, String> {
     let mut settings = load_global_config()?.sidebar;
     normalize_sidebar_settings(&mut settings);
     Ok(settings)
-}
-
-pub fn load_usage_settings() -> Result<UsageSettings, String> {
-    Ok(load_global_config()?.usage)
-}
-
-pub fn save_usage_settings(settings: &UsageSettings) -> Result<(), String> {
-    mutate_global_config(|config| {
-        config.usage = settings.clone();
-        Ok(())
-    })
 }
 
 pub fn load_global_capability_data(

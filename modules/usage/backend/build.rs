@@ -4,7 +4,6 @@ const COMMANDS: &[&str] = &[
     "get_usage_details",
     "get_usage_overview",
     "get_project_alias_review_queue",
-    "get_observed_models_for_provider",
     "refresh_usage_data",
 ];
 

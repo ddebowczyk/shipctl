@@ -184,6 +184,10 @@ capability ceiling.
 - [43-atomic-global-config-mutations.md](./43-atomic-global-config-mutations.md)
   records the generic locked read-modify-write boundary, deterministic
   lost-update proof, preserved unknown YAML values, and cross-process limit.
+- [44-usage-host-compatibility-removal.md](./44-usage-host-compatibility-removal.md)
+  records removal of flat Usage commands and typed host settings, opaque
+  module-owned settings, Assistant-owned model discovery, and the final Usage
+  dependency and disabled-build gates.
 
 ## Target dependency shape
 

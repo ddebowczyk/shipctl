@@ -21,8 +21,6 @@ pub struct GlobalConfig {
     pub terminal: TerminalSettings,
     #[serde(default)]
     pub sidebar: SidebarSettings,
-    #[serde(default)]
-    pub usage: UsageSettings,
     /// Capability-owned top-level values remain human-editable without expanding the host schema.
     #[serde(default, flatten)]
     pub capability_data: HashMap<String, serde_json::Value>,
@@ -43,14 +41,16 @@ impl Default for GlobalConfig {
             keybindings: KeybindingSettings::default(),
             terminal: TerminalSettings::default(),
             sidebar: SidebarSettings::default(),
-            usage: UsageSettings::default(),
             capability_data: HashMap::new(),
         }
     }
 }
 
 impl GlobalConfig {
-    pub fn capability_value(&self, capability_id: &str) -> Result<Option<serde_json::Value>, String> {
+    pub fn capability_value(
+        &self,
+        capability_id: &str,
+    ) -> Result<Option<serde_json::Value>, String> {
         self.assert_capability_id(capability_id)?;
         Ok(self.capability_data.get(capability_id).cloned())
     }
@@ -61,7 +61,8 @@ impl GlobalConfig {
         value: serde_json::Value,
     ) -> Result<(), String> {
         self.assert_capability_id(capability_id)?;
-        self.capability_data.insert(capability_id.to_string(), value);
+        self.capability_data
+            .insert(capability_id.to_string(), value);
         Ok(())
     }
 
@@ -74,13 +75,13 @@ impl GlobalConfig {
         host_document.capability_data.clear();
         let host_value = serde_yaml::to_value(host_document)
             .map_err(|error| format!("Failed to inspect global config ownership: {error}"))?;
-        let host_owned = host_value
-            .as_mapping()
-            .is_some_and(|mapping| {
-                mapping.contains_key(serde_yaml::Value::String(capability_id.to_string()))
-            });
+        let host_owned = host_value.as_mapping().is_some_and(|mapping| {
+            mapping.contains_key(serde_yaml::Value::String(capability_id.to_string()))
+        });
         if host_owned {
-            return Err(format!("Global config key {capability_id} is host-owned data"));
+            return Err(format!(
+                "Global config key {capability_id} is host-owned data"
+            ));
         }
 
         Ok(())
@@ -272,88 +273,6 @@ fn is_valid_url_scheme_token(scheme: &str) -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderBudgetConfig {
-    #[serde(default = "default_true")]
-    pub show: bool,
-    #[serde(default = "default_budget_mode_subscription", rename = "budgetMode")]
-    pub budget_mode: String,
-    #[serde(default, rename = "monthlyBudget")]
-    pub monthly_budget: Option<f64>,
-}
-
-fn default_budget_mode_subscription() -> String {
-    "subscription".to_string()
-}
-
-impl ProviderBudgetConfig {
-    fn default_subscription() -> Self {
-        ProviderBudgetConfig {
-            show: true,
-            budget_mode: "subscription".to_string(),
-            monthly_budget: None,
-        }
-    }
-
-    fn default_custom() -> Self {
-        ProviderBudgetConfig {
-            show: true,
-            budget_mode: "custom".to_string(),
-            monthly_budget: None,
-        }
-    }
-}
-
-fn default_provider_subscription() -> ProviderBudgetConfig {
-    ProviderBudgetConfig::default_subscription()
-}
-
-fn default_provider_custom() -> ProviderBudgetConfig {
-    ProviderBudgetConfig::default_custom()
-}
-
-fn default_provider_custom_hidden() -> ProviderBudgetConfig {
-    ProviderBudgetConfig {
-        show: false,
-        ..ProviderBudgetConfig::default_custom()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UsageSettings {
-    #[serde(default = "default_provider_subscription")]
-    pub claude: ProviderBudgetConfig,
-    #[serde(default = "default_provider_subscription")]
-    pub codex: ProviderBudgetConfig,
-    #[serde(default = "default_provider_subscription")]
-    pub antigravity: ProviderBudgetConfig,
-    #[serde(default = "default_provider_subscription")]
-    pub gemini: ProviderBudgetConfig,
-    #[serde(default = "default_provider_custom")]
-    pub opencode: ProviderBudgetConfig,
-    #[serde(default = "default_provider_custom_hidden")]
-    pub pi: ProviderBudgetConfig,
-}
-
-impl Default for UsageSettings {
-    fn default() -> Self {
-        UsageSettings {
-            claude: ProviderBudgetConfig::default_subscription(),
-            codex: ProviderBudgetConfig::default_subscription(),
-            antigravity: ProviderBudgetConfig::default_subscription(),
-            gemini: ProviderBudgetConfig {
-                show: false,
-                ..ProviderBudgetConfig::default_subscription()
-            },
-            opencode: ProviderBudgetConfig {
-                monthly_budget: Some(100.0),
-                ..ProviderBudgetConfig::default_custom()
-            },
-            pi: ProviderBudgetConfig::default_custom(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoEntry {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -413,10 +332,8 @@ mod tests {
 
     #[test]
     fn global_config_preserves_capability_owned_top_level_values() {
-        let mut config: GlobalConfig = serde_yaml::from_str(
-            "version: 1\nfutureCapability:\n  density: compact\n",
-        )
-        .unwrap();
+        let mut config: GlobalConfig =
+            serde_yaml::from_str("version: 1\nfutureCapability:\n  density: compact\n").unwrap();
 
         assert_eq!(
             config.capability_value("futureCapability").unwrap(),
@@ -437,11 +354,35 @@ mod tests {
     fn global_capability_data_rejects_empty_and_host_owned_keys() {
         let mut config = GlobalConfig::default();
 
-        assert!(config.capability_value("").unwrap_err().contains("must not be empty"));
+        assert!(config
+            .capability_value("")
+            .unwrap_err()
+            .contains("must not be empty"));
         assert!(config
             .replace_capability_value("terminal", serde_json::json!({}))
             .unwrap_err()
             .contains("host-owned"));
+    }
+
+    #[test]
+    fn usage_document_is_opaque_capability_data() {
+        let config: GlobalConfig = serde_yaml::from_str(
+            "version: 1\nusage:\n  claude:\n    show: false\n    futureOption: preserved\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.capability_value("usage").unwrap(),
+            Some(serde_json::json!({
+                "claude": {
+                    "show": false,
+                    "futureOption": "preserved"
+                }
+            }))
+        );
+        assert!(serde_yaml::to_string(&config)
+            .unwrap()
+            .contains("futureOption: preserved"));
     }
 
     #[test]

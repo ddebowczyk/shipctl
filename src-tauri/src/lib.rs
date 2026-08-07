@@ -14,8 +14,6 @@ mod pty;
 #[cfg(feature = "skills-module")]
 mod skills_module;
 #[cfg(feature = "usage-module")]
-mod usage;
-#[cfg(feature = "usage-module")]
 mod usage_module;
 mod watcher;
 mod workspace;
@@ -112,12 +110,8 @@ pub fn run() {
             commands::get_default_shell,
             commands::get_computer_name,
             commands::check_command_exists,
-            commands::get_usage_settings,
-            commands::save_usage_settings,
             global_capability_data::get_global_capability_data,
             global_capability_data::replace_global_capability_data,
-            #[cfg(feature = "usage-module")]
-            commands::get_models_for_provider,
             commands::get_memory_stats,
             commands::watch_repo,
             commands::unwatch_repo,

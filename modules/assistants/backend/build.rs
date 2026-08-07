@@ -12,6 +12,7 @@ const COMMANDS: &[&str] = &[
     "list_restorable_assistant_sessions",
     "take_assistant_session_startup_warning",
     "begin_assistant_session_preserving_shutdown",
+    "get_models_for_provider",
 ];
 
 fn main() {

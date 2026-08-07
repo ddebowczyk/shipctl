@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -116,6 +117,15 @@ test("module identity and launcher migration metadata remain stable", () => {
   assert.equal(assistants.assistantsModule.panels[0].id, "assistants.launcher");
   assert.equal(assistants.assistantsModule.panels[0].migrationAlias.kind, "launcher");
   assert.equal(assistants.assistantsModule.panels[0].newSession.label, "Agent");
+});
+
+test("model discovery is namespaced to the Assistants native module", () => {
+  const client = readFileSync(
+    fileURLToPath(new URL("../src/client.ts", import.meta.url)),
+    "utf8",
+  );
+  assert.match(client, /assistantCommand\("get_models_for_provider"\)/);
+  assert.doesNotMatch(client, /invoke\("get_models_for_provider"/);
 });
 
 test("the provider catalogue preserves commands and exact launch flags", () => {

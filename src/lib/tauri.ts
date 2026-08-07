@@ -222,10 +222,6 @@ export function checkCommandExists(command: string): Promise<boolean> {
   return invoke("check_command_exists", { command });
 }
 
-export function getModelsForProvider(provider: string): Promise<string[]> {
-  return invoke("get_models_for_provider", { provider });
-}
-
 export interface MemoryStats {
   app_rss: number;
   children_rss: number;

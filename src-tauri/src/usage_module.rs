@@ -1,25 +1,17 @@
 use std::sync::Arc;
 
-use shep_module_usage::{HostServices, ProviderSettingsAuthority, ProviderVisibility};
+use shep_module_usage::{GlobalCapabilityDataAuthority, HostServices};
 
 use crate::workspace::manager::WorkspaceManager;
 
-struct WorkspaceProviderSettings;
+struct WorkspaceGlobalCapabilityData;
 
-impl ProviderSettingsAuthority for WorkspaceProviderSettings {
-    fn provider_visibility(&self) -> ProviderVisibility {
-        let settings = WorkspaceManager::new()
-            .load_usage_settings()
-            .unwrap_or_default();
-        ProviderVisibility {
-            claude: settings.claude.show,
-            codex: settings.codex.show,
-            gemini: settings.gemini.show,
-            antigravity: settings.antigravity.show,
-        }
+impl GlobalCapabilityDataAuthority for WorkspaceGlobalCapabilityData {
+    fn read(&self, capability_id: &str) -> Result<Option<serde_json::Value>, String> {
+        WorkspaceManager::new().load_global_capability_data(capability_id)
     }
 }
 
 pub fn host_services() -> HostServices {
-    HostServices::new(Arc::new(WorkspaceProviderSettings))
+    HostServices::new(Arc::new(WorkspaceGlobalCapabilityData))
 }

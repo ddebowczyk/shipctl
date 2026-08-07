@@ -1,24 +1,17 @@
 use std::collections::HashMap;
-use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
 use tauri::ipc::Channel;
-use tauri::{Emitter, State};
+use tauri::State;
 use url::Url;
 
 use crate::fonts::{self, FontFaceData, FontFamily};
 use crate::pty::manager::PtyManager;
 use crate::pty::session::{PtyColorTheme, PtyOutput};
-#[cfg(feature = "usage-module")]
-use crate::usage::{
-    LocalUsageDetails, ProviderUsageSnapshot, UsageDb, UsageOverview, UsageProjectAliasReviewItem,
-};
 use crate::watcher::GitWatcher;
 use crate::workspace::config::{
     normalize_terminal_settings, EditorSettings, GroupEntry, KeybindingSettings, ProjectSettings,
-    RegisteredRepo, RepoInfo, SidebarSettings, TerminalSettings, UsageSettings, WorkspaceConfig,
+    RegisteredRepo, RepoInfo, SidebarSettings, TerminalSettings, WorkspaceConfig,
 };
 use crate::workspace::manager::WorkspaceManager;
 
@@ -371,195 +364,6 @@ pub fn check_command_exists(command: &str) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
-}
-
-#[cfg(feature = "usage-module")]
-#[tauri::command]
-pub async fn get_all_usage_snapshots(
-    db: State<'_, UsageDb>,
-    workspace: State<'_, WorkspaceManager>,
-) -> Result<Vec<ProviderUsageSnapshot>, String> {
-    let enabled = enabled_providers(&workspace);
-    Ok(crate::usage::get_all_usage_snapshots(&db, &enabled))
-}
-
-#[cfg(feature = "usage-module")]
-#[tauri::command]
-pub async fn get_usage_snapshot(
-    db: State<'_, UsageDb>,
-    workspace: State<'_, WorkspaceManager>,
-    provider: String,
-) -> Result<ProviderUsageSnapshot, String> {
-    let enabled = enabled_providers(&workspace);
-    crate::usage::get_usage_snapshot(&db, &provider, &enabled)
-}
-
-#[cfg(feature = "usage-module")]
-fn enabled_providers(workspace: &State<'_, WorkspaceManager>) -> crate::usage::EnabledProviders {
-    let settings = workspace.load_usage_settings().unwrap_or_default();
-    crate::usage::EnabledProviders {
-        claude: settings.claude.show,
-        codex: settings.codex.show,
-        gemini: settings.gemini.show,
-        antigravity: settings.antigravity.show,
-    }
-}
-
-#[tauri::command]
-pub fn get_usage_settings(
-    workspace: State<'_, WorkspaceManager>,
-) -> Result<UsageSettings, String> {
-    workspace.load_usage_settings()
-}
-
-#[tauri::command]
-pub fn save_usage_settings(
-    settings: UsageSettings,
-    workspace: State<'_, WorkspaceManager>,
-) -> Result<(), String> {
-    workspace.save_usage_settings(&settings)
-}
-
-#[cfg(feature = "usage-module")]
-#[tauri::command]
-pub async fn get_usage_details(db: State<'_, UsageDb>, provider: String, window: String) -> Result<LocalUsageDetails, String> {
-    crate::usage::get_windowed_details(&db, &provider, &window)
-}
-
-#[cfg(feature = "usage-module")]
-#[tauri::command]
-pub async fn get_usage_overview(db: State<'_, UsageDb>, window: String) -> Result<UsageOverview, String> {
-    crate::usage::get_usage_overview(&db, &window)
-}
-
-#[cfg(feature = "usage-module")]
-#[tauri::command]
-pub async fn get_project_alias_review_queue(
-    db: State<'_, UsageDb>,
-) -> Result<Vec<UsageProjectAliasReviewItem>, String> {
-    Ok(crate::usage::get_project_alias_review_queue(&db))
-}
-
-#[cfg(feature = "usage-module")]
-#[tauri::command]
-pub async fn get_models_for_provider(
-    db: State<'_, UsageDb>,
-    provider: String,
-) -> Result<Vec<String>, String> {
-    match provider.as_str() {
-        "pi" => Ok(sort_cli_models(&db, query_cli_models("pi", &["--list-models"], parse_pi_models))),
-        "opencode" => Ok(sort_cli_models(&db, query_cli_models("opencode", &["models"], parse_opencode_models))),
-        _ => Ok(crate::usage::get_models_for_provider(&db, &provider)),
-    }
-}
-
-#[cfg(feature = "usage-module")]
-fn query_cli_models(
-    cmd: &str,
-    args: &[&str],
-    parser: fn(&str) -> Vec<String>,
-) -> Vec<String> {
-    let mut child = match Command::new(cmd)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => return Vec::new(),
-    };
-
-    let Some(mut stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Vec::new();
-    };
-
-    let reader = thread::spawn(move || {
-        let mut text = String::new();
-        stdout.read_to_string(&mut text).map(|_| text).ok()
-    });
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = reader.join().ok().flatten();
-                if !status.success() {
-                    return Vec::new();
-                }
-                return output.map(|text| parser(&text)).unwrap_or_default();
-            }
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = reader.join();
-                return Vec::new();
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(50)),
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = reader.join();
-                return Vec::new();
-            }
-        }
-    }
-}
-
-#[cfg(feature = "usage-module")]
-fn sort_cli_models(db: &UsageDb, models: Vec<String>) -> Vec<String> {
-    let conn = db.conn.lock().unwrap();
-    let mut dated: Vec<(String, String)> = models
-        .into_iter()
-        .map(|name| {
-            let date = name.split_once('/')
-                .and_then(|(provider, model)| {
-                    conn.query_row(
-                        "SELECT COALESCE(release_date, '2000-01-01') FROM model_pricing WHERE provider = ?1 AND model_pattern = ?2",
-                        rusqlite::params![provider, model],
-                        |row| row.get::<_, String>(0),
-                    ).ok()
-                })
-                .unwrap_or_else(|| "2000-01-01".to_string());
-            (name, date)
-        })
-        .collect();
-    dated.sort_by(|a, b| b.1.cmp(&a.1));
-    dated.into_iter().map(|(name, _)| name).collect()
-}
-
-/// Parse `pi --list-models` table: "provider  model  context  ..."
-#[cfg(feature = "usage-module")]
-fn parse_pi_models(text: &str) -> Vec<String> {
-    text.lines()
-        .skip(1) // header row
-        .filter_map(|line| {
-            let mut cols = line.split_whitespace();
-            let provider = cols.next()?;
-            let model = cols.next()?;
-            Some(format!("{provider}/{model}"))
-        })
-        .collect()
-}
-
-/// Parse `opencode models` output: "provider/model" per line
-#[cfg(feature = "usage-module")]
-fn parse_opencode_models(text: &str) -> Vec<String> {
-    text.lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect()
-}
-
-#[cfg(feature = "usage-module")]
-#[tauri::command]
-pub fn refresh_usage_data(db: State<'_, UsageDb>, app: tauri::AppHandle) {
-    let db = db.inner().clone();
-    std::thread::spawn(move || {
-        crate::usage::run_background_ingest(&db);
-        let _ = app.emit("usage-ingest-complete", ());
-    });
 }
 
 // ── Memory diagnostics (dev only) ──────────────────────────────────

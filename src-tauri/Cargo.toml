@@ -40,7 +40,6 @@ tauri-plugin-dialog = "2"
 fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
 tauri-plugin-notification = "2"
 libc = "0.2"
-rusqlite = { version = "0.33", features = ["bundled"] }
 notify = { version = "7", features = ["macos_fsevent"] }
 core-text = "21"
 core-foundation = "0.10"

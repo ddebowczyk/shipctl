@@ -40,7 +40,7 @@ export function checkCommandExists(command: string): Promise<boolean> {
 }
 
 export function getModelsForProvider(provider: string): Promise<string[]> {
-  return invoke("get_models_for_provider", { provider });
+  return invoke(assistantCommand("get_models_for_provider"), { provider });
 }
 
 export function spawnAssistantSession(

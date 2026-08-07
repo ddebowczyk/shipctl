@@ -3981,7 +3981,6 @@ dependencies = [
  "log",
  "notify",
  "portable-pty",
- "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",

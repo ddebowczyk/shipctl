@@ -4,7 +4,10 @@ import type { ShepModule } from "@shep/module-api";
 import "./usage.css";
 
 import { refreshUsageData } from "./client";
-import { useUsageSettingsStore } from "./usageSettingsStore";
+import {
+  configureUsageSettingsPersistence,
+  useUsageSettingsStore,
+} from "./usageSettingsStore";
 import { useUsageStore } from "./usageStore";
 
 export const USAGE_SURFACE_ID = "core.usage" as const;
@@ -72,7 +75,8 @@ export const usageModule = {
       },
     },
   ],
-  activate() {
+  activate({ services }) {
+    configureUsageSettingsPersistence(services.globalData);
     void useUsageSettingsStore.getState().loadSettings();
     void fetchUsageSnapshots();
     void refreshUsageData();
@@ -81,6 +85,7 @@ export const usageModule = {
     return {
       async deactivate() {
         (await unlisten)();
+        configureUsageSettingsPersistence(null);
       },
     };
   },

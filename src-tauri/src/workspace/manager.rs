@@ -1,6 +1,6 @@
 use super::config::{
     EditorSettings, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo, RepoInfo,
-    SidebarSettings, TerminalSettings, UsageSettings, WorkspaceConfig,
+    SidebarSettings, TerminalSettings, WorkspaceConfig,
 };
 use super::loader;
 
@@ -73,14 +73,6 @@ impl WorkspaceManager {
 
     pub fn load_sidebar_settings(&self) -> Result<SidebarSettings, String> {
         loader::load_sidebar_settings()
-    }
-
-    pub fn load_usage_settings(&self) -> Result<UsageSettings, String> {
-        loader::load_usage_settings()
-    }
-
-    pub fn save_usage_settings(&self, settings: &UsageSettings) -> Result<(), String> {
-        loader::save_usage_settings(settings)
     }
 
     pub fn load_global_capability_data(

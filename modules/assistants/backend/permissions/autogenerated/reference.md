@@ -114,6 +114,32 @@ Denies the fail_assistant_session_capture command without any pre-configured sco
 <tr>
 <td>
 
+`shep-assistants:allow-get-models-for-provider`
+
+</td>
+<td>
+
+Enables the get_models_for_provider command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shep-assistants:deny-get-models-for-provider`
+
+</td>
+<td>
+
+Denies the get_models_for_provider command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `shep-assistants:allow-list-restorable-assistant-sessions`
 
 </td>

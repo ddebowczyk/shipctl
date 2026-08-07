@@ -8,6 +8,7 @@
 
 pub mod capture;
 mod manifest;
+mod model_catalog;
 pub mod providers;
 
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,7 @@ pub const TAKE_ASSISTANT_SESSION_STARTUP_WARNING_COMMAND: &str =
     "plugin:shep-assistants|take_assistant_session_startup_warning";
 pub const BEGIN_ASSISTANT_SESSION_PRESERVING_SHUTDOWN_COMMAND: &str =
     "plugin:shep-assistants|begin_assistant_session_preserving_shutdown";
+pub const GET_MODELS_FOR_PROVIDER_COMMAND: &str = "plugin:shep-assistants|get_models_for_provider";
 
 /// The only host authority required by the Assistant provider module.
 ///
@@ -816,6 +818,11 @@ fn begin_assistant_session_preserving_shutdown(
     state.registry.begin_preserving_shutdown()
 }
 
+#[tauri::command]
+async fn get_models_for_provider(provider: String) -> Result<Vec<String>, String> {
+    model_catalog::query(&provider)
+}
+
 pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
     tauri::plugin::Builder::new(PLUGIN_NAME)
         .setup(move |app, _api| {
@@ -839,6 +846,7 @@ pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
             list_restorable_assistant_sessions,
             take_assistant_session_startup_warning,
             begin_assistant_session_preserving_shutdown,
+            get_models_for_provider,
         ])
         .build()
 }

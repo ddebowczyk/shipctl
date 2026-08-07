@@ -5,16 +5,7 @@ import type {
   ProviderUsageSnapshot,
   UsageOverview,
   UsageProjectAliasReviewItem,
-  UsageSettings,
 } from "./types";
-
-export function getUsageSettings(): Promise<UsageSettings> {
-  return invoke("get_usage_settings");
-}
-
-export function saveUsageSettings(settings: UsageSettings): Promise<void> {
-  return invoke("save_usage_settings", { settings });
-}
 
 export function getAllUsageSnapshots(): Promise<ProviderUsageSnapshot[]> {
   return invoke("plugin:shep-usage|get_all_usage_snapshots");

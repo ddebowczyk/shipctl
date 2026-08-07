@@ -343,6 +343,18 @@
           "markdownDescription": "Denies the fail_assistant_session_capture command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_models_for_provider command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-models-for-provider",
+          "markdownDescription": "Enables the get_models_for_provider command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_models_for_provider command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-models-for-provider",
+          "markdownDescription": "Denies the get_models_for_provider command without any pre-configured scope."
+        },
+        {
           "description": "Enables the list_restorable_assistant_sessions command without any pre-configured scope.",
           "type": "string",
           "const": "allow-list-restorable-assistant-sessions",

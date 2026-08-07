@@ -108,7 +108,8 @@
             "shep-assistants:allow-rearm-assistant-session",
             "shep-assistants:allow-list-restorable-assistant-sessions",
             "shep-assistants:allow-take-assistant-session-startup-warning",
-            "shep-assistants:allow-begin-assistant-session-preserving-shutdown"
+            "shep-assistants:allow-begin-assistant-session-preserving-shutdown",
+            "shep-assistants:allow-get-models-for-provider"
           ]
         },
         {
@@ -121,7 +122,6 @@
             "shep-usage:allow-get-usage-details",
             "shep-usage:allow-get-usage-overview",
             "shep-usage:allow-get-project-alias-review-queue",
-            "shep-usage:allow-get-observed-models-for-provider",
             "shep-usage:allow-refresh-usage-data"
           ]
         }

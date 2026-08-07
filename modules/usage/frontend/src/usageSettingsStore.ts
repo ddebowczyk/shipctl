@@ -1,6 +1,8 @@
 import { create } from "zustand";
-import { getUsageSettings, saveUsageSettings } from "./client";
+import type { ModuleGlobalDataPort } from "@shep/module-api";
 import type { UsageSettings, UsageProvider, ProviderBudgetConfig } from "./types";
+
+const USAGE_SETTINGS_KEY = "usage";
 
 const DEFAULT_SETTINGS: UsageSettings = {
   claude: { show: true, budgetMode: "subscription", monthlyBudget: null },
@@ -10,6 +12,61 @@ const DEFAULT_SETTINGS: UsageSettings = {
   opencode: { show: true, budgetMode: "custom", monthlyBudget: 100 },
   pi: { show: false, budgetMode: "custom", monthlyBudget: null },
 };
+
+let globalData: ModuleGlobalDataPort | null = null;
+let persistedDocument: Record<string, unknown> = {};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function normalizeProvider(
+  value: unknown,
+  defaults: ProviderBudgetConfig,
+): ProviderBudgetConfig {
+  const provider = asRecord(value);
+  return {
+    show: typeof provider.show === "boolean" ? provider.show : defaults.show,
+    budgetMode: provider.budgetMode === "subscription" || provider.budgetMode === "custom"
+      ? provider.budgetMode
+      : defaults.budgetMode,
+    monthlyBudget: typeof provider.monthlyBudget === "number" || provider.monthlyBudget === null
+      ? provider.monthlyBudget
+      : defaults.monthlyBudget,
+  };
+}
+
+function normalizeSettings(value: unknown): UsageSettings {
+  const document = asRecord(value);
+  return Object.fromEntries(
+    (Object.keys(DEFAULT_SETTINGS) as UsageProvider[]).map((provider) => [
+      provider,
+      normalizeProvider(document[provider], DEFAULT_SETTINGS[provider]),
+    ]),
+  ) as unknown as UsageSettings;
+}
+
+function mergeSettingsDocument(settings: UsageSettings): Record<string, unknown> {
+  return Object.fromEntries([
+    ...Object.entries(persistedDocument),
+    ...(Object.keys(DEFAULT_SETTINGS) as UsageProvider[]).map((provider) => [
+      provider,
+      { ...asRecord(persistedDocument[provider]), ...settings[provider] },
+    ]),
+  ]);
+}
+
+export function configureUsageSettingsPersistence(port: ModuleGlobalDataPort | null) {
+  globalData = port;
+  if (!port) persistedDocument = {};
+}
+
+function persistence(): ModuleGlobalDataPort {
+  if (!globalData) throw new Error("Usage settings persistence is unavailable");
+  return globalData;
+}
 
 interface UsageSettingsStore {
   settings: UsageSettings;
@@ -29,7 +86,9 @@ export const useUsageSettingsStore = create<UsageSettingsStore>((set, get) => ({
   error: null,
   loadSettings: async () => {
     try {
-      const settings = await getUsageSettings();
+      const value = await persistence().read(USAGE_SETTINGS_KEY);
+      persistedDocument = asRecord(value);
+      const settings = normalizeSettings(value);
       set({ settings, hasLoaded: true, error: null });
     } catch (error) {
       set({
@@ -43,7 +102,9 @@ export const useUsageSettingsStore = create<UsageSettingsStore>((set, get) => ({
     const next = { ...prev, [provider]: { ...prev[provider], ...patch } };
     set({ settings: next, isSaving: true });
     try {
-      await saveUsageSettings(next);
+      const document = mergeSettingsDocument(next);
+      await persistence().replace(USAGE_SETTINGS_KEY, document);
+      persistedDocument = document;
       set({ isSaving: false, error: null });
     } catch (error) {
       set({

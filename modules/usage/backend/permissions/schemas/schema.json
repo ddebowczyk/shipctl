@@ -307,18 +307,6 @@
           "markdownDescription": "Denies the get_all_usage_snapshots command without any pre-configured scope."
         },
         {
-          "description": "Enables the get_observed_models_for_provider command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-get-observed-models-for-provider",
-          "markdownDescription": "Enables the get_observed_models_for_provider command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the get_observed_models_for_provider command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-get-observed-models-for-provider",
-          "markdownDescription": "Denies the get_observed_models_for_provider command without any pre-configured scope."
-        },
-        {
           "description": "Enables the get_project_alias_review_queue command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-project-alias-review-queue",

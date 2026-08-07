@@ -13,7 +13,6 @@ pub use usage::types::{
 };
 pub use usage::{
     get_all_usage_snapshots as query_all_usage_snapshots,
-    get_models_for_provider as query_observed_models_for_provider,
     get_project_alias_review_queue as query_project_alias_review_queue,
     get_usage_overview as query_usage_overview, get_usage_snapshot as query_usage_snapshot,
     get_windowed_details as query_usage_details, run_background_ingest, EnabledProviders, UsageDb,
@@ -26,11 +25,9 @@ pub const GET_USAGE_DETAILS_COMMAND: &str = "plugin:shep-usage|get_usage_details
 pub const GET_USAGE_OVERVIEW_COMMAND: &str = "plugin:shep-usage|get_usage_overview";
 pub const GET_PROJECT_ALIAS_REVIEW_QUEUE_COMMAND: &str =
     "plugin:shep-usage|get_project_alias_review_queue";
-pub const GET_OBSERVED_MODELS_FOR_PROVIDER_COMMAND: &str =
-    "plugin:shep-usage|get_observed_models_for_provider";
 pub const REFRESH_USAGE_DATA_COMMAND: &str = "plugin:shep-usage|refresh_usage_data";
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderVisibility {
     pub claude: bool,
     pub codex: bool,
@@ -38,19 +35,55 @@ pub struct ProviderVisibility {
     pub antigravity: bool,
 }
 
-/// Read-only host authority for the provider visibility stored in global config.
-pub trait ProviderSettingsAuthority: Send + Sync {
-    fn provider_visibility(&self) -> ProviderVisibility;
+impl Default for ProviderVisibility {
+    fn default() -> Self {
+        Self {
+            claude: true,
+            codex: true,
+            gemini: false,
+            antigravity: true,
+        }
+    }
+}
+
+impl ProviderVisibility {
+    fn from_capability_data(value: Option<&serde_json::Value>) -> Self {
+        let mut visibility = Self::default();
+        let Some(settings) = value.and_then(serde_json::Value::as_object) else {
+            return visibility;
+        };
+
+        for (provider, target) in [
+            ("claude", &mut visibility.claude),
+            ("codex", &mut visibility.codex),
+            ("gemini", &mut visibility.gemini),
+            ("antigravity", &mut visibility.antigravity),
+        ] {
+            if let Some(show) = settings
+                .get(provider)
+                .and_then(|entry| entry.get("show"))
+                .and_then(serde_json::Value::as_bool)
+            {
+                *target = show;
+            }
+        }
+        visibility
+    }
+}
+
+/// Read-only access to opaque global data. Usage owns the schema under `usage`.
+pub trait GlobalCapabilityDataAuthority: Send + Sync {
+    fn read(&self, capability_id: &str) -> Result<Option<serde_json::Value>, String>;
 }
 
 #[derive(Clone)]
 pub struct HostServices {
-    settings: Arc<dyn ProviderSettingsAuthority>,
+    global_data: Arc<dyn GlobalCapabilityDataAuthority>,
 }
 
 impl HostServices {
-    pub fn new(settings: Arc<dyn ProviderSettingsAuthority>) -> Self {
-        Self { settings }
+    pub fn new(global_data: Arc<dyn GlobalCapabilityDataAuthority>) -> Self {
+        Self { global_data }
     }
 }
 
@@ -60,7 +93,8 @@ struct UsagePluginState {
 }
 
 fn enabled_providers(services: &HostServices) -> usage::EnabledProviders {
-    let visibility = services.settings.provider_visibility();
+    let data = services.global_data.read("usage").ok().flatten();
+    let visibility = ProviderVisibility::from_capability_data(data.as_ref());
     usage::EnabledProviders {
         claude: visibility.claude,
         codex: visibility.codex,
@@ -111,14 +145,6 @@ async fn get_project_alias_review_queue(
 }
 
 #[tauri::command]
-async fn get_observed_models_for_provider(
-    state: State<'_, UsagePluginState>,
-    provider: String,
-) -> Result<Vec<String>, String> {
-    Ok(usage::get_models_for_provider(&state.db, &provider))
-}
-
-#[tauri::command]
 fn refresh_usage_data<R: Runtime>(state: State<'_, UsagePluginState>, app: tauri::AppHandle<R>) {
     spawn_ingest(state.db.clone(), app);
 }
@@ -141,9 +167,6 @@ pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
                 db: db.clone(),
                 services: services.clone(),
             });
-            // Transitional flat commands use this state until the compatibility
-            // layer is removed in the next migration slice.
-            app.manage(db.clone());
             spawn_ingest(db, app.clone());
             Ok(())
         })
@@ -153,7 +176,6 @@ pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
             get_usage_details,
             get_usage_overview,
             get_project_alias_review_queue,
-            get_observed_models_for_provider,
             refresh_usage_data,
         ])
         .build()
@@ -180,10 +202,29 @@ mod tests {
         assert_eq!(
             ProviderVisibility::default(),
             ProviderVisibility {
-                claude: false,
-                codex: false,
+                claude: true,
+                codex: true,
                 gemini: false,
-                antigravity: false,
+                antigravity: true,
+            }
+        );
+    }
+
+    #[test]
+    fn visibility_schema_is_owned_and_defaulted_by_usage() {
+        let value = serde_json::json!({
+            "claude": { "show": false, "future": "preserved by host" },
+            "gemini": { "show": true },
+            "codex": { "show": "invalid" }
+        });
+
+        assert_eq!(
+            ProviderVisibility::from_capability_data(Some(&value)),
+            ProviderVisibility {
+                claude: false,
+                codex: true,
+                gemini: true,
+                antigravity: true,
             }
         );
     }

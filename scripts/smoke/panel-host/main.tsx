@@ -25,7 +25,7 @@ mockIPC(
     switch (command) {
       case "check_command_exists":
         return true;
-      case "get_models_for_provider":
+      case "plugin:shep-assistants|get_models_for_provider":
         return ["smoke-model"];
       case "plugin:shep-git|git_status":
         return {
