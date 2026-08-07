@@ -84,3 +84,20 @@ Commands is removable without changing lifecycle, panel rendering, sidebar,
 terminal, or project-data host implementations. This validates the terminal
 and project-data ports against their first real consumer and leaves assistant
 continuity as the next terminal-backed capability to extract.
+
+## Closure evidence
+
+The phase-closing gate additionally ran the complete host native suite: 45
+tests passed. Beads lint and dependency-cycle checks were clean.
+
+The browser panel-host harness loaded the real Commands module, opened its
+add-command editor, cancelled the edit, and then loaded the To-dos module with
+its own module-local layout styles. This verifies both the Commands entrypoint
+and the CSS isolation correction through the rendered runtime path.
+
+The environment still cannot script the native Tauri window without macOS
+Accessibility permission. The final operator smoke must therefore exercise a
+real command launch and stop through the built application. This is a bounded
+interactive-evidence gap rather than a known failure: terminal launch, focus,
+exit classification, and cleanup are covered by the generic terminal-session
+contract and Commands characterization suites.
