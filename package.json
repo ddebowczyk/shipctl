@@ -12,6 +12,7 @@
     "test:module-boundaries": "node --test scripts/tests/moduleBoundaries.test.mjs",
     "test:module-composition": "node --test scripts/tests/moduleComposition.test.ts",
     "test:global-surfaces": "node --test scripts/tests/globalSurfaces.test.ts",
+    "test:git-characterization": "node --test --test-concurrency=1 scripts/tests/gitCharacterization.test.ts && cargo test --manifest-path src-tauri/Cargo.toml git_characterization_tests -- --test-threads=1",
     "test:panel-persistence": "node --test scripts/tests/panelPersistence.test.ts",
     "test:panels": "node --test scripts/tests/panelRegistry.test.ts scripts/tests/panelPersistence.test.ts scripts/tests/panelTabs.test.ts",
     "test:ports-characterization": "node --test modules/ports/frontend/tests/*.test.ts && cargo test --manifest-path modules/ports/backend/Cargo.toml",

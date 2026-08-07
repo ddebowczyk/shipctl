@@ -3,6 +3,8 @@ mod commands;
 mod enabled_modules;
 mod fonts;
 mod git;
+#[cfg(test)]
+mod git_characterization_tests;
 mod menu;
 mod pi_config;
 #[cfg(feature = "ports-module")]

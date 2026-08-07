@@ -122,6 +122,9 @@ capability ceiling.
 - [23-skills-plugout-gate.md](./23-skills-plugout-gate.md) records the enabled,
   disabled, and physically source-absent Skills verification matrix plus the
   scalable per-module plug-out recipe.
+- [24-git-characterization-and-seam.md](./24-git-characterization-and-seam.md)
+  protects current repository, worktree, file, diff, watcher, and project-state
+  behavior and splits Git extraction at the proven host/native boundaries.
 
 ## Target dependency shape
 
