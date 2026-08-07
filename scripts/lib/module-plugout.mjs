@@ -14,11 +14,11 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-export function run(command, args, cwd) {
+export function run(command, args, cwd, env = {}) {
   process.stdout.write(`\n$ ${command} ${args.join(" ")}\n`);
   const result = spawnSync(command, args, {
     cwd,
-    env: process.env,
+    env: { ...process.env, ...env },
     stdio: "inherit",
   });
   if (result.error) throw result.error;

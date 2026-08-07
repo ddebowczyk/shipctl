@@ -84,6 +84,24 @@ test("unknown panel IDs remain retryable and removable", () => {
   assert.equal(result.raw, raw);
 });
 
+test("a persisted panel from a source-absent module recovers generically", () => {
+  const raw = {
+    schemaVersion: PANEL_REFERENCE_SCHEMA_VERSION,
+    instanceId: "assistant-launcher-1",
+    panelId: "assistants.launcher",
+    label: "New Agent",
+  };
+  const result = hydratePanelReference(raw, {
+    availablePanelIds: ["core.git"],
+  });
+
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.recovery?.reason, "unknown");
+  assert.equal(result.recovery?.canRetry, true);
+  assert.equal(result.recovery?.canRemove, true);
+  assert.equal(result.raw, raw);
+});
+
 test("known but disabled panels are distinguished from unknown panels", () => {
   const raw = {
     schemaVersion: PANEL_REFERENCE_SCHEMA_VERSION,

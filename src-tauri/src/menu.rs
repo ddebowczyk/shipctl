@@ -39,10 +39,10 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+T"),
     )?;
-    let new_agent = MenuItem::with_id(
+    let new_session = MenuItem::with_id(
         app,
-        "new_agent",
-        "New Agent Session",
+        "new_session",
+        "New Session",
         true,
         Some("CmdOrCtrl+Shift+T"),
     )?;
@@ -63,7 +63,7 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
 
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_terminal)
-        .item(&new_agent)
+        .item(&new_session)
         .item(&new_commands)
         .separator()
         .item(&open_in_editor)

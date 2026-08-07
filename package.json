@@ -34,6 +34,7 @@
     "verify:git-plugout": "node scripts/verify-git-plugout.mjs",
     "verify:commands-frontend-disabled": "node scripts/verify-commands-frontend-disabled.mjs",
     "verify:assistants-frontend-disabled": "node scripts/verify-assistants-frontend-disabled.mjs",
+    "verify:assistants-plugout": "node scripts/verify-assistants-plugout.mjs",
     "verify:commands-plugout": "node scripts/verify-commands-plugout.mjs",
     "verify:ports-plugout": "node scripts/verify-ports-plugout.mjs",
     "verify:skills-plugout": "node scripts/verify-skills-plugout.mjs",

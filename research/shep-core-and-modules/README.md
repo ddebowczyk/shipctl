@@ -164,6 +164,9 @@ capability ceiling.
 - [37-assistants-host-compatibility-removal.md](./37-assistants-host-compatibility-removal.md)
   records generic host tabs and launch routing, removal of retired adapters and
   provider DTOs, panel migration aliases, and opaque workspace-data retention.
+- [38-assistants-plugout-gate.md](./38-assistants-plugout-gate.md) records the
+  enabled, disabled, and physically source-absent Assistant verification
+  matrix, generic new-session menu behavior, and persisted-tab recovery.
 
 ## Target dependency shape
 

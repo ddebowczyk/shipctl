@@ -558,6 +558,9 @@ export default function AppShell() {
         case "new_terminal":
           handleNewShell();
           break;
+        case "new_session":
+          handleNewModuleSession();
+          break;
         case "toggle_sidebar":
           useUIStore.getState().toggleSidebar();
           break;
@@ -585,7 +588,7 @@ export default function AppShell() {
       }
     });
     return () => { unlisten.then((f) => f()); };
-  }, [cycleTabs, handleNewShell, handleOpenInEditor, pushNotice]);
+  }, [cycleTabs, handleNewShell, handleNewModuleSession, handleOpenInEditor, pushNotice]);
 
   // Renderer fallback for platforms/webviews that deliver the shortcut to the
   // page instead of the native application menu.
