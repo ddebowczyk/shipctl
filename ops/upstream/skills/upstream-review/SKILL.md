@@ -8,10 +8,11 @@ description: Triage upstream changes into a durable ledger without mutating the 
 The repeatable procedure. Written to be executed by an agent without further context;
 read `reference/ledger-format.md` for the entry schema it produces.
 
-`origin/main` is the authoritative product trunk. `upstream/main` is a
-read-only intake feed. Review fetches and records upstream changes; it never
-synchronizes, resets, rebases, merges, cherry-picks, or checks upstream content
-out into a product branch.
+`main` in this repository is the product trunk and the only authority over
+product state. The original Shep repository is not a trunk and never becomes
+one: `upstream/main` is a read-only intake feed. Review fetches and records
+upstream changes; it never synchronizes, resets, rebases, merges, cherry-picks,
+or checks upstream content out into a product branch.
 
 This is one-way selective intake, not contribution-fork maintenance. Never open
 a pull request against the original Shep repository or push our product branches
@@ -136,14 +137,14 @@ git commit -m "chore(upstream): triage <range>"
 
 Ledger triage and implementation are separate activities — never block a batch on writing
 code. Implementation happens later from the linked `bd` issue, on a short-lived branch
-created from `origin/main`. When the work lands, add `integrated: <our-sha>` to the ledger
-entry and close the bd issue.
+created from the product trunk `main`. When the work lands, add `integrated: <our-sha>` to
+the ledger entry and close the bd issue.
 
 Useful extraction commands for the implementer:
 
 ```bash
 git show <sha> -- <path> > /tmp/upstream.patch    # inspect
-git diff origin/main <sha> -- <path>               # compare against the product trunk
+git diff main <sha> -- <path>                     # compare against the product trunk
 ```
 
 Direct cherry-pick is reserved for a later implementation task and only for structurally
