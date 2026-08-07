@@ -77,10 +77,11 @@ scopes. Two concurrent callers can read the same config and then overwrite one
 another's changes. Frontend serialization protects calls through one module
 port but cannot coordinate a simultaneous host settings write.
 
-This is not a reason to abandon the module boundary, but it is a correctness
-prerequisite before typed Usage ownership is removed. Bead
-`shep-3w1.8.6.2.5` requires one atomic global-config mutation boundary and a
-deterministic lost-update test; it blocks the compatibility-removal slice.
+This was not a reason to abandon the module boundary, but it was a correctness
+prerequisite before typed Usage ownership could be removed. Bead
+`shep-3w1.8.6.2.5` subsequently landed one atomic global-config mutation
+boundary and a deterministic lost-update test, as documented in
+`43-atomic-global-config-mutations.md`.
 
 ## Verification contract
 

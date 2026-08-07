@@ -41,9 +41,10 @@ schema, or mutation authority to the module.
 
 Usage settings commands remain host-owned in this slice because their typed
 field is still part of shared global configuration. Removing that ownership
-before global writes are atomic could allow one capability to overwrite another
-capability's concurrent settings update. The prerequisite remains tracked by
-`shep-3w1.8.6.2.5`.
+before global writes were atomic could have allowed one capability to overwrite
+another capability's concurrent settings update. The prerequisite subsequently
+landed through the generic transaction documented in
+`43-atomic-global-config-mutations.md`.
 
 ## Bounded compatibility seam
 

@@ -143,7 +143,10 @@ test("native cache, unavailable states, and persisted config remain bounded", ()
   assert.match(config, /pub usage: UsageSettings/);
   assert.match(config, /rename = "budgetMode"/);
   assert.match(config, /rename = "monthlyBudget"/);
-  assert.match(loader, /config\.usage = settings\.clone\(\);[\s\S]*save_global_config\(&config\)/);
+  assert.match(
+    loader,
+    /pub fn save_usage_settings[\s\S]*mutate_global_config\(\|config\|[\s\S]*config\.usage = settings\.clone\(\)/,
+  );
 });
 
 test("native ownership seam includes ingestion, query DB, and provider subprocess access", () => {

@@ -53,9 +53,9 @@ the native workspace configuration still owns its typed `usage:` field. That
 is intentional for this safe slice. The next migration extracts the Rust
 backend into a namespaced internal Tauri plugin before compatibility removal.
 
-Atomic mutation of shared global configuration remains a prerequisite for
-removing typed host ownership. That risk is tracked by
-`shep-3w1.8.6.2.5`; this extraction does not hide or widen it.
+Atomic mutation of shared global configuration was a prerequisite for removing
+typed host ownership. Bead `shep-3w1.8.6.2.5` subsequently landed that boundary,
+as documented in `43-atomic-global-config-mutations.md`.
 
 ## Verification
 

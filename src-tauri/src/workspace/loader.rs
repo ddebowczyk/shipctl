@@ -11,6 +11,8 @@ use super::config::{
 
 static CONFIG_CACHE: Mutex<Option<(GlobalConfig, SystemTime)>> = Mutex::new(None);
 
+type ConfigCache = Option<(GlobalConfig, SystemTime)>;
+
 // ── Paths ───────────────────────────────────────────────────────────
 
 fn shep_home() -> Result<PathBuf, String> {
@@ -39,6 +41,13 @@ fn repo_workspace_file(repo_path: &str) -> PathBuf {
 
 pub fn load_global_config() -> Result<GlobalConfig, String> {
     let path = global_config_path()?;
+    let mut cache = CONFIG_CACHE
+        .lock()
+        .map_err(|_| "Global config lock is poisoned".to_string())?;
+    load_global_config_at(&path, &mut cache)
+}
+
+fn load_global_config_at(path: &Path, cache: &mut ConfigCache) -> Result<GlobalConfig, String> {
     if !path.exists() {
         return Ok(GlobalConfig::default());
     }
@@ -47,11 +56,9 @@ pub fn load_global_config() -> Result<GlobalConfig, String> {
         .and_then(|m| m.modified())
         .unwrap_or(UNIX_EPOCH);
 
-    if let Ok(guard) = CONFIG_CACHE.lock() {
-        if let Some((ref cached, ref cached_mtime)) = *guard {
-            if *cached_mtime == mtime {
-                return Ok(cached.clone());
-            }
+    if let Some((cached, cached_mtime)) = cache.as_ref() {
+        if *cached_mtime == mtime {
+            return Ok(cached.clone());
         }
     }
 
@@ -60,30 +67,60 @@ pub fn load_global_config() -> Result<GlobalConfig, String> {
     let config: GlobalConfig = serde_yaml::from_str(&content)
         .map_err(|e| format!("Failed to parse global config: {e}"))?;
 
-    if let Ok(mut guard) = CONFIG_CACHE.lock() {
-        *guard = Some((config.clone(), mtime));
-    }
+    *cache = Some((config.clone(), mtime));
 
     Ok(config)
 }
 
 pub fn save_global_config(config: &GlobalConfig) -> Result<(), String> {
-    let dir = shep_home()?;
-    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create .shep dir: {e}"))?;
-
     let path = global_config_path()?;
+    let mut cache = CONFIG_CACHE
+        .lock()
+        .map_err(|_| "Global config lock is poisoned".to_string())?;
+    save_global_config_at(&path, config, &mut cache)
+}
+
+fn save_global_config_at(
+    path: &Path,
+    config: &GlobalConfig,
+    cache: &mut ConfigCache,
+) -> Result<(), String> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| "Global config path has no parent directory".to_string())?;
+    fs::create_dir_all(dir).map_err(|e| format!("Failed to create .shep dir: {e}"))?;
+
     let yaml =
         serde_yaml::to_string(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
     fs::write(&path, &yaml).map_err(|e| format!("Failed to write global config: {e}"))?;
 
     // Update cache with the config we just wrote
     if let Ok(mtime) = fs::metadata(&path).and_then(|m| m.modified()) {
-        if let Ok(mut guard) = CONFIG_CACHE.lock() {
-            *guard = Some((config.clone(), mtime));
-        }
+        *cache = Some((config.clone(), mtime));
     }
 
     Ok(())
+}
+
+fn mutate_global_config<T>(
+    mutation: impl FnOnce(&mut GlobalConfig) -> Result<T, String>,
+) -> Result<T, String> {
+    let path = global_config_path()?;
+    mutate_global_config_at(&path, &CONFIG_CACHE, mutation)
+}
+
+fn mutate_global_config_at<T>(
+    path: &Path,
+    cache: &Mutex<ConfigCache>,
+    mutation: impl FnOnce(&mut GlobalConfig) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut cache = cache
+        .lock()
+        .map_err(|_| "Global config lock is poisoned".to_string())?;
+    let mut config = load_global_config_at(path, &mut cache)?;
+    let result = mutation(&mut config)?;
+    save_global_config_at(path, &config, &mut cache)?;
+    Ok(result)
 }
 
 pub fn backfill_global_config_defaults() -> Result<(), String> {
@@ -101,10 +138,11 @@ pub fn backfill_global_config_defaults() -> Result<(), String> {
         return Ok(());
     }
 
-    let mut config = load_global_config()?;
-    normalize_terminal_settings(&mut config.terminal);
-    normalize_sidebar_settings(&mut config.sidebar);
-    save_global_config(&config)
+    mutate_global_config(|config| {
+        normalize_terminal_settings(&mut config.terminal);
+        normalize_sidebar_settings(&mut config.sidebar);
+        Ok(())
+    })
 }
 
 pub fn load_editor_settings() -> Result<EditorSettings, String> {
@@ -116,15 +154,17 @@ pub fn load_project_settings() -> Result<ProjectSettings, String> {
 }
 
 pub fn save_editor_settings(settings: &EditorSettings) -> Result<(), String> {
-    let mut config = load_global_config()?;
-    config.editor = settings.clone();
-    save_global_config(&config)
+    mutate_global_config(|config| {
+        config.editor = settings.clone();
+        Ok(())
+    })
 }
 
 pub fn save_project_settings(settings: &ProjectSettings) -> Result<(), String> {
-    let mut config = load_global_config()?;
-    config.projects = settings.clone();
-    save_global_config(&config)
+    mutate_global_config(|config| {
+        config.projects = settings.clone();
+        Ok(())
+    })
 }
 
 pub fn load_keybinding_settings() -> Result<KeybindingSettings, String> {
@@ -132,9 +172,10 @@ pub fn load_keybinding_settings() -> Result<KeybindingSettings, String> {
 }
 
 pub fn save_keybinding_settings(settings: &KeybindingSettings) -> Result<(), String> {
-    let mut config = load_global_config()?;
-    config.keybindings = settings.clone();
-    save_global_config(&config)
+    mutate_global_config(|config| {
+        config.keybindings = settings.clone();
+        Ok(())
+    })
 }
 
 pub fn load_terminal_settings() -> Result<TerminalSettings, String> {
@@ -142,9 +183,10 @@ pub fn load_terminal_settings() -> Result<TerminalSettings, String> {
 }
 
 pub fn save_terminal_settings(settings: &TerminalSettings) -> Result<(), String> {
-    let mut config = load_global_config()?;
-    config.terminal = settings.clone();
-    save_global_config(&config)
+    mutate_global_config(|config| {
+        config.terminal = settings.clone();
+        Ok(())
+    })
 }
 
 pub fn load_sidebar_settings() -> Result<SidebarSettings, String> {
@@ -158,9 +200,10 @@ pub fn load_usage_settings() -> Result<UsageSettings, String> {
 }
 
 pub fn save_usage_settings(settings: &UsageSettings) -> Result<(), String> {
-    let mut config = load_global_config()?;
-    config.usage = settings.clone();
-    save_global_config(&config)
+    mutate_global_config(|config| {
+        config.usage = settings.clone();
+        Ok(())
+    })
 }
 
 pub fn load_global_capability_data(
@@ -173,9 +216,7 @@ pub fn replace_global_capability_data(
     capability_id: &str,
     value: serde_json::Value,
 ) -> Result<(), String> {
-    let mut config = load_global_config()?;
-    config.replace_capability_value(capability_id, value)?;
-    save_global_config(&config)
+    mutate_global_config(|config| config.replace_capability_value(capability_id, value))
 }
 
 // ── Repo operations ─────────────────────────────────────────────────
@@ -209,20 +250,21 @@ pub fn register_repo(repo_path: &str) -> Result<RegisteredRepo, String> {
         return Err(format!("Directory does not exist: {repo_path}"));
     }
 
-    // Add to global config if not already there
-    let mut config = load_global_config()?;
     let canonical = path
         .canonicalize()
         .map_err(|e| format!("Failed to resolve path: {e}"))?;
     let canonical_str = canonical.to_string_lossy().to_string();
 
-    if !config.repos.iter().any(|r| r.path == canonical_str) {
-        config.repos.push(RepoEntry {
-            path: canonical_str.clone(),
-            group: None,
-        });
-        save_global_config(&config)?;
-    }
+    // Add to global config if not already there.
+    mutate_global_config(|config| {
+        if !config.repos.iter().any(|r| r.path == canonical_str) {
+            config.repos.push(RepoEntry {
+                path: canonical_str.clone(),
+                group: None,
+            });
+        }
+        Ok(())
+    })?;
 
     // Load existing workspace config or return an in-memory default. We create
     // `.shep` lazily only when the user actually saves project config.
@@ -234,9 +276,10 @@ pub fn register_repo(repo_path: &str) -> Result<RegisteredRepo, String> {
 }
 
 pub fn unregister_repo(repo_path: &str) -> Result<(), String> {
-    let mut config = load_global_config()?;
-    config.repos.retain(|r| r.path != repo_path);
-    save_global_config(&config)
+    mutate_global_config(|config| {
+        config.repos.retain(|r| r.path != repo_path);
+        Ok(())
+    })
 }
 
 // ── Per-repo workspace ──────────────────────────────────────────────
@@ -368,9 +411,6 @@ pub fn create_group(name: &str) -> Result<GroupEntry, String> {
         return Err("Group name cannot be empty".to_string());
     }
 
-    let mut config = load_global_config()?;
-    let next_order = config.groups.iter().map(|g| g.order).max().unwrap_or(0) + 1;
-
     let id = format!(
         "{}-{}",
         slug_from_name(trimmed),
@@ -380,15 +420,16 @@ pub fn create_group(name: &str) -> Result<GroupEntry, String> {
             .as_millis()
     );
 
-    let entry = GroupEntry {
-        id,
-        name: trimmed.to_string(),
-        order: next_order,
-    };
-
-    config.groups.push(entry.clone());
-    save_global_config(&config)?;
-    Ok(entry)
+    mutate_global_config(|config| {
+        let next_order = config.groups.iter().map(|g| g.order).max().unwrap_or(0) + 1;
+        let entry = GroupEntry {
+            id,
+            name: trimmed.to_string(),
+            order: next_order,
+        };
+        config.groups.push(entry.clone());
+        Ok(entry)
+    })
 }
 
 pub fn rename_group(group_id: &str, new_name: &str) -> Result<(), String> {
@@ -397,45 +438,47 @@ pub fn rename_group(group_id: &str, new_name: &str) -> Result<(), String> {
         return Err("Group name cannot be empty".to_string());
     }
 
-    let mut config = load_global_config()?;
-    let group = config
-        .groups
-        .iter_mut()
-        .find(|g| g.id == group_id)
-        .ok_or_else(|| format!("Group not found: {group_id}"))?;
-    group.name = trimmed.to_string();
-    save_global_config(&config)
+    mutate_global_config(|config| {
+        let group = config
+            .groups
+            .iter_mut()
+            .find(|g| g.id == group_id)
+            .ok_or_else(|| format!("Group not found: {group_id}"))?;
+        group.name = trimmed.to_string();
+        Ok(())
+    })
 }
 
 pub fn delete_group(group_id: &str) -> Result<(), String> {
-    let mut config = load_global_config()?;
-    config.groups.retain(|g| g.id != group_id);
-    // Ungroup any repos that belonged to this group
-    for repo in &mut config.repos {
-        if repo.group.as_deref() == Some(group_id) {
-            repo.group = None;
+    mutate_global_config(|config| {
+        config.groups.retain(|g| g.id != group_id);
+        // Ungroup any repos that belonged to this group
+        for repo in &mut config.repos {
+            if repo.group.as_deref() == Some(group_id) {
+                repo.group = None;
+            }
         }
-    }
-    save_global_config(&config)
+        Ok(())
+    })
 }
 
 pub fn move_repo_to_group(repo_path: &str, group_id: Option<&str>) -> Result<(), String> {
-    let mut config = load_global_config()?;
-
-    // Validate group exists (if setting, not clearing)
-    if let Some(gid) = group_id {
-        if !config.groups.iter().any(|g| g.id == gid) {
-            return Err(format!("Group not found: {gid}"));
+    mutate_global_config(|config| {
+        // Validate group exists (if setting, not clearing)
+        if let Some(gid) = group_id {
+            if !config.groups.iter().any(|g| g.id == gid) {
+                return Err(format!("Group not found: {gid}"));
+            }
         }
-    }
 
-    let repo = config
-        .repos
-        .iter_mut()
-        .find(|r| r.path == repo_path)
-        .ok_or_else(|| format!("Repo not found: {repo_path}"))?;
-    repo.group = group_id.map(|s| s.to_string());
-    save_global_config(&config)
+        let repo = config
+            .repos
+            .iter_mut()
+            .find(|r| r.path == repo_path)
+            .ok_or_else(|| format!("Repo not found: {repo_path}"))?;
+        repo.group = group_id.map(|s| s.to_string());
+        Ok(())
+    })
 }
 
 fn slug_from_name(name: &str) -> String {
@@ -489,5 +532,100 @@ fn load_or_default_workspace(repo_path: &str) -> Result<WorkspaceConfig, String>
         };
 
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use super::{
+        load_global_config_at, mutate_global_config_at, save_global_config_at, ConfigCache,
+    };
+    use crate::workspace::config::GlobalConfig;
+
+    #[test]
+    fn concurrent_global_mutations_cannot_lose_host_or_capability_updates() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "shep-global-config-atomic-{}-{unique}.yml",
+            std::process::id()
+        ));
+        let cache: Arc<Mutex<ConfigCache>> = Arc::new(Mutex::new(None));
+
+        let mut initial = GlobalConfig::default();
+        initial.capability_data.insert(
+            "futureCapability".to_string(),
+            serde_json::json!({ "density": "compact" }),
+        );
+        save_global_config_at(&path, &initial, &mut cache.lock().unwrap()).unwrap();
+
+        let (first_entered_tx, first_entered_rx) = mpsc::channel();
+        let (release_first_tx, release_first_rx) = mpsc::channel();
+        let first_path = path.clone();
+        let first_cache = Arc::clone(&cache);
+        let first = thread::spawn(move || {
+            mutate_global_config_at(&first_path, &first_cache, |config| {
+                config.editor.preferred_editor = Some("zed".to_string());
+                first_entered_tx.send(()).unwrap();
+                release_first_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+
+        first_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("first mutation should hold the transaction lock");
+
+        let (second_started_tx, second_started_rx) = mpsc::channel();
+        let (second_entered_tx, second_entered_rx) = mpsc::channel();
+        let second_path = path.clone();
+        let second_cache = Arc::clone(&cache);
+        let second = thread::spawn(move || {
+            second_started_tx.send(()).unwrap();
+            mutate_global_config_at(&second_path, &second_cache, |config| {
+                second_entered_tx.send(()).unwrap();
+                config.replace_capability_value(
+                    "exampleCapability",
+                    serde_json::json!({ "enabled": true }),
+                )
+            })
+        });
+
+        second_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("second mutation should attempt the transaction");
+        assert!(
+            second_entered_rx
+                .recv_timeout(Duration::from_millis(100))
+                .is_err(),
+            "second mutation entered while the first transaction was paused"
+        );
+
+        release_first_tx.send(()).unwrap();
+        first.join().unwrap().unwrap();
+        second_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("second mutation should enter after the first commits");
+        second.join().unwrap().unwrap();
+
+        let final_config = load_global_config_at(&path, &mut cache.lock().unwrap()).unwrap();
+        assert_eq!(final_config.editor.preferred_editor.as_deref(), Some("zed"));
+        assert_eq!(
+            final_config.capability_value("exampleCapability").unwrap(),
+            Some(serde_json::json!({ "enabled": true }))
+        );
+        assert_eq!(
+            final_config.capability_value("futureCapability").unwrap(),
+            Some(serde_json::json!({ "density": "compact" }))
+        );
+
+        fs::remove_file(path).unwrap();
     }
 }

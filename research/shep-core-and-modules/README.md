@@ -181,6 +181,9 @@ capability ceiling.
 - [42-usage-native-module.md](./42-usage-native-module.md) records plugin-owned
   persistence, ingestion, providers, queries, namespaced commands, the narrow
   settings authority, compatibility bounds, and native-disabled build proof.
+- [43-atomic-global-config-mutations.md](./43-atomic-global-config-mutations.md)
+  records the generic locked read-modify-write boundary, deterministic
+  lost-update proof, preserved unknown YAML values, and cross-process limit.
 
 ## Target dependency shape
 
