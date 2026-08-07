@@ -23,14 +23,41 @@ function isLightTheme(theme: ShepTheme): boolean {
   return hexLuminance(theme.appBg) > 0.3;
 }
 
+// Preserve the perceived color of the former translucent dark ANSI entries
+// while handing the renderer a conventional opaque foreground palette.
+export function blendOpaque(base: string, foreground: string, opacity: number): string {
+  if (!/^#[\da-f]{6}$/i.test(base) || !/^#[\da-f]{6}$/i.test(foreground)) {
+    return foreground;
+  }
+
+  const channel = (hex: string, offset: number) =>
+    Number.parseInt(hex.slice(offset, offset + 2), 16);
+  const mix = (baseChannel: number, foregroundChannel: number) =>
+    Math.round(baseChannel + (foregroundChannel - baseChannel) * opacity);
+  const channels = [1, 3, 5].map((offset) =>
+    mix(channel(base, offset), channel(foreground, offset)),
+  );
+  return `#${channels.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export function createTerminalTheme(theme: ShepTheme): ITheme {
   const light = isLightTheme(theme);
   return {
-    background: "transparent",
+    // Only glass themes expose Shep's gradient and native window effect. Opaque
+    // themes must hand WebGL a real RGB background: it turns "transparent"'s
+    // zero RGB value into an opaque black viewport.
+    background: theme.isTransparent ? "transparent" : theme.appBg,
     foreground: theme.termForeground,
     cursor: theme.termCursor,
     selectionBackground: theme.termSelection,
-    black: light ? theme.termBlack : withAlpha(theme.termBlack, 0.4),
+    // xterm 6 draws the terminal's own scrollbar, so its colors come from the
+    // theme rather than the viewport's CSS scrollbar-color.
+    scrollbarSliderBackground: withAlpha(theme.termForeground, 0.24),
+    scrollbarSliderHoverBackground: withAlpha(theme.termForeground, 0.4),
+    scrollbarSliderActiveBackground: withAlpha(theme.termForeground, 0.5),
+    // WebGL makes ANSI foreground glyphs opaque, so the dimmed entries are
+    // pre-blended against the app background instead of carrying alpha.
+    black: light ? theme.termBlack : blendOpaque(theme.appBg, theme.termBlack, 0.4),
     red: theme.termRed,
     green: theme.termGreen,
     yellow: theme.termYellow,
@@ -38,7 +65,9 @@ export function createTerminalTheme(theme: ShepTheme): ITheme {
     magenta: theme.termMagenta,
     cyan: theme.termCyan,
     white: theme.termWhite,
-    brightBlack: light ? theme.termBrightBlack : withAlpha(theme.termBrightBlack, 0.4),
+    brightBlack: light
+      ? theme.termBrightBlack
+      : blendOpaque(theme.appBg, theme.termBrightBlack, 0.4),
     brightRed: theme.termBrightRed,
     brightGreen: theme.termBrightGreen,
     brightYellow: theme.termBrightYellow,

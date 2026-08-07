@@ -15,7 +15,7 @@ import type { ShepTheme } from "@shep/core/appearance";
  * "dom" is xterm's own built-in renderer: it needs no addon, so it is always
  * reachable and is the last entry of every preference chain.
  */
-export type TerminalRendererKind = "canvas" | "webgl" | "dom";
+export type TerminalRendererKind = "webgl" | "dom";
 
 /** The slice of an xterm renderer addon this capability actually drives. */
 export type TerminalRendererAddon = ITerminalAddon & {
@@ -26,12 +26,11 @@ export type TerminalRendererAddon = ITerminalAddon & {
 /**
  * Constructors for the addon-backed renderers.
  *
- * A missing entry means that renderer is not available in this build. That is
- * the intended lever: removing `canvas` here is the whole change needed to move
- * the app onto the post-canvas renderer set, and both sets are covered by tests.
+ * A missing entry means that renderer is not available in this build, which is
+ * how a renderer is retired: xterm 6 ships no canvas addon, so the canvas
+ * factory — and with it the canvas strategy — is simply gone.
  */
 export interface TerminalRendererFactories {
-  canvas?: () => TerminalRendererAddon;
   webgl?: () => TerminalRendererAddon;
 }
 
@@ -49,12 +48,12 @@ type RendererTheme = Pick<ShepTheme, "isTransparent">;
 
 // Glass themes composite over Shep's gradient and the native window effect, so
 // their renderer must leave cell backgrounds unpainted. WebGL paints an opaque
-// rectangle instead, which is why it is absent from this chain.
-const GLASS_PREFERENCE: readonly TerminalRendererKind[] = ["canvas", "dom"];
+// rectangle instead, which is why it is absent from this chain — leaving only
+// xterm's built-in DOM renderer.
+const GLASS_PREFERENCE: readonly TerminalRendererKind[] = ["dom"];
 
-// Opaque themes keep the accelerated path the app has always used: Canvas
-// first, WebGL when Canvas is unavailable.
-const OPAQUE_PREFERENCE: readonly TerminalRendererKind[] = ["canvas", "webgl", "dom"];
+// Opaque themes take the accelerated path.
+const OPAQUE_PREFERENCE: readonly TerminalRendererKind[] = ["webgl", "dom"];
 
 export function createTerminalRendererState(): TerminalRendererState {
   return { rendererAddon: null, rendererKind: "dom", failedRenderers: new Set() };

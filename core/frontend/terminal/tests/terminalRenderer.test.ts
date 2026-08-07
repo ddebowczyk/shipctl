@@ -11,13 +11,9 @@ import {
 const GLASS = { isTransparent: true };
 const OPAQUE = { isTransparent: false };
 
-// The renderer set the app ships on xterm 5, and the set it is left with once
-// the canvas addon — which has no xterm 6 build — is dropped.
-function withCanvas(): TerminalRendererFactories {
-  return { canvas: () => fakeAddon(), webgl: () => fakeAddon() };
-}
-
-function withoutCanvas(): TerminalRendererFactories {
+// The renderer set this build ships. xterm 6 has no canvas addon, so WebGL is
+// the only addon-backed renderer left; "dom" needs no addon at all.
+function accelerated(): TerminalRendererFactories {
   return { webgl: () => fakeAddon() };
 }
 
@@ -53,32 +49,24 @@ function fakeTerminal(mounted = true) {
 
 /* ── selection policy ──────────────────────────────────── */
 
-test("glass themes prefer canvas while it ships, and never webgl", () => {
+test("glass themes use the DOM renderer and never WebGL", () => {
   const state = createTerminalRendererState();
-  assert.equal(selectTerminalRenderer(GLASS, state, withCanvas()), "canvas");
   // WebGL paints cell backgrounds opaque, so it is not a glass candidate even
-  // when it is the only accelerated renderer left.
-  assert.equal(selectTerminalRenderer(GLASS, state, withoutCanvas()), "dom");
-});
-
-test("glass themes fall to the DOM renderer once canvas is gone", () => {
-  const state = createTerminalRendererState();
+  // when it is the only accelerated renderer available.
+  assert.equal(selectTerminalRenderer(GLASS, state, accelerated()), "dom");
   assert.equal(selectTerminalRenderer(GLASS, state, {}), "dom");
 });
 
-test("opaque themes keep the canvas-then-webgl accelerated path", () => {
+test("opaque themes take the accelerated path when it is available", () => {
   const state = createTerminalRendererState();
-  assert.equal(selectTerminalRenderer(OPAQUE, state, withCanvas()), "canvas");
-  assert.equal(selectTerminalRenderer(OPAQUE, state, withoutCanvas()), "webgl");
+  assert.equal(selectTerminalRenderer(OPAQUE, state, accelerated()), "webgl");
   assert.equal(selectTerminalRenderer(OPAQUE, state, {}), "dom");
 });
 
 test("a failed renderer is not selected again", () => {
   const state = createTerminalRendererState();
-  state.failedRenderers.add("canvas");
-  assert.equal(selectTerminalRenderer(OPAQUE, state, withCanvas()), "webgl");
   state.failedRenderers.add("webgl");
-  assert.equal(selectTerminalRenderer(OPAQUE, state, withCanvas()), "dom");
+  assert.equal(selectTerminalRenderer(OPAQUE, state, accelerated()), "dom");
 });
 
 /* ── reconciliation ────────────────────────────────────── */
@@ -86,22 +74,21 @@ test("a failed renderer is not selected again", () => {
 test("reconcile loads the selected addon once and is idempotent", () => {
   const term = fakeTerminal();
   const state = createTerminalRendererState();
-  const factories = withCanvas();
+  const factories = accelerated();
 
-  assert.equal(reconcileTerminalRenderer(term, state, OPAQUE, factories), "canvas");
+  assert.equal(reconcileTerminalRenderer(term, state, OPAQUE, factories), "webgl");
   assert.equal(term.loaded.length, 1);
-  assert.equal(state.rendererKind, "canvas");
+  assert.equal(state.rendererKind, "webgl");
   assert.ok(state.rendererAddon);
 
-  assert.equal(reconcileTerminalRenderer(term, state, OPAQUE, factories), "canvas");
+  assert.equal(reconcileTerminalRenderer(term, state, OPAQUE, factories), "webgl");
   assert.equal(term.loaded.length, 1, "already-active renderer must not reload");
 });
 
-test("reconcile disposes the previous addon when the theme changes", () => {
+test("reconcile disposes the accelerated addon when a glass theme arrives", () => {
   const term = fakeTerminal();
   const state = createTerminalRendererState();
-  // Canvas is absent, so opaque lands on WebGL and glass must shed it.
-  const factories = withoutCanvas();
+  const factories = accelerated();
 
   assert.equal(reconcileTerminalRenderer(term, state, OPAQUE, factories), "webgl");
   const webgl = state.rendererAddon as unknown as FakeAddon;
@@ -112,28 +99,23 @@ test("reconcile disposes the previous addon when the theme changes", () => {
   assert.equal(state.rendererKind, "dom");
 });
 
-test("reconcile falls through renderers that throw on construction", () => {
+test("reconcile reloads the accelerated addon when an opaque theme returns", () => {
   const term = fakeTerminal();
   const state = createTerminalRendererState();
-  const factories: TerminalRendererFactories = {
-    canvas: () => {
-      throw new Error("no 2d context");
-    },
-    webgl: () => fakeAddon(),
-  };
+  const factories = accelerated();
+
+  reconcileTerminalRenderer(term, state, OPAQUE, factories);
+  reconcileTerminalRenderer(term, state, GLASS, factories);
 
   assert.equal(reconcileTerminalRenderer(term, state, OPAQUE, factories), "webgl");
-  assert.equal(state.failedRenderers.has("canvas"), true);
-  assert.equal(term.loaded.length, 1);
+  assert.equal(term.loaded.length, 2);
+  assert.equal((state.rendererAddon as unknown as FakeAddon).disposed, false);
 });
 
-test("reconcile ends on the DOM renderer when every addon fails", () => {
+test("reconcile ends on the DOM renderer when the addon throws", () => {
   const term = fakeTerminal();
   const state = createTerminalRendererState();
   const factories: TerminalRendererFactories = {
-    canvas: () => {
-      throw new Error("no 2d context");
-    },
     webgl: () => {
       throw new Error("no webgl context");
     },
@@ -141,6 +123,7 @@ test("reconcile ends on the DOM renderer when every addon fails", () => {
 
   assert.equal(reconcileTerminalRenderer(term, state, OPAQUE, factories), "dom");
   assert.equal(state.rendererAddon, null);
+  assert.equal(state.failedRenderers.has("webgl"), true);
   assert.equal(term.loaded.length, 0);
 });
 
@@ -148,7 +131,7 @@ test("reconcile does nothing before the terminal is mounted", () => {
   const term = fakeTerminal(false);
   const state = createTerminalRendererState();
 
-  assert.equal(reconcileTerminalRenderer(term, state, OPAQUE, withCanvas()), "dom");
+  assert.equal(reconcileTerminalRenderer(term, state, OPAQUE, accelerated()), "dom");
   assert.equal(term.loaded.length, 0);
   assert.equal(state.failedRenderers.size, 0, "an unmounted terminal must not burn candidates");
 });

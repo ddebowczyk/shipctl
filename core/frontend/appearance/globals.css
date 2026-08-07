@@ -1585,14 +1585,14 @@ select {
   font-synthesis: none;
 }
 
+/* xterm 6 renamed the scroll area to .xterm-scrollable-element. */
 .terminal-surface .xterm-viewport,
 .terminal-surface .xterm-screen,
-.terminal-surface .xterm-scroll-area {
+.terminal-surface .xterm-scrollable-element {
   background: transparent !important;
 }
 
 .terminal-surface .xterm-viewport {
-  scrollbar-color: rgba(185, 208, 255, 0.24) transparent;
   overscroll-behavior: none;
 }
 
