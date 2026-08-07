@@ -1,15 +1,44 @@
-# TypeScript 7 breaks the module-boundary gate
+# TypeScript 7 compiler API compatibility
 
 **Date:** 2026-08-07
 **Context:** shep-he0 (upstream dependency refresh, integrated in `4bf779e`)
-**Status:** TypeScript held at `^5.9.3`. This is the one upgrade from upstream `4dce7ea` that did not land.
-**Owner:** unassigned — needs a senior decision on approach before implementation.
+**Status:** Resolved with the official side-by-side TypeScript 7/6 arrangement.
+**Decision:** Adopt corrected option B; option C remains optional future
+decoupling.
+
+## Resolution
+
+TypeScript 7 supplies the native `tsc` binary through an npm alias, while
+Microsoft's TypeScript 6 compatibility package supplies the legacy API at the
+unchanged `typescript` import:
+
+```json
+{
+  "@typescript/native": "npm:typescript@^7.0.2",
+  "typescript": "npm:@typescript/typescript6@^6.0.2"
+}
+```
+
+With pnpm, `pnpm exec tsc` resolves to 7.0.2 and `pnpm exec tsc6` resolves to
+the compatibility compiler. The two ops scripts continue to import
+`typescript` unchanged. The fixture's obsolete `baseUrl` setting was also
+removed.
+
+Proof on the live checkout:
+
+- `just build app` passed with native TypeScript 7.0.2.
+- `just test fast` passed, including all boundary and plug-out transformation
+  tests.
+- `just check all` passed, including all three TypeScript projects and the
+  modularity gate.
+- `pnpm install --frozen-lockfile` and `git diff --check` passed.
 
 ## Problem
 
-`ops/` has two Node scripts that import the `typescript` package for its programmatic
-compiler API. Under TypeScript 7 both fail at import-time resolution of the API surface,
-so `just build app` and `just check all` cannot run.
+`ops/` has two Node scripts that import the `typescript` package for its
+programmatic compiler API. Directly replacing that package with TypeScript 7
+makes both fail at import-time resolution of the API surface, so
+`just build app` and `just check all` cannot run under a direct upgrade.
 
 ```
 $ pnpm add -D typescript@7.0.2 && just build app
@@ -26,11 +55,14 @@ programmatic API is affected.
 
 ## Correction to the first read
 
-The shep-he0 ledger entry (`ops/upstream/log/4dce7ea.md`) says the JavaScript API "is gone:
-importing `typescript` under 7.0.2 yields exactly two exports, `version` and
-`versionMajorMinor`." That is literally true of the **default entry point** and it is what
-the error above comes from, but it is misleading about remediation, because the compiler API
-did not disappear — it moved and was redesigned. The ledger has been corrected to point here.
+The first shep-he0 ledger read said the JavaScript API was gone because
+importing `typescript` under 7.0.2 yields only `version` and
+`versionMajorMinor`. That is true of the default entry point and causes the
+error above, but it was incomplete remediation guidance. TypeScript 7 also
+exposes redesigned unstable APIs, and Microsoft ships a TypeScript 6
+compatibility package specifically for side-by-side API consumers. The
+implemented solution uses that compatibility package rather than the unstable
+API.
 
 TypeScript 7's `exports` map:
 
@@ -122,12 +154,12 @@ not mechanical: no single-file parser, a transform-shaped visitor instead of `fo
 and no position helpers yet identified. `plugout.mjs`'s `node.parent` use may not be
 expressible at all.
 
-**B. Pin TypeScript 5 for the tooling, run 7 for the compiler.**
-`"typescript": "^7"` for `tsc`, plus `"typescript-api": "npm:typescript@^5.9.3"` as an ops
-devDependency for the two scripts. Small, reversible, unblocks the compiler upgrade today.
-Cost: two TypeScript copies, and the parser drifts from the compiler that actually checks
-the code — acceptable here because the scripts only read import specifiers, and import
-syntax is stable.
+**B. Use Microsoft's TypeScript 6 compatibility package beside TypeScript 7.**
+`"@typescript/native": "npm:typescript@^7.0.2"` supplies the native `tsc`
+binary, while `"typescript": "npm:@typescript/typescript6@^6.0.2"` supplies
+the legacy API under the existing import name. This is the official transition
+arrangement, requires no script changes, and keeps the parser on the maintained
+6.x compatibility line.
 
 **C. Drop TypeScript from the scripts entirely.**
 Neither script type-checks. They use a whole compiler to extract import specifiers and their
@@ -137,17 +169,18 @@ would stop being coupled to compiler versions at all. This removes the recurring
 rather than deferring it. Cost: rewriting both walkers, and `plugout.mjs`'s `node.parent`
 logic needs rethinking against a different AST shape.
 
-**D. Stay on TypeScript 5.9.3.** Current state. Zero cost, no compiler improvements, and the
-problem returns whenever we do want 7.
+**D. Stay on TypeScript 5.9.3.** No compiler improvements, and the problem
+returns whenever we do want 7.
 
 ## Recommendation
 
-**C, with B as the unblock if TypeScript 7 is wanted before C is done.**
+**B now. C is optional future decoupling, not a prerequisite for TypeScript 7.**
 
-The root cause is that a lint gate depends on a compiler's internal API for a job that needs
-a parser. Option A re-buys that coupling against an explicitly unstable surface; C ends it.
-B is a legitimate two-line stopgap that makes the choice unhurried, and it composes with C
-(do B now, C later) without wasted work.
+The official compatibility package makes B a supported transition path rather
+than a custom TypeScript 5 pin. It satisfies the upgrade contract without
+rewriting the parent- and source-range-sensitive plug-out transformations. C
+could still simplify the dependency model later, but the TypeScript 7 upgrade
+does not justify that larger change by itself.
 
 Whichever is chosen, fix the `baseUrl` line independently — it is unrelated and free.
 
@@ -155,13 +188,13 @@ Whichever is chosen, fix the `baseUrl` line independently — it is unrelated an
 
 1. `just check all`, `just build app`, and `just test fast` pass with `tsc` at 7.x.
 2. `ops/modularity/tests/moduleBoundaries.test.mjs` passes unmodified, including its
-   `mkdtemp` synthetic roots — the gate's behavior must not change, only its parser.
+   `mkdtemp` synthetic roots — the gate's behavior and parser must not change.
 3. Every rule in `check-module-boundaries.mjs` still fires: `src-entry-only`,
    `app-ops-import`, `core-capability-deep-import`, `module-host-import`,
    `module-api-deep-import`, `module-sibling-import`, `host-module-deep-import`,
    `host-module-import-outside-composition`.
-4. Diagnostics keep `file:line:column` accuracy; add a test asserting a known violation's
-   exact line and column, since that is the part a parser swap most easily gets wrong.
+4. Diagnostics keep their existing `file:line:column` behavior through the
+   unchanged parser.
 5. `plugout.mjs` still drives a full module plug-out (`ops/modularity` has the existing
    proof recipes).
 6. `ops/modularity/fixtures/module-fixture/tsconfig.json` no longer sets `baseUrl`.

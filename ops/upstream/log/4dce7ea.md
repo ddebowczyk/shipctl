@@ -62,6 +62,14 @@ Accepted, landing in the owning manifest rather than a root-only one:
 
 Adapted rather than adopted:
 
+- **TypeScript 7.0.2.** The native compiler lands as the
+  `@typescript/native` npm alias, while the official `@typescript/typescript6`
+  compatibility package remains available as `typescript` for the two ops
+  scripts that use the legacy compiler API. This keeps `pnpm exec tsc` on
+  7.0.2 without changing either script. The obsolete fixture `baseUrl` setting
+  was removed. `just build app`, `just test fast`, and `just check all` pass;
+  see `research/handoffs/2026-08-07T1904-typescript-7-compiler-api.md` for the
+  decision and proof.
 - **`rust-version`.** Upstream raised the floor to 1.95. Measured against this repo's
   resolved tree, the true floor is **1.88** — the highest declared MSRV among all 626
   locked crates (`home` 0.5.12 and `time` 0.3.47). The fork's previous 1.77.2 was already
@@ -80,19 +88,6 @@ Adapted rather than adopted:
 
 Rejected:
 
-- **TypeScript 7.0.2.** `tsc --noEmit` passes, but the compiler API our ops tooling uses is
-  not at the package's default entry any more: under 7.0.2 `import ts from "typescript"`
-  yields exactly two exports, `version` and `versionMajorMinor`, so
-  `ops/modularity/bin/check-module-boundaries.mjs` fails at `ts.ScriptTarget.Latest` and
-  `ops/modularity/bin/plugout.mjs` fails the same way. The API is not gone — it moved to
-  `typescript/unstable/*` and was redesigned around projects, snapshots and node handles,
-  without single-file `createSourceFile`, `forEachChild`, `isStringLiteralLike`, or the
-  position helpers both scripts use for diagnostics. Adopting TypeScript 7 therefore means
-  reworking both scripts against a different parser, which is its own piece of work.
-  TypeScript 7 also removes `baseUrl`, which
-  `ops/modularity/fixtures/module-fixture/tsconfig.json` still sets. Full evidence, affected
-  API list and options in
-  `research/handoffs/2026-08-07T1904-typescript-7-compiler-api.md`.
 - **`pnpm.overrides`.** See `4bd529f.md`.
 - **`"icons": "tauri icon assets/shep.png"` script.** Belongs to the ops build capability
   in this tree, not to the root package manifest.

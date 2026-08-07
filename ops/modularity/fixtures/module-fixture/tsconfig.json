@@ -1,7 +1,6 @@
 {
   "extends": "../../../../tsconfig.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "noEmit": true,
     "paths": {
       "@shep/module-fixture": ["../../../../modules/fixture/frontend/src/index.ts"]
