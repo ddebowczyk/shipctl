@@ -107,7 +107,7 @@ function removeFixtureComposition(root) {
   );
   replaceOnce(
     root,
-    "src-tauri/src/enabled_modules.rs",
+    "src-tauri/src/modules/mod.rs",
     '    #[cfg(feature = "fixture-module")]\n    let builder = builder.plugin(shep_module_fixture::init());\n\n',
     "",
   );
@@ -192,9 +192,9 @@ function verifySourceAbsentProfile() {
     removeFixtureComposition(temporaryRoot);
     assertFixtureImplementationAbsent(temporaryRoot);
 
-    const sharedTarget = path.join(repositoryRoot, "src-tauri/target");
+    const sharedTarget = path.join(repositoryRoot, "target");
     if (existsSync(sharedTarget)) {
-      symlinkSync(sharedTarget, path.join(temporaryRoot, "src-tauri/target"), "dir");
+      symlinkSync(sharedTarget, path.join(temporaryRoot, "target"), "dir");
     }
     run("pnpm", ["install", "--frozen-lockfile", "--offline", "--ignore-scripts"], temporaryRoot);
     assertFixtureDependencyGraphsAbsent(temporaryRoot);

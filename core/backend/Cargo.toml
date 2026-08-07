@@ -1,0 +1,24 @@
+[package]
+name = "shep-core"
+version = "0.5.0"
+description = "Shep's own capabilities: workspace storage, terminals, projects, appearance, settings"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "shep_core"
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+tauri = { version = "2.10.3", features = ["macos-private-api"] }
+portable-pty = "0.8"
+dirs = "6.0"
+libc = "0.2"
+notify = { version = "7", features = ["macos_fsevent"] }
+core-text = "21"
+core-foundation = "0.10"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+shep-module-api = { path = "../../modules/api/backend" }

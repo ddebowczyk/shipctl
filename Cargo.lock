@@ -3973,17 +3973,12 @@ checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 name = "shep"
 version = "0.5.0"
 dependencies = [
- "core-foundation",
- "core-text",
  "dirs",
  "fix-path-env",
- "libc",
  "log",
- "notify",
- "portable-pty",
  "serde",
  "serde_json",
- "serde_yaml",
+ "shep-core",
  "shep-module-api",
  "tauri",
  "tauri-build",
@@ -3999,6 +3994,23 @@ dependencies = [
  "tauri-plugin-shep-todos",
  "tauri-plugin-shep-usage",
  "tauri-plugin-updater",
+]
+
+[[package]]
+name = "shep-core"
+version = "0.5.0"
+dependencies = [
+ "core-foundation",
+ "core-text",
+ "dirs",
+ "libc",
+ "notify",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "shep-module-api",
+ "tauri",
  "url",
  "uuid",
 ]

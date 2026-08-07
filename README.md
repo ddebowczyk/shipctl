@@ -183,7 +183,7 @@ pnpm tauri build --target aarch64-apple-darwin --bundles app,dmg --no-sign
 This writes an installable DMG to:
 
 ```text
-src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
 ```
 
 Open the DMG and drag `shep.app` to Applications when you are ready to replace
@@ -220,28 +220,62 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 Build artifacts land here:
 
-- App bundle: `src-tauri/target/release/bundle/macos/shep.app`
-- DMG: `src-tauri/target/release/bundle/dmg/`
+- App bundle: `target/release/bundle/macos/shep.app`
+- DMG: `target/release/bundle/dmg/`
 
 Debug artifacts land here:
 
-- App bundle: `src-tauri/target/debug/bundle/macos/shep.app`
-- DMG: `src-tauri/target/debug/bundle/dmg/`
+- App bundle: `target/debug/bundle/macos/shep.app`
+- DMG: `target/debug/bundle/dmg/`
 
 ## Project Structure
 
-```text
-src/                    React frontend
-src/components/         App UI
-src/hooks/              UI and PTY lifecycle hooks
-src/lib/                Shared helpers and Tauri bindings
-src/stores/             Zustand stores
+Shep is split into a host and a set of pluggable modules. Both halves are
+organised by *capability* — a capability owns its logic, its state and its
+assets in one directory — never by file kind.
 
-src-tauri/              Rust backend and Tauri config
-src-tauri/src/commands.rs
-src-tauri/src/pty/      PTY process management
-src-tauri/src/workspace/
+```text
+src/                    the Vite entry point, and nothing else (main.tsx)
+index.html
+
+core/frontend/          the host's own capabilities (package @shep/core)
+  platform/               Tauri IPC bindings and the types they exchange
+  shared/                 building blocks 2+ capabilities already use
+  appearance/             themes, fonts, globals.css
+  terminal/               PTY lifecycle, xterm views, terminal stores
+  settings/               preferences no other capability owns
+  projects/               repositories, groups, per-project settings
+  host/                   module activation and composition
+  shell/                  the app shell — the only place that composes
+                          several capabilities into one screen
+  README.md               where a new frontend file goes; read this first
+
+core/backend/           the host's own capabilities in Rust (crate shep-core)
+  src/workspace/          on-disk config schema and its manager
+  src/{platform,appearance,terminal,projects,settings}/
+                          one directory per capability, each with commands.rs
+  README.md               where a new backend file goes
+
+modules/                pluggable features, each removable from a build
+  api/                    the host↔module contract (not itself a module)
+  <name>/frontend/        workspace package @shep/module-<name>
+  <name>/backend/         Tauri plugin crate
+
+src-tauri/              the Tauri shell — no capability logic lives here
+  src/lib.rs              builds the app and registers every handler
+  src/lifecycle.rs        shutdown, which spans several capabilities
+  src/menu.rs             the native menu
+  src/modules/            one adapter per module, behind its feature flag
+  tauri.conf.json, capabilities/, icons/
+
+profiles/               tauri configs that build with a module removed
+scripts/                gates, plug-out verifiers, release tooling
 ```
+
+Two rules hold this together, and both are checked in CI: a module may never
+import the host, and the host reaches modules only through `@shep/module-api`
+and `core/frontend/host/enabledModules.ts`. Every module can be built out
+entirely — see `pnpm verify:<name>-plugout`.
 
 ## Tech Stack
 

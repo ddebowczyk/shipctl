@@ -7,6 +7,69 @@ use std::time::UNIX_EPOCH;
 
 use super::helpers::{as_u64, home_join, now_epoch_seconds, walk_files};
 
+struct UsageSessionIdentity {
+    session_id: String,
+    cwd: Option<PathBuf>,
+}
+
+fn parse_claude_session_metadata(path: &Path) -> Result<UsageSessionIdentity, String> {
+    let session_id = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Claude transcript has no filename session id: {}",
+                path.display()
+            )
+        })?
+        .to_string();
+
+    Ok(UsageSessionIdentity {
+        session_id,
+        cwd: None,
+    })
+}
+
+fn parse_codex_session_metadata(path: &Path) -> Result<UsageSessionIdentity, String> {
+    let file = fs::File::open(path).map_err(|error| {
+        format!(
+            "Failed to read Codex transcript {}: {error}",
+            path.display()
+        )
+    })?;
+    for line in BufReader::new(file).lines() {
+        let line =
+            line.map_err(|error| format!("Failed to read Codex transcript line: {error}"))?;
+        let Ok(row) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if row.get("type").and_then(Value::as_str) != Some("session_meta") {
+            continue;
+        }
+        let payload = row
+            .get("payload")
+            .ok_or_else(|| format!("Codex session_meta has no payload: {}", path.display()))?;
+        let session_id = payload
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("Codex session_meta has no id: {}", path.display()))?
+            .to_string();
+        let cwd = payload
+            .get("cwd")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
+        return Ok(UsageSessionIdentity { session_id, cwd });
+    }
+
+    Err(format!(
+        "Codex transcript has no session_meta event: {}",
+        path.display()
+    ))
+}
+
 /// Maximum files to process per ingest cycle. Keep small so the DB lock is
 /// released frequently and UI queries aren't starved during heavy ingestion.
 const MAX_FILES_PER_CYCLE: usize = 10;
@@ -146,17 +209,16 @@ fn ingest_claude_file(conn: &Connection, path: &Path) -> Result<(), String> {
         None => 0,
     };
 
+    let session_metadata = parse_claude_session_metadata(path)?;
+    // Keep the historical Claude usage grouping: its parent directory is an
+    // encoded project path, while the shared parser supplies only identity.
     let project_name = path
         .parent()
-        .and_then(|p| p.file_name())
-        .and_then(|n| n.to_str())
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
         .unwrap_or("unknown")
         .to_string();
-    let session_id = path
-        .file_stem()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default()
-        .to_string();
+    let session_id = session_metadata.session_id;
 
     let file = fs::File::open(path).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(file);
@@ -364,7 +426,8 @@ fn ingest_antigravity(conn: &Connection, budget: usize) -> Result<bool, String> 
         return Ok(true);
     }
 
-    let mut by_session: std::collections::BTreeMap<String, PathBuf> = std::collections::BTreeMap::new();
+    let mut by_session: std::collections::BTreeMap<String, PathBuf> =
+        std::collections::BTreeMap::new();
     for path in walk_files(&brain_dir) {
         let file_name = path.file_name().and_then(|n| n.to_str());
         if file_name != Some("transcript_full.jsonl") && file_name != Some("transcript.jsonl") {
@@ -377,7 +440,8 @@ fn ingest_antigravity(conn: &Connection, budget: usize) -> Result<bool, String> 
         let replace = by_session
             .get(&session_id)
             .map(|existing| {
-                existing.file_name().and_then(|n| n.to_str()) != Some("transcript_full.jsonl") && is_full
+                existing.file_name().and_then(|n| n.to_str()) != Some("transcript_full.jsonl")
+                    && is_full
             })
             .unwrap_or(true);
         if replace {
@@ -481,9 +545,15 @@ fn ingest_antigravity_file(
             timestamp = ts;
         }
 
-        let source = row.get("source").and_then(Value::as_str).unwrap_or_default();
+        let source = row
+            .get("source")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let step_type = row.get("type").and_then(Value::as_str).unwrap_or_default();
-        let content = row.get("content").and_then(Value::as_str).unwrap_or_default();
+        let content = row
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
 
         if step_type == "USER_INPUT" || source == "USER_EXPLICIT" {
             input = input.saturating_add(estimate_text_tokens(content));
@@ -693,9 +763,26 @@ fn ingest_codex_file(conn: &Connection, path: &Path) -> Result<(), String> {
 
     let contents = fs::read_to_string(path).map_err(|e| e.to_string())?;
 
-    // Extract session metadata and final token totals from JSONL events
-    let mut session_id = String::new();
-    let mut project = String::new();
+    // Extract final token totals from JSONL events. Identity metadata is parsed
+    // once by the shared provider parser so restore and usage agree on it.
+    let session_metadata = match parse_codex_session_metadata(path) {
+        Ok(metadata) => metadata,
+        // A partially written or future-format transcript must not make usage
+        // ingestion loop forever. The restore subsystem will surface capture
+        // failures separately.
+        Err(_) => {
+            upsert_cursor(conn, &path_str, "codex", file_size, file_size, mtime)?;
+            return Ok(());
+        }
+    };
+    let session_id = session_metadata.session_id;
+    let project = session_metadata
+        .cwd
+        .as_deref()
+        .and_then(|cwd| cwd.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown")
+        .to_string();
     let mut model = "unknown".to_string();
     let mut timestamp: u64 = 0;
     let mut input: u64 = 0;
@@ -715,23 +802,8 @@ fn ingest_codex_file(conn: &Connection, path: &Path) -> Result<(), String> {
 
         match event_type {
             "session_meta" => {
-                if let Some(payload) = row.get("payload") {
-                    session_id = payload
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string();
-                    project = payload
-                        .get("cwd")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .split('/')
-                        .rfind(|s| !s.is_empty())
-                        .unwrap_or("unknown")
-                        .to_string();
-                }
                 if let Some(ts_str) = row.get("timestamp").and_then(Value::as_str) {
-                    timestamp = parse_iso_timestamp(ts_str).unwrap_or(0);
+                    timestamp = parse_iso_timestamp(ts_str).unwrap_or(timestamp);
                 }
             }
             "turn_context" => {
@@ -1375,8 +1447,14 @@ mod tests {
 
     #[test]
     fn antigravity_pricing_provider_uses_underlying_model_vendor() {
-        assert_eq!(antigravity_pricing_provider("Gemini 3.5 Flash (Medium)"), "google");
-        assert_eq!(antigravity_pricing_provider("Claude Sonnet 4.6 (Thinking)"), "anthropic");
+        assert_eq!(
+            antigravity_pricing_provider("Gemini 3.5 Flash (Medium)"),
+            "google"
+        );
+        assert_eq!(
+            antigravity_pricing_provider("Claude Sonnet 4.6 (Thinking)"),
+            "anthropic"
+        );
         assert_eq!(antigravity_pricing_provider("GPT-OSS 120B"), "antigravity");
     }
 }

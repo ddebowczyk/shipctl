@@ -10,10 +10,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer, type ViteDevServer } from "vite";
 
-type RegistryModule = typeof import("../../src/core/modules/globalSurfaceRegistry.ts");
-type HostModule = typeof import("../../src/core/modules/GlobalSurfaceHost.tsx");
-type UIStoreModule = typeof import("../../src/stores/useUIStore.ts");
-type TerminalStoreModule = typeof import("../../src/stores/useTerminalStore.ts");
+type RegistryModule = typeof import("../../core/frontend/host/globalSurfaceRegistry.ts");
+type HostModule = typeof import("../../core/frontend/host/GlobalSurfaceHost.tsx");
+type UIStoreModule = typeof import("../../core/frontend/shared/useUIStore.ts");
+type TerminalStoreModule = typeof import("../../core/frontend/terminal/useTerminalStore.ts");
 
 let vite: ViteDevServer;
 let GlobalSurfaceRegistry: RegistryModule["GlobalSurfaceRegistry"];
@@ -94,16 +94,16 @@ before(async () => {
     server: { hmr: false, middlewareMode: true },
   });
   ({ GlobalSurfaceRegistry, GlobalSurfaceRegistrationError } = await vite.ssrLoadModule(
-    "/src/core/modules/globalSurfaceRegistry.ts",
+    "/core/frontend/host/globalSurfaceRegistry.ts",
   ) as RegistryModule);
   ({ default: GlobalSurfaceHost } = await vite.ssrLoadModule(
-    "/src/core/modules/GlobalSurfaceHost.tsx",
+    "/core/frontend/host/GlobalSurfaceHost.tsx",
   ) as HostModule);
   ({ useUIStore } = await vite.ssrLoadModule(
-    "/src/stores/useUIStore.ts",
+    "/core/frontend/shared/useUIStore.ts",
   ) as UIStoreModule);
   ({ useTerminalStore } = await vite.ssrLoadModule(
-    "/src/stores/useTerminalStore.ts",
+    "/core/frontend/terminal/useTerminalStore.ts",
   ) as TerminalStoreModule);
 });
 

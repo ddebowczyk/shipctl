@@ -10,7 +10,7 @@ set -euo pipefail
 VERSION=$(jq -r .version src-tauri/tauri.conf.json)
 
 # Locate the signed update artifact
-BUNDLE_DIR="src-tauri/target/release/bundle/macos"
+BUNDLE_DIR="target/release/bundle/macos"
 SIG_FILE="${BUNDLE_DIR}/shep.app.tar.gz.sig"
 
 if [ ! -f "$SIG_FILE" ]; then

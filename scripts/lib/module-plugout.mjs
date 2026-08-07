@@ -105,13 +105,13 @@ export function replaceOnce(root, relativePath, expected, replacement) {
 export function removeFrontendModuleComposition(root, packageName, variableName) {
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     `import { ${variableName} } from "${packageName}";\n`,
     "",
   );
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     `  ${variableName},\n`,
     "",
   );

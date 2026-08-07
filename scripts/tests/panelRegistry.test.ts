@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   PanelRegistrationError,
   PanelRegistry,
-} from "../../src/core/modules/panelRegistry.ts";
+} from "../../core/frontend/host/panelRegistry.ts";
 
 function contribution(
   id: `${string}.${string}`,

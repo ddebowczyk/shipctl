@@ -5,12 +5,12 @@ import type { ContributionId, ProjectRef } from "@shep/module-api";
 import { gitModule } from "@shep/module-git";
 import { skillsModule } from "@shep/module-skills";
 
-import "../../../src/styles/globals.css";
-import PanelHost from "../../../src/core/modules/PanelHost";
-import { createEnabledPanelRegistry } from "../../../src/core/modules/moduleComposition";
-import { MODULE_HOST_SERVICES } from "../../../src/core/modules/moduleHostServices";
-import { useRepoStore } from "../../../src/stores/useRepoStore";
-import { useTerminalStore } from "../../../src/stores/useTerminalStore";
+import "@shep/core/appearance/globals.css";
+import PanelHost from "../../../core/frontend/host/PanelHost";
+import { createEnabledPanelRegistry } from "../../../core/frontend/host/moduleComposition";
+import { MODULE_HOST_SERVICES } from "../../../core/frontend/host/moduleHostServices";
+import { useRepoStore } from "@shep/core/projects";
+import { useTerminalStore } from "@shep/core/terminal";
 
 const PROJECT_PATH = "/smoke/shep";
 const PROJECT: ProjectRef = {
@@ -49,7 +49,7 @@ mockIPC(
           },
         ];
       case "plugin:shep-git|git_list_files":
-        return ["README.md", "src/AppShell.tsx", "src/core/modules/PanelHost.tsx"];
+        return ["README.md", "src/AppShell.tsx", "core/frontend/host/PanelHost.tsx"];
       case "plugin:shep-git|git_file_contents":
         return "Panel host smoke fixture";
       case "plugin:shep-git|git_file_diff":
@@ -65,7 +65,7 @@ mockIPC(
             installed: true,
           },
         ];
-      case "get_pi_config":
+      case "plugin:shep-assistants|get_pi_config":
         return {
           settings: {
             defaultProvider: null,

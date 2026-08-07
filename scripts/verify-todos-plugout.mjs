@@ -40,7 +40,7 @@ function removeNativeComposition(root) {
   );
   replaceOnce(
     root,
-    "src-tauri/src/enabled_modules.rs",
+    "src-tauri/src/modules/mod.rs",
     '    #[cfg(feature = "todos-module")]\n    let builder = builder.plugin(shep_module_todos::init());\n\n',
     "",
   );

@@ -9,6 +9,7 @@
 pub mod capture;
 mod manifest;
 mod model_catalog;
+mod pi_config;
 pub mod providers;
 
 use serde::{Deserialize, Serialize};
@@ -75,18 +76,6 @@ pub trait TerminalAuthority: Send + Sync {
     fn kill(&self, terminal_id: u32) -> Result<(), String>;
 }
 
-/// Host-owned secure storage primitives used by the Pi provider UI.
-///
-/// The Assistant module owns Pi's DTOs and commands. The host adapter retains
-/// filesystem and macOS Keychain authority so the module never receives an
-/// unrestricted shell or arbitrary path capability.
-pub trait PiConfigAuthority: Send + Sync {
-    fn get(&self) -> Result<PiConfig, String>;
-    fn save_settings(&self, settings: PiSettings) -> Result<(), String>;
-    fn save_api_key(&self, provider: &str, api_key: &str) -> Result<(), String>;
-    fn delete_api_key(&self, provider: &str) -> Result<(), String>;
-}
-
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PiSettings {
@@ -115,21 +104,19 @@ pub struct TerminalLaunchRequest {
     pub color_theme: TerminalColorTheme,
 }
 
+/// What this module needs from the host and cannot own itself.
+///
+/// Only the PTY: terminals are host-owned state with a lifetime spanning the
+/// whole app. Everything else this module does — including reading and writing
+/// `~/.pi/agent` — is its own business and lives in this crate.
 #[derive(Clone)]
 pub struct HostServices {
     terminal: Arc<dyn TerminalAuthority>,
-    pi_config: Arc<dyn PiConfigAuthority>,
 }
 
 impl HostServices {
-    pub fn new(
-        terminal: Arc<dyn TerminalAuthority>,
-        pi_config: Arc<dyn PiConfigAuthority>,
-    ) -> Self {
-        Self {
-            terminal,
-            pi_config,
-        }
+    pub fn new(terminal: Arc<dyn TerminalAuthority>) -> Self {
+        Self { terminal }
     }
 }
 
@@ -865,33 +852,23 @@ async fn get_models_for_provider(provider: String) -> Result<Vec<String>, String
 }
 
 #[tauri::command]
-fn get_pi_config(state: State<'_, AssistantPluginState>) -> Result<PiConfig, String> {
-    state.services.pi_config.get()
+fn get_pi_config() -> Result<PiConfig, String> {
+    pi_config::get_pi_config()
 }
 
 #[tauri::command]
-fn save_pi_settings(
-    settings: PiSettings,
-    state: State<'_, AssistantPluginState>,
-) -> Result<(), String> {
-    state.services.pi_config.save_settings(settings)
+fn save_pi_settings(settings: PiSettings) -> Result<(), String> {
+    pi_config::save_pi_settings(settings)
 }
 
 #[tauri::command]
-fn save_pi_api_key(
-    provider: String,
-    api_key: String,
-    state: State<'_, AssistantPluginState>,
-) -> Result<(), String> {
-    state.services.pi_config.save_api_key(&provider, &api_key)
+fn save_pi_api_key(provider: String, api_key: String) -> Result<(), String> {
+    pi_config::save_pi_api_key(&provider, &api_key)
 }
 
 #[tauri::command]
-fn delete_pi_api_key(
-    provider: String,
-    state: State<'_, AssistantPluginState>,
-) -> Result<(), String> {
-    state.services.pi_config.delete_api_key(&provider)
+fn delete_pi_api_key(provider: String) -> Result<(), String> {
+    pi_config::delete_pi_api_key(&provider)
 }
 
 pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {

@@ -5,7 +5,12 @@ import ts from "typescript";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const MODULE_API_PACKAGE = "@shep/module-api";
-const COMPOSITION_FILES = new Set(["src/core/modules/enabledModules.ts"]);
+// The host's own capabilities ship as a workspace package so that node, tsc and
+// Vite resolve them identically. That makes the host reachable by name, so it
+// needs the same treatment as a relative reach into src/.
+const HOST_PACKAGE = "@shep/core";
+const HOST_ROOTS = ["src", "core/frontend"];
+const COMPOSITION_FILES = new Set(["core/frontend/host/enabledModules.ts"]);
 
 function isWithin(parent, child) {
   const relative = path.relative(parent, child);
@@ -85,9 +90,19 @@ function diagnostic(file, entry, rule, message, root) {
 export async function checkModuleBoundaries(root = process.cwd()) {
   const absoluteRoot = path.resolve(root);
   const packages = await modulePackages(absoluteRoot);
-  const hostRoot = path.join(absoluteRoot, "src");
+  const hostFiles = (await Promise.all(
+    HOST_ROOTS.map(async (hostRoot) => {
+      try {
+        return await sourceFiles(path.join(absoluteRoot, hostRoot));
+      } catch (error) {
+        // Synthetic roots in the boundary tests carry only the trees they exercise.
+        if (error?.code === "ENOENT") return [];
+        throw error;
+      }
+    }),
+  )).flat();
   const files = [
-    ...await sourceFiles(hostRoot),
+    ...hostFiles,
     ...(
       await Promise.all(packages.map(({ root: packageRoot }) => sourceFiles(path.join(packageRoot, "src"))))
     ).flat(),
@@ -119,6 +134,8 @@ export async function checkModuleBoundaries(root = process.cwd()) {
           }
         } else if (entry.specifier === "src" || entry.specifier.startsWith("src/")) {
           diagnostics.push(diagnostic(file, entry, "module-host-import", "module imports host source", absoluteRoot));
+        } else if (entry.specifier === HOST_PACKAGE || entry.specifier.startsWith(`${HOST_PACKAGE}/`)) {
+          diagnostics.push(diagnostic(file, entry, "module-host-import", "module imports host capabilities; use the module API", absoluteRoot));
         } else if (entry.specifier.startsWith(`${MODULE_API_PACKAGE}/`)) {
           diagnostics.push(diagnostic(file, entry, "module-api-deep-import", "use the public module API entrypoint", absoluteRoot));
         } else if (matchedPackage && matchedPackage.name !== MODULE_API_PACKAGE) {

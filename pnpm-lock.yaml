@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@shep/core':
+        specifier: workspace:*
+        version: link:core/frontend
       '@shep/module-api':
         specifier: workspace:*
         version: link:modules/api/frontend
@@ -108,6 +111,18 @@ importers:
       vite:
         specifier: ^7.3.1
         version: 7.3.1(jiti@2.6.1)(lightningcss@1.31.1)
+
+  core/frontend:
+    dependencies:
+      '@shep/module-api':
+        specifier: workspace:*
+        version: link:../../modules/api/frontend
+      '@tauri-apps/api':
+        specifier: ^2.10.1
+        version: 2.10.1
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
 
   modules/api/frontend:
     dependencies:

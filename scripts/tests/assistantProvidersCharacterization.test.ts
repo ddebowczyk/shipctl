@@ -74,7 +74,7 @@ test("resume preserves provider identity, placement, and quick-exit recovery", (
 
 test("tab close and natural exit retain the current restore-record semantics", () => {
   const runtime = source("../../modules/assistants/frontend/src/runtime.ts");
-  const pty = source("../../src/hooks/usePty.ts");
+  const pty = source("../../core/frontend/terminal/usePty.ts");
 
   assert.match(runtime, /event\.type === "stop-requested"[\s\S]*if \(metadata\.record\) await discardSession\(metadata\.record\.recordId\)/s);
   assert.match(runtime, /if \(!metadata\.record \|\| event\.reason === "manual-stop"\) return/);
@@ -86,7 +86,7 @@ test("tab close and natural exit retain the current restore-record semantics", (
 test("startup restore and recovery are module-owned", () => {
   const runtime = source("../../modules/assistants/frontend/src/runtime.ts");
   const moduleEntry = source("../../modules/assistants/frontend/src/index.ts");
-  const shell = source("../../src/components/layout/AppShell.tsx");
+  const shell = source("../../core/frontend/shell/AppShell.tsx");
 
   assert.match(runtime, /const records = await listRestorableSessions\(\)/);
   assert.match(runtime, /for \(const record of records\) await restoreRecord\(record, registered, services\)/);
@@ -102,11 +102,11 @@ test("startup restore and recovery are module-owned", () => {
 });
 
 test("normal shutdown freezes ready records before PTYs receive signals", () => {
-  const shell = source("../../src/components/layout/AppShell.tsx");
+  const shell = source("../../core/frontend/shell/AppShell.tsx");
   const moduleEntry = source("../../modules/assistants/frontend/src/index.ts");
   const client = source("../../modules/assistants/frontend/src/client.ts");
   const backend = source("../../modules/assistants/backend/src/lib.rs");
-  const commands = source("../../src-tauri/src/commands.rs");
+  const commands = source("../../src-tauri/src/lifecycle.rs");
 
   assert.match(shell, /await notifyModulesBeforeShutdown\(MODULE_HOST_SERVICES\);\s*await shutdownAndQuit\(\)/);
   assert.match(moduleEntry, /beforeShutdown: beginAssistantSessionPreservingShutdown/);
@@ -132,12 +132,13 @@ test("the restore manifest persists identity metadata, not transcripts or comman
 
 test("the Assistant implementation is module-owned behind generic host ports", () => {
   const moduleEntry = source("../../modules/assistants/frontend/src/index.ts");
-  const composition = source("../../src/core/modules/enabledModules.ts");
-  const shell = source("../../src/components/layout/AppShell.tsx");
-  const pty = source("../../src/hooks/usePty.ts");
+  const composition = source("../../core/frontend/host/enabledModules.ts");
+  const shell = source("../../core/frontend/shell/AppShell.tsx");
+  const pty = source("../../core/frontend/terminal/usePty.ts");
   const nativeHost = source("../../src-tauri/src/lib.rs");
-  const nativeComposition = source("../../src-tauri/src/enabled_modules.rs");
-  const terminalAdapter = source("../../src-tauri/src/assistants_module.rs");
+  const nativeComposition = source("../../src-tauri/src/modules/mod.rs");
+  const terminalAdapter = source("../../src-tauri/src/modules/assistants.rs");
+  const piConfig = source("../../modules/assistants/backend/src/pi_config.rs");
   const backend = source("../../modules/assistants/backend/src/lib.rs");
   const client = source("../../modules/assistants/frontend/src/client.ts");
 
@@ -150,6 +151,15 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   assert.doesNotMatch(nativeHost, /AssistantSessionRegistry|commands::spawn_assistant_session|commands::begin_assistant_session_preserving_shutdown/);
   assert.match(nativeComposition, /shep_module_assistants::init\(/);
   assert.match(terminalAdapter, /impl TerminalAuthority for HostTerminalAuthority/);
+  // The PTY is the only thing this module cannot own. pi's own config —
+  // ~/.pi/agent and its Keychain entries — is module business and stays in the
+  // module crate; the host adapter must not grow a second authority for it.
+  assert.match(terminalAdapter, /HostServices::new\(Arc::new\(HostTerminalAuthority \{ manager \}\)\)/);
+  assert.doesNotMatch(terminalAdapter, /PiConfig|pi_config/);
+  assert.doesNotMatch(backend, /trait PiConfigAuthority/);
+  assert.match(backend, /fn get_pi_config\(\) -> Result<PiConfig, String> \{\s*pi_config::get_pi_config\(\)/);
+  assert.match(piConfig, /\.join\("\.pi"\)\s*\.join\("agent"\)/);
+  assert.match(piConfig, /"add-generic-password"/);
   assert.match(backend, /app\.manage\(AssistantPluginState \{/);
   assert.match(backend, /pub fn init<R: Runtime>\(services: HostServices\) -> TauriPlugin<R>/);
   assert.match(client, /const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shep-assistants\|"/);

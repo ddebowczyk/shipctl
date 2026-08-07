@@ -9,3 +9,12 @@ latest.json
 .claude/settings.local.json
 builds/
 notes/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+
+# bv (beads viewer) local config and caches
+.bv/

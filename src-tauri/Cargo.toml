@@ -30,23 +30,16 @@ tauri-build = { version = "2.5.6", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
 log = "0.4"
 tauri = { version = "2.10.3", features = ["macos-private-api"] }
 tauri-plugin-log = "2"
-portable-pty = "0.8"
 dirs = "6.0"
 tauri-plugin-dialog = "2"
 fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
 tauri-plugin-notification = "2"
-libc = "0.2"
-notify = { version = "7", features = ["macos_fsevent"] }
-core-text = "21"
-core-foundation = "0.10"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-url = "2"
-uuid = { version = "1", features = ["v4"] }
+shep-core = { path = "../core/backend" }
 shep-module-api = { path = "../modules/api/backend" }
 shep-module-fixture = { package = "tauri-plugin-shep-fixture", path = "../modules/fixture/backend", optional = true }
 shep-module-todos = { package = "tauri-plugin-shep-todos", path = "../modules/todos/backend", optional = true }

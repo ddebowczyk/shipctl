@@ -40,17 +40,17 @@ function removeNativeComposition(root) {
   );
   replaceOnce(
     root,
-    "src-tauri/src/enabled_modules.rs",
-    '    #[cfg(feature = "ports-module")]\n    let builder = builder.plugin(shep_module_ports::init(crate::ports_module::host_services()));\n\n',
+    "src-tauri/src/modules/mod.rs",
+    '    #[cfg(feature = "ports-module")]\n    let builder = builder.plugin(shep_module_ports::init(crate::modules::ports::host_services()));\n\n',
     "",
   );
   replaceOnce(
     root,
-    "src-tauri/src/lib.rs",
-    '#[cfg(feature = "ports-module")]\nmod ports_module;\n',
+    "src-tauri/src/modules/mod.rs",
+    '#[cfg(feature = "ports-module")]\npub mod ports;\n',
     "",
   );
-  rmSync(path.join(root, "src-tauri/src/ports_module.rs"), { force: true });
+  rmSync(path.join(root, "src-tauri/src/modules/ports.rs"), { force: true });
 }
 
 function removePortsCapability(root, relativePath) {

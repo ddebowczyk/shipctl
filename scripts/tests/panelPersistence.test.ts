@@ -5,7 +5,7 @@ import {
   hydratePanelReference,
   PANEL_REFERENCE_SCHEMA_VERSION,
   toPersistedPanelReference,
-} from "../../src/core/modules/panelPersistence.ts";
+} from "../../core/frontend/host/panelPersistence.ts";
 
 const migrationAliases = [
   { kind: "commands", panelId: "core.commands", label: "Commands" },

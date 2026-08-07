@@ -21,20 +21,20 @@ const repositoryRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)
 
 function cargoEnvironment(root) {
   return {
-    CARGO_TARGET_DIR: path.join(root, "src-tauri/target/assistants-plugout"),
+    CARGO_TARGET_DIR: path.join(root, "target/assistants-plugout"),
   };
 }
 
 function removeFrontendComposition(root) {
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     'import { assistantsModule } from "@shep/module-assistants";\n',
     "",
   );
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     '  ...(import.meta.env.VITE_SHEP_ASSISTANTS_MODULE === "disabled" ? [] : [assistantsModule]),\n',
     "",
   );
@@ -56,19 +56,25 @@ function removeNativeComposition(root) {
   );
   replaceOnce(
     root,
-    "src-tauri/src/enabled_modules.rs",
+    "src-tauri/src/modules/mod.rs",
     "pub fn install<R: Runtime>(builder: Builder<R>, pty_manager: PtyManager) -> Builder<R> {\n",
     "pub fn install<R: Runtime>(builder: Builder<R>, _pty_manager: PtyManager) -> Builder<R> {\n",
   );
   replaceOnce(
     root,
-    "src-tauri/src/enabled_modules.rs",
+    "src-tauri/src/modules/mod.rs",
     `    #[cfg(feature = "assistants-module")]
     let builder = builder.plugin(shep_module_assistants::init(
-        crate::assistants_module::host_services(pty_manager),
+        crate::modules::assistants::host_services(pty_manager),
     ));
 
-    #[cfg(not(feature = "assistants-module"))]
+`,
+    "",
+  );
+  replaceOnce(
+    root,
+    "src-tauri/src/modules/mod.rs",
+    `    #[cfg(not(feature = "assistants-module"))]
     let _ = pty_manager;
 
 `,
@@ -76,18 +82,11 @@ function removeNativeComposition(root) {
   );
   replaceOnce(
     root,
-    "src-tauri/src/lib.rs",
-    '#[cfg(feature = "assistants-module")]\nmod assistants_module;\n',
+    "src-tauri/src/modules/mod.rs",
+    '#[cfg(feature = "assistants-module")]\npub mod assistants;\n',
     "",
   );
-  replaceOnce(
-    root,
-    "src-tauri/src/lib.rs",
-    '#[cfg(feature = "assistants-module")]\nmod pi_config;\n',
-    "",
-  );
-  rmSync(path.join(root, "src-tauri/src/assistants_module.rs"), { force: true });
-  rmSync(path.join(root, "src-tauri/src/pi_config.rs"), { force: true });
+  rmSync(path.join(root, "src-tauri/src/modules/assistants.rs"), { force: true });
 }
 
 function removeAssistantCapability(root, relativePath) {
@@ -102,6 +101,30 @@ function removeAssistantCapability(root, relativePath) {
   writeJson(root, relativePath, config);
 }
 
+function removeSmokeDependency(root) {
+  replaceOnce(
+    root,
+    "scripts/smoke/panel-host/main.tsx",
+    '      case "plugin:shep-assistants|get_models_for_provider":\n        return ["smoke-model"];\n',
+    "",
+  );
+  replaceOnce(
+    root,
+    "scripts/smoke/panel-host/main.tsx",
+    `      case "plugin:shep-assistants|get_pi_config":
+        return {
+          settings: {
+            defaultProvider: null,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+          },
+          configuredProviders: [],
+        };
+`,
+    "",
+  );
+}
+
 function prepareDisabled(root) {
   removeFrontendComposition(root);
 }
@@ -109,6 +132,7 @@ function prepareDisabled(root) {
 function prepareSourceAbsent(root) {
   prepareDisabled(root);
   removeNativeComposition(root);
+  removeSmokeDependency(root);
 
   rmSync(path.join(root, "modules/assistants"), { recursive: true, force: true });
   rmSync(path.join(root, "profiles/assistants-disabled"), { recursive: true, force: true });

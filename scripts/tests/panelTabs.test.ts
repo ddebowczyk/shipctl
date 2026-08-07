@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type ViteDevServer } from "vite";
 
-import { contributedPanelTabId } from "../../src/lib/types.ts";
+import { contributedPanelTabId } from "@shep/core/platform";
 
-type TerminalStoreModule = typeof import("../../src/stores/useTerminalStore.ts");
+type TerminalStoreModule = typeof import("../../core/frontend/terminal/useTerminalStore.ts");
 
 let vite: ViteDevServer;
 let useTerminalStore: TerminalStoreModule["useTerminalStore"];
@@ -19,7 +19,7 @@ before(async () => {
     server: { hmr: false, middlewareMode: true },
   });
   ({ useTerminalStore } = await vite.ssrLoadModule(
-    "/src/stores/useTerminalStore.ts",
+    "/core/frontend/terminal/useTerminalStore.ts",
   ) as TerminalStoreModule);
 });
 

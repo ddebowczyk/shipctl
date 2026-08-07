@@ -152,9 +152,9 @@ bash scripts/generate-update-json.sh
 
 # ── Step 9: summary ─────────────────────────────────────────────────
 
-DMG_PATH="src-tauri/target/release/bundle/dmg/shep_${VERSION}_aarch64.dmg"
-UPDATER_TARBALL="src-tauri/target/release/bundle/macos/shep.app.tar.gz"
-UPDATER_SIG="src-tauri/target/release/bundle/macos/shep.app.tar.gz.sig"
+DMG_PATH="target/release/bundle/dmg/shep_${VERSION}_aarch64.dmg"
+UPDATER_TARBALL="target/release/bundle/macos/shep.app.tar.gz"
+UPDATER_SIG="target/release/bundle/macos/shep.app.tar.gz.sig"
 
 printf "\n"
 printf "── Release build complete: v%s\n" "$VERSION"

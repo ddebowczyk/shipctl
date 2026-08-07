@@ -1,0 +1,31 @@
+{
+  "name": "@shep/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "./appearance/globals.css"
+  ],
+  "exports": {
+    "./platform": "./platform/index.ts",
+    "./appearance": "./appearance/index.ts",
+    "./appearance/globals.css": "./appearance/globals.css",
+    "./terminal": "./terminal/index.ts",
+    "./shared": "./shared/index.ts",
+    "./settings": "./settings/index.ts",
+    "./projects": "./projects/index.ts",
+    "./terminal/views": "./terminal/views.ts",
+    "./shared/views": "./shared/views.ts",
+    "./projects/views": "./projects/views.ts",
+    "./host": "./host/index.ts",
+    "./host/views": "./host/views.ts",
+    "./shell": "./shell/index.ts"
+  },
+  "dependencies": {
+    "@shep/module-api": "workspace:*",
+    "@tauri-apps/api": "^2.10.1"
+  },
+  "peerDependencies": {
+    "react": "^19.2.4"
+  }
+}

@@ -10,7 +10,7 @@ import type {
 } from "@shep/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
-type ProjectActionsModule = typeof import("../../src/core/modules/projectActions.ts");
+type ProjectActionsModule = typeof import("../../core/frontend/host/projectActions.ts");
 
 let vite: ViteDevServer;
 let refreshProjectActions: ProjectActionsModule["refreshProjectActions"];
@@ -29,7 +29,7 @@ before(async () => {
     resolveProjectActionGroups,
     subscribeProjectActions,
   } = await vite.ssrLoadModule(
-    "/src/core/modules/projectActions.ts",
+    "/core/frontend/host/projectActions.ts",
   ) as ProjectActionsModule);
 });
 
@@ -202,8 +202,8 @@ test("inline interactive actions remain data until the host opens their surface"
 
 test("project hosts depend on generic rails instead of Git UI implementations", () => {
   const root = fileURLToPath(new URL("../..", import.meta.url));
-  const appShell = readFileSync(`${root}/src/components/layout/AppShell.tsx`, "utf8");
-  const projectItem = readFileSync(`${root}/src/components/sidebar/ProjectItem.tsx`, "utf8");
+  const appShell = readFileSync(`${root}/core/frontend/shell/AppShell.tsx`, "utf8");
+  const projectItem = readFileSync(`${root}/core/frontend/projects/ProjectItem.tsx`, "utf8");
 
   assert.match(appShell, /ModuleProjectLayoutSurfaces/);
   assert.doesNotMatch(appShell, /DiffSummaryPanel/);

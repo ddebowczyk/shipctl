@@ -5,15 +5,15 @@ import { fileURLToPath } from "node:url";
 import type { ModuleHostServices, ShepModule } from "@shep/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
-import type { BuiltinGlobalSurfaceLoaders } from "../../src/core/modules/builtinGlobalSurfaceAdapters.ts";
-import type { ModuleTaskScheduler } from "../../src/core/modules/moduleComposition.ts";
+import type { BuiltinGlobalSurfaceLoaders } from "../../core/frontend/host/builtinGlobalSurfaceAdapters.ts";
+import type { ModuleTaskScheduler } from "../../core/frontend/host/moduleComposition.ts";
 import {
   hydratePanelReference,
   PANEL_REFERENCE_SCHEMA_VERSION,
-} from "../../src/core/modules/panelPersistence.ts";
-import { matchesPanelShortcut } from "../../src/core/modules/panelShortcuts.ts";
+} from "../../core/frontend/host/panelPersistence.ts";
+import { matchesPanelShortcut } from "../../core/frontend/host/panelShortcuts.ts";
 
-type ModuleComposition = typeof import("../../src/core/modules/moduleComposition.ts");
+type ModuleComposition = typeof import("../../core/frontend/host/moduleComposition.ts");
 
 let vite: ViteDevServer;
 let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
@@ -64,7 +64,7 @@ before(async () => {
     notifyModulesProjectOpened,
     selectProjectFactsProvider,
   } = await vite.ssrLoadModule(
-    "/src/core/modules/moduleComposition.ts",
+    "/core/frontend/host/moduleComposition.ts",
   ) as ModuleComposition);
 });
 

@@ -40,17 +40,17 @@ function removeNativeComposition(root) {
   );
   replaceOnce(
     root,
-    "src-tauri/src/enabled_modules.rs",
-    '    #[cfg(feature = "skills-module")]\n    let builder = builder.plugin(shep_module_skills::init(\n        crate::skills_module::host_services(),\n    ));\n\n',
+    "src-tauri/src/modules/mod.rs",
+    '    #[cfg(feature = "skills-module")]\n    let builder = builder.plugin(shep_module_skills::init(\n        crate::modules::skills::host_services(),\n    ));\n\n',
     "",
   );
   replaceOnce(
     root,
-    "src-tauri/src/lib.rs",
-    '#[cfg(feature = "skills-module")]\nmod skills_module;\n',
+    "src-tauri/src/modules/mod.rs",
+    '#[cfg(feature = "skills-module")]\npub mod skills;\n',
     "",
   );
-  rmSync(path.join(root, "src-tauri/src/skills_module.rs"), { force: true });
+  rmSync(path.join(root, "src-tauri/src/modules/skills.rs"), { force: true });
 }
 
 function removeSkillsCapability(root, relativePath) {

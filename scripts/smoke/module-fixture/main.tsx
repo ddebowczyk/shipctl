@@ -2,10 +2,10 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import "../../../src/styles/globals.css";
-import PanelHost from "../../../src/core/modules/PanelHost";
-import { modulePanelContributions } from "../../../src/core/modules/moduleComposition";
-import { PanelRegistry } from "../../../src/core/modules/panelRegistry";
+import "@shep/core/appearance/globals.css";
+import PanelHost from "../../../core/frontend/host/PanelHost";
+import { modulePanelContributions } from "../../../core/frontend/host/moduleComposition";
+import { PanelRegistry } from "../../../core/frontend/host/panelRegistry";
 import { FIXTURE_PING_COMMAND } from "@shep/module-fixture";
 import type { ModuleHostServices } from "@shep/module-api";
 import { ENABLED_MODULES } from "./enabledModules";

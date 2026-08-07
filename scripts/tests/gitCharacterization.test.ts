@@ -316,16 +316,16 @@ test("module lifecycle owns project refresh, filesystem refresh, and removal", a
 
 test("generic host project chrome has no direct Git state dependency", () => {
   const files = [
-    "../../src/components/layout/AppShell.tsx",
-    "../../src/components/layout/TabBar.tsx",
-    "../../src/components/shared/projectMoveMenu.tsx",
-    "../../src/components/sidebar/AgentSessionList.tsx",
-    "../../src/components/sidebar/ModuleSessionButton.tsx",
-    "../../src/components/sidebar/ProjectList.tsx",
-    "../../src/components/sidebar/Sidebar.tsx",
-    "../../src/components/sidebar/TerminalItem.tsx",
-    "../../src/hooks/useProjectWatcher.ts",
-    "../../src/lib/projectGrouping.ts",
+    "../../core/frontend/shell/AppShell.tsx",
+    "../../core/frontend/shell/TabBar.tsx",
+    "../../core/frontend/projects/projectMoveMenu.tsx",
+    "../../core/frontend/terminal/AgentSessionList.tsx",
+    "../../core/frontend/host/ModuleSessionButton.tsx",
+    "../../core/frontend/projects/ProjectList.tsx",
+    "../../core/frontend/shell/Sidebar.tsx",
+    "../../core/frontend/terminal/TerminalItem.tsx",
+    "../../core/frontend/projects/useProjectWatcher.ts",
+    "../../core/frontend/projects/projectGrouping.ts",
   ];
 
   for (const file of files) {

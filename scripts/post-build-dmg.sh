@@ -4,7 +4,7 @@ set -euo pipefail
 # Post-build script: repositions .VolumeIcon.icns off-screen in the DMG
 # so it doesn't appear in Finder, and lays out the app + Applications nicely.
 
-DMG_DIR="src-tauri/target/release/bundle/dmg"
+DMG_DIR="target/release/bundle/dmg"
 DMG=$(ls "$DMG_DIR"/*.dmg 2>/dev/null | grep -v rw_temp | head -1)
 
 if [[ -z "$DMG" ]]; then

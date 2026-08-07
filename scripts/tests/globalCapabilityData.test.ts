@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createGlobalCapabilityDataPort } from "../../src/core/modules/globalCapabilityData.ts";
+import { createGlobalCapabilityDataPort } from "../../core/frontend/host/globalCapabilityData.ts";
 
 test("global reads and replacements stay capability scoped", async () => {
   const values = new Map<string, unknown>([

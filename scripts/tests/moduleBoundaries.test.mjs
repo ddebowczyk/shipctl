@@ -8,7 +8,7 @@ import { checkModuleBoundaries, formatDiagnostics } from "../check-module-bounda
 
 async function fixture(files) {
   const root = await mkdtemp(path.join(os.tmpdir(), "shep-module-boundaries-"));
-  await mkdir(path.join(root, "src/core/modules"), { recursive: true });
+  await mkdir(path.join(root, "core/frontend/host"), { recursive: true });
   for (const moduleName of ["api", "alpha", "beta"]) {
     const frontend = path.join(root, "modules", moduleName, "frontend");
     await mkdir(path.join(frontend, "src"), { recursive: true });
@@ -25,7 +25,7 @@ async function fixture(files) {
 
 test("accepts public composition and inward API imports", async (t) => {
   const root = await fixture({
-    "src/core/modules/enabledModules.ts": "import alpha from '@shep/alpha'; export default alpha;",
+    "core/frontend/host/enabledModules.ts": "import alpha from '@shep/alpha'; export default alpha;",
     "src/host.ts": "import type { ShepModule } from '@shep/module-api'; export type T = ShepModule;",
     "modules/alpha/frontend/src/index.ts": "import type { ShepModule } from '@shep/module-api'; export const value: ShepModule | null = null;",
   });
@@ -36,7 +36,7 @@ test("accepts public composition and inward API imports", async (t) => {
 test("reports deterministic host and sibling violations", async (t) => {
   const root = await fixture({
     "src/host.ts": "import alpha from '@shep/alpha'; export default alpha;",
-    "src/core/modules/enabledModules.ts": "import x from '@shep/alpha/src/internal'; export default x;",
+    "core/frontend/host/enabledModules.ts": "import x from '@shep/alpha/src/internal'; export default x;",
     "modules/alpha/frontend/src/index.ts": "import beta from '@shep/beta'; export default beta;",
     "modules/beta/frontend/src/index.ts": "import host from '../../../../src/host'; export default host;",
   });
@@ -46,9 +46,9 @@ test("reports deterministic host and sibling violations", async (t) => {
   assert.deepEqual(
     diagnostics.map(({ rule }) => rule),
     [
+      "host-module-deep-import",
       "module-sibling-import",
       "module-host-import",
-      "host-module-deep-import",
       "host-module-import-outside-composition",
     ],
   );

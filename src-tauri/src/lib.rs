@@ -1,29 +1,19 @@
-#[cfg(feature = "assistants-module")]
-mod assistants_module;
-mod commands;
-mod enabled_modules;
-mod fonts;
-mod global_capability_data;
-#[cfg(feature = "git-module")]
-mod git_module;
+//! The Tauri desktop shell.
+//!
+//! This crate holds no capability logic. It starts the app, wires the managers
+//! from `shep-core` into Tauri state, registers the command handlers those
+//! capabilities expose, and installs whichever module plugins this build
+//! carries. Everything it registers lives in `core/backend` or `modules/`.
+
+mod lifecycle;
 mod menu;
-#[cfg(feature = "assistants-module")]
-mod pi_config;
-#[cfg(feature = "ports-module")]
-mod ports_module;
-mod pty;
-#[cfg(feature = "skills-module")]
-mod skills_module;
-#[cfg(feature = "usage-module")]
-mod usage_module;
-mod watcher;
-mod workspace;
+mod modules;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
-use pty::manager::PtyManager;
-use watcher::GitWatcher;
-use workspace::manager::WorkspaceManager;
+use shep_core::projects::watcher::GitWatcher;
+use shep_core::terminal::manager::PtyManager;
+use shep_core::workspace::manager::WorkspaceManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -34,7 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
     let pty_manager = PtyManager::new();
-    let app = enabled_modules::install(builder, pty_manager.clone())
+    let app = modules::install(builder, pty_manager.clone())
         .manage(pty_manager)
         .manage(WorkspaceManager::new())
         .setup(|app| {
@@ -76,47 +66,47 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            commands::list_repos,
-            commands::register_repo,
-            commands::unregister_repo,
-            commands::load_workspace,
-            commands::save_workspace,
-            commands::list_groups,
-            commands::create_group,
-            commands::rename_group,
-            commands::delete_group,
-            commands::move_repo_to_group,
-            commands::get_editor_settings,
-            commands::get_project_settings,
-            commands::save_editor_settings,
-            commands::save_project_settings,
-            commands::get_keybinding_settings,
-            commands::save_keybinding_settings,
-            commands::get_terminal_settings,
-            commands::save_terminal_settings,
-            commands::get_sidebar_settings,
-            commands::list_monospace_families,
-            commands::load_font_family,
-            commands::open_in_editor,
-            commands::reveal_in_finder,
-            commands::spawn_pty,
-            commands::write_pty,
-            commands::update_pty_color_theme,
-            commands::resize_pty,
-            commands::kill_pty,
-            commands::get_pty_session_count,
-            commands::shutdown_and_quit,
-            commands::get_username,
-            commands::get_home_directory,
-            commands::get_default_shell,
-            commands::get_computer_name,
-            commands::check_command_exists,
-            global_capability_data::get_global_capability_data,
-            global_capability_data::replace_global_capability_data,
-            commands::get_memory_stats,
-            commands::watch_repo,
-            commands::unwatch_repo,
-            commands::open_url,
+            shep_core::projects::commands::list_repos,
+            shep_core::projects::commands::register_repo,
+            shep_core::projects::commands::unregister_repo,
+            shep_core::projects::commands::load_workspace,
+            shep_core::projects::commands::save_workspace,
+            shep_core::projects::commands::list_groups,
+            shep_core::projects::commands::create_group,
+            shep_core::projects::commands::rename_group,
+            shep_core::projects::commands::delete_group,
+            shep_core::projects::commands::move_repo_to_group,
+            shep_core::projects::commands::watch_repo,
+            shep_core::projects::commands::unwatch_repo,
+            shep_core::settings::commands::get_editor_settings,
+            shep_core::settings::commands::save_editor_settings,
+            shep_core::settings::commands::get_project_settings,
+            shep_core::settings::commands::save_project_settings,
+            shep_core::settings::commands::get_keybinding_settings,
+            shep_core::settings::commands::save_keybinding_settings,
+            shep_core::settings::commands::get_sidebar_settings,
+            shep_core::settings::commands::open_in_editor,
+            shep_core::terminal::commands::spawn_pty,
+            shep_core::terminal::commands::write_pty,
+            shep_core::terminal::commands::update_pty_color_theme,
+            shep_core::terminal::commands::resize_pty,
+            shep_core::terminal::commands::kill_pty,
+            shep_core::terminal::commands::get_pty_session_count,
+            shep_core::terminal::commands::get_terminal_settings,
+            shep_core::terminal::commands::save_terminal_settings,
+            shep_core::terminal::commands::get_memory_stats,
+            shep_core::appearance::commands::list_monospace_families,
+            shep_core::appearance::commands::load_font_family,
+            shep_core::platform::commands::get_username,
+            shep_core::platform::commands::get_home_directory,
+            shep_core::platform::commands::get_default_shell,
+            shep_core::platform::commands::get_computer_name,
+            shep_core::platform::commands::check_command_exists,
+            shep_core::platform::commands::reveal_in_finder,
+            shep_core::platform::commands::open_url,
+            modules::capability_data::get_global_capability_data,
+            modules::capability_data::replace_global_capability_data,
+            lifecycle::shutdown_and_quit,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

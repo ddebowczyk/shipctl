@@ -9,8 +9,8 @@ import type {
 } from "@shep/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
-type ProjectFactsModule = typeof import("../../src/core/modules/projectFacts.ts");
-type ModuleComposition = typeof import("../../src/core/modules/moduleComposition.ts");
+type ProjectFactsModule = typeof import("../../core/frontend/host/projectFacts.ts");
+type ModuleComposition = typeof import("../../core/frontend/host/moduleComposition.ts");
 type GitStoreModule = typeof import("../../modules/git/frontend/src/store.ts");
 
 let vite: ViteDevServer;
@@ -32,10 +32,10 @@ before(async () => {
     resolveProjectFacts,
     subscribeProjectFacts,
   } = await vite.ssrLoadModule(
-    "/src/core/modules/projectFacts.ts",
+    "/core/frontend/host/projectFacts.ts",
   ) as ProjectFactsModule);
   ({ enabledProjectFactsProvider } = await vite.ssrLoadModule(
-    "/src/core/modules/moduleComposition.ts",
+    "/core/frontend/host/moduleComposition.ts",
   ) as ModuleComposition);
   ({ useGitStore } = await vite.ssrLoadModule(
     "/modules/git/frontend/src/store.ts",

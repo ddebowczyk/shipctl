@@ -21,20 +21,20 @@ const repositoryRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)
 
 function cargoEnvironment(root) {
   return {
-    CARGO_TARGET_DIR: path.join(root, "src-tauri/target/usage-plugout"),
+    CARGO_TARGET_DIR: path.join(root, "target/usage-plugout"),
   };
 }
 
 function removeFrontendComposition(root) {
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     'import { usageModule } from "@shep/module-usage";\n',
     "",
   );
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     '  ...(import.meta.env.VITE_SHEP_USAGE_MODULE === "disabled" ? [] : [usageModule]),\n',
     "",
   );
@@ -79,10 +79,10 @@ function removeNativeComposition(root) {
   );
   replaceOnce(
     root,
-    "src-tauri/src/enabled_modules.rs",
+    "src-tauri/src/modules/mod.rs",
     `    #[cfg(feature = "usage-module")]
     let builder = builder.plugin(shep_module_usage::init(
-        crate::usage_module::host_services(),
+        crate::modules::usage::host_services(),
     ));
 
 `,
@@ -90,11 +90,11 @@ function removeNativeComposition(root) {
   );
   replaceOnce(
     root,
-    "src-tauri/src/lib.rs",
-    '#[cfg(feature = "usage-module")]\nmod usage_module;\n',
+    "src-tauri/src/modules/mod.rs",
+    '#[cfg(feature = "usage-module")]\npub mod usage;\n',
     "",
   );
-  rmSync(path.join(root, "src-tauri/src/usage_module.rs"), { force: true });
+  rmSync(path.join(root, "src-tauri/src/modules/usage.rs"), { force: true });
 }
 
 function removeUsageCapability(root, relativePath) {

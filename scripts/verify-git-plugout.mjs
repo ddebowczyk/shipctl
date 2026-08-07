@@ -22,13 +22,13 @@ const repositoryRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)
 function removeFrontendComposition(root) {
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     'import { gitModule } from "@shep/module-git";\n',
     "",
   );
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     '  ...(import.meta.env.VITE_SHEP_GIT_MODULE === "disabled" ? [] : [gitModule]),\n',
     "",
   );
@@ -50,17 +50,17 @@ function removeNativeComposition(root) {
   );
   replaceOnce(
     root,
-    "src-tauri/src/enabled_modules.rs",
-    '    #[cfg(feature = "git-module")]\n    let builder = builder.plugin(shep_module_git::init(crate::git_module::host_services()));\n\n',
+    "src-tauri/src/modules/mod.rs",
+    '    #[cfg(feature = "git-module")]\n    let builder = builder.plugin(shep_module_git::init(crate::modules::git::host_services()));\n\n',
     "",
   );
   replaceOnce(
     root,
-    "src-tauri/src/lib.rs",
-    '#[cfg(feature = "git-module")]\nmod git_module;\n',
+    "src-tauri/src/modules/mod.rs",
+    '#[cfg(feature = "git-module")]\npub mod git;\n',
     "",
   );
-  rmSync(path.join(root, "src-tauri/src/git_module.rs"), { force: true });
+  rmSync(path.join(root, "src-tauri/src/modules/git.rs"), { force: true });
 }
 
 function removeGitCapability(root, relativePath) {
@@ -112,14 +112,14 @@ function removeSmokeDependency(root) {
       case "plugin:shep-git|git_changed_files":
         return [
           {
-            path: "src/AppShell.tsx",
+            path: "core/frontend/shell/AppShell.tsx",
             status: "M",
             area: "unstaged",
             old_path: null,
           },
         ];
       case "plugin:shep-git|git_list_files":
-        return ["README.md", "src/AppShell.tsx", "src/core/modules/PanelHost.tsx"];
+        return ["README.md", "core/frontend/shell/AppShell.tsx", "core/frontend/host/PanelHost.tsx"];
       case "plugin:shep-git|git_file_contents":
         return "Panel host smoke fixture";
       case "plugin:shep-git|git_file_diff":

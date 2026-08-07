@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { WorkspaceConfig } from "../../src/lib/types.ts";
-import { createProjectCapabilityDataPort } from "../../src/core/modules/projectCapabilityData.ts";
+import type { WorkspaceConfig } from "@shep/core/platform";
+import { createProjectCapabilityDataPort } from "../../core/frontend/host/projectCapabilityData.ts";
 
 function workspace(overrides: Partial<WorkspaceConfig> = {}): WorkspaceConfig {
   return {

@@ -66,7 +66,7 @@ fi
 target='aarch64-apple-darwin'
 version="$(jq -er '.version | strings | select(length > 0)' package.json)" \
   || fail 'could not read a non-empty version from package.json'
-bundle_root="src-tauri/target/${target}/release/bundle"
+bundle_root="target/${target}/release/bundle"
 app_source="${bundle_root}/macos/shep.app"
 dmg_name="shep_${version}_aarch64.dmg"
 dmg_source="${bundle_root}/dmg/${dmg_name}"

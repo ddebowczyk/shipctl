@@ -113,7 +113,7 @@ test("snapshot and persisted-settings stores bound success and failure behavior"
 });
 
 test("Usage remains global across project switches and refreshes on module cadence", () => {
-  const shell = source("../../src/components/layout/AppShell.tsx");
+  const shell = source("../../core/frontend/shell/AppShell.tsx");
   const adapter = source("../../modules/usage/frontend/src/index.ts");
   const store = source("../../modules/usage/frontend/src/usageStore.ts");
 
@@ -131,8 +131,8 @@ test("Usage remains global across project switches and refreshes on module caden
 
 test("native cache, unavailable states, and capability-owned config remain bounded", () => {
   const usage = source("../../modules/usage/backend/src/usage/mod.rs");
-  const config = source("../../src-tauri/src/workspace/config.rs");
-  const loader = source("../../src-tauri/src/workspace/loader.rs");
+  const config = source("../../core/backend/src/workspace/config.rs");
+  const loader = source("../../core/backend/src/workspace/loader.rs");
 
   assert.match(usage, /COOLDOWN_SUCCESS_SECS: u64 = 300/);
   assert.match(usage, /COOLDOWN_ERROR_BASE_SECS: u64 = 30/);
@@ -150,8 +150,14 @@ test("native cache, unavailable states, and capability-owned config remain bound
 
 test("native ownership seam includes ingestion, query DB, and provider subprocess access", () => {
   const host = source("../../src-tauri/src/lib.rs");
-  const installer = source("../../src-tauri/src/enabled_modules.rs");
-  const commands = source("../../src-tauri/src/commands.rs");
+  const installer = source("../../src-tauri/src/modules/mod.rs");
+  const commands = [
+    "platform",
+    "projects",
+    "settings",
+    "terminal",
+    "appearance",
+  ].map((capability) => source(`../../core/backend/src/${capability}/commands.rs`)).join("\n");
   const client = source("../../modules/usage/frontend/src/client.ts");
   const plugin = source("../../modules/usage/backend/src/lib.rs");
   const usage = source("../../modules/usage/backend/src/usage/mod.rs");
@@ -160,7 +166,7 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
 
   assert.doesNotMatch(host, /\.manage\(UsageDb::open\(\)/);
   assert.doesNotMatch(host, /usage::run_background_ingest\(&db\)/);
-  assert.match(installer, /shep_module_usage::init\([\s\S]*usage_module::host_services\(\)/);
+  assert.match(installer, /shep_module_usage::init\([\s\S]*modules::usage::host_services\(\)/);
   assert.match(plugin, /plugin::Builder::new\(PLUGIN_NAME\)/);
   assert.match(plugin, /app\.manage\(UsagePluginState/);
   assert.match(plugin, /spawn_ingest\(db, app\.clone\(\)\)/);

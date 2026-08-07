@@ -19,13 +19,13 @@ const repositoryRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)
 function removeFrontendComposition(root) {
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     'import { commandsModule } from "@shep/module-commands";\n',
     "",
   );
   replaceOnce(
     root,
-    "src/core/modules/enabledModules.ts",
+    "core/frontend/host/enabledModules.ts",
     '  ...(import.meta.env.VITE_SHEP_COMMANDS_MODULE === "disabled" ? [] : [commandsModule]),\n',
     "",
   );

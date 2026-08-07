@@ -25,7 +25,8 @@ pub fn codex_provider_windows() -> Result<Vec<UsageWindowSnapshot>, String> {
         "curl",
         &[
             "-sS",
-            "--max-time", "10",
+            "--max-time",
+            "10",
             "-H",
             &format!("Authorization: Bearer {token}"),
             "https://chatgpt.com/backend-api/wham/usage",
@@ -50,8 +51,17 @@ pub fn codex_provider_windows() -> Result<Vec<UsageWindowSnapshot>, String> {
 }
 
 /// Fetch Claude rate limit windows from Anthropic API.
-pub fn claude_provider_windows() -> Result<(Vec<UsageWindowSnapshot>, Vec<UsageWindowSnapshot>), String> {
-    let token_json = run_command("security", &["find-generic-password", "-s", "Claude Code-credentials", "-w"])?;
+pub fn claude_provider_windows(
+) -> Result<(Vec<UsageWindowSnapshot>, Vec<UsageWindowSnapshot>), String> {
+    let token_json = run_command(
+        "security",
+        &[
+            "find-generic-password",
+            "-s",
+            "Claude Code-credentials",
+            "-w",
+        ],
+    )?;
     let credentials: Value = serde_json::from_str(&token_json)
         .map_err(|e| format!("Failed to parse Claude Keychain credentials: {e}"))?;
     let token = credentials
@@ -64,7 +74,8 @@ pub fn claude_provider_windows() -> Result<(Vec<UsageWindowSnapshot>, Vec<UsageW
         "curl",
         &[
             "-sS",
-            "--max-time", "10",
+            "--max-time",
+            "10",
             "-H",
             &format!("Authorization: Bearer {token}"),
             "-H",
@@ -112,7 +123,10 @@ fn claude_window(window: &str, value: &Value) -> UsageWindowSnapshot {
         cost_kind: "included".to_string(),
         used_percent: used,
         remaining_percent: used.map(|v| (100.0 - v).max(0.0)),
-        reset_at: value.get("resets_at").and_then(Value::as_str).map(ToString::to_string),
+        reset_at: value
+            .get("resets_at")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
         token_total: None,
         pace_status: None,
     }
@@ -161,7 +175,8 @@ struct AntigravityQuota {
     reset_time: Option<String>,
 }
 
-pub fn antigravity_provider_windows() -> Result<(Vec<UsageWindowSnapshot>, Vec<UsageWindowSnapshot>), String> {
+pub fn antigravity_provider_windows(
+) -> Result<(Vec<UsageWindowSnapshot>, Vec<UsageWindowSnapshot>), String> {
     let process = antigravity_detect_process()?;
     let ports = antigravity_listening_ports(process.pid)?;
     let endpoints = antigravity_endpoints(&process, &ports);
@@ -212,7 +227,10 @@ fn antigravity_detect_process() -> Result<AntigravityProcess, String> {
     if saw_tokenless_ide {
         Err("Antigravity language server is missing a CSRF token".to_string())
     } else {
-        Err("Antigravity language server not detected. Launch Antigravity or agy and retry.".to_string())
+        Err(
+            "Antigravity language server not detected. Launch Antigravity or agy and retry."
+                .to_string(),
+        )
     }
 }
 
@@ -274,7 +292,9 @@ fn extract_flag(flag: &str, command: &str) -> Option<String> {
     while index + flag_bytes.len() <= bytes.len() {
         if &bytes[index..index + flag_bytes.len()] == flag_bytes {
             let mut value_start = index + flag_bytes.len();
-            while value_start < bytes.len() && (bytes[value_start] == b'=' || bytes[value_start].is_ascii_whitespace()) {
+            while value_start < bytes.len()
+                && (bytes[value_start] == b'=' || bytes[value_start].is_ascii_whitespace())
+            {
                 value_start += 1;
             }
             if value_start >= bytes.len() {
@@ -296,7 +316,10 @@ fn antigravity_listening_ports(pid: i64) -> Result<Vec<i64>, String> {
         .into_iter()
         .find(|path| Path::new(path).exists())
         .ok_or_else(|| "lsof not available".to_string())?;
-    let output = run_command(lsof, &["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", &pid.to_string()])?;
+    let output = run_command(
+        lsof,
+        &["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", &pid.to_string()],
+    )?;
     let mut ports = Vec::new();
     for line in output.lines() {
         if !line.contains("(LISTEN)") {
@@ -350,14 +373,18 @@ fn antigravity_endpoints(process: &AntigravityProcess, ports: &[i64]) -> Vec<Ant
     endpoints
 }
 
-fn antigravity_fetch_quotas(endpoints: &[AntigravityEndpoint]) -> Result<Vec<AntigravityQuota>, String> {
+fn antigravity_fetch_quotas(
+    endpoints: &[AntigravityEndpoint],
+) -> Result<Vec<AntigravityQuota>, String> {
     let mut last_error = "No Antigravity endpoint available".to_string();
     for endpoint in endpoints {
         for path in [
             "/exa.language_server_pb.LanguageServerService/GetUserStatus",
             "/exa.language_server_pb.LanguageServerService/GetCommandModelConfigs",
         ] {
-            match antigravity_request(endpoint, path).and_then(|body| antigravity_parse_quotas(&body)) {
+            match antigravity_request(endpoint, path)
+                .and_then(|body| antigravity_parse_quotas(&body))
+            {
                 Ok(quotas) if !quotas.is_empty() => return Ok(quotas),
                 Ok(_) => last_error = "Antigravity returned no quota models".to_string(),
                 Err(error) => last_error = error,
@@ -404,7 +431,11 @@ fn antigravity_parse_quotas(body: &str) -> Result<Vec<AntigravityQuota>, String>
             .map(ToString::to_string)
             .unwrap_or_else(|| code.to_string());
         let normalized = text.trim_matches('"').to_lowercase();
-        if !normalized.is_empty() && normalized != "ok" && normalized != "success" && normalized != "0" {
+        if !normalized.is_empty()
+            && normalized != "ok"
+            && normalized != "success"
+            && normalized != "0"
+        {
             return Err(format!("Antigravity API returned code {text}"));
         }
     }
@@ -420,7 +451,8 @@ fn antigravity_parse_quotas(body: &str) -> Result<Vec<AntigravityQuota>, String>
         let Some(quota) = config.get("quotaInfo") else {
             continue;
         };
-        let Some(remaining_fraction) = quota.get("remainingFraction").and_then(Value::as_f64) else {
+        let Some(remaining_fraction) = quota.get("remainingFraction").and_then(Value::as_f64)
+        else {
             continue;
         };
         let model_id = config
@@ -433,7 +465,10 @@ fn antigravity_parse_quotas(body: &str) -> Result<Vec<AntigravityQuota>, String>
             .and_then(Value::as_str)
             .unwrap_or(&model_id)
             .to_string();
-        let reset_time = quota.get("resetTime").and_then(Value::as_str).map(ToString::to_string);
+        let reset_time = quota
+            .get("resetTime")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
         quotas.push(AntigravityQuota {
             label,
             model_id,
@@ -445,7 +480,9 @@ fn antigravity_parse_quotas(body: &str) -> Result<Vec<AntigravityQuota>, String>
     Ok(quotas)
 }
 
-fn antigravity_quotas_to_windows(quotas: &[AntigravityQuota]) -> Result<(Vec<UsageWindowSnapshot>, Vec<UsageWindowSnapshot>), String> {
+fn antigravity_quotas_to_windows(
+    quotas: &[AntigravityQuota],
+) -> Result<(Vec<UsageWindowSnapshot>, Vec<UsageWindowSnapshot>), String> {
     let mut summary = Vec::new();
     let families = [
         ("claude", "24h_claude", "Claude quota"),
@@ -545,7 +582,13 @@ fn antigravity_window(
 fn sanitize_window_id(value: &str) -> String {
     let sanitized: String = value
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     sanitized.trim_matches('-').to_string()
 }
@@ -557,9 +600,18 @@ mod tests {
     #[test]
     fn antigravity_process_kind_matches_cli_commands() {
         assert_eq!(antigravity_process_kind("agy --model gemini"), Some("cli"));
-        assert_eq!(antigravity_process_kind("/usr/local/bin/antigravity-cli serve"), Some("cli"));
-        assert_eq!(antigravity_process_kind("/opt/bin/antigravity_cli"), Some("cli"));
-        assert_eq!(antigravity_process_kind("/usr/bin/env agy --dangerously-skip-permissions"), Some("cli"));
+        assert_eq!(
+            antigravity_process_kind("/usr/local/bin/antigravity-cli serve"),
+            Some("cli")
+        );
+        assert_eq!(
+            antigravity_process_kind("/opt/bin/antigravity_cli"),
+            Some("cli")
+        );
+        assert_eq!(
+            antigravity_process_kind("/usr/bin/env agy --dangerously-skip-permissions"),
+            Some("cli")
+        );
     }
 
     #[test]
@@ -570,9 +622,18 @@ mod tests {
 
     #[test]
     fn extract_flag_accepts_space_and_equals_forms() {
-        assert_eq!(extract_flag("--csrf_token", "language_server --csrf_token abc123"), Some("abc123".to_string()));
-        assert_eq!(extract_flag("--csrf_token", "language_server --csrf_token=abc123"), Some("abc123".to_string()));
-        assert_eq!(extract_flag("--csrf_token", "language_server --other abc123"), None);
+        assert_eq!(
+            extract_flag("--csrf_token", "language_server --csrf_token abc123"),
+            Some("abc123".to_string())
+        );
+        assert_eq!(
+            extract_flag("--csrf_token", "language_server --csrf_token=abc123"),
+            Some("abc123".to_string())
+        );
+        assert_eq!(
+            extract_flag("--csrf_token", "language_server --other abc123"),
+            None
+        );
     }
 
     #[test]
@@ -601,7 +662,10 @@ mod tests {
         assert_eq!(quotas[0].label, "Claude Sonnet 4.5");
         assert_eq!(quotas[0].model_id, "claude-sonnet-4-5");
         assert_eq!(quotas[0].remaining_fraction, 0.42);
-        assert_eq!(quotas[0].reset_time.as_deref(), Some("2026-06-10T12:00:00Z"));
+        assert_eq!(
+            quotas[0].reset_time.as_deref(),
+            Some("2026-06-10T12:00:00Z")
+        );
     }
 
     #[test]
@@ -628,14 +692,14 @@ mod tests {
         assert_eq!(summary[1].remaining_percent, Some(75.0));
         assert_eq!(extra.len(), 2);
     }
-
 }
 
 // ── Gemini ────────────────────────────────────────────────
 
 // OAuth client credentials from the Gemini CLI bundle.
 // These are public values embedded in the open-source CLI.
-const GEMINI_OAUTH_CLIENT_ID: &str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
+const GEMINI_OAUTH_CLIENT_ID: &str =
+    "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
 const GEMINI_OAUTH_CLIENT_SECRET: &str = "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";
 
 /// Fetch Gemini quota windows from Google's internal API.
@@ -650,7 +714,11 @@ pub fn gemini_provider_windows() -> Result<Vec<UsageWindowSnapshot>, String> {
             .and_then(Value::as_str)
             .unwrap_or("oauth-personal");
         match auth_type {
-            "api-key" | "vertex-ai" => return Err(format!("Gemini auth type '{auth_type}' not supported for quota")),
+            "api-key" | "vertex-ai" => {
+                return Err(format!(
+                    "Gemini auth type '{auth_type}' not supported for quota"
+                ))
+            }
             _ => {} // oauth-personal or unknown — proceed
         }
     }
@@ -669,7 +737,10 @@ fn gemini_get_access_token() -> Result<String, String> {
     let creds: Value = serde_json::from_str(&creds_text)
         .map_err(|e| format!("Failed to parse Gemini OAuth creds: {e}"))?;
 
-    let expiry = creds.get("expiry_date").and_then(Value::as_u64).unwrap_or(0);
+    let expiry = creds
+        .get("expiry_date")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -677,14 +748,16 @@ fn gemini_get_access_token() -> Result<String, String> {
 
     if now_ms < expiry.saturating_sub(60_000) {
         // Token still valid (with 60s buffer)
-        return creds.get("access_token")
+        return creds
+            .get("access_token")
             .and_then(Value::as_str)
             .map(ToString::to_string)
             .ok_or_else(|| "Missing access_token in Gemini OAuth creds".to_string());
     }
 
     // Refresh the token
-    let refresh_token = creds.get("refresh_token")
+    let refresh_token = creds
+        .get("refresh_token")
         .and_then(Value::as_str)
         .ok_or_else(|| "Missing refresh_token in Gemini OAuth creds".to_string())?;
 
@@ -693,39 +766,61 @@ fn gemini_get_access_token() -> Result<String, String> {
         GEMINI_OAUTH_CLIENT_ID, GEMINI_OAUTH_CLIENT_SECRET, refresh_token
     );
 
-    let response = run_command("curl", &[
-        "-sS", "--max-time", "10",
-        "-X", "POST",
-        "-H", "Content-Type: application/x-www-form-urlencoded",
-        "-d", &body,
-        "https://oauth2.googleapis.com/token",
-    ])?;
+    let response = run_command(
+        "curl",
+        &[
+            "-sS",
+            "--max-time",
+            "10",
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: application/x-www-form-urlencoded",
+            "-d",
+            &body,
+            "https://oauth2.googleapis.com/token",
+        ],
+    )?;
 
     let resp: Value = serde_json::from_str(&response)
         .map_err(|e| format!("Failed to parse token refresh response: {e}"))?;
 
-    let new_token = resp.get("access_token")
+    let new_token = resp
+        .get("access_token")
         .and_then(Value::as_str)
         .ok_or_else(|| {
-            let error = resp.get("error_description")
+            let error = resp
+                .get("error_description")
                 .or_else(|| resp.get("error"))
                 .and_then(Value::as_str)
                 .unwrap_or("unknown error");
             format!("Token refresh failed: {error}")
         })?;
 
-    let expires_in = resp.get("expires_in").and_then(Value::as_u64).unwrap_or(3600);
+    let expires_in = resp
+        .get("expires_in")
+        .and_then(Value::as_u64)
+        .unwrap_or(3600);
 
     // Write updated creds back
     let mut updated = creds.clone();
     if let Some(obj) = updated.as_object_mut() {
-        obj.insert("access_token".to_string(), Value::String(new_token.to_string()));
-        obj.insert("expiry_date".to_string(), Value::Number((now_ms + expires_in * 1000).into()));
+        obj.insert(
+            "access_token".to_string(),
+            Value::String(new_token.to_string()),
+        );
+        obj.insert(
+            "expiry_date".to_string(),
+            Value::Number((now_ms + expires_in * 1000).into()),
+        );
         if let Some(new_id_token) = resp.get("id_token") {
             obj.insert("id_token".to_string(), new_id_token.clone());
         }
     }
-    let _ = fs::write(&creds_path, serde_json::to_string_pretty(&updated).unwrap_or_default());
+    let _ = fs::write(
+        &creds_path,
+        serde_json::to_string_pretty(&updated).unwrap_or_default(),
+    );
 
     Ok(new_token.to_string())
 }
@@ -734,14 +829,23 @@ fn gemini_get_access_token() -> Result<String, String> {
 fn gemini_load_project(token: &str) -> Result<String, String> {
     let body = r#"{"metadata":{"ideType":"GEMINI_CLI","pluginType":"GEMINI"}}"#;
 
-    let response = run_command("curl", &[
-        "-sS", "--max-time", "10",
-        "-X", "POST",
-        "-H", &format!("Authorization: Bearer {token}"),
-        "-H", "Content-Type: application/json",
-        "-d", body,
-        "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-    ])?;
+    let response = run_command(
+        "curl",
+        &[
+            "-sS",
+            "--max-time",
+            "10",
+            "-X",
+            "POST",
+            "-H",
+            &format!("Authorization: Bearer {token}"),
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            body,
+            "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+        ],
+    )?;
 
     let resp: Value = serde_json::from_str(&response)
         .map_err(|e| format!("Failed to parse loadCodeAssist response: {e}"))?;
@@ -765,28 +869,49 @@ fn gemini_retrieve_quota(token: &str, project_id: &str) -> Result<Vec<GeminiQuot
         format!(r#"{{"project":"{}"}}"#, project_id)
     };
 
-    let response = run_command("curl", &[
-        "-sS", "--max-time", "10",
-        "-X", "POST",
-        "-H", &format!("Authorization: Bearer {token}"),
-        "-H", "Content-Type: application/json",
-        "-d", &body,
-        "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
-    ])?;
+    let response = run_command(
+        "curl",
+        &[
+            "-sS",
+            "--max-time",
+            "10",
+            "-X",
+            "POST",
+            "-H",
+            &format!("Authorization: Bearer {token}"),
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &body,
+            "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
+        ],
+    )?;
 
     let resp: Value = serde_json::from_str(&response)
         .map_err(|e| format!("Failed to parse retrieveUserQuota response: {e}"))?;
 
-    let buckets = resp.get("buckets")
+    let buckets = resp
+        .get("buckets")
         .and_then(Value::as_array)
         .ok_or_else(|| "retrieveUserQuota response missing buckets".to_string())?;
 
     let mut result = Vec::new();
     for bucket in buckets {
         let remaining = bucket.get("remainingFraction").and_then(Value::as_f64);
-        let reset = bucket.get("resetTime").and_then(Value::as_str).map(ToString::to_string);
-        let model = bucket.get("modelId").and_then(Value::as_str).unwrap_or("unknown").to_string();
-        let token_type = bucket.get("tokenType").and_then(Value::as_str).unwrap_or("").to_string();
+        let reset = bucket
+            .get("resetTime")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+        let model = bucket
+            .get("modelId")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let token_type = bucket
+            .get("tokenType")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
 
         if let Some(frac) = remaining {
             result.push(GeminiQuotaBucket {
@@ -829,7 +954,9 @@ fn gemini_model_tier(model: &str) -> &'static str {
 /// Convert quota buckets to UsageWindowSnapshot entries.
 /// Groups by tier (pro/flash/lite), takes the lowest remaining fraction per
 /// tier (worst case across all models and token types in that tier).
-fn gemini_buckets_to_windows(buckets: &[GeminiQuotaBucket]) -> Result<Vec<UsageWindowSnapshot>, String> {
+fn gemini_buckets_to_windows(
+    buckets: &[GeminiQuotaBucket],
+) -> Result<Vec<UsageWindowSnapshot>, String> {
     // Group by tier — keep lowest remaining fraction and earliest reset
     let mut by_tier: HashMap<&str, (f64, Option<String>)> = HashMap::new();
     for bucket in buckets {
@@ -843,33 +970,41 @@ fn gemini_buckets_to_windows(buckets: &[GeminiQuotaBucket]) -> Result<Vec<UsageW
         }
     }
 
-    let mut windows: Vec<UsageWindowSnapshot> = by_tier.iter().map(|(tier, (remaining, reset))| {
-        let used_pct = ((1.0 - remaining) * 100.0).max(0.0);
-        UsageWindowSnapshot {
-            provider: "gemini".to_string(),
-            window_id: format!("gemini-24h-{tier}"),
-            window: format!("24h_{tier}"),
-            label: format!("24h {tier}"),
-            scope: "plan".to_string(),
-            limit: Some(100.0),
-            used: Some(used_pct),
-            source_type: "provider".to_string(),
-            confidence: "official".to_string(),
-            cost_kind: "included".to_string(),
-            used_percent: Some(used_pct),
-            remaining_percent: Some((remaining * 100.0).max(0.0)),
-            reset_at: reset.clone(),
-            token_total: None,
-            pace_status: None,
-        }
-    }).collect();
+    let mut windows: Vec<UsageWindowSnapshot> = by_tier
+        .iter()
+        .map(|(tier, (remaining, reset))| {
+            let used_pct = ((1.0 - remaining) * 100.0).max(0.0);
+            UsageWindowSnapshot {
+                provider: "gemini".to_string(),
+                window_id: format!("gemini-24h-{tier}"),
+                window: format!("24h_{tier}"),
+                label: format!("24h {tier}"),
+                scope: "plan".to_string(),
+                limit: Some(100.0),
+                used: Some(used_pct),
+                source_type: "provider".to_string(),
+                confidence: "official".to_string(),
+                cost_kind: "included".to_string(),
+                used_percent: Some(used_pct),
+                remaining_percent: Some((remaining * 100.0).max(0.0)),
+                reset_at: reset.clone(),
+                token_total: None,
+                pace_status: None,
+            }
+        })
+        .collect();
 
     // Sort so pro comes first, then flash, then lite
     windows.sort_by_key(|w| {
-        if w.window.contains("pro") { 0 }
-        else if w.window.contains("flash") && !w.window.contains("lite") { 1 }
-        else if w.window.contains("lite") { 2 }
-        else { 3 }
+        if w.window.contains("pro") {
+            0
+        } else if w.window.contains("flash") && !w.window.contains("lite") {
+            1
+        } else if w.window.contains("lite") {
+            2
+        } else {
+            3
+        }
     });
 
     if windows.is_empty() {

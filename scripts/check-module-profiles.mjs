@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -70,7 +71,7 @@ for (const { id, feature } of modules) {
     expectedModules.map((candidate) => candidate.feature),
     `${scriptName} must enable every non-target module`,
   );
-  if (!command.includes(`CARGO_TARGET_DIR=src-tauri/target/${id}-native-disabled`)) {
+  if (!command.includes(`CARGO_TARGET_DIR="$PWD/target/${id}-native-disabled"`)) {
     throw new Error(`${scriptName} must use an isolated Cargo target directory`);
   }
 
@@ -78,6 +79,16 @@ for (const { id, feature } of modules) {
   if (!plugout.includes(`nativeModuleFeaturesExcept("${feature}")`)) {
     throw new Error(`${id} plug-out verifier does not derive its peer feature list`);
   }
+}
+
+// A relative CARGO_TARGET_DIR resolves against the Tauri CLI's working directory,
+// which is src-tauri/ — producing a second build tree at src-tauri/src-tauri/target.
+// The scripts above are asserted to pass an absolute path; this catches a rerun that
+// slipped through anyway.
+if (existsSync(path.join(root, "src-tauri/src-tauri"))) {
+  throw new Error(
+    "src-tauri/src-tauri exists: a build wrote outside the workspace target directory",
+  );
 }
 
 process.stdout.write("Native module features, permissions, and disabled profiles: OK\n");

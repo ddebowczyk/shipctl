@@ -13,7 +13,7 @@ import {
   publishTerminalSessionEvent,
   requestTerminalSessionOwnerAction,
   terminalSessionExitReason,
-} from "../../src/core/modules/terminalSessions.ts";
+} from "../../core/frontend/terminal/terminalSessions.ts";
 
 const request: ModuleTerminalSessionLaunchRequest = {
   projectPath: "/repo",
