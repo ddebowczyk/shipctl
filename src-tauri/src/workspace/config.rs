@@ -370,11 +370,14 @@ pub struct WorkspaceConfig {
     pub commands: Vec<CommandConfig>,
     #[serde(default)]
     pub assistants: Vec<AssistantConfig>,
+    /// Module-owned top-level values remain human-editable without expanding host schema.
+    #[serde(default, flatten)]
+    pub capability_data: HashMap<String, serde_yaml::Value>,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ProjectSettings;
+    use super::{ProjectSettings, WorkspaceConfig};
 
     #[test]
     fn project_settings_preserve_capability_owned_values_without_host_fields() {
@@ -390,5 +393,27 @@ mod tests {
 
         let serialized = serde_yaml::to_string(&settings).unwrap();
         assert!(serialized.contains("exampleModuleValue: compact"));
+    }
+
+    #[test]
+    fn workspace_preserves_capability_owned_top_level_values() {
+        let workspace: WorkspaceConfig = serde_yaml::from_str(
+            "name: demo\ncommands: []\nassistants: []\nfutureCapability:\n  enabled: true\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            workspace.capability_data.get("futureCapability"),
+            Some(&serde_yaml::Value::Mapping(serde_yaml::Mapping::from_iter(
+                [(
+                    serde_yaml::Value::String("enabled".to_string()),
+                    serde_yaml::Value::Bool(true),
+                )]
+            ))),
+        );
+
+        let serialized = serde_yaml::to_string(&workspace).unwrap();
+        assert!(serialized.contains("futureCapability:"));
+        assert!(serialized.contains("enabled: true"));
     }
 }

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ModuleHostServices } from "@shep/module-api";
 import type { RepoInfo, RepoGroup, WorkspaceConfig } from "../lib/types";
 import {
   listRepos,
@@ -11,10 +12,7 @@ import {
   deleteGroup as ipcDeleteGroup,
   moveRepoToGroup as ipcMoveRepoToGroup,
 } from "../lib/tauri";
-import {
-  discoverRelatedProjectPaths,
-  MODULE_HOST_SERVICES,
-} from "../core/modules";
+import { discoverRelatedProjectPaths } from "../core/modules/moduleComposition";
 
 const EMPTY_REPOS: RepoInfo[] = [];
 const EMPTY_GROUPS: RepoGroup[] = [];
@@ -44,7 +42,10 @@ interface RepoStore {
   fetchRepos: () => Promise<void>;
   fetchGroups: () => Promise<void>;
   openRepo: (repoPath: string) => Promise<WorkspaceConfig>;
-  addRepo: (repoPath: string) => Promise<WorkspaceConfig>;
+  addRepo: (
+    repoPath: string,
+    moduleServices: ModuleHostServices,
+  ) => Promise<WorkspaceConfig>;
   removeRepo: (repoPath: string) => Promise<void>;
   setActiveConfig: (config: WorkspaceConfig | null) => void;
   clearRepo: () => void;
@@ -85,7 +86,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     return config;
   },
 
-  addRepo: async (repoPath: string) => {
+  addRepo: async (repoPath: string, moduleServices: ModuleHostServices) => {
     const knownPaths = new Set(get().repos.map((repo) => repo.path));
     const queuedPaths = new Set<string>();
     const queue: QueueEntry[] = [{ path: repoPath, mode: "expand-main", isPrimary: true }];
@@ -119,7 +120,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
         {
           expandRelated: next.mode === "expand-main",
         },
-        MODULE_HOST_SERVICES,
+        moduleServices,
       );
 
       for (const relatedPath of uniquePaths([...relatedPaths])) {

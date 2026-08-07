@@ -5,12 +5,14 @@ import type {
 
 import type { ProjectSettings } from "../../lib/types";
 import { contributedPanelTabId } from "../../lib/types";
-import { openUrl } from "../../lib/tauri";
+import { loadWorkspace, openUrl, saveWorkspace } from "../../lib/tauri";
 import { useNoticeStore } from "../../stores/useNoticeStore";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
+import { useRepoStore } from "../../stores/useRepoStore";
 import { useThemeStore } from "../../stores/useThemeStore";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { modulePanelContributions, moduleSkillsProvider } from "./moduleComposition";
+import { createProjectCapabilityDataPort } from "./projectCapabilityData";
 
 let settingsSource: ReturnType<typeof useProjectSettingsStore.getState> | null = null;
 let settingsSnapshot: ModuleSettingsSnapshot = {
@@ -52,6 +54,17 @@ const skillsProvider = moduleSkillsProvider() ?? {
   },
 };
 
+const projectData = createProjectCapabilityDataPort({
+  load: loadWorkspace,
+  save: saveWorkspace,
+  onSaved: (projectPath, document) => {
+    const repoState = useRepoStore.getState();
+    if (repoState.activeRepoPath === projectPath) {
+      repoState.setActiveConfig(document);
+    }
+  },
+});
+
 export const MODULE_HOST_SERVICES: ModuleHostServices = {
   panels: {
     open: (panelId) => {
@@ -70,6 +83,7 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
     getSnapshot: getAppearanceSnapshot,
     subscribe: (listener) => useThemeStore.subscribe(listener),
   },
+  projectData,
   settings: {
     getSnapshot: getSettingsSnapshot,
     subscribe: (listener) => useProjectSettingsStore.subscribe(listener),

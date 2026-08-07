@@ -48,6 +48,10 @@ const services = {
     getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
     subscribe: () => () => undefined,
   },
+  projectData: {
+    read: async () => undefined,
+    replace: async () => undefined,
+  },
   settings: {
     getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
     subscribe: () => () => undefined,

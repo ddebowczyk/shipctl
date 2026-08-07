@@ -362,7 +362,7 @@ export default function AppShell() {
     async (repoPath: string) => {
       try {
         useUIStore.getState().closeGlobalSurface();
-        const config = await addRepo(repoPath);
+        const config = await addRepo(repoPath, MODULE_HOST_SERVICES);
         // addRepo sets activeRepoPath in the repo store, get the canonical path
         const canonicalPath = useRepoStore.getState().activeRepoPath;
         if (!canonicalPath) return;

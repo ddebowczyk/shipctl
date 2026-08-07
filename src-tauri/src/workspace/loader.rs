@@ -317,6 +317,7 @@ pub fn migrate_old_projects() -> Result<(), String> {
             },
             commands,
             assistants: Vec::new(),
+            capability_data: Default::default(),
         };
 
         // Write to repo's .shep/workspace.yml
@@ -471,6 +472,7 @@ fn load_or_default_workspace(repo_path: &str) -> Result<WorkspaceConfig, String>
             name,
             commands: Vec::new(),
             assistants: Vec::new(),
+            capability_data: Default::default(),
         };
 
         Ok(config)

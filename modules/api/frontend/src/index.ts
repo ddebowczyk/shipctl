@@ -15,6 +15,7 @@ export type {
   ModuleExternalLinksPort,
   ModuleNotice,
   ModuleNoticesPort,
+  ModuleProjectDataPort,
   ModuleSettingsPort,
   ModuleSettingsSnapshot,
   ModuleSkillRef,

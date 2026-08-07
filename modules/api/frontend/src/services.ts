@@ -43,9 +43,19 @@ export interface ModuleExternalLinksPort {
   open(url: string): Promise<void>;
 }
 
+export interface ModuleProjectDataPort {
+  read(projectPath: string, capabilityId: string): Promise<unknown>;
+  replace(
+    projectPath: string,
+    capabilityId: string,
+    value: unknown,
+  ): Promise<void>;
+}
+
 export interface ModuleHostServices {
   readonly panels: PanelHostPort;
   readonly appearance: ModuleAppearancePort;
+  readonly projectData: ModuleProjectDataPort;
   readonly settings: ModuleSettingsPort;
   readonly skills: ModuleSkillsPort;
   readonly notices: ModuleNoticesPort;

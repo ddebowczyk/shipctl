@@ -24,6 +24,8 @@ export interface WorkspaceConfig {
   name: string;
   commands: CommandConfig[];
   assistants: AssistantConfig[];
+  /** Module-owned top-level values are preserved without entering host schema. */
+  [capabilityId: string]: unknown;
 }
 
 export interface RegisteredRepo {

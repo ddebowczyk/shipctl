@@ -140,6 +140,9 @@ capability ceiling.
 - [29-commands-characterization-and-seam.md](./29-commands-characterization-and-seam.md)
   protects Commands catalogue, persistence, autostart, and PTY behavior and
   defines the generic project-data and terminal-session boundaries.
+- [30-project-capability-data-rail.md](./30-project-capability-data-rail.md)
+  records the generic project data service, serialized writes, active-project
+  compatibility, and preservation of unknown human-editable YAML values.
 
 ## Target dependency shape
 
