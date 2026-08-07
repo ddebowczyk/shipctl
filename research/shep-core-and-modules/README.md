@@ -188,6 +188,10 @@ capability ceiling.
   records removal of flat Usage commands and typed host settings, opaque
   module-owned settings, Assistant-owned model discovery, and the final Usage
   dependency and disabled-build gates.
+- [45-inter-module-information-flow-decision.md](./45-inter-module-information-flow-decision.md)
+  records why no cross-module runtime is justified yet, compares explicit
+  composition injection, typed capability tokens, and an event bus, and defines
+  the evidence required before introducing a shared information-flow contract.
 
 ## Target dependency shape
 
