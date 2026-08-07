@@ -38,6 +38,7 @@
     "verify:assistants-frontend-disabled": "node scripts/verify-assistants-frontend-disabled.mjs",
     "verify:usage-frontend-disabled": "node scripts/verify-usage-frontend-disabled.mjs",
     "verify:assistants-plugout": "node scripts/verify-assistants-plugout.mjs",
+    "verify:usage-plugout": "node scripts/verify-usage-plugout.mjs",
     "verify:commands-plugout": "node scripts/verify-commands-plugout.mjs",
     "verify:ports-plugout": "node scripts/verify-ports-plugout.mjs",
     "verify:skills-plugout": "node scripts/verify-skills-plugout.mjs",

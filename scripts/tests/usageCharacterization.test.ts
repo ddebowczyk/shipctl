@@ -156,6 +156,7 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
   const plugin = source("../../modules/usage/backend/src/lib.rs");
   const usage = source("../../modules/usage/backend/src/usage/mod.rs");
   const providers = source("../../modules/usage/backend/src/usage/providers.rs");
+  const pricingUpdater = source("../update_model_pricing.py");
 
   assert.doesNotMatch(host, /\.manage\(UsageDb::open\(\)/);
   assert.doesNotMatch(host, /usage::run_background_ingest\(&db\)/);
@@ -175,4 +176,9 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
   assert.match(usage, /queries::usage_overview\(&conn, window\)/);
   assert.match(providers, /run_command\(\s*"curl"/);
   assert.match(providers, /find-generic-password/);
+  assert.match(
+    pricingUpdater,
+    /"modules" \/ "usage" \/ "backend" \/ "src" \/ "usage" \/ "model_pricing_snapshot\.json"/,
+  );
+  assert.doesNotMatch(pricingUpdater, /"src-tauri" \/ "src" \/ "usage"/);
 });

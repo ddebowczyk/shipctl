@@ -68,6 +68,10 @@ Characterization tests assert that flat commands and typed host ownership do
 not return. Module-boundary checks continue to forbid module internals from
 leaking into core or sibling modules.
 
+The pricing-catalogue updater now writes directly to the module-owned snapshot
+under `modules/usage/backend`; no development tool targets the deleted host
+implementation path.
+
 ## Verification
 
 The completed gate is expected to include:
@@ -83,9 +87,14 @@ cargo test -p tauri-plugin-shep-assistants
 cargo test -p tauri-plugin-shep-usage
 pnpm verify:usage-frontend-disabled
 pnpm verify:usage-native-disabled
+pnpm verify:usage-plugout
 pnpm verify:assistants-frontend-disabled
 pnpm verify:assistants-native-disabled
 ```
 
-A production Tauri build in a dedicated target directory is the final runtime
-composition proof. No running installed Shep application is replaced.
+The plug-out verifier covers enabled, composition-disabled, and physically
+source-absent profiles in disposable copies. Each external command has a
+15-minute timeout so a linker or policy-service regression fails the gate
+instead of holding the migration indefinitely. A production Tauri build in a
+dedicated target directory is the final runtime composition proof. No running
+installed Shep application is replaced.

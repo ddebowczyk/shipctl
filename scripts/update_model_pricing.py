@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "src-tauri" / "src" / "usage" / "model_pricing_snapshot.json"
+OUTPUT = ROOT / "modules" / "usage" / "backend" / "src" / "usage" / "model_pricing_snapshot.json"
 API_URL = "https://models.dev/api.json"
 
 

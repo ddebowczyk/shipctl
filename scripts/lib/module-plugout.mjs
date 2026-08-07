@@ -14,13 +14,29 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-export function run(command, args, cwd, env = {}) {
+const DEFAULT_COMMAND_TIMEOUT_MS = 15 * 60 * 1000;
+
+export function run(
+  command,
+  args,
+  cwd,
+  env = {},
+  { timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS } = {},
+) {
   process.stdout.write(`\n$ ${command} ${args.join(" ")}\n`);
   const result = spawnSync(command, args, {
     cwd,
     env: { ...process.env, ...env },
     stdio: "inherit",
+    timeout: timeoutMs,
+    killSignal: "SIGTERM",
   });
+  if (result.error?.code === "ETIMEDOUT") {
+    throw new Error(
+      `${command} timed out after ${Math.round(timeoutMs / 1000)} seconds`,
+      { cause: result.error },
+    );
+  }
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`${command} exited with status ${result.status}`);
