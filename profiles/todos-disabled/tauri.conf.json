@@ -1,7 +1,28 @@
 {
   "app": {
     "security": {
-      "capabilities": ["default"]
+      "capabilities": [
+        "default",
+        {
+          "identifier": "ports",
+          "description": "Enables the internal Ports module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-ports:allow-list-listening-ports",
+            "shep-ports:allow-kill-port"
+          ]
+        },
+        {
+          "identifier": "skills",
+          "description": "Enables the internal Skills module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-skills:allow-list-skills",
+            "shep-skills:allow-setup-skill",
+            "shep-skills:allow-remove-skill"
+          ]
+        }
+      ]
     }
   }
 }

@@ -226,14 +226,6 @@ test("Skills provider selection is optional, singular, and module-owned", () => 
   );
 });
 
-test("default composition exposes Skills through generic rails", () => {
-  assert.deepEqual(
-    moduleProjectActionContributions().map(({ id }) => id),
-    ["skills.project-actions"],
-  );
-  assert.notEqual(moduleSkillsProvider(), null);
-});
-
 test("project lifecycle dispatch isolates module failures", async () => {
   const calls: string[][] = [];
   const modules: ShepModule[] = [

@@ -13,6 +13,16 @@
             "shep-todos:allow-add-todo",
             "shep-todos:allow-move-todo"
           ]
+        },
+        {
+          "identifier": "skills",
+          "description": "Enables the internal Skills module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-skills:allow-list-skills",
+            "shep-skills:allow-setup-skill",
+            "shep-skills:allow-remove-skill"
+          ]
         }
       ]
     }

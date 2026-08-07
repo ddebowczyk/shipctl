@@ -119,6 +119,9 @@ capability ceiling.
 - [22-skills-frontend-extraction.md](./22-skills-frontend-extraction.md) records
   the module-owned client, DTO, cache, project actions, lifecycle, and public
   composition cutover.
+- [23-skills-plugout-gate.md](./23-skills-plugout-gate.md) records the enabled,
+  disabled, and physically source-absent Skills verification matrix plus the
+  scalable per-module plug-out recipe.
 
 ## Target dependency shape
 

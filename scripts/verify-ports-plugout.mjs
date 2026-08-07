@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   readJson,
+  removeCargoDefaultFeature,
+  removeFrontendModuleComposition,
   replaceOnce,
   run,
   verifyModulePlugout,
@@ -17,27 +19,11 @@ import {
 const repositoryRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 function removeFrontendComposition(root) {
-  replaceOnce(
-    root,
-    "src/core/modules/enabledModules.ts",
-    'import { portsModule } from "@shep/module-ports";\n',
-    "",
-  );
-  replaceOnce(
-    root,
-    "src/core/modules/enabledModules.ts",
-    "export const ENABLED_MODULES = [portsModule, todosModule] as const satisfies readonly ShepModule[];",
-    "export const ENABLED_MODULES = [todosModule] as const satisfies readonly ShepModule[];",
-  );
+  removeFrontendModuleComposition(root, "@shep/module-ports", "portsModule");
 }
 
 function removeNativeComposition(root) {
-  replaceOnce(
-    root,
-    "src-tauri/Cargo.toml",
-    'default = ["todos-module", "ports-module"]\n',
-    'default = ["todos-module"]\n',
-  );
+  removeCargoDefaultFeature(root, "ports-module");
   replaceOnce(
     root,
     "src-tauri/Cargo.toml",
@@ -154,7 +140,7 @@ function verifyDisabled(root) {
     "--",
     "--no-default-features",
     "--features",
-    "todos-module",
+    "todos-module,skills-module",
   ], root);
 }
 

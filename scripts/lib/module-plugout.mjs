@@ -51,6 +51,35 @@ export function replaceOnce(root, relativePath, expected, replacement) {
   writeFileSync(file, source.replace(expected, replacement));
 }
 
+export function removeFrontendModuleComposition(root, packageName, variableName) {
+  replaceOnce(
+    root,
+    "src/core/modules/enabledModules.ts",
+    `import { ${variableName} } from "${packageName}";\n`,
+    "",
+  );
+  replaceOnce(
+    root,
+    "src/core/modules/enabledModules.ts",
+    `  ${variableName},\n`,
+    "",
+  );
+}
+
+export function removeCargoDefaultFeature(root, featureName) {
+  const relativePath = "src-tauri/Cargo.toml";
+  const file = path.join(root, relativePath);
+  const source = readFileSync(file, "utf8");
+  const match = source.match(/^default = (\[[^\n]*\])$/m);
+  if (!match) throw new Error(`Expected one default feature list in ${relativePath}`);
+  const features = JSON.parse(match[1]);
+  const remaining = features.filter((feature) => feature !== featureName);
+  if (remaining.length !== features.length - 1) {
+    throw new Error(`Expected default feature ${featureName} in ${relativePath}`);
+  }
+  writeFileSync(file, source.replace(match[0], `default = ${JSON.stringify(remaining)}`));
+}
+
 export function readJson(root, relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
 }
