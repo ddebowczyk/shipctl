@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { GlobalNavigationContribution } from "@shep/module-api";
-import type { RepoInfo, RepoGroup, CommandState } from "../../lib/types";
+import type { RepoInfo, RepoGroup } from "../../lib/types";
 import { useTerminalStore } from "../../stores/useTerminalStore";
-import { useCommandStore } from "../../stores/useCommandStore";
 import { useProjectFactsMap } from "../../core/modules";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
 import { useSidebarSettingsStore } from "../../stores/useSidebarSettingsStore";
@@ -17,7 +16,6 @@ interface SidebarProps {
   groups: RepoGroup[];
   activeRepoPath: string | null;
   activeTabId: string | null;
-  commands: CommandState[];
   onSelectRepo: (repoPath: string) => void;
   onAddProject: (repoPath: string) => Promise<void>;
   onRemoveProject: (repoPath: string) => void;
@@ -40,7 +38,6 @@ export default function Sidebar({
   groups,
   activeRepoPath,
   activeTabId,
-  commands,
   onSelectRepo,
   onAddProject,
   onRemoveProject,
@@ -60,7 +57,6 @@ export default function Sidebar({
   // Projects always starts expanded on launch; collapsing is per-session only.
   const [projectsCollapsed, setProjectsCollapsed] = useState(false);
   const projectState = useTerminalStore((s) => s.projectState);
-  const projectCommands = useCommandStore((s) => s.projectCommands);
   const tabActivity = useTerminalStore((s) => s.tabActivity);
   const projectFacts = useProjectFactsMap(repos);
   const projectSettings = useProjectSettingsStore((s) => s.settings);
@@ -85,11 +81,10 @@ export default function Sidebar({
 
   const projectActivity = useMemo(() => {
     const tabActivity = useTerminalStore.getState().tabActivity;
-    const activity: Record<string, { terminalCount: number; runningCount: number; hasAttention: boolean; hasCrash: boolean; hasActive: boolean }> = {};
+    const activity: Record<string, { terminalCount: number; hasAttention: boolean; hasCrash: boolean; hasActive: boolean }> = {};
     for (const repo of repos) {
       const ps = projectState[repo.path];
       const repoTabs = ps?.tabs ?? [];
-      const cmds = projectCommands[repo.path] ?? [];
       let hasAttention = false;
       let hasCrash = false;
       let hasActive = false;
@@ -106,14 +101,13 @@ export default function Sidebar({
       }
       activity[repo.path] = {
         terminalCount: liveTerminalCount,
-        runningCount: cmds.filter((c) => c.status === "running").length,
         hasAttention,
         hasCrash,
         hasActive,
       };
     }
     return activity;
-  }, [repos, projectState, projectCommands, activityKey]);
+  }, [repos, projectState, activityKey]);
 
   const agentSessions = useMemo<AgentSessionItem[]>(() => {
     const repoNames = new Map(repos.map((repo) => [repo.path, repo.name]));
@@ -202,7 +196,6 @@ export default function Sidebar({
               groups={groups}
               activeRepoPath={activeRepoPath}
               activeTabId={activeTabId}
-              commands={commands}
               projectActivity={projectActivity}
               onSelectRepo={onSelectRepo}
               onAddProject={onAddProject}

@@ -212,7 +212,8 @@ authorization, conflict, confirmation, and audit semantics for mutations.
 
 ### D8. TODOs is the first existing extraction
 
-**Decision:** extract TODOs after Beads/removal proof.
+**Decision:** with Beads deferred to its own epic, extract TODOs first through
+the generic module/removal rails.
 
 **Reason:** it is a real vertical slice with manageable coupling. Extracting
 Git, Usage, Terminal, or Assistant continuity first would mix architecture

@@ -17,6 +17,7 @@ export const commandsModule = {
       label: "Commands",
       icon: { name: "list", label: "Commands" },
       shortcut: "⇧⌘C",
+      menuEvent: "new_commands",
       singleton: "per-project",
       order: 20,
       unavailable: {

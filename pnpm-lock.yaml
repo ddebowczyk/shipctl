@@ -11,6 +11,9 @@ importers:
       '@shep/module-api':
         specifier: workspace:*
         version: link:modules/api/frontend
+      '@shep/module-commands':
+        specifier: workspace:*
+        version: link:modules/commands/frontend
       '@shep/module-git':
         specifier: workspace:*
         version: link:modules/git/frontend

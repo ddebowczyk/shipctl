@@ -7,7 +7,6 @@ import TerminalErrorBoundary from "../terminal/TerminalErrorBoundary";
 import NoticeCenter from "../shared/NoticeCenter";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useRepoStore } from "../../stores/useRepoStore";
-import { useCommandStore } from "../../stores/useCommandStore";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { useShallow } from "zustand/shallow";
@@ -22,7 +21,6 @@ import {
   getComputerName,
   openInEditor,
   refreshUsageData,
-  saveWorkspace,
   shutdownAndQuit,
   discardAssistantSession,
   listRestorableAssistantSessions,
@@ -59,36 +57,22 @@ import { matchesPanelShortcut } from "../../core/modules/panelShortcuts";
 
 import type {
   AssistantSessionRecord,
-  CommandConfig,
-  CommandState,
   TabCycleDirection,
   TerminalTabData,
   UnifiedTab,
   SessionMode,
-  WorkspaceConfig,
 } from "../../lib/types";
 const LAST_REPO_STORAGE_KEY = "shep:last-repo-path";
 
 // Stable empty arrays to avoid infinite re-render loops with zustand v5's
 // useSyncExternalStore — selectors must return the same reference for the same state.
 const EMPTY_TABS: UnifiedTab[] = [];
-const EMPTY_COMMANDS: CommandState[] = [];
 const PANEL_REGISTRY = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
 const MODULE_PANEL_CONTRIBUTIONS = PANEL_REGISTRY.list()
   .filter((panel) => panel.moduleId !== "core");
 const GLOBAL_SURFACE_REGISTRY = createEnabledGlobalSurfaceRegistry(
   BUILTIN_GLOBAL_SURFACE_LOADERS,
 );
-
-function toCommandConfig(command: CommandState): CommandConfig {
-  return {
-    name: command.name,
-    command: command.command,
-    autostart: command.autostart,
-    env: command.env,
-    cwd: command.cwd,
-  };
-}
 
 function fallbackWorkspaceName(repoPath: string) {
   return repoPath.split("/").filter(Boolean).pop() ?? "Project";
@@ -99,10 +83,8 @@ export default function AppShell() {
 
   const { repos, groups, activeRepoPath, fetchRepos, fetchGroups, openRepo, addRepo, removeRepo, renameGroup, deleteGroup, moveRepoToGroup } =
     useRepoStore();
-  const activeConfig = useRepoStore((s) => s.activeConfig);
-  const setActiveConfig = useRepoStore((s) => s.setActiveConfig);
   const pushNotice = useNoticeStore((s) => s.pushNotice);
-  const { startCommand, stopCommand, spawnBlankShell, launchAssistant, resumeAssistant, closeTab, killProjectPtys } =
+  const { spawnBlankShell, launchAssistant, resumeAssistant, closeTab, killProjectPtys } =
     usePty();
 
   const initialProjectAttemptedRef = useRef(false);
@@ -166,40 +148,7 @@ export default function AppShell() {
     return all.sort((a, b) => a.tab.ptyId - b.tab.ptyId || a.tab.id.localeCompare(b.tab.id));
   }, [projectState]);
 
-  const commands = useCommandStore(
-    (s) => (s.activeProjectPath ? s.projectCommands[s.activeProjectPath] ?? EMPTY_COMMANDS : EMPTY_COMMANDS),
-  );
-
   const { setActiveTab } = useTerminalStore.getState();
-
-  const persistWorkspaceCommands = useCallback(
-    async (nextCommands: CommandConfig[]) => {
-      if (!activeRepoPath) return null;
-
-      const nextConfig: WorkspaceConfig = {
-        name: activeConfig?.name ?? fallbackWorkspaceName(activeRepoPath),
-        assistants: activeConfig?.assistants ?? [],
-        commands: nextCommands,
-      };
-
-      try {
-        await saveWorkspace(activeRepoPath, nextConfig);
-        setActiveConfig(nextConfig);
-        return nextConfig;
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.error("Failed to save workspace commands:", error);
-        }
-        pushNotice({
-          tone: "error",
-          title: "Couldn’t save workspace",
-          message: getErrorMessage(error),
-        });
-        return null;
-      }
-    },
-    [activeConfig, activeRepoPath, pushNotice, setActiveConfig],
-  );
 
   const { activeGlobalSurfaceId, sidebarVisible, diffPanelVisible } = useUIStore(useShallow((s) => ({
     activeGlobalSurfaceId: s.activeGlobalSurfaceId,
@@ -267,25 +216,12 @@ export default function AppShell() {
       if (repoPath === activeRepoPath) return;
 
       try {
-        const isFirstVisit = !useCommandStore.getState().hasProject(repoPath);
-
         useUIStore.getState().closeGlobalSurface();
-        const config = await openRepo(repoPath);
+        await openRepo(repoPath);
         initialProjectAttemptedRef.current = true;
         window.localStorage.setItem(LAST_REPO_STORAGE_KEY, repoPath);
         useTerminalStore.getState().switchProject(repoPath);
         await notifyModulesProjectOpened(repoPath, MODULE_HOST_SERVICES);
-        useCommandStore.getState().switchProject(repoPath);
-        if (isFirstVisit) {
-          useCommandStore.getState().loadCommands(repoPath, config.commands);
-
-          for (const cmd of config.commands) {
-            if (cmd.autostart) {
-              const { cols, rows } = getTerminalDimensions();
-              await startCommand(cmd, cols, rows);
-            }
-          }
-        }
       } catch (error) {
         pushNotice({
           tone: "error",
@@ -294,7 +230,7 @@ export default function AppShell() {
         });
       }
     },
-    [activeRepoPath, openRepo, startCommand, getTerminalDimensions, pushNotice],
+    [activeRepoPath, openRepo, pushNotice],
   );
 
   const handleMoveTab = useCallback(
@@ -370,7 +306,7 @@ export default function AppShell() {
     async (repoPath: string) => {
       try {
         useUIStore.getState().closeGlobalSurface();
-        const config = await addRepo(repoPath, MODULE_HOST_SERVICES);
+        await addRepo(repoPath, MODULE_HOST_SERVICES);
         // addRepo sets activeRepoPath in the repo store, get the canonical path
         const canonicalPath = useRepoStore.getState().activeRepoPath;
         if (!canonicalPath) return;
@@ -378,8 +314,6 @@ export default function AppShell() {
         window.localStorage.setItem(LAST_REPO_STORAGE_KEY, canonicalPath);
         useTerminalStore.getState().switchProject(canonicalPath);
         await notifyModulesProjectOpened(canonicalPath, MODULE_HOST_SERVICES);
-        useCommandStore.getState().switchProject(canonicalPath);
-        useCommandStore.getState().loadCommands(canonicalPath, config.commands);
       } catch (error) {
         pushNotice({
           tone: "error",
@@ -403,7 +337,6 @@ export default function AppShell() {
         await killProjectPtys(repoPath);
         await removeRepo(repoPath);
         useTerminalStore.getState().removeProject(repoPath);
-        useCommandStore.getState().removeProject(repoPath);
         await notifyModulesProjectRemoved(repoPath, MODULE_HOST_SERVICES);
       } catch (error) {
         pushNotice({
@@ -468,30 +401,6 @@ export default function AppShell() {
     [moveRepoToGroup, pushNotice],
   );
 
-  const handleStartCommand = useCallback(
-    (name: string) => {
-      const path = useCommandStore.getState().activeProjectPath;
-      if (!path) return;
-      const cmds = useCommandStore.getState().projectCommands[path] ?? [];
-      const cmd = cmds.find((c) => c.name === name);
-      if (cmd) {
-        const { cols, rows } = getTerminalDimensions();
-        startCommand(
-          {
-            name: cmd.name,
-            command: cmd.command,
-            autostart: cmd.autostart,
-            env: cmd.env,
-            cwd: cmd.cwd,
-          },
-          cols,
-          rows,
-        );
-      }
-    },
-    [startCommand, getTerminalDimensions],
-  );
-
   const handleSelectSidebarTab = useCallback((tabId: string) => {
     useUIStore.getState().closeGlobalSurface();
     setActiveTab(tabId);
@@ -554,67 +463,6 @@ export default function AppShell() {
     const { cols, rows } = getTerminalDimensions();
     spawnBlankShell(cols, rows);
   }, [spawnBlankShell, getTerminalDimensions]);
-
-  const handleCreateCommand = useCallback(
-    async (command: CommandConfig) => {
-      if (!activeRepoPath) return false;
-      const nextCommands = [...commands.map(toCommandConfig), command];
-      const saved = await persistWorkspaceCommands(nextCommands);
-      if (!saved) return false;
-      useCommandStore.getState().addCommandForProject(activeRepoPath, command);
-      return true;
-    },
-    [activeRepoPath, commands, persistWorkspaceCommands],
-  );
-
-  const handleUpdateCommand = useCallback(
-    async (previousName: string, command: CommandConfig) => {
-      if (!activeRepoPath) return false;
-      const nextCommands = commands.map((existing) =>
-        existing.name === previousName ? command : toCommandConfig(existing),
-      );
-      const saved = await persistWorkspaceCommands(nextCommands);
-      if (!saved) return false;
-      await stopCommand(previousName);
-      useCommandStore.getState().updateCommandForProject(
-        activeRepoPath,
-        previousName,
-        command,
-      );
-      return true;
-    },
-    [activeRepoPath, commands, persistWorkspaceCommands, stopCommand],
-  );
-
-  const handleDeleteCommand = useCallback(
-    async (name: string) => {
-      if (!activeRepoPath) return;
-      const nextCommands = commands
-        .filter((command) => command.name !== name)
-        .map(toCommandConfig);
-      const saved = await persistWorkspaceCommands(nextCommands);
-      if (!saved) return;
-      await stopCommand(name);
-      useCommandStore.getState().removeCommandForProject(activeRepoPath, name);
-    },
-    [activeRepoPath, commands, persistWorkspaceCommands, stopCommand],
-  );
-
-  const handleStartAllCommands = useCallback(async () => {
-    for (const command of commands) {
-      if (command.status !== "running") {
-        handleStartCommand(command.name);
-      }
-    }
-  }, [commands, handleStartCommand]);
-
-  const handleStopAllCommands = useCallback(async () => {
-    for (const command of commands) {
-      if (command.status === "running") {
-        await stopCommand(command.name);
-      }
-    }
-  }, [commands, stopCommand]);
 
   const handleOpenInEditor = useCallback(async (repoPath: string) => {
     const preferredEditor = useEditorStore.getState().settings.preferredEditor;
@@ -775,6 +623,16 @@ export default function AppShell() {
   // Handle native menu events (accelerators for Cmd+T, Cmd+Shift+T, Cmd+B, Cmd+E, Cmd+, etc.)
   useEffect(() => {
     const unlisten = listen<string>("menu-event", (event) => {
+      const contributedPanel = MODULE_PANEL_CONTRIBUTIONS.find(
+        (panel) => panel.menuEvent === event.payload,
+      );
+      if (contributedPanel) {
+        useTerminalStore.getState().addContributedPanelTab(
+          contributedPanel.id,
+          contributedPanel.label,
+        );
+        return;
+      }
       switch (event.payload) {
         case "next_tab":
           cycleTabs(1);
@@ -787,9 +645,6 @@ export default function AppShell() {
           break;
         case "new_agent":
           handleNewAssistant();
-          break;
-        case "new_commands":
-          useTerminalStore.getState().addPanelTab("commands");
           break;
         case "toggle_sidebar":
           useUIStore.getState().toggleSidebar();
@@ -850,25 +705,9 @@ export default function AppShell() {
     path: activeRepoPath,
   } : null, [activeRepoPath]);
   const builtinPanelRuntime = useMemo<BuiltinPanelRuntimeValue>(() => ({
-    commands,
-    onStartCommand: handleStartCommand,
-    onStopCommand: stopCommand,
-    onCreateCommand: handleCreateCommand,
-    onUpdateCommand: handleUpdateCommand,
-    onDeleteCommand: handleDeleteCommand,
-    onStartAllCommands: handleStartAllCommands,
-    onStopAllCommands: handleStopAllCommands,
     onStartSession: handleStartSession,
   }), [
-    commands,
-    handleCreateCommand,
-    handleDeleteCommand,
-    handleStartAllCommands,
-    handleStartCommand,
     handleStartSession,
-    handleStopAllCommands,
-    handleUpdateCommand,
-    stopCommand,
   ]);
 
   return (
@@ -916,7 +755,6 @@ export default function AppShell() {
             groups={groups}
             activeRepoPath={activeRepoPath}
             activeTabId={showGlobalSurface ? null : activeTabId}
-            commands={commands}
             onSelectRepo={handleSelectRepo}
             onAddProject={handleAddProject}
             onRemoveProject={handleRemoveProject}
@@ -940,7 +778,6 @@ export default function AppShell() {
             onClose={handleCloseTab}
             onNewShell={handleNewShell}
             onNewAssistant={handleNewAssistant}
-            onNewCommands={() => useTerminalStore.getState().addPanelTab("commands")}
             panels={MODULE_PANEL_CONTRIBUTIONS}
             onOpenPanel={(panel) => useTerminalStore.getState().addContributedPanelTab(panel.id, panel.label)}
             onOpenInEditor={() => { const p = useTerminalStore.getState().activeProjectPath; if (p) handleOpenInEditor(p); }}

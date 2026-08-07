@@ -86,18 +86,6 @@ export interface FontFaceData {
 
 // ── Runtime state types ─────────────────────────────────────────────
 
-export type CommandStatus = "stopped" | "running" | "crashed";
-
-export interface CommandState {
-  name: string;
-  command: string;
-  status: CommandStatus;
-  ptyId: number | null;
-  autostart: boolean;
-  env: Record<string, string>;
-  cwd: string | null;
-}
-
 export type SessionMode = "standard" | "yolo";
 
 export type RestorableAssistantProvider = "claude" | "codex";

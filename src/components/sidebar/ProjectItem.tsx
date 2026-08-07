@@ -32,7 +32,7 @@ interface ProjectItemProps {
   repo: RepoInfo;
   isActive: boolean;
   isExpanded: boolean;
-  activity?: { terminalCount: number; runningCount: number; hasAttention: boolean; hasCrash: boolean; hasActive: boolean };
+  activity?: { terminalCount: number; hasAttention: boolean; hasCrash: boolean; hasActive: boolean };
   worktreeParent?: string | null;
   groups: RepoGroup[];
   onClick: () => void;
@@ -63,7 +63,7 @@ export default function ProjectItem({
     hasCrash: activity?.hasCrash,
     hasAttention: activity?.hasAttention,
     hasActive: activity?.hasActive,
-    hasRunning: Boolean(activity && (activity.terminalCount > 0 || activity.runningCount > 0)),
+    hasRunning: Boolean(activity && activity.terminalCount > 0),
   });
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [actionSurface, setActionSurface] = useState<{

@@ -27,7 +27,7 @@ function panelIcon(panel: PanelContribution, size: number) {
   return <Icon size={size} />;
 }
 
-function NewSessionButton({ onNewAssistant, onNewShell, onNewCommands, panels, onOpenPanel, onOpenInEditor }: { onNewAssistant: () => void; onNewShell: () => void; onNewCommands: () => void; panels: readonly PanelContribution[]; onOpenPanel: (panel: PanelContribution) => void; onOpenInEditor: () => void }) {
+function NewSessionButton({ onNewAssistant, onNewShell, panels, onOpenPanel, onOpenInEditor }: { onNewAssistant: () => void; onNewShell: () => void; panels: readonly PanelContribution[]; onOpenPanel: (panel: PanelContribution) => void; onOpenInEditor: () => void }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -50,7 +50,6 @@ function NewSessionButton({ onNewAssistant, onNewShell, onNewCommands, panels, o
   const menuItems = [
     { key: "assistant", meta: tabKindMeta.assistant, action: onNewAssistant },
     { key: "terminal", meta: tabKindMeta.terminal, action: onNewShell },
-    { key: "commands", meta: tabKindMeta.commands, action: onNewCommands },
     ...panels
       .filter((panel) => panel.scope === "project" && panel.shortcut)
       .map((panel) => ({
@@ -128,7 +127,6 @@ interface TabBarProps {
   onClose: (tabId: string) => void;
   onNewShell: () => void;
   onNewAssistant: () => void;
-  onNewCommands: () => void;
   panels: readonly PanelContribution[];
   onOpenPanel: (panel: PanelContribution) => void;
   onOpenInEditor: () => void;
@@ -141,7 +139,6 @@ export default function TabBar({
   onClose,
   onNewShell,
   onNewAssistant,
-  onNewCommands,
   panels,
   onOpenPanel,
   onOpenInEditor,
@@ -381,7 +378,7 @@ export default function TabBar({
           );
         })}
 
-        <NewSessionButton onNewAssistant={onNewAssistant} onNewShell={onNewShell} onNewCommands={onNewCommands} panels={panels} onOpenPanel={onOpenPanel} onOpenInEditor={onOpenInEditor} />
+        <NewSessionButton onNewAssistant={onNewAssistant} onNewShell={onNewShell} panels={panels} onOpenPanel={onOpenPanel} onOpenInEditor={onOpenInEditor} />
       </div>
       {projectName && (
         <span className="tab-bar__breadcrumb">

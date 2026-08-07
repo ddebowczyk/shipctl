@@ -146,6 +146,9 @@ capability ceiling.
 - [31-terminal-session-rail.md](./31-terminal-session-rail.md) records the
   capability-neutral launch, stop, focus, and lifecycle contract while PTY,
   xterm, and tab identities remain private host implementation details.
+- [32-commands-frontend-module-and-plugout.md](./32-commands-frontend-module-and-plugout.md)
+  records module-owned Commands UI, state, runtime, lifecycle, resources, the
+  To-dos CSS isolation correction, and the disabled/source-absent proof.
 
 ## Target dependency shape
 

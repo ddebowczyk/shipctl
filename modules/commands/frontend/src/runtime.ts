@@ -81,6 +81,7 @@ export async function startCommand(
   ensureRuntime(services);
   let command = commandsFor(projectPath).find((entry) => entry.name === name);
   if (!command) return false;
+  let ownerKey: string | null = null;
 
   try {
     if (command.sessionId) {
@@ -88,7 +89,7 @@ export async function startCommand(
       command = commandsFor(projectPath).find((entry) => entry.name === name);
       if (!command) return false;
     }
-    const ownerKey = `commands:${++ownerSequence}`;
+    ownerKey = `commands:${++ownerSequence}`;
     owners.set(ownerKey, { projectPath, commandName: name });
     const dimensions = services.terminalSessions.getDimensions();
     const session = await services.terminalSessions.launch({
@@ -107,6 +108,7 @@ export async function startCommand(
     }
     return true;
   } catch (error) {
+    if (ownerKey) owners.delete(ownerKey);
     services.notices.push({
       tone: "error",
       title: `Couldn’t start ${name}`,

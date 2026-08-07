@@ -18,13 +18,11 @@ import { useThemeStore } from "../stores/useThemeStore";
 import { hexLuminance } from "../lib/themes";
 import type {
   AssistantSessionRecord,
-  CommandConfig,
   PtyOutput,
   RestorableAssistantProvider,
   SessionMode,
 } from "../lib/types";
 import { toPtyColorTheme } from "../lib/ptyColorTheme";
-import { useCommandStore } from "../stores/useCommandStore";
 import { useTerminalStore, nextTabId } from "../stores/useTerminalStore";
 import { useRepoStore } from "../stores/useRepoStore";
 import { useNoticeStore } from "../stores/useNoticeStore";
@@ -185,28 +183,12 @@ function writeToPty(ptyId: number, data: string) {
   }
 }
 
-export function resolveCommandCwd(repoPath: string, commandCwd: string | null) {
-  const trimmed = commandCwd?.trim();
-  if (!trimmed) return repoPath;
-  const relativePath = trimmed.replace(/^\.?\//, "").replace(/^\/+/, "");
-  return `${repoPath}/${relativePath}`;
-}
-
 export function usePty() {
   const activeRepoPath = useRepoStore((s) => s.activeRepoPath);
   const pushNotice = useNoticeStore((s) => s.pushNotice);
   const {
-    setCommandStatus,
-    setCommandPtyId,
-    setCommandStatusForProject,
-    setCommandPtyIdForProject,
-  } = useCommandStore.getState();
-  const {
     addTab,
     removeTabFromProject,
-    findTabByCommand,
-    findTabByCommandForProject,
-    setActiveTab,
     initActivity,
     setTabActive,
     setTabExited,
@@ -218,12 +200,7 @@ export function usePty() {
     useTerminalStore.getState();
 
   const handlePtyMessage = useCallback(
-    (
-      ptyId: number,
-      commandName: string | null,
-      repoPath: string,
-      msg: PtyOutput,
-    ) => {
+    (ptyId: number, msg: PtyOutput) => {
       if (msg.event === "data") {
         writeToPty(ptyId, msg.data);
 
@@ -270,22 +247,11 @@ export function usePty() {
             void discardAssistantSession(tab.restoreRecordId).catch(() => {});
           }
         }
-        if (commandName) {
-          const command = useCommandStore.getState().projectCommands[repoPath]
-            ?.find((entry) => entry.name === commandName);
-          const nextStatus = stoppedByUser || msg.data.code === 0 ? "stopped" : "crashed";
-          if (command?.status !== "stopped" || nextStatus === "crashed") {
-            setCommandStatusForProject(repoPath, commandName, nextStatus);
-          }
-          setCommandPtyIdForProject(repoPath, commandName, null);
-        }
       }
     },
     [
       findTabByPtyId,
       pushNotice,
-      setCommandStatusForProject,
-      setCommandPtyIdForProject,
       setTabActive,
       setTabExited,
     ],
@@ -345,7 +311,6 @@ export function usePty() {
       env: Record<string, string>,
       cols: number,
       rows: number,
-      commandName: string | null,
       repoPath: string,
       onSpawned?: (ptyId: number) => void,
     ) => {
@@ -373,7 +338,7 @@ export function usePty() {
             return;
           }
 
-          handlePtyMessage(resolvedPtyId, commandName, repoPath, msg);
+          handlePtyMessage(resolvedPtyId, msg);
         },
       );
 
@@ -382,7 +347,7 @@ export function usePty() {
       onSpawned?.(ptyId);
 
       for (const msg of bufferedMessages) {
-        handlePtyMessage(ptyId, commandName, repoPath, msg);
+        handlePtyMessage(ptyId, msg);
       }
 
       return ptyId;
@@ -406,7 +371,6 @@ export function usePty() {
         { ...request.environment },
         request.columns,
         request.rows,
-        null,
         request.cwd,
         (ptyId) => {
           hostTerminalSessions.set(session.id, {
@@ -475,110 +439,6 @@ export function usePty() {
     focus: focusTerminalSession,
   }), [focusTerminalSession, launchTerminalSession, stopTerminalSession]);
 
-  const startCommand = useCallback(
-    async (command: CommandConfig, cols: number, rows: number) => {
-      if (!activeRepoPath) return;
-      const commandName = command.name;
-
-      const basePath = activeRepoPath;
-
-      try {
-        const ptyId = await spawnSession(
-          command.command,
-          null,
-          command.env,
-          cols,
-          rows,
-          commandName,
-          resolveCommandCwd(basePath, command.cwd ?? null),
-        );
-        if (!ptyId) return;
-
-        setCommandStatus(commandName, "running");
-        setCommandPtyId(commandName, ptyId);
-
-        const existing = findTabByCommand(commandName);
-        if (existing) {
-          setActiveTab(existing.id);
-        } else {
-          const id = nextTabId();
-          addTab({
-            id,
-            kind: "terminal",
-            label: commandName,
-            ptyId,
-            repoPath: activeRepoPath,
-            commandName,
-            assistantId: null,
-            sessionMode: null,
-            restoreRecordId: null,
-            providerSessionId: null,
-            captureState: null,
-          });
-        }
-
-        return ptyId;
-      } catch (e) {
-        if (import.meta.env.DEV) {
-          console.error(`Failed to start command "${commandName}":`, e);
-        }
-        pushNotice({
-          tone: "error",
-          title: `Couldn’t start ${commandName}`,
-          message: getErrorMessage(e),
-        });
-        return null;
-      }
-    },
-    [
-      activeRepoPath,
-      spawnSession,
-      setCommandStatus,
-      setCommandPtyId,
-      findTabByCommand,
-      setActiveTab,
-      addTab,
-      pushNotice,
-    ],
-  );
-
-  const stopCommand = useCallback(
-    async (commandName: string) => {
-      const path = useCommandStore.getState().activeProjectPath;
-      if (!path) return;
-      const state = useTerminalStore.getState();
-      const commands = useCommandStore.getState().projectCommands[path] ?? [];
-      const command = commands.find((c) => c.name === commandName);
-      const tab = findTabByCommandForProject(path, commandName);
-      if (command?.ptyId) {
-        cleanupActivityState(command.ptyId);
-        stoppingPtys.add(command.ptyId);
-        await killPty(command.ptyId).catch(() => {
-          stoppingPtys.delete(command.ptyId!);
-        });
-        unregisterTerminal(command.ptyId);
-        removeActivity(command.ptyId);
-      }
-      if (tab) {
-        const tabProjectPath = Object.entries(state.projectState).find(([, project]) =>
-          project.tabs.some((entry) => entry.id === tab.id),
-        )?.[0];
-        if (tabProjectPath) removeTabFromProject(tabProjectPath, tab.id);
-      }
-      setCommandStatusForProject(path, commandName, "stopped");
-      setCommandPtyIdForProject(path, commandName, null);
-    },
-    [setCommandStatusForProject, setCommandPtyIdForProject, findTabByCommandForProject, removeTabFromProject, removeActivity],
-  );
-
-  const restartCommand = useCallback(
-    async (command: CommandConfig, cols: number, rows: number) => {
-      await stopCommand(command.name);
-      return startCommand(command, cols, rows);
-    },
-    [stopCommand, startCommand],
-  );
-
   const spawnBlankShell = useCallback(
     async (cols: number, rows: number) => {
       if (!activeRepoPath) return;
@@ -591,7 +451,6 @@ export function usePty() {
           {},
           cols,
           rows,
-          null,
           activeRepoPath,
         );
         if (!ptyId) return;
@@ -656,7 +515,6 @@ export function usePty() {
             {},
             cols,
             rows,
-            null,
             activeRepoPath,
           );
           if (!ptyId) return;
@@ -700,7 +558,7 @@ export function usePty() {
               bufferedMessages.push(msg);
               return;
             }
-            handlePtyMessage(resolvedPtyId, null, activeRepoPath, msg);
+            handlePtyMessage(resolvedPtyId, msg);
           },
         );
         resolvedPtyId = spawned.ptyId;
@@ -721,7 +579,7 @@ export function usePty() {
           captureState: spawned.record.captureState,
         });
         for (const message of bufferedMessages) {
-          handlePtyMessage(spawned.ptyId, null, activeRepoPath, message);
+          handlePtyMessage(spawned.ptyId, message);
         }
         if (provider === "codex") {
           captureCodexSession(spawned.record, id);
@@ -754,7 +612,6 @@ export function usePty() {
   const resumeAssistant = useCallback(
     async (recordId: string, cols: number, rows: number) => {
       let resolvedPtyId: number | null = null;
-      let resumeRepoPath = "";
       const bufferedMessages: PtyOutput[] = [];
       const theme = useThemeStore.getState().theme;
       const colorfgbg = hexLuminance(theme.appBg) > 0.3 ? "0;15" : "15;0";
@@ -772,10 +629,9 @@ export function usePty() {
             bufferedMessages.push(msg);
             return;
           }
-          handlePtyMessage(resolvedPtyId, null, resumeRepoPath, msg);
+          handlePtyMessage(resolvedPtyId, msg);
         },
       );
-      resumeRepoPath = spawned.record.launchRepoPath;
       resolvedPtyId = spawned.ptyId;
       initActivity(spawned.ptyId);
 
@@ -802,7 +658,7 @@ export function usePty() {
         captureState: spawned.record.captureState,
       });
       for (const message of bufferedMessages) {
-        handlePtyMessage(spawned.ptyId, null, spawned.record.launchRepoPath, message);
+        handlePtyMessage(spawned.ptyId, message);
       }
       return spawned.ptyId;
     },
@@ -842,16 +698,9 @@ export function usePty() {
       unregisterTerminal(tab.ptyId);
       removeActivity(tab.ptyId);
 
-      if (tab.commandName) {
-        setCommandStatusForProject(tab.repoPath, tab.commandName, "stopped");
-        setCommandPtyIdForProject(tab.repoPath, tab.commandName, null);
-      }
-
       removeTabFromProject(tabProjectPath, tabId);
     },
     [
-      setCommandStatusForProject,
-      setCommandPtyIdForProject,
       removeTabFromProject,
       removeActivity,
       pushNotice,
@@ -887,9 +736,6 @@ export function usePty() {
   }, [removeActivity, pushNotice]);
 
   return {
-    startCommand,
-    stopCommand,
-    restartCommand,
     spawnBlankShell,
     launchAssistant,
     resumeAssistant,

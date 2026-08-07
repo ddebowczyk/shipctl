@@ -1,21 +1,10 @@
 import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
 
-import type { CommandConfig, CommandState, SessionMode } from "../../lib/types";
+import type { SessionMode } from "../../lib/types";
 import type { BuiltinPanelLoaders } from "./builtinPanelAdapters";
 
 export interface BuiltinPanelRuntimeValue {
-  readonly commands: CommandState[];
-  readonly onStartCommand: (name: string) => void;
-  readonly onStopCommand: (name: string) => void;
-  readonly onCreateCommand: (command: CommandConfig) => Promise<boolean> | boolean;
-  readonly onUpdateCommand: (
-    previousName: string,
-    command: CommandConfig,
-  ) => Promise<boolean> | boolean;
-  readonly onDeleteCommand: (name: string) => void;
-  readonly onStartAllCommands: () => Promise<void> | void;
-  readonly onStopAllCommands: () => Promise<void> | void;
   readonly onStartSession: (
     assistantId: string,
     mode: SessionMode,
@@ -48,15 +37,6 @@ function useBuiltinPanelRuntime(): BuiltinPanelRuntimeValue {
 }
 
 export const BUILTIN_PANEL_LOADERS = {
-  commands: async () => {
-    const { default: CommandsPanel } = await import("../../components/commands/CommandsPanel");
-    return {
-      default: function CommandsPanelAdapter() {
-        const runtime = useBuiltinPanelRuntime();
-        return <CommandsPanel {...runtime} />;
-      },
-    };
-  },
   launcher: async () => {
     const { default: SessionLauncher } = await import("../../components/session/SessionLauncher");
     return {

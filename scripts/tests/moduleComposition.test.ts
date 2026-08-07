@@ -65,7 +65,6 @@ after(async () => {
 });
 
 const builtinPanelLoaders: BuiltinPanelLoaders = {
-  commands: async () => ({ default: () => null }),
   launcher: async () => ({ default: () => null }),
 };
 
@@ -232,6 +231,18 @@ test("default profile enables the extracted Ports surface", () => {
   assert.equal(registry.has("ports.overview"), true);
   assert.equal(
     registry.navigation().some(({ id }) => id === "ports.global-navigation"),
+    true,
+  );
+});
+
+test("default profile enables the extracted Commands surfaces", () => {
+  const registry = createEnabledPanelRegistry(builtinPanelLoaders);
+  assert.equal(registry.has("core.commands"), true);
+  assert.equal(registry.panel("core.commands")?.legacyTab?.kind, "commands");
+  assert.equal(
+    moduleProjectNavigationContributions().some(
+      ({ id, panelId }) => id === "commands.project-navigation" && panelId === "core.commands",
+    ),
     true,
   );
 });

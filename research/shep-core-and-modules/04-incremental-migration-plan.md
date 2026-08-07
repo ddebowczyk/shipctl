@@ -232,6 +232,15 @@ until at least Commands and Assistant modules consume stable ports. Extracting
 the foundation before its consumers are understood risks inventing the wrong
 abstractions.
 
+### Current Phase 4 status
+
+Ports, Skills, Git, and Commands have completed characterization, extraction,
+and enabled/disabled/source-absent gates. Commands validated the generic
+project-data and terminal-session ports and removed its direct host UI/store
+integration. Assistant providers/continuity and Usage are next; terminal/PTY
+itself remains a host infrastructure service until those consumers establish
+whether any further contract is needed.
+
 ## Suggested PR sequence
 
 Keep changes reviewable and reversible:
@@ -313,7 +322,8 @@ arbitrary native modules can be installed into an already signed app.
 
 ## Recommended immediate next action
 
-Execute Phase 3 TODO characterization. Do not move files until current UI,
-state, native behavior, persistence, sidebar integration, and host dependencies
-are protected and mapped. Then extract TODO through the already-proven module
-rails in compile-green steps.
+Characterize and extract assistant providers/continuity through the proven
+terminal-session and lifecycle contracts. Preserve provider-session restore
+behavior, managed-assistant startup, model selection, tab movement, and quit
+handling before deleting direct host branches. Then extract Usage behind its
+own global-surface, background-refresh, and settings boundaries.

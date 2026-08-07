@@ -13,7 +13,6 @@ import {
 } from "../../../src/core/modules/builtinPanelRuntime";
 import { createEnabledPanelRegistry } from "../../../src/core/modules/moduleComposition";
 import { MODULE_HOST_SERVICES } from "../../../src/core/modules/moduleHostServices";
-import type { CommandState } from "../../../src/lib/types";
 import { useRepoStore } from "../../../src/stores/useRepoStore";
 import { useTerminalStore } from "../../../src/stores/useTerminalStore";
 
@@ -23,18 +22,6 @@ const PROJECT: ProjectRef = {
   name: "Shep smoke fixture",
   path: PROJECT_PATH,
 };
-
-const COMMANDS: CommandState[] = [
-  {
-    name: "frontend",
-    command: "pnpm dev",
-    status: "running",
-    ptyId: 1,
-    autostart: false,
-    env: {},
-    cwd: null,
-  },
-];
 
 mockWindows("main");
 mockIPC(
@@ -139,14 +126,6 @@ function SmokeApp() {
   return (
     <BuiltinPanelRuntimeProvider
       value={{
-        commands: COMMANDS,
-        onStartCommand: () => undefined,
-        onStopCommand: () => undefined,
-        onCreateCommand: () => true,
-        onUpdateCommand: () => true,
-        onDeleteCommand: () => undefined,
-        onStartAllCommands: () => undefined,
-        onStopAllCommands: () => undefined,
         onStartSession: async () => false,
       }}
     >

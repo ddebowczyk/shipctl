@@ -265,7 +265,7 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
 
   if (!activeProjectPath) {
     return (
-      <div className="commands-panel commands-panel--empty">
+      <div className="todos-panel todos-panel--empty">
         Select a project to see its to-dos
       </div>
     );
@@ -372,13 +372,13 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
   };
 
   return (
-    <div className="commands-panel">
-      <div className="commands-panel__header">
-        <div className="commands-panel__title-wrap">
+    <div className="todos-panel">
+      <div className="todos-panel__header">
+        <div className="todos-panel__title-wrap">
           <span className="shrink-0"><ListTodo size={15} /></span>
-          <div className="commands-panel__title-block">
-            <div className="commands-panel__title">To-dos</div>
-            <div className="commands-panel__subtitle">
+          <div className="todos-panel__title-block">
+            <div className="todos-panel__title">To-dos</div>
+            <div className="todos-panel__subtitle">
               {hasFile
                 ? `${openCount} open · ${doneCount} done · ${todoFiles
                     .map((f) => f.relativePath)

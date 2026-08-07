@@ -19,6 +19,8 @@ interface CommandDraft {
   autostart: boolean;
 }
 
+const EMPTY_COMMANDS: readonly CommandState[] = [];
+
 function createDraft(command?: CommandState): CommandDraft {
   return {
     command: command?.command ?? "",
@@ -207,7 +209,7 @@ function CommandRow({
 export default function CommandsPanel({ project, services }: ModulePanelProps) {
   const projectPath = project?.path ?? null;
   const commands = useCommandsStore(
-    (state) => projectPath ? state.projectCommands[projectPath] ?? [] : [],
+    (state) => projectPath ? state.projectCommands[projectPath] ?? EMPTY_COMMANDS : EMPTY_COMMANDS,
   );
   const [creating, setCreating] = useState(false);
   const runningCount = useMemo(

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import type { RepoInfo, RepoGroup, CommandState, TerminalTabData } from "../../lib/types";
+import type { RepoInfo, RepoGroup, TerminalTabData } from "../../lib/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import tabKindMeta from "../../lib/tabKindMeta";
 import { useTerminalStore } from "../../stores/useTerminalStore";
@@ -11,7 +11,6 @@ import GroupHeader from "./GroupHeader";
 import CollapsibleSection from "./CollapsibleSection";
 import AssistantList from "./AssistantList";
 import TerminalList from "./TerminalList";
-import CommandsRow from "./CommandsRow";
 import { ModuleProjectNavigationSurfaces, useProjectFactsMap } from "../../core/modules";
 import { groupProjects } from "../../lib/projectGrouping";
 
@@ -20,8 +19,7 @@ interface ProjectListProps {
   groups: RepoGroup[];
   activeRepoPath: string | null;
   activeTabId: string | null;
-  commands: CommandState[];
-  projectActivity: Record<string, { terminalCount: number; runningCount: number; hasAttention: boolean; hasCrash: boolean; hasActive: boolean }>;
+  projectActivity: Record<string, { terminalCount: number; hasAttention: boolean; hasCrash: boolean; hasActive: boolean }>;
   onSelectRepo: (repoPath: string) => void;
   onAddProject: (repoPath: string) => Promise<void>;
   onRemoveProject: (repoPath: string) => void;
@@ -42,7 +40,6 @@ export default function ProjectList({
   groups,
   activeRepoPath,
   activeTabId,
-  commands,
   projectActivity,
   onSelectRepo,
   onAddProject,
@@ -167,7 +164,6 @@ export default function ProjectList({
     return projectTabs.filter((t): t is TerminalTabData => t.kind === "terminal");
   }, [projectTabs]);
 
-  const commandsBadge = commands.length > 0 ? String(commands.length) : null;
   const projectFacts = useProjectFactsMap(repos);
 
   // Build grouped layout
@@ -186,7 +182,7 @@ export default function ProjectList({
       for (const repo of groupRepos) {
         const a = projectActivity[repo.path];
         if (a) {
-          if (a.terminalCount > 0 || a.runningCount > 0) hasActivity = true;
+          if (a.terminalCount > 0) hasActivity = true;
           if (a.hasAttention) hasAttention = true;
           if (a.hasCrash) hasCrash = true;
           if (a.hasActive) hasActive = true;
@@ -258,7 +254,6 @@ export default function ProjectList({
               />
             </CollapsibleSection>
 
-            <CommandsRow badge={commandsBadge} />
             <ModuleProjectNavigationSurfaces
               project={{ id: repo.path, name: repo.name, path: repo.path }}
               activeTabId={activeTabId}

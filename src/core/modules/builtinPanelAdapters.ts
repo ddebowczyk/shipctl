@@ -1,4 +1,4 @@
-import type { PanelTabKind, TabKind } from "../../lib/types";
+import type { TabKind } from "../../lib/types";
 import type { PanelContribution } from "@shep/module-api";
 import { PanelRegistry } from "./panelRegistry";
 import { BUILTIN_PANEL_IDS } from "./panelPersistence";
@@ -7,27 +7,12 @@ type BuiltinPanelDefinition = Omit<PanelContribution, "load"> & {
   readonly legacyKind: CoreBuiltinPanelKind;
 };
 
-export type CoreBuiltinPanelKind = PanelTabKind;
+export type CoreBuiltinPanelKind = "launcher";
 export type BuiltinPanelLoaders = Readonly<
   Record<CoreBuiltinPanelKind, PanelContribution["load"]>
 >;
 
 export const BUILTIN_PANEL_DEFINITIONS = {
-  commands: {
-    id: BUILTIN_PANEL_IDS.commands,
-    legacyKind: "commands",
-    moduleId: "core",
-    scope: "project",
-    label: "Commands",
-    icon: { name: "list" },
-    shortcut: "⇧⌘C",
-    singleton: "per-project",
-    order: 20,
-    unavailable: {
-      title: "Commands panel unavailable",
-      description: "The built-in command runner could not be loaded.",
-    },
-  },
   launcher: {
     id: BUILTIN_PANEL_IDS.launcher,
     legacyKind: "launcher",
@@ -47,7 +32,7 @@ export const BUILTIN_PANEL_DEFINITIONS = {
 export const CORE_TAB_EXCEPTIONS = {
   terminal: "PTY-backed tabs remain owned by terminal infrastructure.",
   assistant: "PTY-backed assistant tabs remain owned by terminal infrastructure.",
-} as const satisfies Record<Exclude<TabKind, PanelTabKind | "panel">, string>;
+} as const satisfies Partial<Record<TabKind, string>>;
 
 export const CORE_SURFACE_EXCEPTIONS = {
   "diff-summary": "layout-slot",
