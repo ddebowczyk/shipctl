@@ -152,9 +152,7 @@ fn sync_directory(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{read, write_atomically, AssistantSessionManifest, MANIFEST_VERSION};
-    use crate::assistant_sessions::{
-        AssistantProvider, AssistantSessionRecord, CaptureState, SessionMode,
-    };
+    use crate::{AssistantProvider, AssistantSessionRecord, CaptureState, SessionMode};
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

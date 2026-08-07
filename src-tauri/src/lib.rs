@@ -1,4 +1,5 @@
-mod assistant_sessions;
+#[cfg(feature = "assistants-module")]
+mod assistants_module;
 mod commands;
 mod enabled_modules;
 mod fonts;
@@ -17,7 +18,6 @@ mod workspace;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
-use assistant_sessions::AssistantSessionRegistry;
 use pty::manager::PtyManager;
 use usage::UsageDb;
 use watcher::GitWatcher;
@@ -31,9 +31,9 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
-    let app = enabled_modules::install(builder)
-        .manage(PtyManager::new())
-        .manage(AssistantSessionRegistry::new())
+    let pty_manager = PtyManager::new();
+    let app = enabled_modules::install(builder, pty_manager.clone())
+        .manage(pty_manager)
         .manage(WorkspaceManager::new())
         .manage(UsageDb::open().unwrap_or_else(|e| {
             eprintln!("Usage database failed to open ({e}), using in-memory fallback");
@@ -114,19 +114,6 @@ pub fn run() {
             commands::update_pty_color_theme,
             commands::resize_pty,
             commands::kill_pty,
-            commands::spawn_assistant_session,
-            commands::resume_assistant_session,
-            commands::prepare_assistant_session,
-            commands::confirm_assistant_session_capture,
-            commands::try_capture_codex_assistant_session,
-            commands::fail_assistant_session_capture,
-            commands::update_assistant_session_placement,
-            commands::update_assistant_session_label,
-            commands::discard_assistant_session,
-            commands::rearm_assistant_session,
-            commands::list_restorable_assistant_sessions,
-            commands::take_assistant_session_startup_warning,
-            commands::begin_assistant_session_preserving_shutdown,
             commands::get_pty_session_count,
             commands::shutdown_and_quit,
             commands::get_username,

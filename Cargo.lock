@@ -3985,12 +3985,14 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "shep-module-api",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tauri-plugin-notification",
  "tauri-plugin-process",
+ "tauri-plugin-shep-assistants",
  "tauri-plugin-shep-fixture",
  "tauri-plugin-shep-git",
  "tauri-plugin-shep-ports",
@@ -4004,6 +4006,9 @@ dependencies = [
 [[package]]
 name = "shep-module-api"
 version = "0.0.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "shlex"
@@ -4525,6 +4530,19 @@ checksum = "d55511a7bf6cd70c8767b02c97bf8134fa434daf3926cfc1be0a0f94132d165a"
 dependencies = [
  "tauri",
  "tauri-plugin",
+]
+
+[[package]]
+name = "tauri-plugin-shep-assistants"
+version = "0.0.0"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+ "shep-module-api",
+ "tauri",
+ "tauri-plugin",
+ "uuid",
 ]
 
 [[package]]

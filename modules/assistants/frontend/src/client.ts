@@ -21,6 +21,12 @@ interface SpawnedAssistantSession {
   readonly record: AssistantSessionRecord;
 }
 
+const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shep-assistants|";
+
+function assistantCommand(name: string) {
+  return `${ASSISTANTS_COMMAND_NAMESPACE}${name}`;
+}
+
 function outputChannel(onOutput: (event: ModuleTerminalOutputEvent) => void) {
   const channel = new Channel<NativePtyOutput>();
   channel.onmessage = (event) => onOutput(event.event === "data"
@@ -49,7 +55,7 @@ export function spawnAssistantSession(
   context: ModuleManagedTerminalStartContext,
   onOutput: (event: ModuleTerminalOutputEvent) => void,
 ): Promise<SpawnedAssistantSession> {
-  return invoke("spawn_assistant_session", {
+  return invoke(assistantCommand("spawn_assistant_session"), {
     request: {
       ...request,
       env: { ...context.environment },
@@ -69,7 +75,7 @@ export function resumeAssistantSession(
   context: ModuleManagedTerminalStartContext,
   onOutput: (event: ModuleTerminalOutputEvent) => void,
 ): Promise<SpawnedAssistantSession> {
-  return invoke("resume_assistant_session", {
+  return invoke(assistantCommand("resume_assistant_session"), {
     request: {
       recordId,
       env: { ...context.environment },
@@ -85,35 +91,39 @@ export function resumeAssistantSession(
 }
 
 export function tryCaptureCodexSession(recordId: string): Promise<AssistantSessionRecord | null> {
-  return invoke("try_capture_codex_assistant_session", { recordId });
+  return invoke(assistantCommand("try_capture_codex_assistant_session"), { recordId });
 }
 
 export function failSessionCapture(recordId: string): Promise<AssistantSessionRecord> {
-  return invoke("fail_assistant_session_capture", { recordId });
+  return invoke(assistantCommand("fail_assistant_session_capture"), { recordId });
 }
 
 export function updateSessionPlacement(recordId: string, projectPath: string): Promise<AssistantSessionRecord> {
-  return invoke("update_assistant_session_placement", { recordId, placementProjectPath: projectPath });
+  return invoke(assistantCommand("update_assistant_session_placement"), { recordId, placementProjectPath: projectPath });
 }
 
 export function updateSessionLabel(recordId: string, label: string): Promise<AssistantSessionRecord> {
-  return invoke("update_assistant_session_label", { recordId, label });
+  return invoke(assistantCommand("update_assistant_session_label"), { recordId, label });
 }
 
 export function discardSession(recordId: string): Promise<void> {
-  return invoke("discard_assistant_session", { recordId });
+  return invoke(assistantCommand("discard_assistant_session"), { recordId });
 }
 
 export function rearmSession(recordId: string): Promise<void> {
-  return invoke("rearm_assistant_session", { recordId });
+  return invoke(assistantCommand("rearm_assistant_session"), { recordId });
 }
 
 export function listRestorableSessions(): Promise<AssistantSessionRecord[]> {
-  return invoke("list_restorable_assistant_sessions");
+  return invoke(assistantCommand("list_restorable_assistant_sessions"));
 }
 
 export function takeStartupWarning(): Promise<string | null> {
-  return invoke("take_assistant_session_startup_warning");
+  return invoke(assistantCommand("take_assistant_session_startup_warning"));
+}
+
+export function beginAssistantSessionPreservingShutdown(): Promise<void> {
+  return invoke(assistantCommand("begin_assistant_session_preserving_shutdown"));
 }
 
 export function getPiConfig(): Promise<PiConfig> {

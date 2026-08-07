@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-begin-assistant-session-preserving-shutdown"
+description = "Enables the begin_assistant_session_preserving_shutdown command without any pre-configured scope."
+commands.allow = ["begin_assistant_session_preserving_shutdown"]
+
+[[permission]]
+identifier = "deny-begin-assistant-session-preserving-shutdown"
+description = "Denies the begin_assistant_session_preserving_shutdown command without any pre-configured scope."
+commands.deny = ["begin_assistant_session_preserving_shutdown"]

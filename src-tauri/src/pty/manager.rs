@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 
@@ -28,18 +28,19 @@ impl TerminationTarget for PtySession {
     }
 }
 
+#[derive(Clone)]
 pub struct PtyManager {
-    sessions: Mutex<HashMap<u32, PtySession>>,
-    next_id: Mutex<u32>,
-    shutting_down: AtomicBool,
+    sessions: Arc<Mutex<HashMap<u32, PtySession>>>,
+    next_id: Arc<Mutex<u32>>,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl PtyManager {
     pub fn new() -> Self {
         PtyManager {
-            sessions: Mutex::new(HashMap::new()),
-            next_id: Mutex::new(1),
-            shutting_down: AtomicBool::new(false),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            next_id: Arc::new(Mutex::new(1)),
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 

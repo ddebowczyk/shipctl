@@ -1,5 +1,5 @@
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use serde::{Deserialize, Serialize};
+pub use shep_module_api::{TerminalColorTheme as PtyColorTheme, TerminalOutput as PtyOutput};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::Command;
@@ -8,23 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
-
-#[derive(Clone, Serialize)]
-#[serde(tag = "event", content = "data")]
-pub enum PtyOutput {
-    #[serde(rename = "data")]
-    Data(String),
-    #[serde(rename = "exit")]
-    Exit { code: i32 },
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PtyColorTheme {
-    pub foreground: String,
-    pub background: String,
-    pub palette: Vec<String>,
-}
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,

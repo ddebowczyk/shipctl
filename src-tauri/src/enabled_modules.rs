@@ -1,6 +1,8 @@
 use tauri::{Builder, Runtime};
 
-pub fn install<R: Runtime>(builder: Builder<R>) -> Builder<R> {
+use crate::pty::manager::PtyManager;
+
+pub fn install<R: Runtime>(builder: Builder<R>, pty_manager: PtyManager) -> Builder<R> {
     #[cfg(feature = "fixture-module")]
     let builder = builder.plugin(shep_module_fixture::init());
 
@@ -17,6 +19,14 @@ pub fn install<R: Runtime>(builder: Builder<R>) -> Builder<R> {
 
     #[cfg(feature = "git-module")]
     let builder = builder.plugin(shep_module_git::init(crate::git_module::host_services()));
+
+    #[cfg(feature = "assistants-module")]
+    let builder = builder.plugin(shep_module_assistants::init(
+        crate::assistants_module::host_services(pty_manager),
+    ));
+
+    #[cfg(not(feature = "assistants-module"))]
+    let _ = pty_manager;
 
     builder
 }

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-rearm-assistant-session"
+description = "Enables the rearm_assistant_session command without any pre-configured scope."
+commands.allow = ["rearm_assistant_session"]
+
+[[permission]]
+identifier = "deny-rearm-assistant-session"
+description = "Denies the rearm_assistant_session command without any pre-configured scope."
+commands.deny = ["rearm_assistant_session"]

@@ -3,11 +3,11 @@
 `shep-module-api` is the leaf dependency reserved for narrow contracts that
 must cross from the Shep host into an internal native module.
 
-The crate intentionally exports no contracts yet. The first fixture plugin
-needs Tauri's plugin interface but no host service, so inventing a generic
-module context or error abstraction here would make the boundary broader than
-the behavior exercises. Add a contract only with the first production caller;
-registered-project authorization is the expected initial candidate.
+The crate exports only contracts with a production caller. Its first concrete
+surface is the terminal transport DTOs used by the Assistant provider module
+to launch through a host-owned PTY authority without importing host
+implementation types. It remains deliberately smaller than a generic module
+context, service locator, or shared error abstraction.
 
 Dependency direction:
 

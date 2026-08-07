@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-fail-assistant-session-capture"
+description = "Enables the fail_assistant_session_capture command without any pre-configured scope."
+commands.allow = ["fail_assistant_session_capture"]
+
+[[permission]]
+identifier = "deny-fail-assistant-session-capture"
+description = "Denies the fail_assistant_session_capture command without any pre-configured scope."
+commands.deny = ["fail_assistant_session_capture"]

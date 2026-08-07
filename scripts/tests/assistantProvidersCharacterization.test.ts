@@ -45,7 +45,7 @@ test("only Claude and Codex enter durable provider-session capture", () => {
 
 test("Codex identity capture is bounded and fails without guessing", () => {
   const runtime = source("../../modules/assistants/frontend/src/runtime.ts");
-  const registry = source("../../src-tauri/src/assistant_sessions/mod.rs");
+  const registry = source("../../modules/assistants/backend/src/lib.rs");
 
   assert.match(runtime, /CODEX_CAPTURE_RETRY_MS = 500/);
   assert.match(runtime, /CODEX_CAPTURE_MAX_ATTEMPTS = 20/);
@@ -60,7 +60,7 @@ test("Codex identity capture is bounded and fails without guessing", () => {
 
 test("resume preserves provider identity, placement, and quick-exit recovery", () => {
   const runtime = source("../../modules/assistants/frontend/src/runtime.ts");
-  const providers = source("../../src-tauri/src/assistant_sessions/providers.rs");
+  const providers = source("../../modules/assistants/backend/src/providers.rs");
 
   assert.match(runtime, /RESTORE_PROBATION_MS = 5000/);
   assert.match(runtime, /projectPath: record\.placementProjectPath/);
@@ -103,19 +103,25 @@ test("startup restore and recovery are module-owned", () => {
 
 test("normal shutdown freezes ready records before PTYs receive signals", () => {
   const shell = source("../../src/components/layout/AppShell.tsx");
+  const moduleEntry = source("../../modules/assistants/frontend/src/index.ts");
+  const client = source("../../modules/assistants/frontend/src/client.ts");
+  const backend = source("../../modules/assistants/backend/src/lib.rs");
   const commands = source("../../src-tauri/src/commands.rs");
-  const registry = source("../../src-tauri/src/assistant_sessions/mod.rs");
 
   assert.match(shell, /await notifyModulesBeforeShutdown\(MODULE_HOST_SERVICES\);\s*await shutdownAndQuit\(\)/);
-  assert.match(commands, /registry\.try_capture_pending_codex_sessions\(\);\s*registry\.begin_preserving_shutdown\(\)\?;[\s\S]*pty_manager\.kill_all\(\)/);
-  assert.match(registry, /retain\(\|record\| \{\s*record\.capture_state == CaptureState::Ready\s*&& record\.provider_session_id\.is_some\(\)/);
-  assert.match(registry, /record\.restore_on_next_launch = true/);
-  assert.match(registry, /state\.preserving_shutdown = true/);
+  assert.match(moduleEntry, /beforeShutdown: beginAssistantSessionPreservingShutdown/);
+  assert.match(client, /assistantCommand\("begin_assistant_session_preserving_shutdown"\)/);
+  assert.match(backend, /state\.registry\.try_capture_pending_codex_sessions\(\);\s*state\.registry\.begin_preserving_shutdown\(\)/);
+  assert.match(backend, /retain\(\|record\| \{\s*record\.capture_state == CaptureState::Ready\s*&& record\.provider_session_id\.is_some\(\)/);
+  assert.match(backend, /record\.restore_on_next_launch = true/);
+  assert.match(backend, /state\.preserving_shutdown = true/);
+  assert.match(commands, /pty_manager\.kill_all\(\)/);
+  assert.doesNotMatch(commands, /AssistantSessionRegistry|try_capture_pending_codex_sessions|begin_preserving_shutdown/);
 });
 
 test("the restore manifest persists identity metadata, not transcripts or commands", () => {
-  const manifest = source("../../src-tauri/src/assistant_sessions/manifest.rs");
-  const registry = source("../../src-tauri/src/assistant_sessions/mod.rs");
+  const manifest = source("../../modules/assistants/backend/src/manifest.rs");
+  const registry = source("../../modules/assistants/backend/src/lib.rs");
 
   assert.match(registry, /\.join\("\.shep\/assistant-sessions\.json"\)/);
   assert.match(manifest, /options\.mode\(0o600\)/);
@@ -124,13 +130,17 @@ test("the restore manifest persists identity metadata, not transcripts or comman
   assert.doesNotMatch(manifest, /transcript_content|prompt|credential|command_args/);
 });
 
-test("the frontend extraction seam is module-owned and host-generic", () => {
+test("the Assistant implementation is module-owned behind generic host ports", () => {
   const moduleEntry = source("../../modules/assistants/frontend/src/index.ts");
   const composition = source("../../src/core/modules/enabledModules.ts");
   const shell = source("../../src/components/layout/AppShell.tsx");
   const pty = source("../../src/hooks/usePty.ts");
   const builtinRuntime = source("../../src/core/modules/builtinPanelRuntime.tsx");
   const nativeHost = source("../../src-tauri/src/lib.rs");
+  const nativeComposition = source("../../src-tauri/src/enabled_modules.rs");
+  const terminalAdapter = source("../../src-tauri/src/assistants_module.rs");
+  const backend = source("../../modules/assistants/backend/src/lib.rs");
+  const client = source("../../modules/assistants/frontend/src/client.ts");
 
   assert.match(moduleEntry, /id: "shep\.assistants"/);
   assert.match(moduleEntry, /load: \(\) => import\("\.\/SessionLauncher"\)/);
@@ -139,7 +149,10 @@ test("the frontend extraction seam is module-owned and host-generic", () => {
   assert.doesNotMatch(shell, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|listRestorableAssistantSessions/);
   assert.doesNotMatch(pty, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|CODEX_CAPTURE_RETRY_MS|RESTORE_PROBATION_MS/);
   assert.doesNotMatch(builtinRuntime, /components\/session\/SessionLauncher/);
-  assert.match(nativeHost, /\.manage\(AssistantSessionRegistry::new\(\)\)/);
-  assert.match(nativeHost, /commands::spawn_assistant_session/);
-  assert.match(nativeHost, /commands::begin_assistant_session_preserving_shutdown/);
+  assert.doesNotMatch(nativeHost, /AssistantSessionRegistry|commands::spawn_assistant_session|commands::begin_assistant_session_preserving_shutdown/);
+  assert.match(nativeComposition, /shep_module_assistants::init\(/);
+  assert.match(terminalAdapter, /impl TerminalAuthority for HostTerminalAuthority/);
+  assert.match(backend, /app\.manage\(AssistantPluginState \{/);
+  assert.match(backend, /pub fn init<R: Runtime>\(services: HostServices\) -> TauriPlugin<R>/);
+  assert.match(client, /const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shep-assistants\|"/);
 });

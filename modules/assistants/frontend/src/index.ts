@@ -1,5 +1,6 @@
 import type { ShepModule } from "@shep/module-api";
 
+import { beginAssistantSessionPreservingShutdown } from "./client";
 import { activateAssistantRuntime, restoreAssistantSessions } from "./runtime";
 
 export const ASSISTANT_LAUNCHER_PANEL_ID = "assistants.launcher" as const;
@@ -28,6 +29,7 @@ export const assistantsModule = {
   projectLifecycle: {
     onProjectsChanged: restoreAssistantSessions,
   },
+  beforeShutdown: beginAssistantSessionPreservingShutdown,
   activate: ({ services }) => {
     const deactivate = activateAssistantRuntime(services);
     return { deactivate };

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-take-assistant-session-startup-warning"
+description = "Enables the take_assistant_session_startup_warning command without any pre-configured scope."
+commands.allow = ["take_assistant_session_startup_warning"]
+
+[[permission]]
+identifier = "deny-take-assistant-session-startup-warning"
+description = "Denies the take_assistant_session_startup_warning command without any pre-configured scope."
+commands.deny = ["take_assistant_session_startup_warning"]

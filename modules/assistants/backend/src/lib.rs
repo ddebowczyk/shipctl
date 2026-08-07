@@ -4,16 +4,21 @@
 //! is meaningful only while this process is alive, while a provider session ID
 //! can survive a relaunch.
 
+#![forbid(unsafe_code)]
+
 pub mod capture;
 mod manifest;
 pub mod providers;
 
 use serde::{Deserialize, Serialize};
+use shep_module_api::{TerminalColorTheme, TerminalOutput};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{ipc::Channel, plugin::TauriPlugin, Manager, Runtime, State};
 use uuid::Uuid;
 
 pub use capture::{parse_claude_session_metadata, parse_codex_session_metadata};
@@ -23,6 +28,67 @@ use manifest::AssistantSessionManifest;
 
 const MAX_LABEL_LENGTH: usize = 256;
 const MAX_MODEL_LENGTH: usize = 256;
+
+pub const PLUGIN_NAME: &str = "shep-assistants";
+pub const SPAWN_ASSISTANT_SESSION_COMMAND: &str = "plugin:shep-assistants|spawn_assistant_session";
+pub const RESUME_ASSISTANT_SESSION_COMMAND: &str =
+    "plugin:shep-assistants|resume_assistant_session";
+pub const PREPARE_ASSISTANT_SESSION_COMMAND: &str =
+    "plugin:shep-assistants|prepare_assistant_session";
+pub const CONFIRM_ASSISTANT_SESSION_CAPTURE_COMMAND: &str =
+    "plugin:shep-assistants|confirm_assistant_session_capture";
+pub const TRY_CAPTURE_CODEX_ASSISTANT_SESSION_COMMAND: &str =
+    "plugin:shep-assistants|try_capture_codex_assistant_session";
+pub const FAIL_ASSISTANT_SESSION_CAPTURE_COMMAND: &str =
+    "plugin:shep-assistants|fail_assistant_session_capture";
+pub const UPDATE_ASSISTANT_SESSION_PLACEMENT_COMMAND: &str =
+    "plugin:shep-assistants|update_assistant_session_placement";
+pub const UPDATE_ASSISTANT_SESSION_LABEL_COMMAND: &str =
+    "plugin:shep-assistants|update_assistant_session_label";
+pub const DISCARD_ASSISTANT_SESSION_COMMAND: &str =
+    "plugin:shep-assistants|discard_assistant_session";
+pub const REARM_ASSISTANT_SESSION_COMMAND: &str = "plugin:shep-assistants|rearm_assistant_session";
+pub const LIST_RESTORABLE_ASSISTANT_SESSIONS_COMMAND: &str =
+    "plugin:shep-assistants|list_restorable_assistant_sessions";
+pub const TAKE_ASSISTANT_SESSION_STARTUP_WARNING_COMMAND: &str =
+    "plugin:shep-assistants|take_assistant_session_startup_warning";
+pub const BEGIN_ASSISTANT_SESSION_PRESERVING_SHUTDOWN_COMMAND: &str =
+    "plugin:shep-assistants|begin_assistant_session_preserving_shutdown";
+
+/// The only host authority required by the Assistant provider module.
+///
+/// Provider command and argv policy remain inside this crate. The host merely
+/// starts or stops an already-authorized process through its generic PTY
+/// infrastructure.
+pub trait TerminalAuthority: Send + Sync {
+    fn spawn(
+        &self,
+        request: TerminalLaunchRequest,
+        on_data: Channel<TerminalOutput>,
+    ) -> Result<u32, String>;
+    fn kill(&self, terminal_id: u32) -> Result<(), String>;
+}
+
+pub struct TerminalLaunchRequest {
+    pub command: String,
+    pub arguments: Vec<String>,
+    pub cwd: String,
+    pub environment: HashMap<String, String>,
+    pub columns: u16,
+    pub rows: u16,
+    pub color_theme: TerminalColorTheme,
+}
+
+#[derive(Clone)]
+pub struct HostServices {
+    terminal: Arc<dyn TerminalAuthority>,
+}
+
+impl HostServices {
+    pub fn new(terminal: Arc<dyn TerminalAuthority>) -> Self {
+        Self { terminal }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -483,6 +549,298 @@ impl AssistantSessionRegistry {
         manifest::write_atomically(&self.path, &state.manifest)?;
         Ok(result)
     }
+}
+
+struct AssistantPluginState {
+    registry: AssistantSessionRegistry,
+    services: HostServices,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpawnAssistantSessionRequest {
+    provider: AssistantProvider,
+    launch_repo_path: String,
+    placement_project_path: String,
+    label: String,
+    session_mode: SessionMode,
+    model: Option<String>,
+    env: HashMap<String, String>,
+    cols: u16,
+    rows: u16,
+    color_theme: TerminalColorTheme,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpawnedAssistantSession {
+    pty_id: u32,
+    record: AssistantSessionRecord,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResumeAssistantSessionRequest {
+    record_id: String,
+    env: HashMap<String, String>,
+    cols: u16,
+    rows: u16,
+    color_theme: TerminalColorTheme,
+}
+
+fn provider_spawn_error(provider: AssistantProvider, spawn_error: String) -> String {
+    let (command, display_name) = match provider {
+        AssistantProvider::Claude => ("claude", "Claude Code"),
+        AssistantProvider::Codex => ("codex", "Codex"),
+    };
+    let version = Command::new(command)
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|output| {
+            let text = if output.stdout.is_empty() {
+                String::from_utf8_lossy(&output.stderr).trim().to_string()
+            } else {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            };
+            (!text.is_empty()).then_some(text)
+        });
+
+    match version {
+        Some(version) => format!(
+            "Could not start {display_name}: {spawn_error}. Detected {version}; update {display_name} and try again."
+        ),
+        None => format!(
+            "Could not start {display_name}: {spawn_error}. {display_name} was not found on Shep's PATH; install it or restart Shep after updating your shell setup."
+        ),
+    }
+}
+
+#[tauri::command]
+fn spawn_assistant_session(
+    request: SpawnAssistantSessionRequest,
+    on_data: Channel<TerminalOutput>,
+    state: State<'_, AssistantPluginState>,
+) -> Result<SpawnedAssistantSession, String> {
+    let prepared = state.registry.prepare(PrepareAssistantSession {
+        provider: request.provider,
+        launch_repo_path: request.launch_repo_path,
+        placement_project_path: request.placement_project_path,
+        label: request.label,
+        session_mode: request.session_mode,
+        model: request.model,
+    })?;
+    let launch = providers::prepare_new_session(
+        prepared.provider,
+        prepared.session_mode,
+        prepared.model.as_deref(),
+        prepared.provider_session_id.as_deref(),
+    )?;
+    let pty_id = match state.services.terminal.spawn(
+        TerminalLaunchRequest {
+            command: launch.command,
+            arguments: launch.args,
+            cwd: prepared.launch_repo_path.clone(),
+            environment: request.env,
+            columns: request.cols,
+            rows: request.rows,
+            color_theme: request.color_theme,
+        },
+        on_data,
+    ) {
+        Ok(pty_id) => pty_id,
+        Err(error) => {
+            let _ = state.registry.discard(&prepared.record_id);
+            return Err(provider_spawn_error(prepared.provider, error));
+        }
+    };
+
+    let record = if prepared.provider == AssistantProvider::Claude {
+        let session_id = prepared
+            .provider_session_id
+            .clone()
+            .expect("Claude records always receive a UUID before spawn");
+        match state
+            .registry
+            .confirm_capture(&prepared.record_id, session_id)
+        {
+            Ok(record) => record,
+            Err(error) => {
+                let _ = state.services.terminal.kill(pty_id);
+                let _ = state.registry.discard(&prepared.record_id);
+                return Err(error);
+            }
+        }
+    } else {
+        prepared
+    };
+
+    Ok(SpawnedAssistantSession { pty_id, record })
+}
+
+#[tauri::command]
+fn resume_assistant_session(
+    request: ResumeAssistantSessionRequest,
+    on_data: Channel<TerminalOutput>,
+    state: State<'_, AssistantPluginState>,
+) -> Result<SpawnedAssistantSession, String> {
+    let candidate = state.registry.get_restorable(&request.record_id)?;
+    let provider_session_id = candidate
+        .provider_session_id
+        .as_deref()
+        .expect("ready assistant records always contain a provider session id");
+    let launch = providers::prepare_resume_session(
+        candidate.provider,
+        provider_session_id,
+        candidate.session_mode,
+        candidate.model.as_deref(),
+    )?;
+    let record = state.registry.claim_for_restore(&request.record_id)?;
+    let pty_id = match state.services.terminal.spawn(
+        TerminalLaunchRequest {
+            command: launch.command,
+            arguments: launch.args,
+            cwd: record.launch_repo_path.clone(),
+            environment: request.env,
+            columns: request.cols,
+            rows: request.rows,
+            color_theme: request.color_theme,
+        },
+        on_data,
+    ) {
+        Ok(pty_id) => pty_id,
+        Err(error) => {
+            if let Err(rearm_error) = state.registry.rearm_for_restore(&record.record_id) {
+                return Err(format!(
+                    "{} The saved session could not be re-armed for retry: {rearm_error}",
+                    provider_spawn_error(record.provider, error)
+                ));
+            }
+            return Err(provider_spawn_error(record.provider, error));
+        }
+    };
+
+    Ok(SpawnedAssistantSession { pty_id, record })
+}
+
+#[tauri::command]
+fn prepare_assistant_session(
+    request: PrepareAssistantSession,
+    state: State<'_, AssistantPluginState>,
+) -> Result<AssistantSessionRecord, String> {
+    state.registry.prepare(request)
+}
+
+#[tauri::command]
+fn confirm_assistant_session_capture(
+    record_id: &str,
+    provider_session_id: String,
+    state: State<'_, AssistantPluginState>,
+) -> Result<AssistantSessionRecord, String> {
+    state
+        .registry
+        .confirm_capture(record_id, provider_session_id)
+}
+
+#[tauri::command]
+fn try_capture_codex_assistant_session(
+    record_id: &str,
+    state: State<'_, AssistantPluginState>,
+) -> Result<Option<AssistantSessionRecord>, String> {
+    state.registry.try_capture_codex_session(record_id)
+}
+
+#[tauri::command]
+fn fail_assistant_session_capture(
+    record_id: &str,
+    state: State<'_, AssistantPluginState>,
+) -> Result<AssistantSessionRecord, String> {
+    state.registry.mark_capture_failed(record_id)
+}
+
+#[tauri::command]
+fn update_assistant_session_placement(
+    record_id: &str,
+    placement_project_path: String,
+    state: State<'_, AssistantPluginState>,
+) -> Result<AssistantSessionRecord, String> {
+    state
+        .registry
+        .update_placement(record_id, placement_project_path)
+}
+
+#[tauri::command]
+fn update_assistant_session_label(
+    record_id: &str,
+    label: String,
+    state: State<'_, AssistantPluginState>,
+) -> Result<AssistantSessionRecord, String> {
+    state.registry.update_label(record_id, label)
+}
+
+#[tauri::command]
+fn discard_assistant_session(
+    record_id: &str,
+    state: State<'_, AssistantPluginState>,
+) -> Result<(), String> {
+    state.registry.discard(record_id)
+}
+
+#[tauri::command]
+fn rearm_assistant_session(
+    record_id: &str,
+    state: State<'_, AssistantPluginState>,
+) -> Result<(), String> {
+    state.registry.rearm_for_restore(record_id)
+}
+
+#[tauri::command]
+fn list_restorable_assistant_sessions(
+    state: State<'_, AssistantPluginState>,
+) -> Vec<AssistantSessionRecord> {
+    state.registry.list_restorable()
+}
+
+#[tauri::command]
+fn take_assistant_session_startup_warning(
+    state: State<'_, AssistantPluginState>,
+) -> Option<String> {
+    state.registry.take_startup_warning()
+}
+
+#[tauri::command]
+fn begin_assistant_session_preserving_shutdown(
+    state: State<'_, AssistantPluginState>,
+) -> Result<(), String> {
+    state.registry.try_capture_pending_codex_sessions();
+    state.registry.begin_preserving_shutdown()
+}
+
+pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
+    tauri::plugin::Builder::new(PLUGIN_NAME)
+        .setup(move |app, _api| {
+            app.manage(AssistantPluginState {
+                registry: AssistantSessionRegistry::new(),
+                services: services.clone(),
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            spawn_assistant_session,
+            resume_assistant_session,
+            prepare_assistant_session,
+            confirm_assistant_session_capture,
+            try_capture_codex_assistant_session,
+            fail_assistant_session_capture,
+            update_assistant_session_placement,
+            update_assistant_session_label,
+            discard_assistant_session,
+            rearm_assistant_session,
+            list_restorable_assistant_sessions,
+            take_assistant_session_startup_warning,
+            begin_assistant_session_preserving_shutdown,
+        ])
+        .build()
 }
 
 fn default_manifest_path() -> Result<PathBuf, String> {

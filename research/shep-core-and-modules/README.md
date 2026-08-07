@@ -158,6 +158,9 @@ capability ceiling.
 - [35-assistants-frontend-module.md](./35-assistants-frontend-module.md) records
   the Assistant frontend/resource cutover, managed-terminal adoption seam,
   module-owned continuity lifecycle, and enabled/disabled build evidence.
+- [36-assistants-native-module.md](./36-assistants-native-module.md) records the
+  namespaced native plugin, narrow terminal-authority port, explicit
+  permissions, shutdown ordering, and Assistant-disabled native build.
 
 ## Target dependency shape
 
