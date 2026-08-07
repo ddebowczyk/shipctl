@@ -91,13 +91,7 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+B"),
     )?;
-    let next_tab = MenuItem::with_id(
-        app,
-        "next_tab",
-        "Next Tab",
-        true,
-        Some("CmdOrCtrl+Tab"),
-    )?;
+    let next_tab = MenuItem::with_id(app, "next_tab", "Next Tab", true, Some("CmdOrCtrl+Tab"))?;
     let previous_tab = MenuItem::with_id(
         app,
         "previous_tab",

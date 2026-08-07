@@ -135,6 +135,7 @@ function ProjectNavigationSurface({
           active={active}
           open={() => {
             useTerminalStore.getState().addContributedPanelTab(
+              project.path,
               contribution.panelId,
               panel.label,
             );

@@ -1,0 +1,13 @@
+---
+schema_version: 1
+id: api
+frontend:
+  package: "@shep/module-api"
+  path: modules/api/frontend
+backend:
+  crate: shep-module-api
+  path: modules/api/backend
+profile: null
+tests:
+  frontend: null
+  backend: null

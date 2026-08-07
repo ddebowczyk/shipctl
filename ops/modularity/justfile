@@ -1,0 +1,34 @@
+validate:
+    node ../bin/ops-validate.mjs
+
+boundaries:
+    node bin/check-module-boundaries.mjs ../..
+
+profiles-check:
+    node bin/profiles.mjs check
+
+profiles-sync:
+    node bin/profiles.mjs sync
+
+plugout module *args:
+    node bin/plugout.mjs "{{module}}" {{args}}
+
+frontend-disabled module:
+    node bin/frontend-disabled.mjs "{{module}}"
+
+native-disabled module:
+    node bin/native-disabled.mjs "{{module}}"
+
+all:
+    node bin/all.mjs
+
+smoke target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{target}}" in
+      panel-host) config="vite.config.ts"; port=4174 ;;
+      module-fixture) config="ops/modularity/fixtures/module-fixture/vite.config.ts"; port=4175 ;;
+      *) printf 'unknown modularity smoke fixture: %s\n' "{{target}}" >&2; exit 2 ;;
+    esac
+    cd ../..
+    pnpm exec vite "ops/modularity/fixtures/{{target}}" --config "$config" --host 127.0.0.1 --port "$port"

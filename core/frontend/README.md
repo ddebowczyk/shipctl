@@ -70,16 +70,13 @@ logic and `@shep/core/terminal/views` for components. Re-exports inside these
 files carry explicit `.ts`/`.tsx` extensions, because Node's ESM resolver does
 not guess them.
 
-## What is deliberately *not* enforced
+## Enforcement
 
-Import direction between capabilities is a convention here, not a build gate.
-`scripts/check-module-boundaries.mjs` enforces only the module boundary: a
-module may not import the host, and the host reaches modules solely through
-`@shep/module-api` and `enabledModules.ts`.
+`just modularity boundaries` rejects cross-capability deep imports, files left
+under `src/`, app imports into `ops/`, and host/module direction violations.
+Cross-capability imports use an exported `@shep/core/<capability>` entrypoint;
+`platform/` and `shared/` remain leaf foundations that may be imported directly.
 
-The layering that *would* be enforced is documented in the table above, and the
-codebase currently has three edges that run against it — `usePty` reads
-`useRepoStore`, `useRepoStore` calls the host's `discoverRelatedProjectPaths`,
-and `projects/ProjectList` renders host surfaces.
-All three are recorded under `shep-aqy.10`. Adding the gate is a follow-on
-decision, not a prerequisite; nothing in this layout blocks it.
+The checker carries exact exceptions for the host-service adapter's concrete
+store/session imports. Loading the corresponding barrels there would pull the
+whole UI and xterm into Node test lanes. New deep imports are still rejected.

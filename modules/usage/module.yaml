@@ -1,0 +1,28 @@
+---
+schema_version: 1
+id: usage
+frontend:
+  package: "@shep/module-usage"
+  path: modules/usage/frontend
+  composition_symbol: usageModule
+backend:
+  crate: tauri-plugin-shep-usage
+  path: modules/usage/backend
+  cargo_feature: usage-module
+  dependency_alias: shep-module-usage
+  plugin_init: "shep_module_usage::init(crate::modules::usage::host_services())"
+  host_glue:
+    - src-tauri/src/modules/usage.rs
+tauri:
+  capability_identifier: usage
+  permissions:
+    - shep-usage:allow-get-all-usage-snapshots
+    - shep-usage:allow-get-usage-snapshot
+    - shep-usage:allow-get-usage-details
+    - shep-usage:allow-get-usage-overview
+    - shep-usage:allow-get-project-alias-review-queue
+    - shep-usage:allow-refresh-usage-data
+profile: profiles/usage-disabled/tauri.conf.json
+tests:
+  frontend: modules/usage/frontend/tests
+  backend: 'CARGO_TARGET_DIR="$PWD/target/usage-characterization" cargo test -p tauri-plugin-shep-usage -- --test-threads=1'

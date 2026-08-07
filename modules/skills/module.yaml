@@ -1,0 +1,25 @@
+---
+schema_version: 1
+id: skills
+frontend:
+  package: "@shep/module-skills"
+  path: modules/skills/frontend
+  composition_symbol: skillsModule
+backend:
+  crate: tauri-plugin-shep-skills
+  path: modules/skills/backend
+  cargo_feature: skills-module
+  dependency_alias: shep-module-skills
+  plugin_init: "shep_module_skills::init(crate::modules::skills::host_services())"
+  host_glue:
+    - src-tauri/src/modules/skills.rs
+tauri:
+  capability_identifier: skills
+  permissions:
+    - shep-skills:allow-list-skills
+    - shep-skills:allow-setup-skill
+    - shep-skills:allow-remove-skill
+profile: profiles/skills-disabled/tauri.conf.json
+tests:
+  frontend: modules/skills/frontend/tests
+  backend: cargo test --manifest-path modules/skills/backend/Cargo.toml

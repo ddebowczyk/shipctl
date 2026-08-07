@@ -1,0 +1,15 @@
+---
+type: object
+additionalProperties: false
+required: [schema_version, active]
+properties:
+  schema_version:
+    const: 1
+  active:
+    type: object
+    minProperties: 1
+    additionalProperties:
+      type: string
+      pattern: ^[a-z][a-z0-9-]*$
+    propertyNames:
+      pattern: ^[a-z][a-z0-9-]*$

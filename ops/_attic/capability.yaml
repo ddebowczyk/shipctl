@@ -1,0 +1,14 @@
+---
+schema_version: 1
+id: attic
+provides: attic
+description: Hold explicitly unsupported repository-operation spikes.
+status: experimental
+requires:
+  tools: []
+  capabilities: []
+owns: [ops/_attic/**]
+reads: []
+generates: []
+commands: []
+skills: []

@@ -28,7 +28,9 @@ pub fn install<R: Runtime>(builder: Builder<R>, pty_manager: PtyManager) -> Buil
     let builder = builder.plugin(shep_module_todos::init());
 
     #[cfg(feature = "ports-module")]
-    let builder = builder.plugin(shep_module_ports::init(crate::modules::ports::host_services()));
+    let builder = builder.plugin(shep_module_ports::init(
+        crate::modules::ports::host_services(),
+    ));
 
     #[cfg(feature = "skills-module")]
     let builder = builder.plugin(shep_module_skills::init(

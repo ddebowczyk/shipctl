@@ -1,0 +1,27 @@
+app:
+    node ../modularity/bin/check-module-boundaries.mjs ../..
+    pnpm --dir ../.. exec tsc
+    pnpm --dir ../.. exec vite build
+
+local *args:
+    bash bin/build-local.sh {{args}}
+
+module-fixture:
+    node ../modularity/bin/check-module-boundaries.mjs ../..
+    pnpm --dir ../.. exec tsc -p ops/modularity/fixtures/module-fixture/tsconfig.json
+    pnpm --dir ../.. exec vite build ops/modularity/fixtures/module-fixture --config ops/modularity/fixtures/module-fixture/vite.config.ts
+
+release:
+    bash bin/release-build.sh
+
+dmg:
+    bash bin/post-build-dmg.sh
+
+icon:
+    node bin/generate-icon.mjs
+
+bump version *args:
+    bash bin/bump-version.sh {{version}} {{args}}
+
+update-json:
+    bash bin/generate-update-json.sh

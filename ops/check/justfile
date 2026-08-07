@@ -1,0 +1,21 @@
+types:
+    pnpm --dir ../.. exec tsc --noEmit
+
+types-all: types
+    pnpm --dir ../.. exec tsc --noEmit -p ops/modularity/fixtures/panel-host/tsconfig.json
+    pnpm --dir ../.. exec tsc --noEmit -p ops/modularity/fixtures/module-fixture/tsconfig.json
+
+fmt:
+    cargo fmt --all -- --check
+
+clippy-soft:
+    node bin/clippy-soft.mjs
+
+schemas:
+    node bin/check-schemas.mjs
+
+manifests:
+    node bin/check-manifests.mjs
+
+all:
+    node bin/run-aggregate.mjs check

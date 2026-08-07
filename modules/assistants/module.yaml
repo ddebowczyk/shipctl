@@ -1,0 +1,40 @@
+---
+schema_version: 1
+id: assistants
+frontend:
+  package: "@shep/module-assistants"
+  path: modules/assistants/frontend
+  composition_symbol: assistantsModule
+backend:
+  crate: tauri-plugin-shep-assistants
+  path: modules/assistants/backend
+  cargo_feature: assistants-module
+  dependency_alias: shep-module-assistants
+  plugin_init: "shep_module_assistants::init(crate::modules::assistants::host_services(pty_manager))"
+  host_glue:
+    - src-tauri/src/modules/assistants.rs
+tauri:
+  capability_identifier: assistants
+  permissions:
+    - shep-assistants:allow-spawn-assistant-session
+    - shep-assistants:allow-resume-assistant-session
+    - shep-assistants:allow-prepare-assistant-session
+    - shep-assistants:allow-confirm-assistant-session-capture
+    - shep-assistants:allow-try-capture-codex-assistant-session
+    - shep-assistants:allow-fail-assistant-session-capture
+    - shep-assistants:allow-update-assistant-session-placement
+    - shep-assistants:allow-update-assistant-session-label
+    - shep-assistants:allow-discard-assistant-session
+    - shep-assistants:allow-rearm-assistant-session
+    - shep-assistants:allow-list-restorable-assistant-sessions
+    - shep-assistants:allow-take-assistant-session-startup-warning
+    - shep-assistants:allow-begin-assistant-session-preserving-shutdown
+    - shep-assistants:allow-get-models-for-provider
+    - shep-assistants:allow-get-pi-config
+    - shep-assistants:allow-save-pi-settings
+    - shep-assistants:allow-save-pi-api-key
+    - shep-assistants:allow-delete-pi-api-key
+profile: profiles/assistants-disabled/tauri.conf.json
+tests:
+  frontend: modules/assistants/frontend/tests
+  backend: cargo test -p tauri-plugin-shep-assistants -- --test-threads=1

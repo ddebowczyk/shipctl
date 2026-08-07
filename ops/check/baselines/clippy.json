@@ -1,0 +1,6 @@
+{
+  "command": "cargo clippy --workspace --all-targets --message-format=json",
+  "measured_at": "2026-08-07",
+  "clippy_version": "0.1.97",
+  "warning_count": 25
+}

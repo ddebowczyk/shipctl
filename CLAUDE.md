@@ -8,12 +8,35 @@ Shep is a Tauri v2 desktop app (Rust backend + React/TypeScript frontend) for ma
 - **Backend**: Rust / Tauri v2
 - **Build**: Vite, pnpm
 
-## Frontend layout
+## Project layout
 
-Host capabilities live in `core/frontend/<capability>/`, split by capability
-rather than by file kind, and are imported as `@shep/core/<capability>`.
-Before adding a frontend file, read `core/frontend/README.md` — it has the
-decision rule for where a new file goes.
+- `core/frontend/<capability>/` owns host React, TypeScript, stores, styles, and
+  assets by capability. Cross-capability imports use exported
+  `@shep/core/<capability>` entrypoints. Read `core/frontend/README.md` first.
+- `core/backend/src/<capability>/` owns native host logic and Tauri command
+  implementations. Read `core/backend/README.md` first.
+- `modules/<name>/` owns removable features. `modules/api/` is the shared
+  host/module contract, not a feature; `modules/commands/` is frontend-only by
+  design. Read `modules/README.md` first.
+- `src/` contains only the Vite entry files.
+- `src-tauri/` is the Tauri app-bundle shell because the crate using
+  `tauri::generate_context!()` must sit beside `tauri.conf.json`; capability
+  behavior does not belong there.
+- Cargo uses the workspace-root `target/` directory, never
+  `src-tauri/target/`.
+- `ops/` owns repository operations; application code must not import it.
+
+## Documentation placement
+
+Use `docs/` for durable reference (including new ops capability documentation),
+`research/` for dated working notes and evidence, and keep procedure prose only
+in `ops/<capability>/skills/` once that capability exists rather than
+duplicating it.
+
+## Repository operations
+
+Repo operations live in `ops/`. Run `just` for commands and `just ops skills`
+for procedures; see `docs/ops/overview.md`.
 
 ## React Patterns
 
@@ -35,7 +58,7 @@ Avoid `useEffect` for synchronizing state or computing derived values. This is a
 - One-time app initialization on mount
 
 ### State Management
-- Use Zustand stores for shared state (`src/stores/`)
+- Keep Zustand stores with their owning capability under `core/frontend/`
 - Access store state outside React with `useStore.getState()` — valid in event handlers
 - Use stable empty arrays/objects as defaults to avoid infinite re-render loops with Zustand v5
 

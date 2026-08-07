@@ -1,0 +1,11 @@
+---
+schema_version: 1
+id: commands
+frontend:
+  package: "@shep/module-commands"
+  path: modules/commands/frontend
+  composition_symbol: commandsModule
+profile: null
+tests:
+  frontend: modules/commands/frontend/tests
+  backend: null

@@ -1,0 +1,41 @@
+---
+name: Nightly
+
+"on":
+  schedule:
+    # Nightly is anchored to the UTC calendar-day boundary.
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    name: Full repository lane
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.28.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install repository tools
+        run: |
+          brew install just ripgrep yamllint yq
+          cargo install yaml-schema --version 0.9.1 --locked
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test — just test full
+        run: just test full

@@ -1,0 +1,25 @@
+---
+schema_version: 1
+id: todos
+frontend:
+  package: "@shep/module-todos"
+  path: modules/todos/frontend
+  composition_symbol: todosModule
+backend:
+  crate: tauri-plugin-shep-todos
+  path: modules/todos/backend
+  cargo_feature: todos-module
+  dependency_alias: shep-module-todos
+  plugin_init: "shep_module_todos::init()"
+  host_glue: []
+tauri:
+  capability_identifier: todos
+  permissions:
+    - shep-todos:allow-read-todos
+    - shep-todos:allow-toggle-todo
+    - shep-todos:allow-add-todo
+    - shep-todos:allow-move-todo
+profile: profiles/todos-disabled/tauri.conf.json
+tests:
+  frontend: modules/todos/frontend/tests
+  backend: cargo test --manifest-path modules/todos/backend/Cargo.toml

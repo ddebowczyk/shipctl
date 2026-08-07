@@ -1,0 +1,38 @@
+---
+schema_version: 1
+id: upstream
+provides: upstream
+description: Review upstream changes without mutating the product trunk.
+status: experimental
+requires:
+  tools: [git, node, yq, ys]
+  capabilities: []
+owns: [ops/upstream/**]
+reads:
+  - research/integrate-upstream-changes/**
+  - .git/refs/heads/upstream-reviewed
+  - .git/refs/remotes/upstream/**
+generates: []
+commands:
+  - name: fetch
+    summary: Fetch the read-only upstream feed and stamp its state.
+    lane: slow
+  - name: queue
+    summary: List unreviewed non-merge commits in review order.
+    lane: fast
+  - name: stub
+    summary: Create pending ledger entries for the current queue.
+    lane: fast
+  - name: triage
+    summary: Show an upstream diff summary with path-map hints.
+    lane: fast
+    args: [sha]
+  - name: status
+    summary: Count ledger verdicts and current queued commits.
+    lane: fast
+  - name: close
+    summary: Close a fully triaged batch and advance its watermark.
+    lane: fast
+skills:
+  - name: upstream-review
+    summary: Triage upstream changes without mutating the product trunk.

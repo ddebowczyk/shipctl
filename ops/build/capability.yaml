@@ -1,0 +1,40 @@
+---
+schema_version: 1
+id: build
+provides: build
+description: Build and package application artifacts.
+status: supported
+requires:
+  tools: [bash, ditto, git, jq, pnpm, shasum, ys]
+  capabilities: [modularity]
+owns: [ops/build/**]
+reads: [core/**, modules/**, src/**, src-tauri/**]
+generates: [dist/**, builds/**, target/**]
+commands:
+  - name: app
+    summary: Build the production frontend application.
+    lane: slow
+  - name: local
+    summary: Build a local application bundle.
+    lane: slow
+    args: [target]
+  - name: module-fixture
+    summary: Build the module-composition smoke fixture.
+    lane: slow
+  - name: release
+    summary: Build a signed and notarized release.
+    lane: slow
+  - name: dmg
+    summary: Patch and re-sign the release DMG.
+    lane: slow
+  - name: icon
+    summary: Generate the application icon asset.
+    lane: slow
+  - name: bump
+    summary: Bump and commit the application version.
+    lane: slow
+    args: [version]
+  - name: update-json
+    summary: Generate Tauri updater metadata.
+    lane: slow
+skills: []

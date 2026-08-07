@@ -1,0 +1,26 @@
+fast:
+    cd ../.. && pnpm exec node --test ops/modularity/tests/moduleBoundaries.test.mjs
+    cd ../.. && pnpm exec node --test ops/modularity/tests/*.test.mjs
+    cd ../.. && pnpm exec node --test ops/check/tests/*.test.mjs
+    cd ../.. && pnpm exec node --test ops/upstream/tests/*.test.mjs
+    cd ../.. && pnpm exec node --test core/frontend/host/tests/moduleComposition.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 modules/assistants/frontend/tests/*.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 modules/commands/frontend/tests/*.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/host/tests/globalSurfaces.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 modules/git/frontend/tests/*.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/host/tests/panelPersistence.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/host/tests/panelRegistry.test.ts core/frontend/host/tests/panelPersistence.test.ts core/frontend/terminal/tests/panelTabs.test.ts
+    cd ../.. && pnpm exec node --test modules/ports/frontend/tests/*.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/host/tests/projectCapabilityData.test.ts core/frontend/host/tests/globalCapabilityData.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalSessions.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/host/tests/projectActions.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/host/tests/projectActions.test.ts core/frontend/host/tests/projectFacts.test.ts core/frontend/host/tests/moduleComposition.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 modules/skills/frontend/tests/*.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 modules/todos/frontend/tests/*.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 modules/usage/frontend/tests/*.test.ts
+
+rust:
+    cd ../.. && cargo test --workspace
+
+full: fast rust
+    just --justfile ../modularity/justfile all

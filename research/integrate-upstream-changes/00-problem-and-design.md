@@ -95,7 +95,7 @@ Three stores, each holding exactly what it is good at:
 | Store | Holds | Mechanism |
 |---|---|---|
 | **git** | upstream content | `upstream` remote + a pinned `upstream-reviewed` ref |
-| **ledger** (committed markdown) | the decision and its reasoning | `research/integrate-upstream-changes/log/<sha>.md` |
+| **ledger** (committed markdown) | the decision and its reasoning | `ops/upstream/log/<sha>.md` |
 | **bd** | the resulting work | `bd` issues labelled `upstream`, id recorded in the ledger entry |
 
 ### 3.1 The watermark is a git ref, so the queue is a git command
@@ -123,7 +123,7 @@ A dedicated ref has one job.
 human-readable). Flat directory, no per-commit subdirectory — a directory holding one file
 is pure ceremony. Noise commits get a 6-line file; substantive ones get real prose.
 
-Format spec and templates: `01-ledger-format.md`.
+Format spec and templates: `ops/upstream/skills/upstream-review/`.
 
 ### 3.3 A path map makes triage mechanical
 
@@ -137,7 +137,8 @@ tree, while all the terminal/PTY paths do.
 
 ### 3.4 Verdict vocabulary (five values, no more)
 
-`pending` · `adopt` · `adapt` · `reject` · `n-a` — defined in `01-ledger-format.md`.
+`pending` · `adopt` · `adapt` · `reject` · `n-a` — defined in
+`ops/upstream/skills/upstream-review/reference/ledger-format.md`.
 
 ### 3.5 Adopt as a *variant*, not a replacement — upstream as a modularity probe
 
@@ -204,4 +205,4 @@ research/integrate-upstream-changes/     # committed
 
 Co-located with the analysis rather than a top-level `./upstream-commits/`, so the process
 docs and the records they describe stay together. If a top-level path is preferred later,
-only `02-review-runbook.md` needs editing.
+only `ops/upstream/skills/upstream-review/SKILL.md` needs editing.

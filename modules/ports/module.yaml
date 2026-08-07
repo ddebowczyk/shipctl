@@ -1,0 +1,24 @@
+---
+schema_version: 1
+id: ports
+frontend:
+  package: "@shep/module-ports"
+  path: modules/ports/frontend
+  composition_symbol: portsModule
+backend:
+  crate: tauri-plugin-shep-ports
+  path: modules/ports/backend
+  cargo_feature: ports-module
+  dependency_alias: shep-module-ports
+  plugin_init: "shep_module_ports::init(crate::modules::ports::host_services())"
+  host_glue:
+    - src-tauri/src/modules/ports.rs
+tauri:
+  capability_identifier: ports
+  permissions:
+    - shep-ports:allow-list-listening-ports
+    - shep-ports:allow-kill-port
+profile: profiles/ports-disabled/tauri.conf.json
+tests:
+  frontend: modules/ports/frontend/tests
+  backend: cargo test --manifest-path modules/ports/backend/Cargo.toml

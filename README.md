@@ -193,7 +193,7 @@ an explicit confirmation the first time it opens.
 ### Archive local Mac Studio builds
 
 ```bash
-pnpm build:local
+just build local
 ```
 
 This creates the unsigned Apple Silicon app and DMG, then copies both into an
@@ -202,7 +202,7 @@ manifest records the source commit, whether the worktree was dirty, and
 SHA-256 checksums. To archive the current Tauri output without rebuilding:
 
 ```bash
-pnpm build:local -- --archive-only
+just build local --archive-only
 ```
 
 ### Create a debug-packaged build
@@ -269,13 +269,13 @@ src-tauri/              the Tauri shell — no capability logic lives here
   tauri.conf.json, capabilities/, icons/
 
 profiles/               tauri configs that build with a module removed
-scripts/                gates, plug-out verifiers, release tooling
+ops/                    repository build, check, test, modularity, and upstream tooling
 ```
 
 Two rules hold this together, and both are checked in CI: a module may never
 import the host, and the host reaches modules only through `@shep/module-api`
 and `core/frontend/host/enabledModules.ts`. Every module can be built out
-entirely — see `pnpm verify:<name>-plugout`.
+entirely — see `just modularity plugout <name>`.
 
 ## Tech Stack
 
@@ -301,8 +301,8 @@ For tester reports, include:
 
 Releases are built locally on macOS and published as a `.dmg` via GitHub Releases:
 
-1. `./scripts/bump-version.sh X.Y.Z` — updates `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`, then commits the bump
-2. `./scripts/release-build.sh` — builds, signs, notarizes, and generates `latest.json`
+1. `just build bump X.Y.Z` — updates `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`, then commits the bump
+2. `just build release` — builds, signs, notarizes, and generates `latest.json`
 3. Smoke test the DMG, then `git tag vX.Y.Z && git push origin main vX.Y.Z`
 4. `gh release create` with the artifacts and release notes
 

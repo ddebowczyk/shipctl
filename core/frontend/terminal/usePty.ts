@@ -15,9 +15,6 @@ import { hexLuminance } from "@shep/core/appearance";
 import type { PtyOutput } from "@shep/core/platform";
 import { toPtyColorTheme } from "./ptyColorTheme.ts";
 import { useTerminalStore, nextTabId } from "./useTerminalStore.ts";
-// TODO(shep-aqy.10.6): closes when the projects capability moves; the host
-// runtime must land first because useRepoStore calls into moduleComposition.
-import { useRepoStore } from "@shep/core/projects";
 import { useNoticeStore } from "@shep/core/shared";
 import type { Terminal } from "@xterm/xterm";
 import { getErrorMessage } from "@shep/core/platform";
@@ -151,11 +148,12 @@ function writeToPty(ptyId: number, data: string) {
   }
 }
 
-export function usePty() {
-  const activeRepoPath = useRepoStore((s) => s.activeRepoPath);
+export function usePty(
+  activeProjectPath: string | null,
+  focusProject: (projectPath: string) => Promise<boolean>,
+) {
   const pushNotice = useNoticeStore((s) => s.pushNotice);
   const {
-    addTab,
     removeTabFromProject,
     initActivity,
     setTabActive,
@@ -408,12 +406,9 @@ export function usePty() {
     const owned = hostTerminalSessions.get(sessionId);
     if (!owned) return;
 
-    if (useRepoStore.getState().activeRepoPath !== owned.session.projectPath) {
-      await useRepoStore.getState().openRepo(owned.session.projectPath);
-      useTerminalStore.getState().switchProject(owned.session.projectPath);
-    }
-    useTerminalStore.getState().setActiveTab(owned.tabId);
-  }, []);
+    if (!await focusProject(owned.session.projectPath)) return;
+    useTerminalStore.getState().setActiveTab(owned.session.projectPath, owned.tabId);
+  }, [focusProject]);
 
   const requestTerminalSessionRename = useCallback(async (
     sessionId: string,
@@ -453,7 +448,7 @@ export function usePty() {
 
   const spawnBlankShell = useCallback(
     async (cols: number, rows: number) => {
-      if (!activeRepoPath) return;
+      if (!activeProjectPath) return;
 
       try {
         const shell = await getDefaultShell();
@@ -463,17 +458,17 @@ export function usePty() {
           {},
           cols,
           rows,
-          activeRepoPath,
+          activeProjectPath,
         );
         if (!ptyId) return;
 
         const id = nextTabId();
-        addTab({
+        addTabToProject(activeProjectPath, {
           id,
           kind: "terminal",
           label: "Terminal",
           ptyId,
-          repoPath: activeRepoPath,
+          repoPath: activeProjectPath,
           commandName: null,
         });
 
@@ -490,7 +485,7 @@ export function usePty() {
         return null;
       }
     },
-    [activeRepoPath, spawnSession, addTab, pushNotice],
+    [activeProjectPath, spawnSession, addTabToProject, pushNotice],
   );
 
   const closeTab = useCallback(

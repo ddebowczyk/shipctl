@@ -83,14 +83,20 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
     open: (panelId) => {
       const panel = modulePanelContributions().find(({ id }) => id === panelId);
       if (!panel) throw new Error(`Panel ${panelId} is unavailable`);
-      useTerminalStore.getState().addContributedPanelTab(panelId, panel.label);
+      const projectPath = useRepoStore.getState().activeRepoPath;
+      if (projectPath) {
+        useTerminalStore.getState().addContributedPanelTab(projectPath, panelId, panel.label);
+      }
       return contributedPanelTabId(panelId);
     },
     reveal: (instanceId) => {
-      const state = useTerminalStore.getState();
-      if (state.activeProjectPath) state.setActiveTab(instanceId);
+      const projectPath = useRepoStore.getState().activeRepoPath;
+      if (projectPath) useTerminalStore.getState().setActiveTab(projectPath, instanceId);
     },
-    close: (instanceId) => useTerminalStore.getState().removeTab(instanceId),
+    close: (instanceId) => {
+      const projectPath = useRepoStore.getState().activeRepoPath;
+      if (projectPath) useTerminalStore.getState().removeTab(projectPath, instanceId);
+    },
   },
   appearance: {
     getSnapshot: getAppearanceSnapshot,

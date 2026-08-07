@@ -1,0 +1,5 @@
+validate:
+    just --justfile modularity/justfile validate
+
+skills:
+    node bin/skills.mjs

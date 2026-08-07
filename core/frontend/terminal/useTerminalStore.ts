@@ -21,22 +21,18 @@ type TerminalTabPatch = Partial<Pick<
 
 interface TerminalStore {
   projectState: Record<string, ProjectTerminalState>;
-  activeProjectPath: string | null;
   tabActivity: Record<number, TabActivity>;
-  switchProject: (repoPath: string) => void;
   removeProject: (repoPath: string) => void;
-  addTab: (tab: UnifiedTab) => void;
   addTabToProject: (repoPath: string, tab: UnifiedTab) => void;
-  removeTab: (id: string) => void;
-  setActiveTab: (id: string) => void;
-  cycleTab: (direction: TabCycleDirection) => void;
+  removeTab: (repoPath: string, id: string) => void;
+  setActiveTab: (repoPath: string, id: string) => void;
+  cycleTab: (repoPath: string, direction: TabCycleDirection) => void;
   updateTab: (id: string, patch: Partial<Pick<UnifiedTab, "label">>) => void;
   updateTerminalTabById: (id: string, patch: TerminalTabPatch) => void;
-  reorderTab: (tabId: string, toIndex: number) => void;
+  reorderTab: (repoPath: string, tabId: string, toIndex: number) => void;
   moveTab: (tabId: string, destinationPath: string) => boolean;
   removeTabFromProject: (repoPath: string, id: string) => void;
-  addContributedPanelTab: (panelId: `${string}.${string}`, label: string) => void;
-  findTabByCommand: (commandName: string) => TerminalTabData | undefined;
+  addContributedPanelTab: (repoPath: string, panelId: `${string}.${string}`, label: string) => void;
   findTabByCommandForProject: (repoPath: string, commandName: string) => TerminalTabData | undefined;
   findTabByPtyId: (ptyId: number) => TerminalTabData | undefined;
   initActivity: (ptyId: number) => void;
@@ -59,20 +55,7 @@ export function nextTabId(): string {
 
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
   projectState: {},
-  activeProjectPath: null,
   tabActivity: {},
-
-  switchProject: (repoPath: string) => {
-    set((state) => {
-      if (state.projectState[repoPath]) {
-        return { activeProjectPath: repoPath };
-      }
-      return {
-        projectState: { ...state.projectState, [repoPath]: emptyState() },
-        activeProjectPath: repoPath,
-      };
-    });
-  },
 
   removeProject: (repoPath: string) => {
     set((state) => {
@@ -92,26 +75,6 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       return {
         projectState,
         tabActivity,
-        ...(state.activeProjectPath === repoPath
-          ? { activeProjectPath: null }
-          : {}),
-      };
-    });
-  },
-
-  addTab: (tab: UnifiedTab) => {
-    set((state) => {
-      const path = state.activeProjectPath;
-      if (!path) return state;
-      const ps = state.projectState[path] ?? emptyState();
-      return {
-        projectState: {
-          ...state.projectState,
-          [path]: {
-            tabs: [...ps.tabs, tab],
-            activeTabId: tab.id,
-          },
-        },
       };
     });
   },
@@ -132,11 +95,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 
-  removeTab: (id: string) => {
+  removeTab: (repoPath: string, id: string) => {
     set((state) => {
-      const path = state.activeProjectPath;
-      if (!path) return state;
-      const ps = state.projectState[path];
+      const ps = state.projectState[repoPath];
       if (!ps) return state;
       const closedIndex = ps.tabs.findIndex((t) => t.id === id);
       if (closedIndex === -1) return state;
@@ -152,33 +113,29 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       return {
         projectState: {
           ...state.projectState,
-          [path]: { tabs, activeTabId },
+          [repoPath]: { tabs, activeTabId },
         },
       };
     });
   },
 
-  setActiveTab: (id: string) => {
+  setActiveTab: (repoPath: string, id: string) => {
     set((state) => {
-      const path = state.activeProjectPath;
-      if (!path) return state;
-      const ps = state.projectState[path];
+      const ps = state.projectState[repoPath];
       if (!ps || !ps.tabs.some((t) => t.id === id)) return state;
       return {
         projectState: {
           ...state.projectState,
-          [path]: { ...ps, activeTabId: id },
+          [repoPath]: { ...ps, activeTabId: id },
         },
       };
     });
   },
 
-  cycleTab: (direction: TabCycleDirection) => {
+  cycleTab: (repoPath: string, direction: TabCycleDirection) => {
     useUIStore.getState().closeGlobalSurface();
     set((state) => {
-      const path = state.activeProjectPath;
-      if (!path) return state;
-      const project = state.projectState[path];
+      const project = state.projectState[repoPath];
       if (!project || project.tabs.length === 0) return state;
 
       const currentIndex = project.tabs.findIndex((tab) => tab.id === project.activeTabId);
@@ -189,14 +146,13 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       return {
         projectState: {
           ...state.projectState,
-          [path]: { ...project, activeTabId: nextTab.id },
+          [repoPath]: { ...project, activeTabId: nextTab.id },
         },
       };
     });
 
     const state = get();
-    const path = state.activeProjectPath;
-    const project = path ? state.projectState[path] : null;
+    const project = state.projectState[repoPath];
     const tab = project?.tabs.find((entry) => entry.id === project.activeTabId);
     if (tab?.kind === "terminal") {
       state.clearTabBell(tab.ptyId);
@@ -245,11 +201,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 
-  reorderTab: (tabId: string, toIndex: number) => {
+  reorderTab: (repoPath: string, tabId: string, toIndex: number) => {
     set((state) => {
-      const path = state.activeProjectPath;
-      if (!path) return state;
-      const ps = state.projectState[path];
+      const ps = state.projectState[repoPath];
       if (!ps) return state;
       const fromIndex = ps.tabs.findIndex((t) => t.id === tabId);
       if (fromIndex === -1) return state;
@@ -264,7 +218,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       return {
         projectState: {
           ...state.projectState,
-          [path]: { ...ps, tabs },
+          [repoPath]: { ...ps, tabs },
         },
       };
     });
@@ -323,19 +277,17 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 
-  addContributedPanelTab: (panelId: `${string}.${string}`, label: string) => {
+  addContributedPanelTab: (repoPath: string, panelId: `${string}.${string}`, label: string) => {
     useUIStore.getState().closeGlobalSurface();
     set((state) => {
-      const path = state.activeProjectPath;
-      if (!path) return state;
-      const project = state.projectState[path] ?? emptyState();
+      const project = state.projectState[repoPath] ?? emptyState();
       const id = contributedPanelTabId(panelId);
       const existing = project.tabs.find((tab) => tab.id === id);
       if (existing) {
         return {
           projectState: {
             ...state.projectState,
-            [path]: { ...project, activeTabId: id },
+            [repoPath]: { ...project, activeTabId: id },
           },
         };
       }
@@ -343,16 +295,10 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       return {
         projectState: {
           ...state.projectState,
-          [path]: { tabs: [...project.tabs, tab], activeTabId: id },
+          [repoPath]: { tabs: [...project.tabs, tab], activeTabId: id },
         },
       };
     });
-  },
-
-  findTabByCommand: (commandName: string) => {
-    const state = get();
-    if (!state.activeProjectPath) return undefined;
-    return state.findTabByCommandForProject(state.activeProjectPath, commandName);
   },
 
   findTabByPtyId: (ptyId: number) => {

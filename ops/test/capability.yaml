@@ -1,0 +1,24 @@
+---
+schema_version: 1
+id: test
+provides: test
+description: Run the repository test lanes.
+status: supported
+requires:
+  tools: [just, node, pnpm, cargo]
+  capabilities: [modularity]
+owns: [ops/test/**]
+reads: [core/**, modules/**, ops/check/tests/**, ops/modularity/tests/**, ops/upstream/tests/**, src-tauri/**]
+generates: [target/**]
+commands:
+  - name: fast
+    summary: Run all Node test suites.
+    lane: fast
+    aggregate: test
+  - name: rust
+    summary: Run the Rust workspace tests.
+    lane: slow
+  - name: full
+    summary: Run fast, Rust, and modularity verification lanes.
+    lane: slow
+skills: []

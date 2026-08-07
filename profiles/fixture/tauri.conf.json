@@ -1,7 +1,7 @@
 {
   "build": {
-    "beforeBuildCommand": "pnpm build:module-fixture",
-    "frontendDist": "../scripts/smoke/module-fixture/dist"
+    "beforeBuildCommand": "just build module-fixture",
+    "frontendDist": "../ops/modularity/fixtures/module-fixture/dist"
   },
   "app": {
     "security": {

@@ -1,0 +1,53 @@
+---
+schema_version: 1
+id: check
+provides: check
+description: Run non-executing correctness checks.
+status: supported
+requires:
+  tools: [cargo, just, node, pnpm, yamllint, yq, ys]
+  capabilities: [modularity]
+owns: [ops/check/**]
+reads:
+  - Cargo.toml
+  - core/**
+  - modules/**
+  - src/**
+  - src-tauri/**
+  - package.json
+  - profiles/**
+  - ops/modularity/bin/plugout.mjs
+  - ops/modularity/fixtures/module-fixture/enabledModules.ts
+  - ops/ops.yaml
+  - ops/schema/**
+  - ops/*/capability.yaml
+  - ops/upstream/**
+generates: []
+commands:
+  - name: types
+    summary: Type-check the application without building it.
+    lane: fast
+  - name: types-all
+    summary: Type-check the application and smoke fixtures.
+    lane: fast
+    aggregate: check
+  - name: fmt
+    summary: Check Rust workspace formatting.
+    lane: fast
+    aggregate: check
+  - name: clippy-soft
+    summary: Report Rust workspace warnings against the recorded baseline.
+    lane: fast
+    aggregate: check
+  - name: schemas
+    summary: Validate schema-bearing YAML and ledger frontmatter.
+    lane: fast
+    aggregate: check
+  - name: manifests
+    summary: Cross-check module manifests against live declaration sites.
+    lane: fast
+    aggregate: check
+  - name: all
+    summary: Run every declared fast check.
+    lane: fast
+skills: []

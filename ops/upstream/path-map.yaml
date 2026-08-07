@@ -1,0 +1,66 @@
+---
+# Upstream bookkeeping does not enter the product fork.
+paths:
+  - glob: .github/**
+    status: ignore
+  - glob: .gitignore
+    status: ignore
+  - glob: CONTRIBUTING.md
+    status: ignore
+  - glob: README.md
+    status: ignore
+  - glob: TODO.md
+    status: ignore
+  - glob: docs/vision/**
+    status: ignore
+
+  # Dependency and application-shell files still exist at their upstream paths.
+  - glob: package.json
+    status: same
+  - glob: pnpm-lock.yaml
+    status: same
+  - glob: src-tauri/Cargo.toml
+    status: same
+  - glob: src-tauri/Cargo.lock
+    status: same
+  - glob: src-tauri/tauri.conf.json
+    status: same
+  - glob: src/styles/globals.css
+    status: same
+  - glob: ops/build/bin/generate-icon.mjs
+    status: same
+
+  # Terminal ownership moved under core; upstream behavior must be adapted.
+  - glob: src-tauri/src/pty/**
+    status: module:terminal
+  - glob: src-tauri/src/commands.rs
+    status: module:terminal
+  - glob: src/components/terminal/**
+    status: module:terminal
+  - glob: src/hooks/usePty.ts
+    status: module:terminal
+  - glob: src/lib/terminalViewport.ts
+    status: module:terminal
+  - glob: src/lib/terminalPipelineDebug.ts
+    status: module:terminal
+  - glob: src/lib/tauri.ts
+    status: module:platform
+  - glob: src-tauri/src/lib.rs
+    status: module:platform
+
+  # Existing capabilities own these responsibilities in the fork.
+  - glob: src/lib/markdownRenderer.ts
+    status: module:git
+  - glob: src-tauri/src/git*
+    status: module:git
+  - glob: src-tauri/src/skills*
+    status: module:skills
+  - glob: src-tauri/src/ports*
+    status: module:ports
+  - glob: src-tauri/src/todos*
+    status: module:todos
+  - glob: src-tauri/src/assistant_sessions/**
+    status: module:assistants
+
+  - glob: scripts/replay-terminal-scroll-repro.mjs
+    status: dead

@@ -1,0 +1,87 @@
+---
+type: object
+additionalProperties: false
+required: [schema_version, id, frontend, profile, tests]
+properties:
+  schema_version:
+    const: 1
+  id:
+    type: string
+    pattern: ^[a-z][a-z0-9-]*$
+  frontend:
+    type: object
+    additionalProperties: false
+    required: [package, path]
+    properties:
+      package:
+        type: string
+        pattern: ^@shep/module-[a-z0-9-]+$
+      path:
+        type: string
+        pattern: ^modules/[a-z0-9-]+/frontend$
+      composition_symbol:
+        type: string
+        pattern: ^[a-z][A-Za-z0-9]*Module$
+  backend:
+    type: object
+    additionalProperties: false
+    required: [crate, path]
+    properties:
+      crate:
+        type: string
+        pattern: ^[a-z][a-z0-9-]*$
+      path:
+        type: string
+        pattern: ^modules/[a-z0-9-]+/backend$
+      cargo_feature:
+        type: string
+        pattern: ^[a-z][a-z0-9-]*-module$
+      dependency_alias:
+        type: string
+        pattern: ^[a-z][a-z0-9-]*$
+      plugin_init:
+        type: string
+        minLength: 1
+      host_glue:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: ^src-tauri/src/modules/[a-z0-9_/-]+\.rs$
+    allOf:
+      - if:
+          anyOf:
+            - required: [cargo_feature]
+            - required: [dependency_alias]
+            - required: [plugin_init]
+            - required: [host_glue]
+        then:
+          required: [cargo_feature, dependency_alias, plugin_init, host_glue]
+  tauri:
+    type: object
+    additionalProperties: false
+    required: [capability_identifier, permissions]
+    properties:
+      capability_identifier:
+        type: string
+        pattern: ^[a-z][a-z0-9-]*$
+      permissions:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: ^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$
+  profile:
+    type: [string, "null"]
+    pattern: ^profiles/[a-z0-9-]+/tauri\.conf\.json$
+  tests:
+    type: object
+    additionalProperties: false
+    required: [frontend, backend]
+    properties:
+      frontend:
+        type: [string, "null"]
+        pattern: ^modules/[a-z0-9-]+/frontend/tests(?:/.*)?$
+      backend:
+        type: [string, "null"]
+        minLength: 1

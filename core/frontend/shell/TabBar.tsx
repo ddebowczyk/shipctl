@@ -2,7 +2,6 @@ import { useCallback, useRef, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useTerminalStore } from "../terminal/index.ts";
 import { useUIStore } from "../shared/index.ts";
-import { useShallow } from "zustand/shallow";
 import { Circle, FolderInput, FolderTree, GitBranch, List, PanelsTopLeft, SquareTerminal } from "lucide-react";
 import type { PanelContribution } from "@shep/module-api";
 import { handleActionKey } from "../shared/index.ts";
@@ -143,8 +142,9 @@ export default function TabBar({
   onMoveTab,
   onDragProjectChange,
 }: TabBarProps) {
-  const { activeProjectPath, projectState } = useTerminalStore(
-    useShallow((s) => ({ activeProjectPath: s.activeProjectPath, projectState: s.activeProjectPath ? s.projectState[s.activeProjectPath] : null })),
+  const activeProjectPath = useRepoStore((s) => s.activeRepoPath);
+  const projectState = useTerminalStore(
+    (s) => (activeProjectPath ? s.projectState[activeProjectPath] : null),
   );
   const projectTerminals = projectState;
   const repos = useRepoStore((s) => s.repos);
@@ -238,7 +238,7 @@ export default function TabBar({
       if (d.didDrag && d.dropProjectPath) {
         void onMoveTab(tabId, d.dropProjectPath);
       } else if (d.didDrag && d.dropIndex !== null) {
-        reorderTab(tabId, d.dropIndex);
+        if (activeProjectPath) reorderTab(activeProjectPath, tabId, d.dropIndex);
       }
       cleanup();
     };
@@ -253,8 +253,9 @@ export default function TabBar({
   const anyGlobalSurface = useUIStore((state) => state.activeGlobalSurfaceId !== null);
 
   const handleSelectTab = (tabId: string) => {
+    if (!activeProjectPath) return;
     useUIStore.getState().closeGlobalSurface();
-    setActiveTab(tabId);
+    setActiveTab(activeProjectPath, tabId);
     const tab = tabs.find((t) => t.id === tabId);
     if (tab?.kind === "terminal") {
       useTerminalStore.getState().clearTabBell(tab.ptyId);

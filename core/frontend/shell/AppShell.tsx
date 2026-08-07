@@ -73,18 +73,42 @@ export default function AppShell() {
   const { repos, groups, activeRepoPath, fetchRepos, fetchGroups, openRepo, addRepo, removeRepo, renameGroup, deleteGroup, moveRepoToGroup } =
     useRepoStore();
   const pushNotice = useNoticeStore((s) => s.pushNotice);
+
+  const initialProjectAttemptedRef = useRef(false);
+  const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
+  const lastTabCycleAtRef = useRef(0);
+
+  const handleSelectRepo = useCallback(
+    async (repoPath: string) => {
+      if (repoPath === activeRepoPath) return true;
+
+      try {
+        useUIStore.getState().closeGlobalSurface();
+        await openRepo(repoPath);
+        initialProjectAttemptedRef.current = true;
+        window.localStorage.setItem(LAST_REPO_STORAGE_KEY, repoPath);
+        await notifyModulesProjectOpened(repoPath, MODULE_HOST_SERVICES);
+        return true;
+      } catch (error) {
+        pushNotice({
+          tone: "error",
+          title: "Couldn’t open project",
+          message: getErrorMessage(error),
+        });
+        return false;
+      }
+    },
+    [activeRepoPath, openRepo, pushNotice],
+  );
+
   const {
     spawnBlankShell,
     closeTab,
     killProjectPtys,
     requestTerminalSessionPlacement,
     requestTerminalSessionRename,
-  } = usePty();
-
-  const initialProjectAttemptedRef = useRef(false);
-  const terminalContainerRef = useRef<HTMLDivElement>(null);
-  const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
-  const lastTabCycleAtRef = useRef(0);
+  } = usePty(activeRepoPath, handleSelectRepo);
 
   const cycleTabs = useCallback((direction: TabCycleDirection) => {
     // Native menu accelerators and the renderer fallback can both receive the
@@ -92,8 +116,8 @@ export default function AppShell() {
     const now = performance.now();
     if (now - lastTabCycleAtRef.current < 100) return;
     lastTabCycleAtRef.current = now;
-    useTerminalStore.getState().cycleTab(direction);
-  }, []);
+    if (activeRepoPath) useTerminalStore.getState().cycleTab(activeRepoPath, direction);
+  }, [activeRepoPath]);
 
   const getTerminalDimensions = useCallback(() => {
     const el = terminalContainerRef.current;
@@ -109,9 +133,8 @@ export default function AppShell() {
   }), [getTerminalDimensions]);
 
   // Derive active project's tabs and commands from stores
-  const activeProjectPath = useTerminalStore((s) => s.activeProjectPath);
   const activeProjectTerminals = useTerminalStore(
-    (s) => (s.activeProjectPath ? s.projectState[s.activeProjectPath] : null),
+    (s) => (activeRepoPath ? s.projectState[activeRepoPath] : null),
   );
   const tabs = activeProjectTerminals?.tabs ?? EMPTY_TABS;
   const activeTabId = activeProjectTerminals?.activeTabId ?? null;
@@ -191,28 +214,6 @@ export default function AppShell() {
     };
   }, [fetchRepos, fetchGroups, loadEditorSettings, loadTerminalSettings, pushNotice]);
 
-  const handleSelectRepo = useCallback(
-    async (repoPath: string) => {
-      if (repoPath === activeRepoPath) return;
-
-      try {
-        useUIStore.getState().closeGlobalSurface();
-        await openRepo(repoPath);
-        initialProjectAttemptedRef.current = true;
-        window.localStorage.setItem(LAST_REPO_STORAGE_KEY, repoPath);
-        useTerminalStore.getState().switchProject(repoPath);
-        await notifyModulesProjectOpened(repoPath, MODULE_HOST_SERVICES);
-      } catch (error) {
-        pushNotice({
-          tone: "error",
-          title: "Couldn’t open project",
-          message: getErrorMessage(error),
-        });
-      }
-    },
-    [activeRepoPath, openRepo, pushNotice],
-  );
-
   const handleMoveTab = useCallback(
     async (tabId: string, destinationPath: string) => {
       const store = useTerminalStore.getState();
@@ -224,9 +225,8 @@ export default function AppShell() {
       const tab = sourceProject.tabs.find((entry) => entry.id === tabId);
       if (!tab || tab.kind !== "terminal") return;
 
-      await handleSelectRepo(destinationPath);
+      if (!await handleSelectRepo(destinationPath)) return;
       const destinationStore = useTerminalStore.getState();
-      if (destinationStore.activeProjectPath !== destinationPath) return;
       if (tab.moduleSessionId) {
         try {
           await requestTerminalSessionPlacement(tab.moduleSessionId, destinationPath);
@@ -245,7 +245,7 @@ export default function AppShell() {
         }
         return;
       }
-      destinationStore.setActiveTab(tabId);
+      destinationStore.setActiveTab(destinationPath, tabId);
       pushNotice({
         tone: "success",
         title: `Moved “${tab.label}”`,
@@ -292,7 +292,6 @@ export default function AppShell() {
         if (!canonicalPath) return;
         initialProjectAttemptedRef.current = true;
         window.localStorage.setItem(LAST_REPO_STORAGE_KEY, canonicalPath);
-        useTerminalStore.getState().switchProject(canonicalPath);
         await notifyModulesProjectOpened(canonicalPath, MODULE_HOST_SERVICES);
       } catch (error) {
         pushNotice({
@@ -382,8 +381,9 @@ export default function AppShell() {
   );
 
   const handleSelectSidebarTab = useCallback((tabId: string) => {
+    if (!activeRepoPath) return;
     useUIStore.getState().closeGlobalSurface();
-    setActiveTab(tabId);
+    setActiveTab(activeRepoPath, tabId);
     const store = useTerminalStore.getState();
     const allTabs = activeRepoPath ? store.getAllProjectTabs(activeRepoPath) : [];
     const tab = allTabs.find((t) => t.id === tabId);
@@ -395,11 +395,11 @@ export default function AppShell() {
   const handleSelectSidebarProjectTab = useCallback(async (repoPath: string, tabId: string) => {
     useUIStore.getState().closeGlobalSurface();
     if (repoPath !== activeRepoPath) {
-      await handleSelectRepo(repoPath);
+      if (!await handleSelectRepo(repoPath)) return;
     }
 
     const store = useTerminalStore.getState();
-    store.setActiveTab(tabId);
+    store.setActiveTab(repoPath, tabId);
     const tab = store.projectState[repoPath]?.tabs.find((entry) => entry.id === tabId);
     if (tab?.kind === "terminal") {
       store.clearTabBell(tab.ptyId);
@@ -407,17 +407,16 @@ export default function AppShell() {
   }, [activeRepoPath, handleSelectRepo]);
 
   const handleCloseTab = useCallback((tabId: string) => {
+    if (!activeRepoPath) return;
     const store = useTerminalStore.getState();
-    const path = store.activeProjectPath;
-    if (!path) return;
-    const tab = store.projectState[path]?.tabs.find((t) => t.id === tabId);
+    const tab = store.projectState[activeRepoPath]?.tabs.find((t) => t.id === tabId);
     if (!tab) return;
     if (tab.kind === "terminal") {
       closeTab(tabId);
     } else {
-      store.removeTab(tabId);
+      store.removeTab(activeRepoPath, tabId);
     }
-  }, [closeTab]);
+  }, [activeRepoPath, closeTab]);
 
   const handleNewModuleSession = useCallback(() => {
     const launcher = MODULE_PANEL_CONTRIBUTIONS
@@ -431,9 +430,10 @@ export default function AppShell() {
       });
       return;
     }
-    useTerminalStore.getState().addContributedPanelTab(launcher.id, launcher.label);
+    if (!activeRepoPath) return;
+    useTerminalStore.getState().addContributedPanelTab(activeRepoPath, launcher.id, launcher.label);
     useUIStore.getState().closeGlobalSurface();
-  }, [pushNotice]);
+  }, [activeRepoPath, pushNotice]);
 
   const handleNewShell = useCallback(() => {
     useUIStore.getState().closeGlobalSurface();
@@ -517,10 +517,13 @@ export default function AppShell() {
         (panel) => panel.menuEvent === event.payload,
       );
       if (contributedPanel) {
-        useTerminalStore.getState().addContributedPanelTab(
-          contributedPanel.id,
-          contributedPanel.label,
-        );
+        if (activeRepoPath) {
+          useTerminalStore.getState().addContributedPanelTab(
+            activeRepoPath,
+            contributedPanel.id,
+            contributedPanel.label,
+          );
+        }
         return;
       }
       switch (event.payload) {
@@ -540,8 +543,7 @@ export default function AppShell() {
           useUIStore.getState().toggleSidebar();
           break;
         case "open_in_editor": {
-          const repoPath = useTerminalStore.getState().activeProjectPath;
-          if (repoPath) handleOpenInEditor(repoPath);
+          if (activeRepoPath) handleOpenInEditor(activeRepoPath);
           break;
         }
         case "settings":
@@ -563,7 +565,7 @@ export default function AppShell() {
       }
     });
     return () => { unlisten.then((f) => f()); };
-  }, [cycleTabs, handleNewShell, handleNewModuleSession, handleOpenInEditor, pushNotice]);
+  }, [activeRepoPath, cycleTabs, handleNewShell, handleNewModuleSession, handleOpenInEditor, pushNotice]);
 
   // Renderer fallback for platforms/webviews that deliver the shortcut to the
   // page instead of the native application menu.
@@ -580,12 +582,14 @@ export default function AppShell() {
       if (!panel) return;
       event.preventDefault();
       event.stopPropagation();
-      useTerminalStore.getState().addContributedPanelTab(panel.id, panel.label);
+      if (activeRepoPath) {
+        useTerminalStore.getState().addContributedPanelTab(activeRepoPath, panel.id, panel.label);
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [cycleTabs]);
+  }, [activeRepoPath, cycleTabs]);
 
   const showGlobalSurface = activeGlobalSurfaceId !== null;
   const activePanelId = activeTab ? panelIdForTab(activeTab) : null;
@@ -662,8 +666,12 @@ export default function AppShell() {
             onClose={handleCloseTab}
             onNewShell={handleNewShell}
             panels={MODULE_PANEL_CONTRIBUTIONS}
-            onOpenPanel={(panel) => useTerminalStore.getState().addContributedPanelTab(panel.id, panel.label)}
-            onOpenInEditor={() => { const p = useTerminalStore.getState().activeProjectPath; if (p) handleOpenInEditor(p); }}
+            onOpenPanel={(panel) => {
+              if (activeRepoPath) {
+                useTerminalStore.getState().addContributedPanelTab(activeRepoPath, panel.id, panel.label);
+              }
+            }}
+            onOpenInEditor={() => { if (activeRepoPath) handleOpenInEditor(activeRepoPath); }}
             onRenameTab={handleRenameTab}
             onMoveTab={handleMoveTab}
             onDragProjectChange={setTabDropProjectPath}
@@ -708,7 +716,7 @@ export default function AppShell() {
                 className="absolute inset-0"
                 style={{
                   display:
-                    !showGlobalSurface && projectPath === activeProjectPath && tab.id === activeTabId
+                    !showGlobalSurface && projectPath === activeRepoPath && tab.id === activeTabId
                       ? "block"
                       : "none",
                 }}
@@ -716,7 +724,7 @@ export default function AppShell() {
                 <TerminalErrorBoundary>
                   <TerminalView
                     ptyId={tab.ptyId}
-                    visible={!showGlobalSurface && projectPath === activeProjectPath && tab.id === activeTabId}
+                    visible={!showGlobalSurface && projectPath === activeRepoPath && tab.id === activeTabId}
                   />
                 </TerminalErrorBoundary>
               </div>

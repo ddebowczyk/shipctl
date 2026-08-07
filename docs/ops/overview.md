@@ -4,6 +4,19 @@ How work *on* this repository is organised, and why it is modular.
 
 Design detail lives in `research/modular-repo-ops/`; this page is the orientation.
 
+## Naming decision
+
+The repository-operations directory is named `ops/`. The name is short and
+unambiguous in this repository. It sorts near the top of the tree and clearly
+distinguishes tooling that operates on the product from application code that
+ships in it.
+
+The alternatives were less precise: `tools/` commonly means vendored binaries,
+`.ops/` would hide the main discovery surface from humans and agents, and
+`devkit/` or `repo/` are broader names that do not say what the directory owns.
+Skills remain ordinary directories under their owning capability and are
+invoked by path; the name does not imply registration with any agent harness.
+
 ## Why we take control of ops
 
 Shep is developed by a large team of agents working in parallel on separate module branches.

@@ -1,0 +1,97 @@
+---
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - id
+  - provides
+  - description
+  - status
+  - requires
+  - owns
+  - reads
+  - generates
+  - commands
+  - skills
+properties:
+  schema_version:
+    const: 1
+  id:
+    type: string
+    pattern: ^[a-z][a-z0-9-]*$
+  provides:
+    type: string
+    pattern: ^[a-z][a-z0-9-]*$
+  description:
+    type: string
+    minLength: 1
+  status:
+    enum: [supported, experimental, deprecated]
+  requires:
+    type: object
+    additionalProperties: false
+    required: [tools, capabilities]
+    properties:
+      tools:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          minLength: 1
+      capabilities:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: ^[a-z][a-z0-9-]*$
+  owns:
+    $ref: "#/$defs/paths"
+  reads:
+    $ref: "#/$defs/paths"
+  generates:
+    $ref: "#/$defs/paths"
+  commands:
+    type: array
+    uniqueItems: true
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, summary, lane]
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9-]*$
+        summary:
+          type: string
+          minLength: 1
+        lane:
+          enum: [fast, slow]
+        aggregate:
+          enum: [check, test]
+        args:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+  skills:
+    type: array
+    uniqueItems: true
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, summary]
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9-]*$
+        summary:
+          type: string
+          minLength: 1
+$defs:
+  paths:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1

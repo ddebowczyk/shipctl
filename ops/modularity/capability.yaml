@@ -1,0 +1,54 @@
+---
+schema_version: 1
+id: modularity
+provides: modularity
+description: Verify application and repository modularity boundaries.
+status: supported
+requires:
+  tools: [cargo, git, node, pnpm, rg, yq]
+  capabilities: []
+owns:
+  - ops/modularity/**
+  - ops/schema/**
+  - ops/bin/**
+  - ops/ops.yaml
+  - ops/README.md
+  - ops/justfile
+reads: [core/**, modules/**, profiles/fixture/**, src/**, src-tauri/**, package.json, pnpm-workspace.yaml]
+generates: [profiles/*-disabled/tauri.conf.json]
+commands:
+  - name: validate
+    summary: Validate operation schemas and ownership invariants.
+    lane: fast
+    aggregate: check
+  - name: boundaries
+    summary: Check static frontend import boundaries.
+    lane: fast
+    aggregate: check
+  - name: profiles-check
+    summary: Check committed disabled-module profiles against module manifests.
+    lane: fast
+    aggregate: check
+  - name: profiles-sync
+    summary: Regenerate committed disabled-module profiles from module manifests.
+    lane: slow
+  - name: plugout
+    summary: Verify a module in enabled, disabled, and source-absent profiles.
+    lane: slow
+    args: [module]
+  - name: frontend-disabled
+    summary: Build a module's frontend-disabled composition profile.
+    lane: slow
+    args: [module]
+  - name: native-disabled
+    summary: Build a module's native-disabled Tauri profile.
+    lane: slow
+    args: [module]
+  - name: all
+    summary: Run every applicable modularity proof for every pluggable module.
+    lane: slow
+  - name: smoke
+    summary: Run a named modularity smoke fixture.
+    lane: slow
+    args: [target]
+skills: []

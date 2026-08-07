@@ -1,0 +1,11 @@
+{
+  "extends": "../../../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true,
+    "paths": {
+      "@shep/module-fixture": ["../../../../modules/fixture/frontend/src/index.ts"]
+    }
+  },
+  "include": ["main.tsx", "enabledModules.ts", "../../../../src/vite-env.d.ts"]
+}

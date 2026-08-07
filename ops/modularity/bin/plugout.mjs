@@ -1,0 +1,432 @@
+#!/usr/bin/env node
+
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
+
+import {
+  readJson,
+  removeCargoDefaultFeature,
+  removeNativeModuleFeatureFromScripts,
+  replaceOnce,
+  run,
+  verifyModulePlugout,
+  writeJson,
+} from "./module-plugout.mjs";
+
+const repositoryRoot = path.resolve(fileURLToPath(new URL("../../../", import.meta.url)));
+
+export function readManifest(root, id) {
+  const file = path.join(root, "modules", id, "module.yaml");
+  if (!existsSync(file)) throw new Error(`Unknown module: ${id}`);
+  return JSON.parse(execFileSync("yq", ["-o=json", ".", file], { encoding: "utf8" }));
+}
+
+function removeLine(root, relativePath, line) {
+  const file = path.join(root, relativePath);
+  const source = readFileSync(file, "utf8");
+  const marker = `${line}\n`;
+  const first = source.indexOf(marker);
+  if (first < 0 || source.indexOf(marker, first + marker.length) >= 0) {
+    throw new Error(`Expected one manifest-derived line in ${relativePath}: ${line}`);
+  }
+  writeFileSync(file, source.replace(marker, ""));
+}
+
+function removePluginInstall(root, backend) {
+  const relativePath = "src-tauri/src/modules/mod.rs";
+  const file = path.join(root, relativePath);
+  const source = readFileSync(file, "utf8");
+  const cfg = `    #[cfg(feature = "${backend.cargo_feature}")]\n`;
+  const start = source.indexOf(cfg);
+  if (start < 0) throw new Error(`Missing ${backend.cargo_feature} plugin cfg in ${relativePath}`);
+  const statementStart = start + cfg.length;
+  if (!source.startsWith("    let builder = builder.plugin(", statementStart)) {
+    throw new Error(`Missing ${backend.cargo_feature} plugin install in ${relativePath}`);
+  }
+
+  let depth = 0;
+  let end = -1;
+  for (let index = source.indexOf("(", statementStart); index < source.length; index += 1) {
+    if (source[index] === "(") depth += 1;
+    if (source[index] === ")") depth -= 1;
+    if (depth === 0 && source[index + 1] === ";") {
+      end = index + 2;
+      break;
+    }
+  }
+  if (end < 0) throw new Error(`Unterminated ${backend.cargo_feature} plugin install`);
+  while (source[end] === "\n") end += 1;
+  writeFileSync(file, `${source.slice(0, start)}${source.slice(end)}`);
+}
+
+function removeInverseCfgStatement(root, backend) {
+  const relativePath = "src-tauri/src/modules/mod.rs";
+  const file = path.join(root, relativePath);
+  const source = readFileSync(file, "utf8");
+  const cfg = `    #[cfg(not(feature = "${backend.cargo_feature}"))]\n`;
+  const start = source.indexOf(cfg);
+  if (start < 0) return;
+  const statementEnd = source.indexOf(";", start + cfg.length);
+  if (statementEnd < 0) throw new Error(`Unterminated inverse cfg for ${backend.cargo_feature}`);
+  let end = statementEnd + 1;
+  while (source[end] === "\n") end += 1;
+  writeFileSync(file, `${source.slice(0, start)}${source.slice(end)}`);
+}
+
+function removeCapability(root, relativePath, identifier) {
+  const file = path.join(root, relativePath);
+  if (!existsSync(file)) return;
+  const config = readJson(root, relativePath);
+  const capabilities = config.app?.security?.capabilities;
+  if (!Array.isArray(capabilities)) return;
+  config.app.security.capabilities = capabilities.filter(
+    (entry) => typeof entry !== "object" || entry?.identifier !== identifier,
+  );
+  writeJson(root, relativePath, config);
+}
+
+function tauriConfigs(root) {
+  const configs = ["src-tauri/tauri.conf.json"];
+  const profiles = path.join(root, "profiles");
+  if (!existsSync(profiles)) return configs;
+  for (const entry of readdirSync(profiles, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const relativePath = `profiles/${entry.name}/tauri.conf.json`;
+    if (existsSync(path.join(root, relativePath))) configs.push(relativePath);
+  }
+  return configs;
+}
+
+function removeSmokeDependencies(root, manifest) {
+  const relativePath = "ops/modularity/fixtures/panel-host/main.tsx";
+  const file = path.join(root, relativePath);
+  if (!existsSync(file)) return;
+  let source = readFileSync(file, "utf8");
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const namespaces = new Set(
+    (manifest.tauri?.permissions ?? []).map((permission) => permission.split(":")[0]),
+  );
+  const removals = [];
+  const walk = (node) => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text === manifest.frontend.package
+    ) {
+      removals.push([node.getFullStart(), node.end]);
+      return;
+    }
+    if (
+      ts.isCaseClause(node) &&
+      ts.isStringLiteral(node.expression) &&
+      [...namespaces].some((namespace) => node.expression.text.startsWith(`plugin:${namespace}|`))
+    ) {
+      removals.push([node.getFullStart(), node.end]);
+      return;
+    }
+    if (
+      ts.isExpressionStatement(node) &&
+      ts.isSourceFile(node.parent) &&
+      node.getText(parsed).includes(manifest.frontend.composition_symbol)
+    ) {
+      removals.push([node.getFullStart(), node.end]);
+      return;
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(parsed);
+  for (const [start, end] of removals.sort((left, right) => right[0] - left[0])) {
+    source = `${source.slice(0, start)}${source.slice(end)}`;
+  }
+  source = source.replaceAll(
+    `${manifest.frontend.composition_symbol}.panels[0].id`,
+    'registry.list()[0]?.id ?? ("missing.panel" as ContributionId)',
+  );
+  writeFileSync(file, source);
+}
+
+export function nativeFeaturesExcept(root, excluded) {
+  return readdirSync(path.join(root, "modules"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const file = path.join(root, "modules", entry.name, "module.yaml");
+      return existsSync(file) ? readManifest(root, entry.name).backend?.cargo_feature : null;
+    })
+    .filter((feature) => feature && feature !== excluded && feature !== "fixture-module")
+    .sort()
+    .join(",");
+}
+
+export function frontendDisabled(root, id) {
+  const manifest = readManifest(root, id);
+  const envName = `VITE_SHEP_${id.toUpperCase().replaceAll("-", "_")}_MODULE`;
+  const composition = readFileSync(path.join(root, "core/frontend/host/enabledModules.ts"), "utf8");
+  if (!composition.includes(`import.meta.env.${envName}`)) {
+    throw new Error(`${id} has no frontend-disabled composition gate`);
+  }
+  run("pnpm", ["build"], root, { [envName]: "disabled" });
+  process.stdout.write(`\n${id} frontend-disabled profile: OK\n`);
+}
+
+export function nativeDisabled(root, id) {
+  const manifest = readManifest(root, id);
+  if (!manifest.backend?.cargo_feature || !manifest.profile?.includes("-disabled/")) {
+    throw new Error(`${id} has no native-disabled profile`);
+  }
+  run(
+    "pnpm",
+    [
+      "tauri",
+      "build",
+      "--debug",
+      "--no-bundle",
+      "--config",
+      manifest.profile,
+      "--",
+      "--no-default-features",
+      "--features",
+      nativeFeaturesExcept(root, manifest.backend.cargo_feature),
+    ],
+    root,
+    { CARGO_TARGET_DIR: path.join(root, "target", `${id}-native-disabled`) },
+  );
+  process.stdout.write(`\n${id} native-disabled profile: OK\n`);
+}
+
+export function prepareDisabled(root, manifest) {
+  if (!manifest.frontend.composition_symbol) return;
+  if (manifest.profile && !manifest.profile.includes("-disabled/")) return;
+  const relativePath = "core/frontend/host/enabledModules.ts";
+  const file = path.join(root, relativePath);
+  let source = readFileSync(file, "utf8");
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const removals = [];
+  for (const statement of parsed.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.moduleSpecifier.text === manifest.frontend.package
+    ) {
+      removals.push([statement.getFullStart(), statement.end]);
+    }
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!declaration.initializer) continue;
+      let compositionArray = null;
+      const findCompositionArray = (node) => {
+        if (
+          !compositionArray &&
+          ts.isArrayLiteralExpression(node) &&
+          node.getText(parsed).includes(manifest.frontend.composition_symbol)
+        ) {
+          compositionArray = node;
+          return;
+        }
+        ts.forEachChild(node, findCompositionArray);
+      };
+      findCompositionArray(declaration.initializer);
+      if (!compositionArray) continue;
+      for (const element of compositionArray.elements) {
+        if (!element.getText(parsed).includes(manifest.frontend.composition_symbol)) continue;
+        let end = element.end;
+        if (source[end] === ",") end += 1;
+        removals.push([element.getFullStart(), end]);
+      }
+    }
+  }
+  if (removals.length !== 2) {
+    throw new Error(`Expected one import and one composition for ${manifest.id} in ${relativePath}`);
+  }
+  for (const [start, end] of removals.sort((left, right) => right[0] - left[0])) {
+    source = `${source.slice(0, start)}${source.slice(end)}`;
+  }
+  writeFileSync(file, source);
+}
+
+export function prepareSourceAbsent(root, manifest) {
+  prepareDisabled(root, manifest);
+  removeSmokeDependencies(root, manifest);
+  const backend = manifest.backend;
+  if (backend?.cargo_feature) {
+    const cargo = JSON.parse(
+      execFileSync("yq", ["-p=toml", "-o=json", ".", path.join(root, "src-tauri/Cargo.toml")], {
+        encoding: "utf8",
+      }),
+    );
+    if (cargo.features?.default?.includes(backend.cargo_feature)) {
+      removeCargoDefaultFeature(root, backend.cargo_feature);
+    }
+    removeLine(
+      root,
+      "src-tauri/Cargo.toml",
+      `${backend.cargo_feature} = ["dep:${backend.dependency_alias}"]`,
+    );
+    removeLine(
+      root,
+      "src-tauri/Cargo.toml",
+      `${backend.dependency_alias} = { package = "${backend.crate}", path = "../${backend.path}", optional = true }`,
+    );
+    removePluginInstall(root, backend);
+    removeInverseCfgStatement(root, backend);
+    for (const hostGlue of backend.host_glue) rmSync(path.join(root, hostGlue), { force: true });
+    if (backend.host_glue.length > 0) {
+      replaceOnce(
+        root,
+        "src-tauri/src/modules/mod.rs",
+        `#[cfg(feature = "${backend.cargo_feature}")]\npub mod ${manifest.id.replaceAll("-", "_")};\n`,
+        "",
+      );
+    }
+  }
+
+  rmSync(path.join(root, "modules", manifest.id), { recursive: true, force: true });
+  if (manifest.profile && !manifest.profile.includes("-disabled/")) {
+    rmSync(path.join(root, "ops/modularity/fixtures/module-fixture"), { recursive: true, force: true });
+  }
+  if (manifest.profile) {
+    rmSync(path.join(root, path.dirname(manifest.profile)), { recursive: true, force: true });
+  }
+  const packageStem = manifest.frontend.package.split("/").at(-1);
+  for (const stem of new Set([manifest.id, packageStem])) {
+    rmSync(path.join(root, "scripts", `verify-${stem}-plugout.mjs`), { force: true });
+    rmSync(path.join(root, "scripts", `verify-${stem}-frontend-disabled.mjs`), { force: true });
+  }
+
+  const packageJson = readJson(root, "package.json");
+  delete packageJson.dependencies?.[manifest.frontend.package];
+  const scriptNamePattern = new RegExp(
+    `(^|[:-])(?:${[manifest.id, packageStem]
+      .filter(Boolean)
+      .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|")})(?:[:-]|$)`,
+  );
+  const commandMarkers = [
+    manifest.frontend.package,
+    manifest.frontend.path,
+    manifest.backend?.path,
+  ].filter(Boolean);
+  for (const [script, command] of Object.entries(packageJson.scripts ?? {})) {
+    if (scriptNamePattern.test(script) || commandMarkers.some((marker) => command.includes(marker))) {
+      delete packageJson.scripts[script];
+    }
+  }
+  if (backend?.cargo_feature && manifest.profile?.includes("-disabled/")) {
+    removeNativeModuleFeatureFromScripts(packageJson, backend.cargo_feature);
+  }
+  writeJson(root, "package.json", packageJson);
+
+  if (manifest.tauri) {
+    for (const config of tauriConfigs(root)) {
+      removeCapability(root, config, manifest.tauri.capability_identifier);
+    }
+  }
+}
+
+export function sourceAbsentPatterns(manifest) {
+  const patterns = [manifest.frontend.package, manifest.frontend.composition_symbol];
+  if (manifest.backend) {
+    patterns.push(
+      manifest.backend.crate,
+      manifest.backend.dependency_alias,
+      manifest.backend.dependency_alias.replaceAll("-", "_"),
+      manifest.backend.cargo_feature,
+    );
+  }
+  if (manifest.tauri) {
+    const permissionNamespaces = manifest.tauri.permissions.map((permission) => permission.split(":")[0]);
+    patterns.push(
+      ...manifest.tauri.permissions,
+      ...permissionNamespaces.map((namespace) => `plugin:${namespace}`),
+    );
+  }
+  patterns.push(`${manifest.id}.`);
+  return [...new Set(patterns.filter(Boolean))];
+}
+
+export function assertSourceAbsent(root, manifest) {
+  const targets = [
+    "src",
+    "src-tauri/src",
+    "src-tauri/Cargo.toml",
+    "src-tauri/tauri.conf.json",
+    "profiles",
+    "ops/modularity/fixtures",
+    "package.json",
+  ].filter((target) => existsSync(path.join(root, target)));
+  const args = [
+    "-n",
+    "-F",
+    ...sourceAbsentPatterns(manifest).flatMap((pattern) => ["-e", pattern]),
+    ...targets,
+  ];
+  const result = spawnSync("rg", args, { cwd: root, encoding: "utf8" });
+  if (result.error) throw result.error;
+  if (result.status === 0) {
+    throw new Error(`${manifest.id} module reference remains after plug-out:\n${result.stdout}`);
+  }
+  if (result.status !== 1) throw new Error(result.stderr || `rg exited with status ${result.status}`);
+}
+
+function runIfScript(root, script) {
+  const packageJson = readJson(root, "package.json");
+  if (packageJson.scripts?.[script]) run("pnpm", [script], root);
+}
+
+function verifyEnabled(root, manifest) {
+  runIfScript(root, `test:${manifest.id}-characterization`);
+  runIfScript(root, "test:module-composition");
+  runIfScript(root, "test:global-surfaces");
+  runIfScript(root, "test:panels");
+  run("pnpm", ["build"], root);
+  if (manifest.backend) run("cargo", ["test", "--manifest-path", "src-tauri/Cargo.toml"], root);
+  if (manifest.backend?.cargo_feature) run("pnpm", ["tauri", "build", "--debug", "--no-bundle"], root);
+}
+
+function verifyDisabled(root, manifest) {
+  runIfScript(root, "test:global-surfaces");
+  runIfScript(root, "test:panels");
+  run("pnpm", ["build"], root);
+  if (manifest.backend?.cargo_feature) {
+    run("pnpm", [
+      "tauri", "build", "--debug", "--no-bundle", "--config", manifest.profile,
+      "--", "--no-default-features", "--features",
+      nativeFeaturesExcept(root, manifest.backend.cargo_feature),
+    ], root);
+  }
+}
+
+function verifySourceAbsent(root, manifest) {
+  runIfScript(root, "test:global-surfaces");
+  runIfScript(root, "test:panels");
+  runIfScript(root, "test:module-boundaries");
+  runIfScript(root, "typecheck:panel-host-smoke");
+  run("pnpm", ["build"], root);
+  if (manifest.backend) run("cargo", ["test", "--manifest-path", "src-tauri/Cargo.toml"], root);
+  if (manifest.backend?.cargo_feature) run("pnpm", ["tauri", "build", "--debug", "--no-bundle"], root);
+}
+
+export function plugout(root, id, { sourceAbsentOnly = false } = {}) {
+  const manifest = readManifest(root, id);
+  verifyModulePlugout({
+    repositoryRoot: root,
+    moduleName: manifest.id,
+    packages: { pnpm: manifest.frontend.package, cargo: manifest.backend?.crate },
+    verifyEnabled: (copyRoot) => verifyEnabled(copyRoot, manifest),
+    prepareDisabled: (copyRoot) => prepareDisabled(copyRoot, manifest),
+    verifyDisabled: (copyRoot) => verifyDisabled(copyRoot, manifest),
+    prepareSourceAbsent: (copyRoot) => prepareSourceAbsent(copyRoot, manifest),
+    assertSourceAbsent: (copyRoot) => assertSourceAbsent(copyRoot, manifest),
+    verifySourceAbsent: (copyRoot) => verifySourceAbsent(copyRoot, manifest),
+    sourceAbsentOnly,
+  });
+}
+
+if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+  const id = process.argv[2];
+  if (!id) throw new Error("Usage: plugout.mjs <module-id> [--source-absent-only]");
+  plugout(repositoryRoot, id, { sourceAbsentOnly: process.argv.includes("--source-absent-only") });
+}

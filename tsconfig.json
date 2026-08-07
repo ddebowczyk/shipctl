@@ -24,5 +24,8 @@
   "include": [
     "src",
     "core/frontend"
+  ],
+  "exclude": [
+    "core/frontend/**/tests"
   ]
 }
