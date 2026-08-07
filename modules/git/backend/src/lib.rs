@@ -1,6 +1,106 @@
+//! Project-authorized Git policy and repository operations.
+
+#![forbid(unsafe_code)]
+
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+
+use tauri::{plugin::TauriPlugin, Manager, Runtime, State};
+
+pub const PLUGIN_NAME: &str = "shep-git";
+pub const IS_GIT_REPO_COMMAND: &str = "plugin:shep-git|is_git_repo";
+pub const GIT_INIT_COMMAND: &str = "plugin:shep-git|git_init";
+pub const GIT_CURRENT_BRANCH_COMMAND: &str = "plugin:shep-git|git_current_branch";
+pub const GIT_LIST_BRANCHES_COMMAND: &str = "plugin:shep-git|git_list_branches";
+pub const GIT_PUSH_BRANCH_COMMAND: &str = "plugin:shep-git|git_push_branch";
+pub const GIT_LIST_WORKTREES_COMMAND: &str = "plugin:shep-git|git_list_worktrees";
+pub const GIT_CREATE_WORKTREE_COMMAND: &str = "plugin:shep-git|git_create_worktree";
+pub const GIT_STATUS_COMMAND: &str = "plugin:shep-git|git_status";
+pub const GIT_CHANGED_FILES_COMMAND: &str = "plugin:shep-git|git_changed_files";
+pub const GIT_FILE_DIFF_COMMAND: &str = "plugin:shep-git|git_file_diff";
+pub const GIT_FILE_CONTENTS_COMMAND: &str = "plugin:shep-git|git_file_contents";
+pub const GIT_LIST_FILES_COMMAND: &str = "plugin:shep-git|git_list_files";
+pub const GIT_STAGE_FILE_COMMAND: &str = "plugin:shep-git|git_stage_file";
+pub const GIT_STAGE_ALL_COMMAND: &str = "plugin:shep-git|git_stage_all";
+pub const GIT_COMMIT_COMMAND: &str = "plugin:shep-git|git_commit";
+pub const GIT_UNSTAGE_FILE_COMMAND: &str = "plugin:shep-git|git_unstage_file";
+pub const GIT_UNSTAGE_ALL_COMMAND: &str = "plugin:shep-git|git_unstage_all";
+pub const GIT_SWITCH_BRANCH_COMMAND: &str = "plugin:shep-git|git_switch_branch";
+pub const GIT_CREATE_BRANCH_COMMAND: &str = "plugin:shep-git|git_create_branch";
+pub const GIT_DIFF_STATS_COMMAND: &str = "plugin:shep-git|git_diff_stats";
+
+/// Host-owned authority for resolving an exact registered project root.
+pub trait ProjectRootAuthority: Send + Sync {
+    fn authorize_project_root(&self, requested_path: &str) -> Result<PathBuf, String>;
+}
+
+#[derive(Clone)]
+pub struct HostServices {
+    projects: Arc<dyn ProjectRootAuthority>,
+}
+
+impl HostServices {
+    pub fn new(projects: Arc<dyn ProjectRootAuthority>) -> Self {
+        Self { projects }
+    }
+
+    pub fn project_root(&self, requested_path: &str) -> Result<PathBuf, String> {
+        self.projects.authorize_project_root(requested_path)
+    }
+}
+
+fn normalized_relative_path(file_path: &str) -> Result<PathBuf, String> {
+    if file_path.trim().is_empty() {
+        return Err("File path is required".to_string());
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in Path::new(file_path).components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "File path must stay within the project: {file_path}"
+                ));
+            }
+        }
+    }
+
+    if normalized.as_os_str().is_empty() {
+        return Err("File path is required".to_string());
+    }
+    Ok(normalized)
+}
+
+fn authorized_file_argument(file_path: &str) -> Result<String, String> {
+    normalized_relative_path(file_path).map(|path| path.to_string_lossy().to_string())
+}
+
+fn authorized_working_file(root: &Path, file_path: &str) -> Result<PathBuf, String> {
+    let relative = normalized_relative_path(file_path)?;
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("Cannot resolve project root {}: {error}", root.display()))?;
+    let candidate = canonical_root.join(relative);
+    let canonical_file = candidate
+        .canonicalize()
+        .map_err(|error| format!("Cannot read {file_path}: {error}"))?;
+    if !canonical_file.starts_with(&canonical_root) {
+        return Err(format!(
+            "File path must stay within the project: {file_path}"
+        ));
+    }
+    Ok(canonical_file)
+}
+
+fn root_argument(root: &Path) -> Result<String, String> {
+    root.to_str()
+        .map(ToString::to_string)
+        .ok_or_else(|| format!("Project path is not valid UTF-8: {}", root.display()))
+}
 
 #[derive(serde::Serialize, Clone, Default)]
 pub struct GitStatus {
@@ -277,9 +377,14 @@ pub fn create_worktree(path: &str, branch_name: &str) -> Result<CreatedWorktree,
         let stdout = String::from_utf8_lossy(&out.stdout);
         stdout
             .lines()
-            .find_map(|l| l.strip_prefix("worktree ").map(|p| std::path::PathBuf::from(p.trim())))
+            .find_map(|l| {
+                l.strip_prefix("worktree ")
+                    .map(|p| std::path::PathBuf::from(p.trim()))
+            })
             .ok_or_else(|| "Could not determine main repo path".to_string())?
-    };
+    }
+    .canonicalize()
+    .map_err(|error| format!("Could not resolve main repo path: {error}"))?;
 
     let repo_name = main_repo_path
         .file_name()
@@ -304,23 +409,38 @@ pub fn create_worktree(path: &str, branch_name: &str) -> Result<CreatedWorktree,
         branch_slug
     };
 
-    let worktree_path = repo_parent
-        .join(".shep-worktrees")
-        .join(repo_name)
-        .join(branch_slug);
+    let worktrees_root = repo_parent.join(".shep-worktrees");
+    reject_symlink(&worktrees_root, "worktree root")?;
+    std::fs::create_dir_all(&worktrees_root)
+        .map_err(|error| format!("Failed to create worktree root: {error}"))?;
+
+    let repo_worktrees = worktrees_root.join(repo_name);
+    reject_symlink(&repo_worktrees, "repository worktree directory")?;
+    std::fs::create_dir_all(&repo_worktrees)
+        .map_err(|error| format!("Failed to create worktree directory: {error}"))?;
+    let authorized_destination_root = repo_worktrees
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve worktree directory: {error}"))?;
+    let worktree_path = authorized_destination_root.join(branch_slug);
 
     if worktree_path.exists() {
-        return Err(format!("Worktree path already exists: {}", worktree_path.display()));
-    }
-
-    if let Some(parent) = worktree_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create worktree directory: {e}"))?;
+        return Err(format!(
+            "Worktree path already exists: {}",
+            worktree_path.display()
+        ));
     }
 
     let worktree_path_string = worktree_path.to_string_lossy().to_string();
     let output = Command::new("git")
-        .args(["-C", path, "worktree", "add", "-b", branch_name, &worktree_path_string])
+        .args([
+            "-C",
+            path,
+            "worktree",
+            "add",
+            "-b",
+            branch_name,
+            &worktree_path_string,
+        ])
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -332,6 +452,18 @@ pub fn create_worktree(path: &str, branch_name: &str) -> Result<CreatedWorktree,
         path: worktree_path_string,
         branch: branch_name.to_string(),
     })
+}
+
+fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
+            "Refusing to use symlinked {label}: {}",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Could not inspect {}: {error}", path.display())),
+    }
 }
 
 // ── Changed files (porcelain v2 parsing) ────────────────────────────
@@ -385,7 +517,10 @@ pub fn changed_files(path: &str) -> Result<Vec<ChangedFile>, String> {
             let parts: Vec<&str> = entry.splitn(9, ' ').collect();
             if parts.len() >= 9 {
                 let xy = parts[1].as_bytes();
-                if xy.len() < 2 { i += 1; continue; }
+                if xy.len() < 2 {
+                    i += 1;
+                    continue;
+                }
                 let file_path = parts[8].to_string();
 
                 if xy[0] != b'.' {
@@ -411,7 +546,10 @@ pub fn changed_files(path: &str) -> Result<Vec<ChangedFile>, String> {
             let parts: Vec<&str> = entry.splitn(10, ' ').collect();
             if parts.len() >= 10 {
                 let xy = parts[1].as_bytes();
-                if xy.len() < 2 { i += 1; continue; }
+                if xy.len() < 2 {
+                    i += 1;
+                    continue;
+                }
                 let file_path = parts[9].to_string();
                 // The original path follows as the next NUL-delimited field
                 let old_path = entries.get(i + 1).map(|s| s.to_string());
@@ -519,11 +657,15 @@ pub fn list_files(path: &str) -> Result<Vec<String>, String> {
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
             let file_name = entry.file_name();
-            let Some(name) = file_name.to_str() else { continue };
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
             if !is_root_env_file(name) {
                 continue;
             }
-            let Ok(file_type) = entry.file_type() else { continue };
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
             if !file_type.is_file() {
                 continue;
             }
@@ -544,9 +686,11 @@ fn is_root_env_file(name: &str) -> bool {
 /// - "staged"  — read from the git index (`git show :path`)
 /// - "head"    — read from HEAD (`git show HEAD:path`), used for deleted files
 pub fn file_contents(path: &str, file_path: &str, source: &str) -> Result<String, String> {
+    let root = Path::new(path);
+    let file_argument = authorized_file_argument(file_path)?;
     match source {
         "working" => {
-            let full_path = std::path::Path::new(path).join(file_path);
+            let full_path = authorized_working_file(root, &file_argument)?;
             let metadata = std::fs::metadata(&full_path)
                 .map_err(|e| format!("Cannot read {file_path}: {e}"))?;
             if metadata.len() > MAX_FILE_PREVIEW_BYTES {
@@ -556,15 +700,15 @@ pub fn file_contents(path: &str, file_path: &str, source: &str) -> Result<String
                     MAX_FILE_PREVIEW_BYTES
                 ));
             }
-            let bytes = std::fs::read(&full_path)
-                .map_err(|e| format!("Cannot read {file_path}: {e}"))?;
+            let bytes =
+                std::fs::read(&full_path).map_err(|e| format!("Cannot read {file_path}: {e}"))?;
             decode_preview_bytes(bytes, file_path)
         }
         "staged" | "head" => {
             let spec = if source == "staged" {
-                format!(":{file_path}")
+                format!(":{file_argument}")
             } else {
-                format!("HEAD:{file_path}")
+                format!("HEAD:{file_argument}")
             };
             let output = Command::new("git")
                 .args(["-C", path, "show", &spec])
@@ -587,29 +731,23 @@ pub fn file_contents(path: &str, file_path: &str, source: &str) -> Result<String
 }
 
 pub fn file_diff(path: &str, file_path: &str, staged: bool) -> Result<String, String> {
+    let file_path = authorized_file_argument(file_path)?;
     let output = if staged {
         Command::new("git")
-            .args(["-C", path, "diff", "--cached", "--", file_path])
+            .args(["-C", path, "diff", "--cached", "--", &file_path])
             .output()
             .map_err(|e| e.to_string())?
     } else {
         // Try normal diff first
         let result = Command::new("git")
-            .args(["-C", path, "diff", "--", file_path])
+            .args(["-C", path, "diff", "--", &file_path])
             .output()
             .map_err(|e| e.to_string())?;
 
         if result.status.success() && result.stdout.is_empty() {
             // Might be untracked — use diff against /dev/null
             Command::new("git")
-                .args([
-                    "-C",
-                    path,
-                    "diff",
-                    "--no-index",
-                    "/dev/null",
-                    file_path,
-                ])
+                .args(["-C", path, "diff", "--no-index", "/dev/null", &file_path])
                 .output()
                 .map_err(|e| e.to_string())?
         } else {
@@ -705,8 +843,9 @@ pub fn diff_stats(path: &str) -> Result<Vec<DiffFileStat>, String> {
 }
 
 pub fn stage_file(path: &str, file_path: &str) -> Result<(), String> {
+    let file_path = authorized_file_argument(file_path)?;
     let output = Command::new("git")
-        .args(["-C", path, "add", "--", file_path])
+        .args(["-C", path, "add", "--", &file_path])
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -744,8 +883,9 @@ pub fn commit(path: &str, message: &str) -> Result<(), String> {
 }
 
 pub fn unstage_file(path: &str, file_path: &str) -> Result<(), String> {
+    let file_path = authorized_file_argument(file_path)?;
     let output = Command::new("git")
-        .args(["-C", path, "restore", "--staged", "--", file_path])
+        .args(["-C", path, "restore", "--staged", "--", &file_path])
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -793,4 +933,234 @@ pub fn create_branch(path: &str, branch_name: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn authorized_project_path(
+    services: &HostServices,
+    requested_path: &str,
+) -> Result<String, String> {
+    root_argument(&services.project_root(requested_path)?)
+}
+
+mod commands {
+    use super::*;
+
+    #[tauri::command]
+    pub async fn is_git_repo(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<bool, String> {
+        let path = authorized_project_path(&services, &path)?;
+        Ok(super::is_git_repo(&path))
+    }
+
+    #[tauri::command]
+    pub async fn git_init(services: State<'_, HostServices>, path: String) -> Result<(), String> {
+        let path = authorized_project_path(&services, &path)?;
+        init_repo(&path)
+    }
+
+    #[tauri::command]
+    pub async fn git_current_branch(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<String, String> {
+        let path = authorized_project_path(&services, &path)?;
+        current_branch(&path)
+    }
+
+    #[tauri::command]
+    pub async fn git_list_branches(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<Vec<String>, String> {
+        let path = authorized_project_path(&services, &path)?;
+        list_branches(&path)
+    }
+
+    #[tauri::command]
+    pub async fn git_push_branch(
+        services: State<'_, HostServices>,
+        path: String,
+        branch: String,
+    ) -> Result<(), String> {
+        let path = authorized_project_path(&services, &path)?;
+        push_branch(&path, &branch)
+    }
+
+    #[tauri::command]
+    pub async fn git_list_worktrees(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<Vec<WorktreeEntry>, String> {
+        let path = authorized_project_path(&services, &path)?;
+        list_worktrees(&path)
+    }
+
+    #[tauri::command]
+    pub async fn git_create_worktree(
+        services: State<'_, HostServices>,
+        path: String,
+        branch_name: String,
+    ) -> Result<CreatedWorktree, String> {
+        let path = authorized_project_path(&services, &path)?;
+        create_worktree(&path, &branch_name)
+    }
+
+    #[tauri::command]
+    pub async fn git_status(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<GitStatus, String> {
+        let path = authorized_project_path(&services, &path)?;
+        Ok(status(&path))
+    }
+
+    #[tauri::command]
+    pub async fn git_changed_files(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<Vec<ChangedFile>, String> {
+        let path = authorized_project_path(&services, &path)?;
+        changed_files(&path)
+    }
+
+    #[tauri::command]
+    pub async fn git_file_diff(
+        services: State<'_, HostServices>,
+        path: String,
+        file_path: String,
+        staged: bool,
+    ) -> Result<String, String> {
+        let path = authorized_project_path(&services, &path)?;
+        file_diff(&path, &file_path, staged)
+    }
+
+    #[tauri::command]
+    pub async fn git_file_contents(
+        services: State<'_, HostServices>,
+        path: String,
+        file_path: String,
+        source: String,
+    ) -> Result<String, String> {
+        let path = authorized_project_path(&services, &path)?;
+        file_contents(&path, &file_path, &source)
+    }
+
+    #[tauri::command]
+    pub async fn git_list_files(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<Vec<String>, String> {
+        let path = authorized_project_path(&services, &path)?;
+        list_files(&path)
+    }
+
+    #[tauri::command]
+    pub async fn git_stage_file(
+        services: State<'_, HostServices>,
+        path: String,
+        file_path: String,
+    ) -> Result<(), String> {
+        let path = authorized_project_path(&services, &path)?;
+        stage_file(&path, &file_path)
+    }
+
+    #[tauri::command]
+    pub async fn git_stage_all(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<(), String> {
+        let path = authorized_project_path(&services, &path)?;
+        stage_all(&path)
+    }
+
+    #[tauri::command]
+    pub async fn git_commit(
+        services: State<'_, HostServices>,
+        path: String,
+        message: String,
+    ) -> Result<(), String> {
+        let path = authorized_project_path(&services, &path)?;
+        commit(&path, &message)
+    }
+
+    #[tauri::command]
+    pub async fn git_unstage_file(
+        services: State<'_, HostServices>,
+        path: String,
+        file_path: String,
+    ) -> Result<(), String> {
+        let path = authorized_project_path(&services, &path)?;
+        unstage_file(&path, &file_path)
+    }
+
+    #[tauri::command]
+    pub async fn git_unstage_all(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<(), String> {
+        let path = authorized_project_path(&services, &path)?;
+        unstage_all(&path)
+    }
+
+    #[tauri::command]
+    pub async fn git_switch_branch(
+        services: State<'_, HostServices>,
+        path: String,
+        branch_name: String,
+    ) -> Result<(), String> {
+        let path = authorized_project_path(&services, &path)?;
+        switch_branch(&path, &branch_name)
+    }
+
+    #[tauri::command]
+    pub async fn git_create_branch(
+        services: State<'_, HostServices>,
+        path: String,
+        branch_name: String,
+    ) -> Result<(), String> {
+        let path = authorized_project_path(&services, &path)?;
+        create_branch(&path, &branch_name)
+    }
+
+    #[tauri::command]
+    pub async fn git_diff_stats(
+        services: State<'_, HostServices>,
+        path: String,
+    ) -> Result<Vec<DiffFileStat>, String> {
+        let path = authorized_project_path(&services, &path)?;
+        diff_stats(&path)
+    }
+}
+
+pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
+    tauri::plugin::Builder::new(PLUGIN_NAME)
+        .setup(move |app, _api| {
+            app.manage(services.clone());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::is_git_repo,
+            commands::git_init,
+            commands::git_current_branch,
+            commands::git_list_branches,
+            commands::git_push_branch,
+            commands::git_list_worktrees,
+            commands::git_create_worktree,
+            commands::git_status,
+            commands::git_changed_files,
+            commands::git_file_diff,
+            commands::git_file_contents,
+            commands::git_list_files,
+            commands::git_stage_file,
+            commands::git_stage_all,
+            commands::git_commit,
+            commands::git_unstage_file,
+            commands::git_unstage_all,
+            commands::git_switch_branch,
+            commands::git_create_branch,
+            commands::git_diff_stats,
+        ])
+        .build()
 }

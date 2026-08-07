@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, before, beforeEach, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +36,37 @@ const nativePlugin: Plugin = {
     `;
   },
 };
+
+test("frontend Git calls use the namespaced plugin command surface", () => {
+  const tauriClient = readFileSync(
+    fileURLToPath(new URL("../../src/lib/tauri.ts", import.meta.url)),
+    "utf8",
+  );
+  const commands = [
+    "is_git_repo",
+    "git_init",
+    "git_current_branch",
+    "git_list_branches",
+    "git_list_worktrees",
+    "git_create_worktree",
+    "git_status",
+    "git_changed_files",
+    "git_file_diff",
+    "git_file_contents",
+    "git_list_files",
+    "git_switch_branch",
+    "git_create_branch",
+    "git_diff_stats",
+  ];
+
+  for (const command of commands) {
+    assert.match(tauriClient, new RegExp(`plugin:shep-git\\|${command}`));
+    assert.doesNotMatch(
+      tauriClient,
+      new RegExp(`invoke(?:<[^>]+>)?\\(\\s*[\"']${command}[\"']`),
+    );
+  }
+});
 
 let vite: ViteDevServer;
 let useGitStore: GitStoreModule["useGitStore"];

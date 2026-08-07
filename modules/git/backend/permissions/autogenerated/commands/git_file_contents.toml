@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-git-file-contents"
+description = "Enables the git_file_contents command without any pre-configured scope."
+commands.allow = ["git_file_contents"]
+
+[[permission]]
+identifier = "deny-git-file-contents"
+description = "Denies the git_file_contents command without any pre-configured scope."
+commands.deny = ["git_file_contents"]

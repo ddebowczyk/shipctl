@@ -23,6 +23,33 @@
             "shep-skills:allow-setup-skill",
             "shep-skills:allow-remove-skill"
           ]
+        },
+        {
+          "identifier": "git",
+          "description": "Enables the internal Git module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-git:allow-is-git-repo",
+            "shep-git:allow-git-init",
+            "shep-git:allow-git-current-branch",
+            "shep-git:allow-git-list-branches",
+            "shep-git:allow-git-push-branch",
+            "shep-git:allow-git-list-worktrees",
+            "shep-git:allow-git-create-worktree",
+            "shep-git:allow-git-status",
+            "shep-git:allow-git-changed-files",
+            "shep-git:allow-git-file-diff",
+            "shep-git:allow-git-file-contents",
+            "shep-git:allow-git-list-files",
+            "shep-git:allow-git-stage-file",
+            "shep-git:allow-git-stage-all",
+            "shep-git:allow-git-commit",
+            "shep-git:allow-git-unstage-file",
+            "shep-git:allow-git-unstage-all",
+            "shep-git:allow-git-switch-branch",
+            "shep-git:allow-git-create-branch",
+            "shep-git:allow-git-diff-stats"
+          ]
         }
       ]
     }

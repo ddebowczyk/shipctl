@@ -1,0 +1,39 @@
+{
+  "app": {
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "todos",
+          "description": "Enables the internal TODO module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-todos:allow-read-todos",
+            "shep-todos:allow-toggle-todo",
+            "shep-todos:allow-add-todo",
+            "shep-todos:allow-move-todo"
+          ]
+        },
+        {
+          "identifier": "ports",
+          "description": "Enables the internal Ports module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-ports:allow-list-listening-ports",
+            "shep-ports:allow-kill-port"
+          ]
+        },
+        {
+          "identifier": "skills",
+          "description": "Enables the internal Skills module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shep-skills:allow-list-skills",
+            "shep-skills:allow-setup-skill",
+            "shep-skills:allow-remove-skill"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -15,5 +15,8 @@ pub fn install<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         crate::skills_module::host_services(),
     ));
 
+    #[cfg(feature = "git-module")]
+    let builder = builder.plugin(shep_module_git::init(crate::git_module::host_services()));
+
     builder
 }

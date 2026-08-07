@@ -128,6 +128,9 @@ capability ceiling.
 - [25-generic-project-rails.md](./25-generic-project-rails.md) records the
   capability-neutral facts, project layout, and interactive action contracts
   plus the temporary Git adapters that preserve behavior during extraction.
+- [26-git-native-extraction.md](./26-git-native-extraction.md) records the
+  namespaced Git plugin, registered-project authority, relative-file security
+  policy, flat-command removal, and Git-disabled native build.
 
 ## Target dependency shape
 

@@ -13,8 +13,6 @@ use crate::assistant_sessions::{
     PrepareAssistantSession, SessionMode,
 };
 use crate::fonts::{self, FontFaceData, FontFamily};
-use crate::git;
-use crate::git::{ChangedFile, CreatedWorktree, DiffFileStat, GitStatus, WorktreeEntry};
 use crate::pty::manager::PtyManager;
 use crate::pty::session::{PtyColorTheme, PtyOutput};
 use crate::usage::{
@@ -604,108 +602,6 @@ pub fn watch_repo(path: &str, watcher: State<'_, GitWatcher>) -> Result<(), Stri
 #[tauri::command]
 pub fn unwatch_repo(path: &str, watcher: State<'_, GitWatcher>) -> Result<(), String> {
     watcher.unwatch(path)
-}
-
-// ── Git commands (async — runs on Tauri thread pool, not main thread) ──
-
-#[tauri::command]
-pub async fn is_git_repo(path: String) -> bool {
-    git::is_git_repo(&path)
-}
-
-#[tauri::command]
-pub async fn git_init(path: String) -> Result<(), String> {
-    git::init_repo(&path)
-}
-
-#[tauri::command]
-pub async fn git_current_branch(path: String) -> Result<String, String> {
-    git::current_branch(&path)
-}
-
-#[tauri::command]
-pub async fn git_list_branches(path: String) -> Result<Vec<String>, String> {
-    git::list_branches(&path)
-}
-
-#[tauri::command]
-pub async fn git_push_branch(path: String, branch: String) -> Result<(), String> {
-    git::push_branch(&path, &branch)
-}
-
-#[tauri::command]
-pub async fn git_list_worktrees(path: String) -> Result<Vec<WorktreeEntry>, String> {
-    git::list_worktrees(&path)
-}
-
-#[tauri::command]
-pub async fn git_create_worktree(path: String, branch_name: String) -> Result<CreatedWorktree, String> {
-    git::create_worktree(&path, &branch_name)
-}
-
-#[tauri::command]
-pub async fn git_status(path: String) -> GitStatus {
-    git::status(&path)
-}
-
-#[tauri::command]
-pub async fn git_changed_files(path: String) -> Result<Vec<ChangedFile>, String> {
-    git::changed_files(&path)
-}
-
-#[tauri::command]
-pub async fn git_file_diff(path: String, file_path: String, staged: bool) -> Result<String, String> {
-    git::file_diff(&path, &file_path, staged)
-}
-
-#[tauri::command]
-pub async fn git_file_contents(path: String, file_path: String, source: String) -> Result<String, String> {
-    git::file_contents(&path, &file_path, &source)
-}
-
-#[tauri::command]
-pub async fn git_list_files(path: String) -> Result<Vec<String>, String> {
-    git::list_files(&path)
-}
-
-#[tauri::command]
-pub async fn git_stage_file(path: String, file_path: String) -> Result<(), String> {
-    git::stage_file(&path, &file_path)
-}
-
-#[tauri::command]
-pub async fn git_stage_all(path: String) -> Result<(), String> {
-    git::stage_all(&path)
-}
-
-#[tauri::command]
-pub async fn git_commit(path: String, message: String) -> Result<(), String> {
-    git::commit(&path, &message)
-}
-
-#[tauri::command]
-pub async fn git_unstage_file(path: String, file_path: String) -> Result<(), String> {
-    git::unstage_file(&path, &file_path)
-}
-
-#[tauri::command]
-pub async fn git_unstage_all(path: String) -> Result<(), String> {
-    git::unstage_all(&path)
-}
-
-#[tauri::command]
-pub async fn git_switch_branch(path: String, branch_name: String) -> Result<(), String> {
-    git::switch_branch(&path, &branch_name)
-}
-
-#[tauri::command]
-pub async fn git_create_branch(path: String, branch_name: String) -> Result<(), String> {
-    git::create_branch(&path, &branch_name)
-}
-
-#[tauri::command]
-pub async fn git_diff_stats(path: String) -> Result<Vec<DiffFileStat>, String> {
-    git::diff_stats(&path)
 }
 
 // ── System commands ────────────────────────────────────────────────

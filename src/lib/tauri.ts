@@ -285,40 +285,57 @@ export function unwatchRepo(path: string): Promise<void> {
 
 // ── Git commands ──────────────────────────────────────────────────
 
+const GIT_COMMANDS = {
+  isRepo: "plugin:shep-git|is_git_repo",
+  init: "plugin:shep-git|git_init",
+  currentBranch: "plugin:shep-git|git_current_branch",
+  listBranches: "plugin:shep-git|git_list_branches",
+  listWorktrees: "plugin:shep-git|git_list_worktrees",
+  createWorktree: "plugin:shep-git|git_create_worktree",
+  status: "plugin:shep-git|git_status",
+  changedFiles: "plugin:shep-git|git_changed_files",
+  fileDiff: "plugin:shep-git|git_file_diff",
+  fileContents: "plugin:shep-git|git_file_contents",
+  listFiles: "plugin:shep-git|git_list_files",
+  switchBranch: "plugin:shep-git|git_switch_branch",
+  createBranch: "plugin:shep-git|git_create_branch",
+  diffStats: "plugin:shep-git|git_diff_stats",
+} as const;
+
 export function isGitRepo(path: string): Promise<boolean> {
-  return invoke("is_git_repo", { path });
+  return invoke(GIT_COMMANDS.isRepo, { path });
 }
 
 export function gitInit(path: string): Promise<void> {
-  return invoke("git_init", { path });
+  return invoke(GIT_COMMANDS.init, { path });
 }
 
 export function gitCurrentBranch(path: string): Promise<string> {
-  return invoke("git_current_branch", { path });
+  return invoke(GIT_COMMANDS.currentBranch, { path });
 }
 
 export function gitListBranches(path: string): Promise<string[]> {
-  return invoke("git_list_branches", { path });
+  return invoke(GIT_COMMANDS.listBranches, { path });
 }
 
 export function gitListWorktrees(path: string): Promise<WorktreeEntry[]> {
-  return invoke("git_list_worktrees", { path });
+  return invoke(GIT_COMMANDS.listWorktrees, { path });
 }
 
 export function gitCreateWorktree(path: string, branchName: string): Promise<CreatedWorktree> {
-  return invoke("git_create_worktree", { path, branchName });
+  return invoke(GIT_COMMANDS.createWorktree, { path, branchName });
 }
 
 export function gitStatus(path: string): Promise<GitStatus> {
-  return invoke("git_status", { path });
+  return invoke(GIT_COMMANDS.status, { path });
 }
 
 export function gitChangedFiles(path: string): Promise<ChangedFile[]> {
-  return invoke("git_changed_files", { path });
+  return invoke(GIT_COMMANDS.changedFiles, { path });
 }
 
 export function gitFileDiff(path: string, filePath: string, staged: boolean): Promise<string> {
-  return invoke("git_file_diff", { path, filePath, staged });
+  return invoke(GIT_COMMANDS.fileDiff, { path, filePath, staged });
 }
 
 /** Read a file's contents for preview in file-viewer mode. `source` is one
@@ -328,26 +345,26 @@ export function gitFileContents(
   filePath: string,
   source: "working" | "staged" | "head",
 ): Promise<string> {
-  return invoke("git_file_contents", { path, filePath, source });
+  return invoke(GIT_COMMANDS.fileContents, { path, filePath, source });
 }
 
 /** List all files known to git — tracked + untracked-but-not-ignored.
  *  Returns repo-relative paths, same set a user would consider "files in
  *  this project" (build artifacts and node_modules are excluded). */
 export function gitListFiles(path: string): Promise<string[]> {
-  return invoke("git_list_files", { path });
+  return invoke(GIT_COMMANDS.listFiles, { path });
 }
 
 export function gitSwitchBranch(path: string, branchName: string): Promise<void> {
-  return invoke("git_switch_branch", { path, branchName });
+  return invoke(GIT_COMMANDS.switchBranch, { path, branchName });
 }
 
 export function gitCreateBranch(path: string, branchName: string): Promise<void> {
-  return invoke("git_create_branch", { path, branchName });
+  return invoke(GIT_COMMANDS.createBranch, { path, branchName });
 }
 
 export function gitDiffStats(path: string): Promise<DiffFileStat[]> {
-  return invoke("git_diff_stats", { path });
+  return invoke(GIT_COMMANDS.diffStats, { path });
 }
 
 // ── System commands ────────────────────────────────────────────────

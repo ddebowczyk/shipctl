@@ -2,10 +2,25 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-use crate::git;
+use shep_module_git as git;
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
+
+struct FixedProjectRoot {
+    root: PathBuf,
+}
+
+impl git::ProjectRootAuthority for FixedProjectRoot {
+    fn authorize_project_root(&self, requested_path: &str) -> Result<PathBuf, String> {
+        if requested_path == self.root.to_string_lossy() {
+            Ok(self.root.clone())
+        } else {
+            Err(format!("Project is not registered: {requested_path}"))
+        }
+    }
+}
 
 struct TempRoot(PathBuf);
 
@@ -318,4 +333,68 @@ fn large_untracked_directories_are_expanded_for_files_but_collapsed_for_status_b
         256
     );
     assert_eq!(git::status(path).untracked, 1);
+}
+
+#[test]
+fn project_authority_accepts_only_the_registered_root() {
+    let fixture = TempRoot::new("authority");
+    let registered = fixture.directory("registered").canonicalize().unwrap();
+    let services = git::HostServices::new(Arc::new(FixedProjectRoot {
+        root: registered.clone(),
+    }));
+
+    assert_eq!(
+        services.project_root(registered.to_str().unwrap()).unwrap(),
+        registered
+    );
+    assert!(services
+        .project_root(fixture.path().to_str().unwrap())
+        .unwrap_err()
+        .contains("not registered"));
+    assert!(services
+        .project_root(registered.join("child").to_string_lossy().as_ref(),)
+        .unwrap_err()
+        .contains("not registered"));
+}
+
+#[test]
+fn file_operations_reject_absolute_and_parent_traversal() {
+    let fixture = TempRoot::new("containment");
+    let repo = fixture.directory("repo");
+    let path = repo.to_str().unwrap();
+    initialize(&repo);
+    write(&repo.join("inside.txt"), "inside\n");
+
+    for file_path in [
+        "../outside.txt",
+        "/tmp/outside.txt",
+        "nested/../../outside.txt",
+    ] {
+        assert!(git::file_contents(path, file_path, "working")
+            .unwrap_err()
+            .contains("stay within the project"));
+        assert!(git::file_diff(path, file_path, false)
+            .unwrap_err()
+            .contains("stay within the project"));
+        assert!(git::stage_file(path, file_path)
+            .unwrap_err()
+            .contains("stay within the project"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn working_preview_rejects_a_symlink_escape() {
+    let fixture = TempRoot::new("symlink-escape");
+    let repo = fixture.directory("repo");
+    let outside = fixture.path().join("outside.txt");
+    initialize(&repo);
+    write(&outside, "outside\n");
+    std::os::unix::fs::symlink(&outside, repo.join("escape.txt")).unwrap();
+
+    assert!(
+        git::file_contents(repo.to_str().unwrap(), "escape.txt", "working")
+            .unwrap_err()
+            .contains("stay within the project")
+    );
 }

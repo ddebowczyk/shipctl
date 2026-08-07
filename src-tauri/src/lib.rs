@@ -2,9 +2,8 @@ mod assistant_sessions;
 mod commands;
 mod enabled_modules;
 mod fonts;
-mod git;
-#[cfg(test)]
-mod git_characterization_tests;
+#[cfg(feature = "git-module")]
+mod git_module;
 mod menu;
 mod pi_config;
 #[cfg(feature = "ports-module")]
@@ -134,26 +133,6 @@ pub fn run() {
             commands::get_home_directory,
             commands::get_default_shell,
             commands::get_computer_name,
-            commands::is_git_repo,
-            commands::git_init,
-            commands::git_current_branch,
-            commands::git_list_branches,
-            commands::git_push_branch,
-            commands::git_list_worktrees,
-            commands::git_create_worktree,
-            commands::git_status,
-            commands::git_changed_files,
-            commands::git_file_diff,
-            commands::git_file_contents,
-            commands::git_list_files,
-            commands::git_stage_file,
-            commands::git_stage_all,
-            commands::git_commit,
-            commands::git_unstage_file,
-            commands::git_unstage_all,
-            commands::git_switch_branch,
-            commands::git_create_branch,
-            commands::git_diff_stats,
             commands::check_command_exists,
             commands::get_usage_settings,
             commands::save_usage_settings,
