@@ -8,7 +8,7 @@ integration: replace
 seam: workspace.dependencies
 areas: [build, dependencies, git]
 bd: [shep-he0]
-integrated: "eadbc53"
+integrated: "4bf779e"
 ---
 
 ## What upstream did
