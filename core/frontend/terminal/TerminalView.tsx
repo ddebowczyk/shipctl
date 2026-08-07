@@ -1,12 +1,16 @@
-import { terminalCache } from "./terminalCache.ts";
+import { terminalCache, type TerminalCacheEntry } from "./terminalCache.ts";
 import { useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
-import { CanvasAddon } from "@xterm/addon-canvas";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
+import {
+  createTerminalRendererState,
+  reconcileTerminalRenderer,
+  setTerminalRendererFactories,
+} from "./terminalRenderer.ts";
+import { browserTerminalRendererFactories } from "./terminalRendererAddons.ts";
 import { writePty, resizePty, openUrl } from "@shep/core/platform";
 import {
   flushPendingOutput,
@@ -30,6 +34,12 @@ interface TerminalViewProps {
   ptyId: number;
   visible: boolean;
 }
+
+// This is the only module that constructs terminals, so registering the addon
+// factories here keeps the xterm addon bundles out of the capability's logic
+// entry point while still guaranteeing they are installed before any terminal
+// exists for the renderer seam to reconcile.
+setTerminalRendererFactories(browserTerminalRendererFactories);
 
 
 export default function TerminalView({
@@ -113,7 +123,11 @@ export default function TerminalView({
       return true; // let xterm handle normally
     });
 
-    const entry = { term, fitAddon, rendererAddon: null as WebglAddon | CanvasAddon | null };
+    const entry: TerminalCacheEntry = {
+      term,
+      fitAddon,
+      ...createTerminalRendererState(),
+    };
     terminalCache.set(ptyId, entry);
     return entry;
   }, [ptyId]);
@@ -160,29 +174,10 @@ export default function TerminalView({
       term.open(containerRef.current);
       mountedRef.current = true;
 
-      // Load renderer addon after open() so it can access the DOM.
-      // Canvas addon handles alpha compositing correctly for glass transparency.
-      // Fall back to WebGL if Canvas fails.
+      // Choose the renderer after open() so the addons can reach the DOM.
       const cached = terminalCache.get(ptyId);
-      if (cached && !cached.rendererAddon) {
-        try {
-          const canvas = new CanvasAddon();
-          term.loadAddon(canvas);
-          cached.rendererAddon = canvas;
-        } catch (err) {
-          if (import.meta.env.DEV) {
-            console.warn("Canvas renderer failed, trying WebGL:", err);
-          }
-          try {
-            const webgl = new WebglAddon();
-            term.loadAddon(webgl);
-            cached.rendererAddon = webgl;
-          } catch (err2) {
-            if (import.meta.env.DEV) {
-              console.warn("No accelerated renderer available:", err2);
-            }
-          }
-        }
+      if (cached) {
+        reconcileTerminalRenderer(term, cached, useThemeStore.getState().theme);
       }
     }
 
@@ -198,8 +193,14 @@ export default function TerminalView({
 
       // Re-apply the current theme now that the container is visible.
       // Theme changes that occurred while hidden were deferred to avoid
-      // corrupting xterm's scroll state.
-      term.options.theme = createTerminalTheme(useThemeStore.getState().theme);
+      // corrupting xterm's scroll state; the renderer was deferred with them,
+      // so reconcile it against the theme that is actually being installed.
+      const currentTheme = useThemeStore.getState().theme;
+      const rendererEntry = terminalCache.get(ptyId);
+      term.options.theme = createTerminalTheme(currentTheme);
+      if (rendererEntry) {
+        reconcileTerminalRenderer(term, rendererEntry, currentTheme);
+      }
 
       // Re-apply terminal settings (font, cursor, scrollback) that may have
       // changed while this terminal was hidden. `applyTerminalSettings` skips

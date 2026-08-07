@@ -6,6 +6,7 @@ import { resizePty } from "@shep/core/platform";
 import { terminalCache } from "./terminalCache.ts";
 import { buildCSSFontFamily } from "@shep/core/appearance";
 import { preserveTerminalViewport } from "./terminalViewport.ts";
+import { reconcileTerminalRenderer } from "./terminalRenderer.ts";
 
 // Utility to make hex colors partially transparent
 function withAlpha(hex: string, alpha: number): string {
@@ -58,8 +59,20 @@ export function applyThemeToTerminals(theme: ShepTheme): void {
     const el = entry.term.element;
     if (!el || el.offsetParent === null) continue;
 
-    entry.term.options.theme = xtermTheme;
-    entry.term.refresh(0, entry.term.rows - 1);
+    preserveTerminalViewport(entry.term, () => {
+      // Drop a renderer the incoming theme cannot use before that theme is
+      // installed, and load the accelerated one only once an opaque theme is
+      // already in place. Both transitions land in the same task, so no frame
+      // is painted by a renderer that cannot honour the background.
+      if (theme.isTransparent) {
+        reconcileTerminalRenderer(entry.term, entry, theme);
+      }
+      entry.term.options.theme = xtermTheme;
+      if (!theme.isTransparent) {
+        reconcileTerminalRenderer(entry.term, entry, theme);
+      }
+      entry.term.refresh(0, entry.term.rows - 1);
+    });
   }
 }
 

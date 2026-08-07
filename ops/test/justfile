@@ -13,6 +13,7 @@ fast:
     cd ../.. && pnpm exec node --test modules/ports/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/projectCapabilityData.test.ts core/frontend/host/tests/globalCapabilityData.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalSessions.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalRenderer.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/projectActions.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/host/tests/projectActions.test.ts core/frontend/host/tests/projectFacts.test.ts core/frontend/host/tests/moduleComposition.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/skills/frontend/tests/*.test.ts
