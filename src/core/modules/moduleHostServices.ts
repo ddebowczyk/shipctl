@@ -5,7 +5,13 @@ import type {
 
 import type { ProjectSettings } from "../../lib/types";
 import { contributedPanelTabId } from "../../lib/types";
-import { loadWorkspace, openUrl, saveWorkspace } from "../../lib/tauri";
+import {
+  getGlobalCapabilityData,
+  loadWorkspace,
+  openUrl,
+  replaceGlobalCapabilityData,
+  saveWorkspace,
+} from "../../lib/tauri";
 import { useNoticeStore } from "../../stores/useNoticeStore";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
 import { useRepoStore } from "../../stores/useRepoStore";
@@ -13,6 +19,7 @@ import { useThemeStore } from "../../stores/useThemeStore";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { modulePanelContributions, moduleSkillsProvider } from "./moduleComposition";
 import { createProjectCapabilityDataPort } from "./projectCapabilityData";
+import { createGlobalCapabilityDataPort } from "./globalCapabilityData";
 import { MODULE_TERMINAL_SESSIONS } from "./terminalSessions";
 
 let settingsSource: ReturnType<typeof useProjectSettingsStore.getState> | null = null;
@@ -66,6 +73,11 @@ const projectData = createProjectCapabilityDataPort({
   },
 });
 
+const globalData = createGlobalCapabilityDataPort({
+  read: getGlobalCapabilityData,
+  replace: replaceGlobalCapabilityData,
+});
+
 export const MODULE_HOST_SERVICES: ModuleHostServices = {
   panels: {
     open: (panelId) => {
@@ -84,6 +96,7 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
     getSnapshot: getAppearanceSnapshot,
     subscribe: (listener) => useThemeStore.subscribe(listener),
   },
+  globalData,
   projectData,
   terminalSessions: MODULE_TERMINAL_SESSIONS,
   settings: {

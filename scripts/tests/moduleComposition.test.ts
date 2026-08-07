@@ -6,6 +6,7 @@ import type { ModuleHostServices, ShepModule } from "@shep/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 import type { BuiltinGlobalSurfaceLoaders } from "../../src/core/modules/builtinGlobalSurfaceAdapters.ts";
+import type { ModuleTaskScheduler } from "../../src/core/modules/moduleComposition.ts";
 import {
   hydratePanelReference,
   PANEL_REFERENCE_SCHEMA_VERSION,
@@ -17,7 +18,10 @@ type ModuleComposition = typeof import("../../src/core/modules/moduleComposition
 let vite: ViteDevServer;
 let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
 let createEnabledGlobalSurfaceRegistry: ModuleComposition["createEnabledGlobalSurfaceRegistry"];
+let activateModules: ModuleComposition["activateModules"];
 let moduleProjectNavigationContributions: ModuleComposition["moduleProjectNavigationContributions"];
+let moduleScheduledTasks: ModuleComposition["moduleScheduledTasks"];
+let moduleSidebarContributions: ModuleComposition["moduleSidebarContributions"];
 let moduleProjectActionContributions: ModuleComposition["moduleProjectActionContributions"];
 let enabledProjectActionContributions: ModuleComposition["enabledProjectActionContributions"];
 let enabledProjectFactsProvider: ModuleComposition["enabledProjectFactsProvider"];
@@ -40,6 +44,7 @@ before(async () => {
     server: { middlewareMode: true },
   });
   ({
+    activateModules,
     createEnabledPanelRegistry,
     createEnabledGlobalSurfaceRegistry,
     enabledProjectActionContributions,
@@ -49,6 +54,8 @@ before(async () => {
     moduleProjectFactsProviders,
     moduleProjectLayoutContributions,
     moduleProjectNavigationContributions,
+    moduleScheduledTasks,
+    moduleSidebarContributions,
     moduleSettingsContributions,
     moduleSkillsProvider,
     modulePanelMigrationAliases,
@@ -107,6 +114,14 @@ const fixtureModule: ShepModule = {
       icon: { name: "test" },
     },
   ],
+  sidebar: [
+    {
+      id: "fixture.sidebar",
+      moduleId: "shep.fixture",
+      order: 10,
+      load: async () => ({ default: () => null }),
+    },
+  ],
   projectNavigation: [
     {
       id: "fixture.project-navigation",
@@ -160,6 +175,10 @@ const services = {
   appearance: {
     getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
     subscribe: () => () => undefined,
+  },
+  globalData: {
+    read: async () => undefined,
+    replace: async () => undefined,
   },
   projectData: {
     read: async () => undefined,
@@ -270,6 +289,10 @@ test("modules own tab migration metadata", () => {
 
 test("module surfaces compose without feature-specific host branches", () => {
   assert.deepEqual(
+    moduleSidebarContributions([fixtureModule]).map(({ id }) => id),
+    ["fixture.sidebar"],
+  );
+  assert.deepEqual(
     moduleProjectNavigationContributions([fixtureModule]).map(({ id }) => id),
     ["fixture.project-navigation"],
   );
@@ -285,6 +308,169 @@ test("module surfaces compose without feature-specific host branches", () => {
     moduleSettingsContributions([fixtureModule]).map(({ id }) => id),
     ["fixture.settings"],
   );
+});
+
+test("sidebar contributions are ordered, module-owned, and absent when disabled", () => {
+  const earlier: ShepModule = {
+    id: "shep.earlier",
+    version: "0",
+    sidebar: [{
+      id: "earlier.sidebar",
+      moduleId: "shep.earlier",
+      order: -10,
+      load: async () => ({ default: () => null }),
+    }],
+  };
+
+  assert.deepEqual(
+    moduleSidebarContributions([fixtureModule, earlier]).map(({ id }) => id),
+    ["earlier.sidebar", "fixture.sidebar"],
+  );
+  assert.deepEqual(moduleSidebarContributions([]), []);
+  assert.throws(
+    () => moduleSidebarContributions([{
+      ...earlier,
+      id: "shep.other",
+    }]),
+    /belongs to shep\.earlier, not shep\.other/,
+  );
+});
+
+test("module scheduling supports startup, delayed, and periodic work with cleanup", async () => {
+  const calls: string[] = [];
+  const timeouts = new Map<number, () => void>();
+  const intervals = new Map<number, () => void>();
+  const clearedTimeouts: number[] = [];
+  const clearedIntervals: number[] = [];
+  let nextHandle = 1;
+  const scheduler: ModuleTaskScheduler = {
+    setTimeout(callback) {
+      const handle = nextHandle++;
+      timeouts.set(handle, callback);
+      return handle;
+    },
+    clearTimeout(handle) {
+      clearedTimeouts.push(handle);
+      timeouts.delete(handle);
+    },
+    setInterval(callback) {
+      const handle = nextHandle++;
+      intervals.set(handle, callback);
+      return handle;
+    },
+    clearInterval(handle) {
+      clearedIntervals.push(handle);
+      intervals.delete(handle);
+    },
+  };
+  const scheduledModule: ShepModule = {
+    id: "shep.scheduled",
+    version: "0",
+    activate: () => {
+      calls.push("activate");
+      return { deactivate: () => { calls.push("deactivate"); } };
+    },
+    scheduledTasks: [
+      {
+        id: "scheduled.startup",
+        moduleId: "shep.scheduled",
+        schedule: { kind: "startup" },
+        run: () => { calls.push("startup"); },
+      },
+      {
+        id: "scheduled.delay",
+        moduleId: "shep.scheduled",
+        schedule: { kind: "delay", delayMs: 3_000 },
+        run: () => { calls.push("delay"); },
+      },
+      {
+        id: "scheduled.interval",
+        moduleId: "shep.scheduled",
+        schedule: { kind: "interval", intervalMs: 60_000 },
+        run: () => { calls.push("interval"); },
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    moduleScheduledTasks([scheduledModule]).map(({ id }) => id),
+    ["scheduled.startup", "scheduled.delay", "scheduled.interval"],
+  );
+  const deactivate = activateModules(services, [scheduledModule], scheduler);
+  await Promise.resolve();
+  assert.deepEqual(calls, ["activate", "startup"]);
+  assert.equal(timeouts.size, 1);
+  assert.equal(intervals.size, 1);
+
+  timeouts.values().next().value?.();
+  intervals.values().next().value?.();
+  await Promise.resolve();
+  assert.deepEqual(calls, ["activate", "startup", "delay", "interval"]);
+
+  await deactivate();
+  assert.deepEqual(calls, ["activate", "startup", "delay", "interval", "deactivate"]);
+  assert.deepEqual(clearedTimeouts, [1]);
+  assert.deepEqual(clearedIntervals, [2]);
+});
+
+test("disabled and invalid scheduled-task profiles fail safely", () => {
+  assert.deepEqual(moduleScheduledTasks([]), []);
+  assert.throws(
+    () => moduleScheduledTasks([{
+      id: "shep.invalid",
+      version: "0",
+      scheduledTasks: [{
+        id: "invalid.task",
+        moduleId: "shep.owner",
+        schedule: { kind: "startup" },
+        run: () => undefined,
+      }],
+    }]),
+    /belongs to shep\.owner, not shep\.invalid/,
+  );
+});
+
+test("partial scheduler registration is rolled back with module activation", async () => {
+  const calls: string[] = [];
+  const cleared: number[] = [];
+  const scheduler: ModuleTaskScheduler = {
+    setTimeout: () => 7,
+    clearTimeout: (handle) => { cleared.push(handle); },
+    setInterval: () => { throw new Error("scheduler unavailable"); },
+    clearInterval: () => undefined,
+  };
+  const module: ShepModule = {
+    id: "shep.rollback",
+    version: "0",
+    activate: () => ({ deactivate: () => { calls.push("deactivate"); } }),
+    scheduledTasks: [
+      {
+        id: "rollback.delay",
+        moduleId: "shep.rollback",
+        schedule: { kind: "delay", delayMs: 1 },
+        run: () => undefined,
+      },
+      {
+        id: "rollback.interval",
+        moduleId: "shep.rollback",
+        schedule: { kind: "interval", intervalMs: 1 },
+        run: () => undefined,
+      },
+    ],
+  };
+
+  const originalConsoleError = console.error;
+  console.error = () => undefined;
+  try {
+    const deactivate = activateModules(services, [module], scheduler);
+    await Promise.resolve();
+    await deactivate();
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.deepEqual(cleared, [7]);
+  assert.deepEqual(calls, ["deactivate"]);
 });
 
 test("project rails are optional, ordered, and absent from disabled composition", () => {

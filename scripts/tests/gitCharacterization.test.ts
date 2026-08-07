@@ -150,6 +150,10 @@ function services(autoImportWorktrees = true): ModuleHostServices {
       getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
       subscribe: () => () => undefined,
     },
+    globalData: {
+      read: async () => undefined,
+      replace: async () => undefined,
+    },
     projectData: {
       read: async () => undefined,
       replace: async () => undefined,

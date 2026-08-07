@@ -9,6 +9,7 @@ import type {
   ProjectNavigationContribution,
   ProjectRef,
   ProjectSurfaceAction,
+  SidebarContribution,
   SettingsContribution,
 } from "@shep/module-api";
 
@@ -19,6 +20,7 @@ import {
   enabledProjectLayoutContributions,
   modulePanelContributions,
   moduleProjectNavigationContributions,
+  moduleSidebarContributions,
   moduleSettingsContributions,
 } from "./moduleComposition";
 
@@ -156,6 +158,27 @@ export function ModuleProjectNavigationSurfaces({
       project={project}
       activeTabId={activeTabId}
     />
+  ));
+}
+
+function SidebarSurface({
+  contribution,
+}: {
+  readonly contribution: SidebarContribution;
+}) {
+  const Surface = useMemo(() => lazy(contribution.load), [contribution]);
+  return (
+    <ModuleSurfaceBoundary>
+      <Suspense fallback={null}>
+        <Surface services={MODULE_HOST_SERVICES} />
+      </Suspense>
+    </ModuleSurfaceBoundary>
+  );
+}
+
+export function ModuleSidebarSurfaces() {
+  return moduleSidebarContributions().map((contribution) => (
+    <SidebarSurface key={contribution.id} contribution={contribution} />
   ));
 }
 

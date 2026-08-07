@@ -83,6 +83,21 @@ impl WorkspaceManager {
         loader::save_usage_settings(settings)
     }
 
+    pub fn load_global_capability_data(
+        &self,
+        capability_id: &str,
+    ) -> Result<Option<serde_json::Value>, String> {
+        loader::load_global_capability_data(capability_id)
+    }
+
+    pub fn replace_global_capability_data(
+        &self,
+        capability_id: &str,
+        value: serde_json::Value,
+    ) -> Result<(), String> {
+        loader::replace_global_capability_data(capability_id, value)
+    }
+
     pub fn list_groups(&self) -> Result<Vec<GroupEntry>, String> {
         loader::list_groups()
     }

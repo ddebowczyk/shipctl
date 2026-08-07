@@ -170,6 +170,10 @@ capability ceiling.
 - [39-usage-characterization-and-seam.md](./39-usage-characterization-and-seam.md)
   protects provider and local-reporting semantics, settings persistence,
   refresh/failure behavior, and defines the Usage extraction boundary.
+- [40-usage-generic-host-rails.md](./40-usage-generic-host-rails.md) records the
+  generic sidebar, scheduler, and global capability-data contracts, the
+  temporary Usage adapter, and the global-config concurrency risk filed before
+  typed host ownership can be removed.
 
 ## Target dependency shape
 

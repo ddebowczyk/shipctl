@@ -14,6 +14,7 @@ import type {
   ProjectLayoutContribution,
   ProjectImportContribution,
   ProjectNavigationContribution,
+  SidebarContribution,
   SettingsContribution,
 } from "./surfaces";
 
@@ -32,12 +33,25 @@ export interface SkillsProviderContribution {
   readonly port: ModuleSkillsPort;
 }
 
+export type ModuleTaskSchedule =
+  | { readonly kind: "startup" }
+  | { readonly kind: "delay"; readonly delayMs: number }
+  | { readonly kind: "interval"; readonly intervalMs: number };
+
+export interface ModuleScheduledTask {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  readonly schedule: ModuleTaskSchedule;
+  run(services: ModuleHostServices): void | Promise<void>;
+}
+
 export interface ShepModule {
   readonly id: ModuleId;
   readonly version: string;
   readonly panels?: readonly PanelContribution[];
   readonly globalSurfaces?: readonly GlobalSurfaceContribution[];
   readonly globalNavigation?: readonly GlobalNavigationContribution[];
+  readonly sidebar?: readonly SidebarContribution[];
   readonly projectNavigation?: readonly ProjectNavigationContribution[];
   readonly projectLayout?: readonly ProjectLayoutContribution[];
   readonly projectActions?: readonly ProjectActionContribution[];
@@ -46,6 +60,7 @@ export interface ShepModule {
   readonly settings?: readonly SettingsContribution[];
   readonly skillsProvider?: SkillsProviderContribution;
   readonly projectLifecycle?: ModuleProjectLifecycle;
+  readonly scheduledTasks?: readonly ModuleScheduledTask[];
   /** Runs in module registration order before native process shutdown begins. */
   beforeShutdown?(services: ModuleHostServices): void | Promise<void>;
   activate?(host: ModuleHost): void | ModuleDeactivation;

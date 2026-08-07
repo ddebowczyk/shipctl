@@ -32,6 +32,19 @@ export interface GlobalNavigationContribution {
   readonly order?: number;
 }
 
+export interface SidebarContributionProps {
+  readonly services: ModuleHostServices;
+}
+
+export interface SidebarContribution {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  readonly order?: number;
+  readonly load: () => Promise<{
+    readonly default: ComponentType<SidebarContributionProps>;
+  }>;
+}
+
 export interface ProjectNavigationContributionProps {
   readonly project: ProjectRef;
   readonly active: boolean;

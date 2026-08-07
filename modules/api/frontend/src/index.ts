@@ -13,6 +13,7 @@ export type {
   ModuleAppearanceSnapshot,
   ModuleHostServices,
   ModuleExternalLinksPort,
+  ModuleGlobalDataPort,
   ModuleNotice,
   ModuleNoticeAction,
   ModuleNoticeOptions,
@@ -60,12 +61,16 @@ export type {
   ProjectNavigationContribution,
   ProjectNavigationContributionProps,
   ProjectSurfaceAction,
+  SidebarContribution,
+  SidebarContributionProps,
   SettingsContribution,
   SettingsContributionProps,
 } from "./surfaces";
 export type {
   ModuleDeactivation,
   ModuleHost,
+  ModuleScheduledTask,
+  ModuleTaskSchedule,
   ShepModule,
   SkillsProviderContribution,
 } from "./module";

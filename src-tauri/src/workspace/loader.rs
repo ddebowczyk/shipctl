@@ -163,6 +163,21 @@ pub fn save_usage_settings(settings: &UsageSettings) -> Result<(), String> {
     save_global_config(&config)
 }
 
+pub fn load_global_capability_data(
+    capability_id: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    load_global_config()?.capability_value(capability_id)
+}
+
+pub fn replace_global_capability_data(
+    capability_id: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let mut config = load_global_config()?;
+    config.replace_capability_value(capability_id, value)?;
+    save_global_config(&config)
+}
+
 // ── Repo operations ─────────────────────────────────────────────────
 
 pub fn list_repos() -> Result<Vec<RepoInfo>, String> {

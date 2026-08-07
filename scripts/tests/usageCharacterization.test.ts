@@ -107,15 +107,18 @@ test("snapshot and persisted-settings stores bound success and failure behavior"
   assert.match(settings, /settings: prev,[\s\S]*"Failed to save usage settings"/);
 });
 
-test("Usage remains global across project switches and refreshes on host cadence", () => {
+test("Usage remains global across project switches and refreshes on module cadence", () => {
   const shell = source("../../src/components/layout/AppShell.tsx");
+  const adapter = source("../../src/core/modules/usageHostAdapter.ts");
   const store = source("../../src/stores/useUsageStore.ts");
 
   assert.doesNotMatch(store, /useRepoStore|activeRepoPath|projectPath/);
-  assert.match(shell, /void loadUsageSettings\(\);[\s\S]*void fetchUsageSnapshots\(\)/);
-  assert.match(shell, /window\.setTimeout\([\s\S]*void fetchUsageSnapshots\(\);[\s\S]*3000\)/);
-  assert.match(shell, /window\.setInterval\([\s\S]*void refreshUsageData\(\);[\s\S]*void fetchUsageSnapshots\(\);[\s\S]*60_000\)/);
-  assert.match(shell, /listen\("usage-ingest-complete"[\s\S]*void fetchUsageSnapshots\(\)/);
+  assert.doesNotMatch(shell, /useUsageStore|useUsageSettingsStore|refreshUsageData/);
+  assert.match(adapter, /useUsageSettingsStore\.getState\(\)\.loadSettings\(\)/);
+  assert.match(adapter, /schedule: \{ kind: "delay", delayMs: 3_000 \}/);
+  assert.match(adapter, /schedule: \{ kind: "interval", intervalMs: 60_000 \}/);
+  assert.match(adapter, /await refreshUsageData\(\);[\s\S]*await fetchUsageSnapshots\(\)/);
+  assert.match(adapter, /listen\("usage-ingest-complete", fetchUsageSnapshots\)/);
 });
 
 test("native cache, unavailable states, and persisted config remain bounded", () => {

@@ -3,6 +3,7 @@ mod assistants_module;
 mod commands;
 mod enabled_modules;
 mod fonts;
+mod global_capability_data;
 #[cfg(feature = "git-module")]
 mod git_module;
 mod menu;
@@ -123,6 +124,8 @@ pub fn run() {
             commands::check_command_exists,
             commands::get_usage_settings,
             commands::save_usage_settings,
+            global_capability_data::get_global_capability_data,
+            global_capability_data::replace_global_capability_data,
             commands::get_all_usage_snapshots,
             commands::get_usage_snapshot,
             commands::get_usage_details,

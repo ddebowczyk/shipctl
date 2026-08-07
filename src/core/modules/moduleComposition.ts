@@ -2,6 +2,7 @@ import type {
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
   ModuleHostServices,
+  ModuleScheduledTask,
   ModuleSkillsPort,
   PanelContribution,
   ProjectActionContribution,
@@ -9,6 +10,7 @@ import type {
   ProjectLayoutContribution,
   ProjectImportContribution,
   ProjectNavigationContribution,
+  SidebarContribution,
   SettingsContribution,
   ShepModule,
 } from "@shep/module-api";
@@ -51,6 +53,21 @@ export function moduleGlobalNavigationContributions(
   modules: readonly ShepModule[] = ENABLED_MODULES,
 ): readonly GlobalNavigationContribution[] {
   return modules.flatMap((module) => module.globalNavigation ?? []);
+}
+
+export function moduleSidebarContributions(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): readonly SidebarContribution[] {
+  return modules
+    .flatMap((module) => (module.sidebar ?? []).map((contribution) => {
+      if (contribution.moduleId !== module.id) {
+        throw new Error(
+          `Sidebar contribution ${contribution.id} belongs to ${contribution.moduleId}, not ${module.id}`,
+        );
+      }
+      return contribution;
+    }))
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
 }
 
 export function moduleProjectNavigationContributions(
@@ -166,22 +183,107 @@ export function moduleSettingsContributions(
     .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
 }
 
+export function moduleScheduledTasks(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): readonly ModuleScheduledTask[] {
+  return modules.flatMap((module) => (module.scheduledTasks ?? []).map((task) => {
+    if (task.moduleId !== module.id) {
+      throw new Error(
+        `Scheduled task ${task.id} belongs to ${task.moduleId}, not ${module.id}`,
+      );
+    }
+    return task;
+  }));
+}
+
+export interface ModuleTaskScheduler {
+  setTimeout(callback: () => void, delayMs: number): number;
+  clearTimeout(handle: number): void;
+  setInterval(callback: () => void, intervalMs: number): number;
+  clearInterval(handle: number): void;
+}
+
+const BROWSER_TASK_SCHEDULER: ModuleTaskScheduler = {
+  setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearTimeout: (handle) => window.clearTimeout(handle),
+  setInterval: (callback, intervalMs) => window.setInterval(callback, intervalMs),
+  clearInterval: (handle) => window.clearInterval(handle),
+};
+
+function reportModuleFailure(message: string, error: unknown) {
+  if (import.meta.env.DEV) console.error(message, error);
+}
+
+function scheduleModuleTask(
+  task: ModuleScheduledTask,
+  services: ModuleHostServices,
+  scheduler: ModuleTaskScheduler,
+): () => void {
+  let active = true;
+  const run = () => {
+    void Promise.resolve()
+      .then(() => active ? task.run(services) : undefined)
+      .catch((error) => reportModuleFailure(`Scheduled task ${task.id} failed:`, error));
+  };
+
+  if (task.schedule.kind === "startup") {
+    run();
+    return () => { active = false; };
+  }
+
+  if (task.schedule.kind === "delay") {
+    if (task.schedule.delayMs < 0) {
+      throw new Error(`Scheduled task ${task.id} delay must not be negative`);
+    }
+    const handle = scheduler.setTimeout(run, task.schedule.delayMs);
+    return () => {
+      active = false;
+      scheduler.clearTimeout(handle);
+    };
+  }
+
+  if (task.schedule.intervalMs <= 0) {
+    throw new Error(`Scheduled task ${task.id} interval must be positive`);
+  }
+  const handle = scheduler.setInterval(run, task.schedule.intervalMs);
+  return () => {
+    active = false;
+    scheduler.clearInterval(handle);
+  };
+}
+
 export function activateModules(
   services: ModuleHostServices,
   modules: readonly ShepModule[] = ENABLED_MODULES,
+  scheduler: ModuleTaskScheduler = BROWSER_TASK_SCHEDULER,
 ): () => Promise<void> {
-  const deactivations = modules.flatMap((module) => {
+  const activeModules = modules.flatMap((module) => {
+    const scheduledTaskCancellations: Array<() => void> = [];
+    let deactivation: ReturnType<NonNullable<ShepModule["activate"]>> = undefined;
     try {
-      const result = module.activate?.({ panels: services.panels, services });
-      return result ? [result] : [];
+      const tasks = moduleScheduledTasks([module]);
+      deactivation = module.activate?.({ panels: services.panels, services });
+      for (const task of tasks) {
+        scheduledTaskCancellations.push(scheduleModuleTask(task, services, scheduler));
+      }
+      return [{ deactivation, scheduledTaskCancellations }];
     } catch (error) {
-      if (import.meta.env.DEV) console.error(`Module ${module.id} activation failed:`, error);
+      for (const cancel of [...scheduledTaskCancellations].reverse()) cancel();
+      if (deactivation) {
+        void Promise.resolve(deactivation.deactivate()).catch((cleanupError) =>
+          reportModuleFailure(`Module ${module.id} cleanup failed:`, cleanupError));
+      }
+      reportModuleFailure(`Module ${module.id} activation failed:`, error);
       return [];
     }
   });
   return async () => {
+    for (const { scheduledTaskCancellations } of [...activeModules].reverse()) {
+      for (const cancel of [...scheduledTaskCancellations].reverse()) cancel();
+    }
     await Promise.allSettled(
-      [...deactivations].reverse().map(({ deactivate }) => deactivate()),
+      [...activeModules].reverse().flatMap(({ deactivation }) =>
+        deactivation ? [deactivation.deactivate()] : []),
     );
   };
 }

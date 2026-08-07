@@ -23,6 +23,9 @@ pub struct GlobalConfig {
     pub sidebar: SidebarSettings,
     #[serde(default)]
     pub usage: UsageSettings,
+    /// Capability-owned top-level values remain human-editable without expanding the host schema.
+    #[serde(default, flatten)]
+    pub capability_data: HashMap<String, serde_json::Value>,
 }
 
 fn default_version() -> u32 {
@@ -41,7 +44,46 @@ impl Default for GlobalConfig {
             terminal: TerminalSettings::default(),
             sidebar: SidebarSettings::default(),
             usage: UsageSettings::default(),
+            capability_data: HashMap::new(),
         }
+    }
+}
+
+impl GlobalConfig {
+    pub fn capability_value(&self, capability_id: &str) -> Result<Option<serde_json::Value>, String> {
+        self.assert_capability_id(capability_id)?;
+        Ok(self.capability_data.get(capability_id).cloned())
+    }
+
+    pub fn replace_capability_value(
+        &mut self,
+        capability_id: &str,
+        value: serde_json::Value,
+    ) -> Result<(), String> {
+        self.assert_capability_id(capability_id)?;
+        self.capability_data.insert(capability_id.to_string(), value);
+        Ok(())
+    }
+
+    fn assert_capability_id(&self, capability_id: &str) -> Result<(), String> {
+        if capability_id.trim().is_empty() {
+            return Err("Global capability ID must not be empty".to_string());
+        }
+
+        let mut host_document = self.clone();
+        host_document.capability_data.clear();
+        let host_value = serde_yaml::to_value(host_document)
+            .map_err(|error| format!("Failed to inspect global config ownership: {error}"))?;
+        let host_owned = host_value
+            .as_mapping()
+            .is_some_and(|mapping| {
+                mapping.contains_key(serde_yaml::Value::String(capability_id.to_string()))
+            });
+        if host_owned {
+            return Err(format!("Global config key {capability_id} is host-owned data"));
+        }
+
+        Ok(())
     }
 }
 
@@ -367,7 +409,40 @@ pub struct WorkspaceConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProjectSettings, WorkspaceConfig};
+    use super::{GlobalConfig, ProjectSettings, WorkspaceConfig};
+
+    #[test]
+    fn global_config_preserves_capability_owned_top_level_values() {
+        let mut config: GlobalConfig = serde_yaml::from_str(
+            "version: 1\nfutureCapability:\n  density: compact\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.capability_value("futureCapability").unwrap(),
+            Some(serde_json::json!({ "density": "compact" })),
+        );
+        config
+            .replace_capability_value("anotherCapability", serde_json::json!({ "enabled": true }))
+            .unwrap();
+
+        let serialized = serde_yaml::to_string(&config).unwrap();
+        assert!(serialized.contains("futureCapability:"));
+        assert!(serialized.contains("density: compact"));
+        assert!(serialized.contains("anotherCapability:"));
+        assert!(serialized.contains("enabled: true"));
+    }
+
+    #[test]
+    fn global_capability_data_rejects_empty_and_host_owned_keys() {
+        let mut config = GlobalConfig::default();
+
+        assert!(config.capability_value("").unwrap_err().contains("must not be empty"));
+        assert!(config
+            .replace_capability_value("terminal", serde_json::json!({}))
+            .unwrap_err()
+            .contains("host-owned"));
+    }
 
     #[test]
     fn project_settings_preserve_capability_owned_values_without_host_fields() {

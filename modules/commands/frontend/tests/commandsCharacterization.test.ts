@@ -61,6 +61,10 @@ function fixtureServices(options: {
       getSnapshot: () => ({ themeId: "fixture", background: "#000" }),
       subscribe: () => () => undefined,
     },
+    globalData: {
+      read: async () => undefined,
+      replace: async () => undefined,
+    },
     projectData: {
       read: async (projectPath, capabilityId) => {
         calls.push(["read", projectPath, capabilityId]);

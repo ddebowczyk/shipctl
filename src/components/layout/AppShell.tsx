@@ -20,13 +20,10 @@ import {
   getUsername,
   getComputerName,
   openInEditor,
-  refreshUsageData,
   shutdownAndQuit,
 } from "../../lib/tauri";
 import { useEditorStore } from "../../stores/useEditorStore";
 import { useTerminalSettingsStore } from "../../stores/useTerminalSettingsStore";
-import { useUsageStore } from "../../stores/useUsageStore";
-import { useUsageSettingsStore } from "../../stores/useUsageSettingsStore";
 import { useUpdateStore } from "../../stores/useUpdateStore";
 import { initNotifications } from "../../lib/notifications";
 import { getErrorMessage } from "../../lib/errors";
@@ -153,8 +150,6 @@ export default function AppShell() {
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
   const { loadSettings: loadEditorSettings } = useEditorStore.getState();
   const { loadSettings: loadTerminalSettings } = useTerminalSettingsStore.getState();
-  const { fetchSnapshots: fetchUsageSnapshots } = useUsageStore.getState();
-  const { loadSettings: loadUsageSettings } = useUsageSettingsStore.getState();
 
   useEffect(() => {
     const deactivate = activateModules(MODULE_HOST_SERVICES);
@@ -173,12 +168,6 @@ export default function AppShell() {
     fetchGroups();
     void loadEditorSettings();
     void loadTerminalSettings();
-    void loadUsageSettings();
-    void fetchUsageSnapshots();
-    const usageRefreshTimer = window.setTimeout(() => {
-      void fetchUsageSnapshots();
-    }, 3000);
-    void refreshUsageData();
     void initNotifications();
     getUsername().then((name) => useUIStore.getState().setUsername(name));
     getComputerName().then((name) => useUIStore.getState().setComputerName(name));
@@ -196,25 +185,8 @@ export default function AppShell() {
     }, 3000);
     return () => {
       window.clearTimeout(updateTimer);
-      window.clearTimeout(usageRefreshTimer);
     };
-  }, [fetchRepos, fetchGroups, loadEditorSettings, loadTerminalSettings, loadUsageSettings, fetchUsageSnapshots, pushNotice]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void refreshUsageData();
-      void fetchUsageSnapshots();
-    }, 60_000);
-    return () => window.clearInterval(timer);
-  }, [fetchUsageSnapshots]);
-
-  // Auto-refresh when background ingest completes
-  useEffect(() => {
-    const unlisten = listen("usage-ingest-complete", () => {
-      void fetchUsageSnapshots();
-    });
-    return () => { unlisten.then((f) => f()); };
-  }, [fetchUsageSnapshots]);
+  }, [fetchRepos, fetchGroups, loadEditorSettings, loadTerminalSettings, pushNotice]);
 
   const handleSelectRepo = useCallback(
     async (repoPath: string) => {

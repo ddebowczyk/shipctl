@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "r
 import type { GlobalNavigationContribution } from "@shep/module-api";
 import type { RepoInfo, RepoGroup } from "../../lib/types";
 import { useTerminalStore } from "../../stores/useTerminalStore";
-import { useProjectFactsMap } from "../../core/modules";
+import { ModuleSidebarSurfaces, useProjectFactsMap } from "../../core/modules";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
 import { useSidebarSettingsStore } from "../../stores/useSidebarSettingsStore";
 import ProjectList from "./ProjectList";
 import SidebarFooter from "./SidebarFooter";
-import SidebarUsage from "./SidebarUsage";
 import AgentSessionList, { type AgentSessionItem } from "./AgentSessionList";
 import SidebarSectionToggle from "./SidebarSectionToggle";
 
@@ -214,7 +213,7 @@ export default function Sidebar({
           )}
         </div>
       </div>
-      <SidebarUsage />
+      <ModuleSidebarSurfaces />
       <SidebarFooter navigation={globalNavigation} />
     </div>
   );

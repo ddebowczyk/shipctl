@@ -63,6 +63,11 @@ export interface ModuleProjectDataPort {
   ): Promise<void>;
 }
 
+export interface ModuleGlobalDataPort {
+  read(capabilityId: string): Promise<unknown>;
+  replace(capabilityId: string, value: unknown): Promise<void>;
+}
+
 export interface ModuleTerminalSessionIcon {
   readonly src: string;
   readonly alt?: string;
@@ -212,6 +217,7 @@ export interface ModuleTerminalSessionsPort {
 export interface ModuleHostServices {
   readonly panels: PanelHostPort;
   readonly appearance: ModuleAppearancePort;
+  readonly globalData: ModuleGlobalDataPort;
   readonly projectData: ModuleProjectDataPort;
   readonly terminalSessions: ModuleTerminalSessionsPort;
   readonly settings: ModuleSettingsPort;
