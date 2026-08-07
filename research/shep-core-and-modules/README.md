@@ -167,6 +167,9 @@ capability ceiling.
 - [38-assistants-plugout-gate.md](./38-assistants-plugout-gate.md) records the
   enabled, disabled, and physically source-absent Assistant verification
   matrix, generic new-session menu behavior, and persisted-tab recovery.
+- [39-usage-characterization-and-seam.md](./39-usage-characterization-and-seam.md)
+  protects provider and local-reporting semantics, settings persistence,
+  refresh/failure behavior, and defines the Usage extraction boundary.
 
 ## Target dependency shape
 

@@ -1,0 +1,82 @@
+{
+  "ready": {
+    "provider": "claude",
+    "status": "ready",
+    "fetchedAt": "2026-08-07T04:00:00Z",
+    "summaryWindows": [
+      {
+        "provider": "claude",
+        "windowId": "claude-seven-day",
+        "window": "7d",
+        "label": "7 day",
+        "scope": "plan",
+        "limit": 100,
+        "used": 61,
+        "sourceType": "provider",
+        "confidence": "official",
+        "costKind": "included",
+        "usedPercent": 61,
+        "remainingPercent": 39,
+        "resetAt": "2026-08-09T12:00:00Z",
+        "tokenTotal": null,
+        "paceStatus": null
+      },
+      {
+        "provider": "claude",
+        "windowId": "claude-five-hour",
+        "window": "5h",
+        "label": "5 hour",
+        "scope": "plan",
+        "limit": 100,
+        "used": 24,
+        "sourceType": "provider",
+        "confidence": "official",
+        "costKind": "included",
+        "usedPercent": 24,
+        "remainingPercent": 76,
+        "resetAt": "2026-08-07T06:00:00Z",
+        "tokenTotal": null,
+        "paceStatus": null
+      }
+    ],
+    "extraWindows": [],
+    "localDetails": null,
+    "error": null
+  },
+  "localOnly": {
+    "provider": "opencode",
+    "status": "ready",
+    "fetchedAt": "2026-08-07T04:00:00Z",
+    "summaryWindows": [
+      {
+        "provider": "opencode",
+        "windowId": "opencode-local-30d",
+        "window": "30d",
+        "label": "30d",
+        "scope": "reporting",
+        "limit": null,
+        "used": null,
+        "sourceType": "local",
+        "confidence": "observed",
+        "costKind": "mixed",
+        "usedPercent": null,
+        "remainingPercent": null,
+        "resetAt": null,
+        "tokenTotal": 12000,
+        "paceStatus": null
+      }
+    ],
+    "extraWindows": [],
+    "localDetails": null,
+    "error": null
+  },
+  "unavailable": {
+    "provider": "antigravity",
+    "status": "unavailable",
+    "fetchedAt": "2026-08-07T04:00:00Z",
+    "summaryWindows": [],
+    "extraWindows": [],
+    "localDetails": null,
+    "error": "synthetic provider unavailable"
+  }
+}
