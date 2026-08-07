@@ -5,6 +5,8 @@ import type {
   ModuleSkillsPort,
   PanelContribution,
   ProjectActionContribution,
+  ProjectFactsProviderContribution,
+  ProjectLayoutContribution,
   ProjectNavigationContribution,
   SettingsContribution,
   ShepModule,
@@ -21,6 +23,11 @@ import {
 import { ENABLED_MODULES } from "./enabledModules";
 import { GlobalSurfaceRegistry } from "./globalSurfaceRegistry";
 import { PanelRegistry } from "./panelRegistry";
+import {
+  BUILTIN_PROJECT_ACTION_CONTRIBUTIONS,
+  BUILTIN_PROJECT_FACTS_PROVIDERS,
+  BUILTIN_PROJECT_LAYOUT_CONTRIBUTIONS,
+} from "./builtinProjectAdapters";
 
 export function modulePanelContributions(
   modules: readonly ShepModule[] = ENABLED_MODULES,
@@ -66,6 +73,64 @@ export function moduleProjectActionContributions(
   return modules
     .flatMap((module) => module.projectActions ?? [])
     .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+}
+
+export function enabledProjectActionContributions(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+  builtin: readonly ProjectActionContribution[] = BUILTIN_PROJECT_ACTION_CONTRIBUTIONS,
+): readonly ProjectActionContribution[] {
+  return [...builtin, ...moduleProjectActionContributions(modules)]
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+}
+
+export function moduleProjectLayoutContributions(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): readonly ProjectLayoutContribution[] {
+  return modules
+    .flatMap((module) => module.projectLayout ?? [])
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+}
+
+export function enabledProjectLayoutContributions(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+  builtin: readonly ProjectLayoutContribution[] = BUILTIN_PROJECT_LAYOUT_CONTRIBUTIONS,
+): readonly ProjectLayoutContribution[] {
+  return [...builtin, ...moduleProjectLayoutContributions(modules)]
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+}
+
+export function moduleProjectFactsProviders(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): readonly ProjectFactsProviderContribution[] {
+  return modules.flatMap((module) => {
+    const provider = module.projectFactsProvider;
+    if (!provider) return [];
+    if (provider.moduleId !== module.id) {
+      throw new Error(
+        `Project facts provider ${provider.id} belongs to ${provider.moduleId}, not ${module.id}`,
+      );
+    }
+    return [provider];
+  });
+}
+
+export function selectProjectFactsProvider(
+  providers: readonly ProjectFactsProviderContribution[],
+): ProjectFactsProviderContribution | null {
+  if (providers.length > 1) {
+    throw new Error("Only one enabled provider may supply project facts");
+  }
+  return providers[0] ?? null;
+}
+
+export function enabledProjectFactsProvider(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+  builtin: readonly ProjectFactsProviderContribution[] = BUILTIN_PROJECT_FACTS_PROVIDERS,
+): ProjectFactsProviderContribution | null {
+  return selectProjectFactsProvider([
+    ...builtin,
+    ...moduleProjectFactsProviders(modules),
+  ]);
 }
 
 export function moduleSkillsProvider(

@@ -19,10 +19,16 @@ let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
 let createEnabledGlobalSurfaceRegistry: ModuleComposition["createEnabledGlobalSurfaceRegistry"];
 let moduleProjectNavigationContributions: ModuleComposition["moduleProjectNavigationContributions"];
 let moduleProjectActionContributions: ModuleComposition["moduleProjectActionContributions"];
+let enabledProjectActionContributions: ModuleComposition["enabledProjectActionContributions"];
+let enabledProjectFactsProvider: ModuleComposition["enabledProjectFactsProvider"];
+let enabledProjectLayoutContributions: ModuleComposition["enabledProjectLayoutContributions"];
+let moduleProjectFactsProviders: ModuleComposition["moduleProjectFactsProviders"];
+let moduleProjectLayoutContributions: ModuleComposition["moduleProjectLayoutContributions"];
 let moduleSettingsContributions: ModuleComposition["moduleSettingsContributions"];
 let moduleSkillsProvider: ModuleComposition["moduleSkillsProvider"];
 let moduleLegacyPanelDefinitions: ModuleComposition["moduleLegacyPanelDefinitions"];
 let notifyModulesFilesystemChanged: ModuleComposition["notifyModulesFilesystemChanged"];
+let selectProjectFactsProvider: ModuleComposition["selectProjectFactsProvider"];
 
 before(async () => {
   vite = await createServer({
@@ -34,12 +40,18 @@ before(async () => {
   ({
     createEnabledPanelRegistry,
     createEnabledGlobalSurfaceRegistry,
+    enabledProjectActionContributions,
+    enabledProjectFactsProvider,
+    enabledProjectLayoutContributions,
     moduleProjectActionContributions,
+    moduleProjectFactsProviders,
+    moduleProjectLayoutContributions,
     moduleProjectNavigationContributions,
     moduleSettingsContributions,
     moduleSkillsProvider,
     moduleLegacyPanelDefinitions,
     notifyModulesFilesystemChanged,
+    selectProjectFactsProvider,
   } = await vite.ssrLoadModule(
     "/src/core/modules/moduleComposition.ts",
   ) as ModuleComposition);
@@ -113,6 +125,20 @@ const fixtureModule: ShepModule = {
       getGroup: () => ({ label: "Fixture", actions: [] }),
     },
   ],
+  projectLayout: [
+    {
+      id: "fixture.project-layout",
+      moduleId: "shep.fixture",
+      slot: "workspace.trailing",
+      order: 5,
+      load: async () => ({ default: () => null }),
+    },
+  ],
+  projectFactsProvider: {
+    id: "fixture.project-facts",
+    moduleId: "shep.fixture",
+    getFacts: () => ({ revision: { label: "main", state: "clean" } }),
+  },
   settings: [
     {
       id: "fixture.settings",
@@ -208,8 +234,59 @@ test("module surfaces compose without feature-specific host branches", () => {
     ["fixture.project-actions"],
   );
   assert.deepEqual(
+    moduleProjectLayoutContributions([fixtureModule]).map(({ id }) => id),
+    ["fixture.project-layout"],
+  );
+  assert.deepEqual(
     moduleSettingsContributions([fixtureModule]).map(({ id }) => id),
     ["fixture.settings"],
+  );
+});
+
+test("project rails are optional, ordered, and absent from disabled composition", () => {
+  assert.deepEqual(
+    enabledProjectActionContributions([fixtureModule], []).map(({ id }) => id),
+    ["fixture.project-actions"],
+  );
+  assert.deepEqual(
+    enabledProjectLayoutContributions([fixtureModule], []).map(({ id }) => id),
+    ["fixture.project-layout"],
+  );
+  assert.equal(
+    enabledProjectFactsProvider([fixtureModule], [])?.id,
+    "fixture.project-facts",
+  );
+  assert.deepEqual(enabledProjectActionContributions([], []), []);
+  assert.deepEqual(enabledProjectLayoutContributions([], []), []);
+  assert.equal(enabledProjectFactsProvider([], []), null);
+});
+
+test("temporary Git adapters keep stable contribution identity and existing menu order", () => {
+  assert.deepEqual(
+    enabledProjectActionContributions().map(({ id }) => id),
+    ["skills.project-actions", "git.project-actions"],
+  );
+  assert.deepEqual(
+    enabledProjectLayoutContributions().map(({ id, slot }) => ({ id, slot })),
+    [{ id: "git.diff-summary", slot: "workspace.trailing" }],
+  );
+  assert.equal(enabledProjectFactsProvider()?.id, "git.project-facts");
+});
+
+test("project facts selection is singular and module-owned", () => {
+  const [provider] = moduleProjectFactsProviders([fixtureModule]);
+  assert.equal(selectProjectFactsProvider([provider]), provider);
+  assert.equal(selectProjectFactsProvider([]), null);
+  assert.throws(
+    () => selectProjectFactsProvider([provider, provider]),
+    /Only one enabled provider/,
+  );
+  assert.throws(
+    () => moduleProjectFactsProviders([{
+      ...fixtureModule,
+      id: "shep.other",
+    }]),
+    /belongs to shep.fixture, not shep.other/,
   );
 });
 

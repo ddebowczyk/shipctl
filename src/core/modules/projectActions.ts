@@ -6,7 +6,7 @@ import type {
   ProjectRef,
 } from "@shep/module-api";
 
-import { moduleProjectActionContributions } from "./moduleComposition";
+import { enabledProjectActionContributions } from "./moduleComposition";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices";
 
 export function resolveProjectActionGroups(
@@ -62,7 +62,7 @@ export function useModuleProjectActions(project: ProjectRef): {
   readonly groups: readonly ProjectActionGroup[];
   readonly refresh: () => Promise<void>;
 } {
-  const contributions = useMemo(() => moduleProjectActionContributions(), []);
+  const contributions = useMemo(() => enabledProjectActionContributions(), []);
   const [, render] = useReducer((revision: number) => revision + 1, 0);
 
   useEffect(

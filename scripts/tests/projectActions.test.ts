@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -134,4 +135,42 @@ test("subscriptions and cleanups isolate contribution failures", () => {
   cleanup();
 
   assert.deepEqual(calls, ["notified", "subscribed", "cleaned"]);
+});
+
+test("inline interactive actions remain data until the host opens their surface", () => {
+  const contributions: ProjectActionContribution[] = [
+    {
+      id: "fixture.interactive-actions",
+      moduleId: "fixture",
+      getGroup: () => ({
+        label: null,
+        actions: [
+          {
+            id: "fixture.interactive-action",
+            label: "Configure",
+            surface: { load: async () => ({ default: () => null }) },
+          },
+        ],
+      }),
+    },
+  ];
+
+  const [group] = resolveProjectActionGroups(project, services, contributions);
+  const [action] = group.actions;
+
+  assert.equal(group.label, null);
+  assert.equal(action.label, "Configure");
+  assert.equal(typeof action.surface?.load, "function");
+  assert.equal(action.run, undefined);
+});
+
+test("project hosts depend on generic rails instead of Git UI implementations", () => {
+  const root = fileURLToPath(new URL("../..", import.meta.url));
+  const appShell = readFileSync(`${root}/src/components/layout/AppShell.tsx`, "utf8");
+  const projectItem = readFileSync(`${root}/src/components/sidebar/ProjectItem.tsx`, "utf8");
+
+  assert.match(appShell, /ModuleProjectLayoutSurfaces/);
+  assert.doesNotMatch(appShell, /DiffSummaryPanel/);
+  assert.match(projectItem, /ModuleProjectActionSurface/);
+  assert.doesNotMatch(projectItem, /gitCreateWorktree/);
 });

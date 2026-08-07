@@ -49,17 +49,99 @@ export interface ProjectNavigationContribution {
   }>;
 }
 
-export interface ProjectAction {
+export interface ProjectFacts {
+  readonly revision?: {
+    readonly label: string;
+    readonly state: "clean" | "changed";
+  };
+  readonly lineage?: {
+    readonly parentLabel: string;
+  };
+}
+
+export interface ProjectFactsProviderContribution {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  getFacts(
+    project: ProjectRef,
+    services: ModuleHostServices,
+  ): ProjectFacts | null;
+  subscribe?(
+    listener: () => void,
+    services: ModuleHostServices,
+  ): () => void;
+  refresh?(
+    project: ProjectRef,
+    services: ModuleHostServices,
+  ): void | Promise<void>;
+}
+
+export type ProjectLayoutSlot = "workspace.trailing";
+
+export interface ProjectLayoutContributionProps {
+  readonly project: ProjectRef;
+  readonly services: ModuleHostServices;
+}
+
+export interface ProjectLayoutContribution {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  readonly slot: ProjectLayoutSlot;
+  readonly order?: number;
+  readonly load: () => Promise<{
+    readonly default: ComponentType<ProjectLayoutContributionProps>;
+  }>;
+}
+
+export interface ProjectActionSurfaceHost {
+  addProject(projectPath: string): Promise<void>;
+  moveProjectToGroup(
+    projectPath: string,
+    groupId: string | null,
+  ): Promise<void>;
+}
+
+export interface ProjectActionSurfacePosition {
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface ProjectActionSurfaceProps {
+  readonly project: ProjectRef;
+  readonly position: ProjectActionSurfacePosition;
+  readonly close: () => void;
+  readonly host: ProjectActionSurfaceHost;
+  readonly services: ModuleHostServices;
+}
+
+interface ProjectActionBase {
   readonly id: ContributionId;
   readonly label: string;
+  readonly icon?: PanelIconDescriptor;
   readonly selected?: boolean;
   readonly keepOpen?: boolean;
   readonly danger?: boolean;
+}
+
+export interface ProjectCommandAction extends ProjectActionBase {
+  readonly surface?: never;
   run(): void | Promise<void>;
 }
 
+export interface ProjectSurfaceAction extends ProjectActionBase {
+  readonly surface: {
+    readonly load: () => Promise<{
+      readonly default: ComponentType<ProjectActionSurfaceProps>;
+    }>;
+  };
+  readonly run?: never;
+}
+
+export type ProjectAction = ProjectCommandAction | ProjectSurfaceAction;
+
 export interface ProjectActionGroup {
-  readonly label: string;
+  /** Null places actions directly in the host menu instead of a submenu. */
+  readonly label: string | null;
   readonly icon?: PanelIconDescriptor;
   readonly actions: readonly ProjectAction[];
 }

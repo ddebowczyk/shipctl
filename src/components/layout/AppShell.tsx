@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useCallback, useRef, useMemo, useState } from "react";
+import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Sidebar from "../sidebar/Sidebar";
 import TabBar from "./TabBar";
@@ -48,6 +48,7 @@ import {
   createEnabledPanelRegistry,
   GlobalSurfaceHost,
   MODULE_HOST_SERVICES,
+  ModuleProjectLayoutSurfaces,
   notifyModulesProjectRemoved,
   panelIdForTab,
   PanelHost,
@@ -70,7 +71,6 @@ const LAST_REPO_STORAGE_KEY = "shep:last-repo-path";
 // useSyncExternalStore — selectors must return the same reference for the same state.
 const EMPTY_TABS: UnifiedTab[] = [];
 const EMPTY_COMMANDS: CommandState[] = [];
-const DiffSummaryPanel = lazy(() => import("../git/DiffSummaryPanel"));
 const PANEL_REGISTRY = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
 const GLOBAL_SURFACE_REGISTRY = createEnabledGlobalSurfaceRegistry(
   BUILTIN_GLOBAL_SURFACE_LOADERS,
@@ -993,10 +993,11 @@ export default function AppShell() {
           </div>
         </div>
 
-        {diffPanelVisible && (
-          <Suspense fallback={null}>
-            <DiffSummaryPanel />
-          </Suspense>
+        {diffPanelVisible && activePanelProject && (
+          <ModuleProjectLayoutSurfaces
+            slot="workspace.trailing"
+            project={activePanelProject}
+          />
         )}
       </div>
     </div>

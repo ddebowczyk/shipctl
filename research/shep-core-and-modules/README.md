@@ -125,6 +125,9 @@ capability ceiling.
 - [24-git-characterization-and-seam.md](./24-git-characterization-and-seam.md)
   protects current repository, worktree, file, diff, watcher, and project-state
   behavior and splits Git extraction at the proven host/native boundaries.
+- [25-generic-project-rails.md](./25-generic-project-rails.md) records the
+  capability-neutral facts, project layout, and interactive action contracts
+  plus the temporary Git adapters that preserve behavior during extraction.
 
 ## Target dependency shape
 

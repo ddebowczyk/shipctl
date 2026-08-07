@@ -10,6 +10,8 @@ import type {
   GlobalSurfaceContribution,
   ModuleProjectLifecycle,
   ProjectActionContribution,
+  ProjectFactsProviderContribution,
+  ProjectLayoutContribution,
   ProjectNavigationContribution,
   SettingsContribution,
 } from "./surfaces";
@@ -36,7 +38,9 @@ export interface ShepModule {
   readonly globalSurfaces?: readonly GlobalSurfaceContribution[];
   readonly globalNavigation?: readonly GlobalNavigationContribution[];
   readonly projectNavigation?: readonly ProjectNavigationContribution[];
+  readonly projectLayout?: readonly ProjectLayoutContribution[];
   readonly projectActions?: readonly ProjectActionContribution[];
+  readonly projectFactsProvider?: ProjectFactsProviderContribution;
   readonly settings?: readonly SettingsContribution[];
   readonly skillsProvider?: SkillsProviderContribution;
   readonly projectLifecycle?: ModuleProjectLifecycle;

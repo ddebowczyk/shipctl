@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo } from "react";
+import type { ProjectAction, ProjectSurfaceAction } from "@shep/module-api";
 import type { RepoInfo, RepoGroup } from "../../lib/types";
 import { getEditorLabel } from "../../lib/editors";
 import { useEditorStore } from "../../stores/useEditorStore";
@@ -20,8 +21,11 @@ import type { ContextMenuItem } from "../shared/ContextMenu";
 import { useNoticeStore } from "../../stores/useNoticeStore";
 import { getErrorMessage } from "../../lib/errors";
 import { handleActionKey } from "../../lib/a11y";
-import { gitCreateWorktree, revealInFinder } from "../../lib/tauri";
-import { useModuleProjectActions } from "../../core/modules";
+import { revealInFinder } from "../../lib/tauri";
+import {
+  ModuleProjectActionSurface,
+  useModuleProjectActions,
+} from "../../core/modules";
 import ActivityIndicator, { getAggregateActivityStatus } from "./ActivityIndicator";
 
 interface ProjectItemProps {
@@ -62,11 +66,16 @@ export default function ProjectItem({
     hasRunning: Boolean(activity && (activity.terminalCount > 0 || activity.runningCount > 0)),
   });
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [actionSurface, setActionSurface] = useState<{
+    action: ProjectSurfaceAction;
+    position: { x: number; y: number };
+  } | null>(null);
   const projectRef = useMemo(() => ({
     id: repo.path,
     name: repo.name,
     path: repo.path,
-  }), [repo.name, repo.path]);
+    groupId: repo.group,
+  }), [repo.group, repo.name, repo.path]);
   const projectActions = useModuleProjectActions(projectRef);
   const preferredEditor = useEditorStore((s) => s.settings.preferredEditor);
   const pushNotice = useNoticeStore((s) => s.pushNotice);
@@ -74,33 +83,6 @@ export default function ProjectItem({
   const editorActionLabel = preferredEditorLabel
     ? `Open in ${preferredEditorLabel}`
     : "Set Editor Preference";
-
-  const [wtCreate, setWtCreate] = useState<{ x: number; y: number } | null>(null);
-  const [wtBranchName, setWtBranchName] = useState("");
-  const [creatingWorktree, setCreatingWorktree] = useState(false);
-  const wtCreateRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!wtCreate) return;
-    const handle = (e: MouseEvent) => {
-      if (wtCreateRef.current && !wtCreateRef.current.contains(e.target as Node)) {
-        setWtCreate(null);
-        setWtBranchName("");
-      }
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setWtCreate(null);
-        setWtBranchName("");
-      }
-    };
-    document.addEventListener("mousedown", handle, true);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handle, true);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [wtCreate]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -111,45 +93,6 @@ export default function ProjectItem({
   const handleClose = useCallback(() => {
     setMenu(null);
   }, []);
-
-  const handleOpenCreateWorktree = () => {
-    setWtCreate(menu ?? { x: 200, y: 200 });
-    setWtBranchName("");
-  };
-
-  const handleCreateWorktree = async () => {
-    const branchName = wtBranchName.trim();
-    if (!branchName || creatingWorktree) return;
-    setCreatingWorktree(true);
-    try {
-      const created = await gitCreateWorktree(repo.path, branchName);
-      await onAddProject(created.path);
-      if (repo.group) {
-        await onMoveToGroup(created.path, repo.group);
-      }
-      setWtCreate(null);
-      setWtBranchName("");
-    } catch (error) {
-      pushNotice({
-        tone: "error",
-        title: "Couldn't create worktree",
-        message: getErrorMessage(error),
-      });
-    } finally {
-      setCreatingWorktree(false);
-    }
-  };
-
-  const branchSlugPreview = wtBranchName
-    .trim()
-    .split("")
-    .map((char) => (/^[A-Za-z0-9_-]$/.test(char) ? char : "-"))
-    .join("")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  const createPathPreview = branchSlugPreview
-    ? `.shep-worktrees/${repo.name}/${branchSlugPreview}`
-    : null;
 
   // Build "Move to" submenu children
   const otherGroups = groups.filter((g) => g.id !== repo.group);
@@ -174,23 +117,38 @@ export default function ProjectItem({
       : []),
   ];
 
-  const contributedActionItems: ContextMenuItem[] = projectActions.groups.map((group) => ({
-    label: group.label,
-    icon: group.icon?.name === "sparkles" ? <Sparkles size={14} /> : undefined,
-    children: group.actions.map((action) => ({
-      label: action.label,
-      icon: action.selected === undefined
-        ? undefined
-        : <Check size={14} className={action.selected ? "opacity-100" : "opacity-0"} />,
-      keepOpen: action.keepOpen,
-      danger: action.danger,
-      onClick: () => {
-        void Promise.resolve()
-          .then(() => action.run())
-          .catch(() => undefined);
-      },
-    })),
-  }));
+  const actionMenuItem = (action: ProjectAction): ContextMenuItem => ({
+    label: action.label,
+    icon: action.selected === undefined
+      ? action.icon?.name === "plus"
+        ? <Plus size={14} />
+        : undefined
+      : <Check size={14} className={action.selected ? "opacity-100" : "opacity-0"} />,
+    keepOpen: action.keepOpen,
+    danger: action.danger,
+    onClick: () => {
+      if (action.surface) {
+        setActionSurface({
+          action,
+          position: menu ?? { x: 200, y: 200 },
+        });
+        return;
+      }
+      void Promise.resolve()
+        .then(() => action.run())
+        .catch(() => undefined);
+    },
+  });
+  const contributedActionItems: ContextMenuItem[] = projectActions.groups.flatMap((group) => {
+    const actions = group.actions.map(actionMenuItem);
+    return group.label === null
+      ? actions
+      : [{
+          label: group.label,
+          icon: group.icon?.name === "sparkles" ? <Sparkles size={14} /> : undefined,
+          children: actions,
+        }];
+  });
 
   const menuItems: ContextMenuItem[] = [
     {
@@ -240,11 +198,6 @@ export default function ProjectItem({
     },
     ...contributedActionItems,
     {
-      label: "Create Worktree",
-      icon: <Plus size={14} />,
-      onClick: handleOpenCreateWorktree,
-    },
-    {
       label: "Remove Project",
       icon: <Trash2 size={14} />,
       danger: true,
@@ -288,55 +241,17 @@ export default function ProjectItem({
         />,
         document.body,
       )}
-      {wtCreate && createPortal(
-        <div
-          ref={wtCreateRef}
-          className="context-menu"
-          style={{ left: wtCreate.x, top: wtCreate.y, minWidth: 280 }}
-        >
-          <div style={{ padding: "6px 10px 2px", fontSize: 11, opacity: 0.5 }}>
-            Create worktree
-          </div>
-          <form
-            className="branch-dropdown__create-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void handleCreateWorktree();
-            }}
-            style={{ padding: "8px" }}
-          >
-            <input
-              className="branch-dropdown__input"
-              type="text"
-              autoFocus
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              placeholder="feature/my-change"
-              value={wtBranchName}
-              onChange={(e) => setWtBranchName(e.target.value)}
-              disabled={creatingWorktree}
-            />
-          </form>
-          <div style={{ padding: "0 10px 8px", fontSize: 11, opacity: 0.5, lineHeight: 1.4 }}>
-            Creates a new branch and worktree under
-            <div style={{ marginTop: 4, opacity: 0.8, wordBreak: "break-all" }}>
-              {createPathPreview ?? `.shep-worktrees/${repo.name}/...`}
-            </div>
-          </div>
-          <div style={{ padding: "6px 8px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-            <button
-              className="btn-primary"
-              style={{ width: "100%", fontSize: 12, padding: "4px 0" }}
-              disabled={!wtBranchName.trim() || creatingWorktree}
-              onClick={() => void handleCreateWorktree()}
-            >
-              {creatingWorktree ? "Creating..." : "Create Worktree"}
-            </button>
-          </div>
-        </div>,
-        document.body,
+      {actionSurface && (
+        <ModuleProjectActionSurface
+          action={actionSurface.action}
+          project={projectRef}
+          position={actionSurface.position}
+          close={() => setActionSurface(null)}
+          host={{
+            addProject: onAddProject,
+            moveProjectToGroup: onMoveToGroup,
+          }}
+        />
       )}
     </>
   );

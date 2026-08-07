@@ -18,7 +18,11 @@ host internals ─────────────────────�
   not import module implementation files.
 - Modules receive narrow host ports; they are not given a generic store,
   command dispatcher, Tauri `invoke`, shell, or filesystem capability.
+- Project capabilities can contribute optional facts, ordered layout surfaces,
+  and either executable or lazy interactive project actions. Interactive
+  actions receive only project registration and placement callbacks from the
+  host.
 
-Executable boundary and enablement checks are introduced in the next migration
-task. This package establishes the import boundary without moving any feature
-implementation.
+The host's boundary and profile tests enforce this dependency direction. A
+capability may be disabled without requiring placeholder implementations in the
+API package.

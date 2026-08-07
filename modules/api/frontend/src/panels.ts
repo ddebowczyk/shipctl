@@ -9,6 +9,7 @@ export interface ProjectRef {
   readonly id: string;
   readonly name: string;
   readonly path: string;
+  readonly groupId?: string | null;
 }
 
 export interface PanelIconDescriptor {

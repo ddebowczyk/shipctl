@@ -35,6 +35,8 @@ export {
 export { default as PanelHost } from "./PanelHost";
 export { default as GlobalSurfaceHost } from "./GlobalSurfaceHost";
 export {
+  ModuleProjectActionSurface,
+  ModuleProjectLayoutSurfaces,
   ModuleProjectNavigationSurfaces,
   ModuleSettingsSurfaces,
 } from "./ModuleSurfaces";
@@ -45,21 +47,33 @@ export {
   subscribeProjectActions,
   useModuleProjectActions,
 } from "./projectActions";
+export {
+  refreshProjectFacts,
+  resolveProjectFacts,
+  subscribeProjectFacts,
+  useProjectFacts,
+} from "./projectFacts";
 export { ENABLED_MODULES } from "./enabledModules";
 export {
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
+  enabledProjectActionContributions,
+  enabledProjectFactsProvider,
+  enabledProjectLayoutContributions,
   moduleGlobalNavigationContributions,
   moduleGlobalSurfaceContributions,
   moduleLegacyPanelDefinitions,
   modulePanelContributions,
   moduleProjectActionContributions,
+  moduleProjectFactsProviders,
+  moduleProjectLayoutContributions,
   moduleProjectNavigationContributions,
   moduleSkillsProvider,
   moduleSettingsContributions,
   notifyModulesFilesystemChanged,
   notifyModulesProjectRemoved,
   notifyModulesProjectsChanged,
+  selectProjectFactsProvider,
 } from "./moduleComposition";
 export { BUILTIN_GLOBAL_SURFACE_LOADERS } from "./builtinGlobalSurfaceRuntime";
 export {
@@ -92,9 +106,19 @@ export type {
   ProjectAction,
   ProjectActionContribution,
   ProjectActionGroup,
+  ProjectActionSurfaceHost,
+  ProjectActionSurfacePosition,
+  ProjectActionSurfaceProps,
+  ProjectCommandAction,
+  ProjectFacts,
+  ProjectFactsProviderContribution,
+  ProjectLayoutContribution,
+  ProjectLayoutContributionProps,
+  ProjectLayoutSlot,
   ProjectNavigationContribution,
   ProjectNavigationContributionProps,
   ProjectRef,
+  ProjectSurfaceAction,
   SettingsContribution,
   SettingsContributionProps,
   ShepModule,
