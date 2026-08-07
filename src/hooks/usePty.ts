@@ -1,4 +1,8 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
+import type {
+  ModuleTerminalSession,
+  ModuleTerminalSessionLaunchRequest,
+} from "@shep/module-api";
 import {
   discardAssistantSession,
   failAssistantSessionCapture,
@@ -27,6 +31,11 @@ import { useNoticeStore } from "../stores/useNoticeStore";
 import { CODING_ASSISTANTS } from "../components/sidebar/constants";
 import type { Terminal } from "@xterm/xterm";
 import { getErrorMessage } from "../lib/errors";
+import {
+  bindTerminalSessionsRuntime,
+  publishTerminalSessionEvent,
+  terminalSessionExitReason,
+} from "../core/modules/terminalSessions";
 
 // Map ptyId -> xterm instance for writing output
 const terminalInstances = new Map<number, Terminal>();
@@ -57,6 +66,44 @@ const restoreProbations = new Map<
   number,
   { recordId: string; timer: ReturnType<typeof setTimeout> }
 >();
+interface HostTerminalSession {
+  session: ModuleTerminalSession;
+  ptyId: number;
+  tabId: string;
+  state: "running" | "exited";
+}
+
+const hostTerminalSessions = new Map<string, HostTerminalSession>();
+const hostTerminalSessionIdsByPty = new Map<number, string>();
+let hostTerminalSessionCounter = 0;
+
+function completeHostTerminalSession(
+  ptyId: number,
+  requestedStop: boolean,
+  exitCode: number | null,
+) {
+  const sessionId = hostTerminalSessionIdsByPty.get(ptyId);
+  if (!sessionId) return;
+  const owned = hostTerminalSessions.get(sessionId);
+  if (!owned) return;
+
+  if (requestedStop) {
+    hostTerminalSessionIdsByPty.delete(ptyId);
+    hostTerminalSessions.delete(sessionId);
+    if (owned.state === "exited") return;
+  } else {
+    if (owned.state === "exited") return;
+    owned.state = "exited";
+  }
+  publishTerminalSessionEvent({
+    type: "exited",
+    session: owned.session,
+    reason: requestedStop
+      ? "manual-stop"
+      : terminalSessionExitReason(false, exitCode ?? 1),
+    exitCode,
+  });
+}
 
 function cleanupActivityState(ptyId: number) {
   const timer = activityTimers.get(ptyId);
@@ -198,6 +245,7 @@ export function usePty() {
         cleanupActivityState(ptyId);
         setTabExited(ptyId, msg.data.code);
         const stoppedByUser = stoppingPtys.delete(ptyId);
+        completeHostTerminalSession(ptyId, stoppedByUser, msg.data.code);
         const restoreProbation = clearRestoreProbation(ptyId);
         const tab = findTabByPtyId(ptyId);
         if (tab?.restoreRecordId && !stoppedByUser) {
@@ -299,6 +347,7 @@ export function usePty() {
       rows: number,
       commandName: string | null,
       repoPath: string,
+      onSpawned?: (ptyId: number) => void,
     ) => {
       let resolvedPtyId: number | null = null;
       const bufferedMessages: PtyOutput[] = [];
@@ -330,6 +379,7 @@ export function usePty() {
 
       resolvedPtyId = ptyId;
       initActivity(ptyId);
+      onSpawned?.(ptyId);
 
       for (const msg of bufferedMessages) {
         handlePtyMessage(ptyId, commandName, repoPath, msg);
@@ -339,6 +389,91 @@ export function usePty() {
     },
     [handlePtyMessage, initActivity],
   );
+
+  const launchTerminalSession = useCallback(
+    async (request: ModuleTerminalSessionLaunchRequest) => {
+      const session: ModuleTerminalSession = {
+        id: `terminal-session-${++hostTerminalSessionCounter}`,
+        projectPath: request.projectPath,
+        ownerKey: request.ownerKey,
+        label: request.label,
+      };
+      const tabId = nextTabId();
+
+      await spawnSession(
+        request.command,
+        request.arguments ? [...request.arguments] : null,
+        { ...request.environment },
+        request.columns,
+        request.rows,
+        null,
+        request.cwd,
+        (ptyId) => {
+          hostTerminalSessions.set(session.id, {
+            session,
+            ptyId,
+            tabId,
+            state: "running",
+          });
+          hostTerminalSessionIdsByPty.set(ptyId, session.id);
+          addTabToProject(request.projectPath, {
+            id: tabId,
+            kind: "terminal",
+            label: request.label,
+            ptyId,
+            repoPath: request.projectPath,
+            commandName: null,
+            assistantId: null,
+            sessionMode: null,
+            restoreRecordId: null,
+            providerSessionId: null,
+            captureState: null,
+          });
+          publishTerminalSessionEvent({ type: "started", session });
+        },
+      );
+
+      return session;
+    },
+    [addTabToProject, spawnSession],
+  );
+
+  const stopTerminalSession = useCallback(async (sessionId: string) => {
+    const owned = hostTerminalSessions.get(sessionId);
+    if (!owned) return;
+
+    if (owned.state === "running") {
+      cleanupActivityState(owned.ptyId);
+      stoppingPtys.add(owned.ptyId);
+      await killPty(owned.ptyId).catch(() => {
+        stoppingPtys.delete(owned.ptyId);
+      });
+    }
+    completeHostTerminalSession(owned.ptyId, true, null);
+    unregisterTerminal(owned.ptyId);
+    useTerminalStore.getState().removeActivity(owned.ptyId);
+    useTerminalStore.getState().removeTabFromProject(
+      owned.session.projectPath,
+      owned.tabId,
+    );
+  }, []);
+
+  const focusTerminalSession = useCallback(async (sessionId: string) => {
+    const owned = hostTerminalSessions.get(sessionId);
+    if (!owned) return;
+
+    if (useRepoStore.getState().activeRepoPath !== owned.session.projectPath) {
+      await useRepoStore.getState().openRepo(owned.session.projectPath);
+      useTerminalStore.getState().switchProject(owned.session.projectPath);
+    }
+    useTerminalStore.getState().setActiveTab(owned.tabId);
+  }, []);
+
+  useEffect(() => bindTerminalSessionsRuntime({
+    launch: launchTerminalSession,
+    stop: stopTerminalSession,
+    focus: focusTerminalSession,
+  }), [focusTerminalSession, launchTerminalSession, stopTerminalSession]);
 
   const startCommand = useCallback(
     async (command: CommandConfig, cols: number, rows: number) => {
@@ -703,6 +838,7 @@ export function usePty() {
       await killPty(tab.ptyId).catch(() => {
         stoppingPtys.delete(tab.ptyId);
       });
+      completeHostTerminalSession(tab.ptyId, true, null);
       unregisterTerminal(tab.ptyId);
       removeActivity(tab.ptyId);
 
@@ -744,6 +880,7 @@ export function usePty() {
       await killPty(tab.ptyId).catch(() => {
         stoppingPtys.delete(tab.ptyId);
       });
+      completeHostTerminalSession(tab.ptyId, true, null);
       unregisterTerminal(tab.ptyId);
       removeActivity(tab.ptyId);
     }

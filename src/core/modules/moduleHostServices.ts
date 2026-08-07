@@ -13,6 +13,7 @@ import { useThemeStore } from "../../stores/useThemeStore";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { modulePanelContributions, moduleSkillsProvider } from "./moduleComposition";
 import { createProjectCapabilityDataPort } from "./projectCapabilityData";
+import { MODULE_TERMINAL_SESSIONS } from "./terminalSessions";
 
 let settingsSource: ReturnType<typeof useProjectSettingsStore.getState> | null = null;
 let settingsSnapshot: ModuleSettingsSnapshot = {
@@ -84,6 +85,7 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
     subscribe: (listener) => useThemeStore.subscribe(listener),
   },
   projectData,
+  terminalSessions: MODULE_TERMINAL_SESSIONS,
   settings: {
     getSnapshot: getSettingsSnapshot,
     subscribe: (listener) => useProjectSettingsStore.subscribe(listener),

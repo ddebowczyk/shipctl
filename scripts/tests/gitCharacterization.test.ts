@@ -154,6 +154,17 @@ function services(autoImportWorktrees = true): ModuleHostServices {
       read: async () => undefined,
       replace: async () => undefined,
     },
+    terminalSessions: {
+      launch: async (request) => ({
+        id: "fixture-session",
+        projectPath: request.projectPath,
+        ownerKey: request.ownerKey,
+        label: request.label,
+      }),
+      stop: async () => undefined,
+      focus: async () => undefined,
+      subscribe: () => () => undefined,
+    },
     settings: {
       getSnapshot: () => ({
         values: { autoImportWorktrees },

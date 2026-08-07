@@ -18,6 +18,7 @@
     "test:panels": "node --test scripts/tests/panelRegistry.test.ts scripts/tests/panelPersistence.test.ts scripts/tests/panelTabs.test.ts",
     "test:ports-characterization": "node --test modules/ports/frontend/tests/*.test.ts && cargo test --manifest-path modules/ports/backend/Cargo.toml",
     "test:project-data": "node --test scripts/tests/projectCapabilityData.test.ts",
+    "test:terminal-sessions": "node --test --test-concurrency=1 scripts/tests/terminalSessions.test.ts",
     "test:project-actions": "node --test scripts/tests/projectActions.test.ts",
     "test:project-surfaces": "node --test --test-concurrency=1 scripts/tests/projectActions.test.ts scripts/tests/projectFacts.test.ts scripts/tests/moduleComposition.test.ts",
     "test:skills-characterization": "node --test --test-concurrency=1 modules/skills/frontend/tests/*.test.ts && cargo test --manifest-path modules/skills/backend/Cargo.toml",

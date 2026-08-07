@@ -7,9 +7,34 @@ import PanelHost from "../../../src/core/modules/PanelHost";
 import { modulePanelContributions } from "../../../src/core/modules/moduleComposition";
 import { PanelRegistry } from "../../../src/core/modules/panelRegistry";
 import { FIXTURE_PING_COMMAND } from "@shep/module-fixture";
+import type { ModuleHostServices } from "@shep/module-api";
 import { ENABLED_MODULES } from "./enabledModules";
 
 const services = {
+  panels: {
+    open: () => "fixture-panel",
+    reveal: () => undefined,
+    close: () => undefined,
+  },
+  appearance: {
+    getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
+    subscribe: () => () => undefined,
+  },
+  projectData: {
+    read: async () => undefined,
+    replace: async () => undefined,
+  },
+  terminalSessions: {
+    launch: async (request) => ({
+      id: "fixture-session",
+      projectPath: request.projectPath,
+      ownerKey: request.ownerKey,
+      label: request.label,
+    }),
+    stop: async () => undefined,
+    focus: async () => undefined,
+    subscribe: () => () => undefined,
+  },
   settings: {
     getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
     subscribe: () => () => undefined,
@@ -22,7 +47,7 @@ const services = {
   },
   notices: { push: () => undefined },
   externalLinks: { open: async () => undefined },
-};
+} satisfies ModuleHostServices;
 
 mockIPC((command) => {
   const commandOutput = document.querySelector("[data-testid='fixture-command']");

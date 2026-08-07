@@ -143,6 +143,9 @@ capability ceiling.
 - [30-project-capability-data-rail.md](./30-project-capability-data-rail.md)
   records the generic project data service, serialized writes, active-project
   compatibility, and preservation of unknown human-editable YAML values.
+- [31-terminal-session-rail.md](./31-terminal-session-rail.md) records the
+  capability-neutral launch, stop, focus, and lifecycle contract while PTY,
+  xterm, and tab identities remain private host implementation details.
 
 ## Target dependency shape
 
