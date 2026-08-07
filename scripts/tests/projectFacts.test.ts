@@ -62,6 +62,7 @@ const services = {
     replace: async () => undefined,
   },
   terminalSessions: {
+    getDimensions: () => ({ columns: 80, rows: 24 }),
     launch: async (request) => ({
       id: "fixture-session",
       projectPath: request.projectPath,

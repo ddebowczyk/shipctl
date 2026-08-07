@@ -16,6 +16,7 @@ export type {
   ModuleNotice,
   ModuleNoticesPort,
   ModuleProjectDataPort,
+  ModuleTerminalDimensions,
   ModuleTerminalSession,
   ModuleTerminalSessionExitReason,
   ModuleTerminalSessionLaunchRequest,

@@ -42,12 +42,14 @@ import {
   BUILTIN_GLOBAL_SURFACE_IDS,
   BUILTIN_GLOBAL_SURFACE_LOADERS,
   BUILTIN_PANEL_LOADERS,
+  bindTerminalSessionDimensions,
   BuiltinPanelRuntimeProvider,
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
   GlobalSurfaceHost,
   MODULE_HOST_SERVICES,
   ModuleProjectLayoutSurfaces,
+  notifyModulesProjectOpened,
   notifyModulesProjectRemoved,
   panelIdForTab,
   PanelHost,
@@ -125,6 +127,11 @@ export default function AppShell() {
     }
     return computeTerminalSize(el.clientWidth, el.clientHeight);
   }, []);
+
+  useEffect(() => bindTerminalSessionDimensions(() => {
+    const { cols, rows } = getTerminalDimensions();
+    return { columns: cols, rows };
+  }), [getTerminalDimensions]);
 
   // Derive active project's tabs and commands from stores
   const activeProjectPath = useTerminalStore((s) => s.activeProjectPath);
@@ -267,6 +274,7 @@ export default function AppShell() {
         initialProjectAttemptedRef.current = true;
         window.localStorage.setItem(LAST_REPO_STORAGE_KEY, repoPath);
         useTerminalStore.getState().switchProject(repoPath);
+        await notifyModulesProjectOpened(repoPath, MODULE_HOST_SERVICES);
         useCommandStore.getState().switchProject(repoPath);
         if (isFirstVisit) {
           useCommandStore.getState().loadCommands(repoPath, config.commands);
@@ -369,6 +377,7 @@ export default function AppShell() {
         initialProjectAttemptedRef.current = true;
         window.localStorage.setItem(LAST_REPO_STORAGE_KEY, canonicalPath);
         useTerminalStore.getState().switchProject(canonicalPath);
+        await notifyModulesProjectOpened(canonicalPath, MODULE_HOST_SERVICES);
         useCommandStore.getState().switchProject(canonicalPath);
         useCommandStore.getState().loadCommands(canonicalPath, config.commands);
       } catch (error) {

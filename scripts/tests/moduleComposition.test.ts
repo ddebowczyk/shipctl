@@ -29,6 +29,7 @@ let moduleSettingsContributions: ModuleComposition["moduleSettingsContributions"
 let moduleSkillsProvider: ModuleComposition["moduleSkillsProvider"];
 let moduleLegacyPanelDefinitions: ModuleComposition["moduleLegacyPanelDefinitions"];
 let notifyModulesFilesystemChanged: ModuleComposition["notifyModulesFilesystemChanged"];
+let notifyModulesProjectOpened: ModuleComposition["notifyModulesProjectOpened"];
 let selectProjectFactsProvider: ModuleComposition["selectProjectFactsProvider"];
 
 before(async () => {
@@ -52,6 +53,7 @@ before(async () => {
     moduleSkillsProvider,
     moduleLegacyPanelDefinitions,
     notifyModulesFilesystemChanged,
+    notifyModulesProjectOpened,
     selectProjectFactsProvider,
   } = await vite.ssrLoadModule(
     "/src/core/modules/moduleComposition.ts",
@@ -168,6 +170,7 @@ const services = {
     replace: async () => undefined,
   },
   terminalSessions: {
+    getDimensions: () => ({ columns: 80, rows: 24 }),
     launch: async (request) => ({
       id: "fixture-session",
       projectPath: request.projectPath,
@@ -330,7 +333,7 @@ test("Skills provider selection is optional, singular, and module-owned", () => 
 });
 
 test("project lifecycle dispatch isolates module failures", async () => {
-  const calls: string[][] = [];
+  const calls: Array<readonly string[] | string> = [];
   const modules: ShepModule[] = [
     {
       id: "fixture.failing",
@@ -345,6 +348,9 @@ test("project lifecycle dispatch isolates module failures", async () => {
       id: "fixture.working",
       version: "0",
       projectLifecycle: {
+        onProjectOpened: (path) => {
+          calls.push(path);
+        },
         onFilesystemChanged: (paths) => {
           calls.push([...paths]);
         },
@@ -352,8 +358,9 @@ test("project lifecycle dispatch isolates module failures", async () => {
     },
   ];
 
+  await notifyModulesProjectOpened("/fixture", services, modules);
   await notifyModulesFilesystemChanged(["/fixture"], services, modules);
-  assert.deepEqual(calls, [["/fixture"]]);
+  assert.deepEqual(calls, ["/fixture", ["/fixture"]]);
 });
 
 test("disabled profile omits implementation and retains recoverable identity", () => {

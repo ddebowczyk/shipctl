@@ -72,6 +72,11 @@ export interface ModuleTerminalSession {
   readonly label: string;
 }
 
+export interface ModuleTerminalDimensions {
+  readonly columns: number;
+  readonly rows: number;
+}
+
 export type ModuleTerminalSessionExitReason =
   | "manual-stop"
   | "zero-exit"
@@ -90,6 +95,7 @@ export type ModuleTerminalSessionLifecycleEvent =
     };
 
 export interface ModuleTerminalSessionsPort {
+  getDimensions(): ModuleTerminalDimensions;
   launch(request: ModuleTerminalSessionLaunchRequest): Promise<ModuleTerminalSession>;
   stop(sessionId: string): Promise<void>;
   focus(sessionId: string): Promise<void>;

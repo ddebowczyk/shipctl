@@ -179,6 +179,10 @@ export interface SettingsContribution {
 }
 
 export interface ModuleProjectLifecycle {
+  onProjectOpened?(
+    projectPath: string,
+    services: ModuleHostServices,
+  ): void | Promise<void>;
   onProjectsChanged?(
     projectPaths: readonly string[],
     services: ModuleHostServices,

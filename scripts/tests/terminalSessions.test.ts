@@ -7,6 +7,7 @@ import type {
   ModuleTerminalSessionLifecycleEvent,
 } from "@shep/module-api";
 import {
+  bindTerminalSessionDimensions,
   bindTerminalSessionsRuntime,
   MODULE_TERMINAL_SESSIONS,
   publishTerminalSessionEvent,
@@ -57,6 +58,19 @@ test("the stable port forwards complete launch, stop, and focus requests", async
     ["stop", session.id],
   ]);
   unbind();
+});
+
+test("terminal dimensions are host-supplied and reset to safe defaults", () => {
+  const unbind = bindTerminalSessionDimensions(() => ({ columns: 132, rows: 42 }));
+  assert.deepEqual(MODULE_TERMINAL_SESSIONS.getDimensions(), {
+    columns: 132,
+    rows: 42,
+  });
+  unbind();
+  assert.deepEqual(MODULE_TERMINAL_SESSIONS.getDimensions(), {
+    columns: 80,
+    rows: 24,
+  });
 });
 
 test("lifecycle subscriptions preserve opaque session ownership and unsubscribe", () => {

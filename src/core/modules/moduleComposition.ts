@@ -169,7 +169,7 @@ export function moduleSettingsContributions(
 }
 
 async function notifyProjectLifecycle(
-  callback: "onProjectsChanged" | "onFilesystemChanged" | "onProjectRemoved",
+  callback: "onProjectOpened" | "onProjectsChanged" | "onFilesystemChanged" | "onProjectRemoved",
   value: readonly string[] | string,
   services: ModuleHostServices,
   modules: readonly ShepModule[] = ENABLED_MODULES,
@@ -177,12 +177,22 @@ async function notifyProjectLifecycle(
   await Promise.allSettled(modules.map(async (module) => {
     const handler = module.projectLifecycle?.[callback];
     if (!handler) return undefined;
-    await (callback === "onProjectRemoved"
+    await (callback === "onProjectOpened"
+      ? module.projectLifecycle?.onProjectOpened?.(value as string, services)
+      : callback === "onProjectRemoved"
       ? module.projectLifecycle?.onProjectRemoved?.(value as string, services)
       : callback === "onFilesystemChanged"
         ? module.projectLifecycle?.onFilesystemChanged?.(value as readonly string[], services)
         : module.projectLifecycle?.onProjectsChanged?.(value as readonly string[], services));
   }));
+}
+
+export function notifyModulesProjectOpened(
+  projectPath: string,
+  services: ModuleHostServices,
+  modules?: readonly ShepModule[],
+): Promise<void> {
+  return notifyProjectLifecycle("onProjectOpened", projectPath, services, modules);
 }
 
 export function notifyModulesProjectsChanged(

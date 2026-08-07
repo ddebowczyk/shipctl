@@ -75,10 +75,12 @@ export {
   moduleSkillsProvider,
   moduleSettingsContributions,
   notifyModulesFilesystemChanged,
+  notifyModulesProjectOpened,
   notifyModulesProjectRemoved,
   notifyModulesProjectsChanged,
   selectProjectFactsProvider,
 } from "./moduleComposition";
+export { bindTerminalSessionDimensions } from "./terminalSessions";
 export { BUILTIN_GLOBAL_SURFACE_LOADERS } from "./builtinGlobalSurfaceRuntime";
 export {
   BUILTIN_PANEL_LOADERS,

@@ -1,4 +1,5 @@
 import type {
+  ModuleTerminalDimensions,
   ModuleTerminalSessionExitReason,
   ModuleTerminalSessionLifecycleEvent,
   ModuleTerminalSessionsPort,
@@ -10,6 +11,10 @@ export type TerminalSessionsRuntime = Pick<
 >;
 
 let runtime: TerminalSessionsRuntime | null = null;
+let dimensionsProvider: () => ModuleTerminalDimensions = () => ({
+  columns: 80,
+  rows: 24,
+});
 const listeners = new Set<
   (event: ModuleTerminalSessionLifecycleEvent) => void
 >();
@@ -36,6 +41,17 @@ export function bindTerminalSessionsRuntime(next: TerminalSessionsRuntime) {
   };
 }
 
+export function bindTerminalSessionDimensions(
+  next: () => ModuleTerminalDimensions,
+) {
+  dimensionsProvider = next;
+  return () => {
+    if (dimensionsProvider === next) {
+      dimensionsProvider = () => ({ columns: 80, rows: 24 });
+    }
+  };
+}
+
 export function publishTerminalSessionEvent(
   event: ModuleTerminalSessionLifecycleEvent,
 ) {
@@ -43,6 +59,7 @@ export function publishTerminalSessionEvent(
 }
 
 export const MODULE_TERMINAL_SESSIONS: ModuleTerminalSessionsPort = {
+  getDimensions: () => dimensionsProvider(),
   launch: (request) => getRuntime().launch(request),
   stop: (sessionId) => getRuntime().stop(sessionId),
   focus: (sessionId) => getRuntime().focus(sessionId),
