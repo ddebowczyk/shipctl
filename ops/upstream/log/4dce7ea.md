@@ -80,14 +80,19 @@ Adapted rather than adopted:
 
 Rejected:
 
-- **TypeScript 7.0.2.** `tsc --noEmit` passes, but the package's JavaScript API is gone:
-  importing `typescript` under 7.0.2 yields exactly two exports, `version` and
-  `versionMajorMinor`. `ops/modularity/bin/check-module-boundaries.mjs` is built on
-  `ts.createSourceFile`, `ts.forEachChild`, `ts.SyntaxKind`, `ts.ScriptKind` and three
-  `ts.isX` predicates, and fails at `ts.ScriptTarget.Latest`. Adopting TypeScript 7 means
-  rewriting the module-boundary gate against a different API, which is its own piece of
-  work. TypeScript 7 also removes `baseUrl`, which
-  `ops/modularity/fixtures/module-fixture/tsconfig.json` still sets.
+- **TypeScript 7.0.2.** `tsc --noEmit` passes, but the compiler API our ops tooling uses is
+  not at the package's default entry any more: under 7.0.2 `import ts from "typescript"`
+  yields exactly two exports, `version` and `versionMajorMinor`, so
+  `ops/modularity/bin/check-module-boundaries.mjs` fails at `ts.ScriptTarget.Latest` and
+  `ops/modularity/bin/plugout.mjs` fails the same way. The API is not gone — it moved to
+  `typescript/unstable/*` and was redesigned around projects, snapshots and node handles,
+  without single-file `createSourceFile`, `forEachChild`, `isStringLiteralLike`, or the
+  position helpers both scripts use for diagnostics. Adopting TypeScript 7 therefore means
+  reworking both scripts against a different parser, which is its own piece of work.
+  TypeScript 7 also removes `baseUrl`, which
+  `ops/modularity/fixtures/module-fixture/tsconfig.json` still sets. Full evidence, affected
+  API list and options in
+  `research/handoffs/2026-08-07T1904-typescript-7-compiler-api.md`.
 - **`pnpm.overrides`.** See `4bd529f.md`.
 - **`"icons": "tauri icon assets/shep.png"` script.** Belongs to the ops build capability
   in this tree, not to the root package manifest.
