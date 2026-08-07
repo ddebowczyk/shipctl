@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { useShallow } from "zustand/shallow";
-import { FolderInput, GitBranch } from "lucide-react";
+import { Circle, FolderInput, FolderTree, GitBranch, List, PanelsTopLeft, SquareTerminal } from "lucide-react";
+import type { PanelContribution } from "@shep/module-api";
 import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
 import { handleActionKey } from "../../lib/a11y";
 import { useRepoStore } from "../../stores/useRepoStore";
@@ -15,7 +16,18 @@ import type { UnifiedTab } from "../../lib/types";
 import { buildProjectMoveMenuItems } from "../shared/projectMoveMenu";
 
 
-function NewSessionButton({ onNewAssistant, onNewShell, onNewCommands, onNewGit, onOpenInEditor }: { onNewAssistant: () => void; onNewShell: () => void; onNewCommands: () => void; onNewGit: () => void; onOpenInEditor: () => void }) {
+const PANEL_ICONS = {
+  "folder-tree": FolderTree,
+  list: List,
+  "square-terminal": SquareTerminal,
+} as const;
+
+function panelIcon(panel: PanelContribution, size: number) {
+  const Icon = PANEL_ICONS[panel.icon.name as keyof typeof PANEL_ICONS] ?? Circle;
+  return <Icon size={size} />;
+}
+
+function NewSessionButton({ onNewAssistant, onNewShell, onNewCommands, panels, onOpenPanel, onOpenInEditor }: { onNewAssistant: () => void; onNewShell: () => void; onNewCommands: () => void; panels: readonly PanelContribution[]; onOpenPanel: (panel: PanelContribution) => void; onOpenInEditor: () => void }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -39,7 +51,17 @@ function NewSessionButton({ onNewAssistant, onNewShell, onNewCommands, onNewGit,
     { key: "assistant", meta: tabKindMeta.assistant, action: onNewAssistant },
     { key: "terminal", meta: tabKindMeta.terminal, action: onNewShell },
     { key: "commands", meta: tabKindMeta.commands, action: onNewCommands },
-    { key: "git", meta: tabKindMeta.git, action: onNewGit },
+    ...panels
+      .filter((panel) => panel.scope === "project" && panel.shortcut)
+      .map((panel) => ({
+        key: panel.id,
+        meta: {
+          label: panel.label,
+          icon: (size: number) => panelIcon(panel, size),
+          shortcut: panel.shortcut,
+        },
+        action: () => onOpenPanel(panel),
+      })),
     { key: "editor", meta: extraActions.openInEditor, action: onOpenInEditor },
   ];
 
@@ -87,12 +109,16 @@ function NewSessionButton({ onNewAssistant, onNewShell, onNewCommands, onNewGit,
 }
 
 /** Render the icon for a tab based on its kind */
-function TabIcon({ tab }: { tab: UnifiedTab }) {
+function TabIcon({ tab, panels }: { tab: UnifiedTab; panels: readonly PanelContribution[] }) {
   if (tab.kind === "assistant" && tab.assistantId) {
     const logoUrl = assistantLogoSrc[tab.assistantId];
     if (logoUrl) {
       return <img src={logoUrl} alt="" width={12} height={12} className={getAssistantLogoClass(tab.assistantId)} />;
     }
+  }
+  if (tab.kind === "panel") {
+    const panel = panels.find(({ id }) => id === tab.panelId);
+    return panel ? <>{panelIcon(panel, 12)}</> : <PanelsTopLeft size={12} />;
   }
   const meta = tabKindMeta[tab.kind];
   return meta ? <>{meta.icon(12)}</> : null;
@@ -103,7 +129,8 @@ interface TabBarProps {
   onNewShell: () => void;
   onNewAssistant: () => void;
   onNewCommands: () => void;
-  onNewGit: () => void;
+  panels: readonly PanelContribution[];
+  onOpenPanel: (panel: PanelContribution) => void;
   onOpenInEditor: () => void;
   onRenameTab: (tabId: string, label: string) => void | Promise<void>;
   onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
@@ -115,7 +142,8 @@ export default function TabBar({
   onNewShell,
   onNewAssistant,
   onNewCommands,
-  onNewGit,
+  panels,
+  onOpenPanel,
   onOpenInEditor,
   onRenameTab,
   onMoveTab,
@@ -301,7 +329,7 @@ export default function TabBar({
               aria-selected={isActive}
               aria-label={`Open tab ${tab.label}`}
             >
-              <TabIcon tab={tab} />
+              <TabIcon tab={tab} panels={panels} />
               {editingTabId === tab.id ? (
                 <input
                   className="tab-rename-input"
@@ -353,7 +381,7 @@ export default function TabBar({
           );
         })}
 
-        <NewSessionButton onNewAssistant={onNewAssistant} onNewShell={onNewShell} onNewCommands={onNewCommands} onNewGit={onNewGit} onOpenInEditor={onOpenInEditor} />
+        <NewSessionButton onNewAssistant={onNewAssistant} onNewShell={onNewShell} onNewCommands={onNewCommands} panels={panels} onOpenPanel={onOpenPanel} onOpenInEditor={onOpenInEditor} />
       </div>
       {projectName && (
         <span className="tab-bar__breadcrumb">

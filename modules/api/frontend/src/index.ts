@@ -9,6 +9,8 @@ export type {
   ProjectRef,
 } from "./panels";
 export type {
+  ModuleAppearancePort,
+  ModuleAppearanceSnapshot,
   ModuleHostServices,
   ModuleExternalLinksPort,
   ModuleNotice,
@@ -35,6 +37,7 @@ export type {
   ProjectFactsProviderContribution,
   ProjectLayoutContribution,
   ProjectLayoutContributionProps,
+  ProjectImportContribution,
   ProjectLayoutSlot,
   ProjectNavigationContribution,
   ProjectNavigationContributionProps,

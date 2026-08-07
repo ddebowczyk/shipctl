@@ -2,13 +2,11 @@ import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import type { ContributionId, ProjectRef } from "@shep/module-api";
+import { gitModule } from "@shep/module-git";
 import { skillsModule } from "@shep/module-skills";
 
 import "../../../src/styles/globals.css";
 import PanelHost from "../../../src/core/modules/PanelHost";
-import {
-  BUILTIN_PANEL_DEFINITIONS,
-} from "../../../src/core/modules/builtinPanelAdapters";
 import {
   BUILTIN_PANEL_LOADERS,
   BuiltinPanelRuntimeProvider,
@@ -16,7 +14,6 @@ import {
 import { createEnabledPanelRegistry } from "../../../src/core/modules/moduleComposition";
 import { MODULE_HOST_SERVICES } from "../../../src/core/modules/moduleHostServices";
 import type { CommandState } from "../../../src/lib/types";
-import { useGitStore } from "../../../src/stores/useGitStore";
 import { useRepoStore } from "../../../src/stores/useRepoStore";
 import { useTerminalStore } from "../../../src/stores/useTerminalStore";
 
@@ -47,7 +44,19 @@ mockIPC(
         return true;
       case "get_models_for_provider":
         return ["smoke-model"];
-      case "git_changed_files":
+      case "plugin:shep-git|git_status":
+        return {
+          is_git_repo: true,
+          branch: "smoke/panel-host",
+          dirty: true,
+          staged: 0,
+          unstaged: 1,
+          untracked: 0,
+          ahead: 0,
+          behind: 0,
+          worktree_parent: null,
+        };
+      case "plugin:shep-git|git_changed_files":
         return [
           {
             path: "src/AppShell.tsx",
@@ -56,11 +65,11 @@ mockIPC(
             old_path: null,
           },
         ];
-      case "git_list_files":
+      case "plugin:shep-git|git_list_files":
         return ["README.md", "src/AppShell.tsx", "src/core/modules/PanelHost.tsx"];
-      case "git_file_contents":
+      case "plugin:shep-git|git_file_contents":
         return "Panel host smoke fixture";
-      case "git_file_diff":
+      case "plugin:shep-git|git_file_diff":
         return "@@ -1 +1 @@\n-old\n+new";
       case "plugin:shep-todos|read_todos":
         return [];
@@ -94,21 +103,7 @@ useRepoStore.setState({
   activeRepoPath: PROJECT_PATH,
   activeConfig: { name: PROJECT.name, commands: [], assistants: [] },
 });
-useGitStore.setState({
-  projectGitStatus: {
-    [PROJECT_PATH]: {
-      is_git_repo: true,
-      branch: "smoke/panel-host",
-      dirty: true,
-      staged: 0,
-      unstaged: 1,
-      untracked: 0,
-      ahead: 0,
-      behind: 0,
-      worktree_parent: null,
-    },
-  },
-});
+await gitModule.projectLifecycle.onProjectsChanged([PROJECT_PATH]);
 await skillsModule.projectLifecycle.onProjectsChanged([PROJECT_PATH]);
 
 const registry = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
@@ -137,7 +132,7 @@ const panelChoices = [
 ] as const;
 
 function SmokeApp() {
-  const [panelId, setPanelId] = useState<ContributionId>(BUILTIN_PANEL_DEFINITIONS.git.id);
+  const [panelId, setPanelId] = useState<ContributionId>(gitModule.panels[0].id);
   const [removedCount, setRemovedCount] = useState(0);
   const [title, setTitle] = useState<string | null>(null);
 

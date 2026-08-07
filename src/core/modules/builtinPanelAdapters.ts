@@ -13,21 +13,6 @@ export type BuiltinPanelLoaders = Readonly<
 >;
 
 export const BUILTIN_PANEL_DEFINITIONS = {
-  git: {
-    id: BUILTIN_PANEL_IDS.git,
-    legacyKind: "git",
-    moduleId: "core",
-    scope: "project",
-    label: "Files",
-    icon: { name: "folder-tree" },
-    shortcut: "⌘G",
-    singleton: "per-project",
-    order: 10,
-    unavailable: {
-      title: "Files panel unavailable",
-      description: "The built-in Git and file browser could not be loaded.",
-    },
-  },
   commands: {
     id: BUILTIN_PANEL_IDS.commands,
     legacyKind: "commands",

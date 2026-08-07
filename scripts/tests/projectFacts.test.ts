@@ -11,14 +11,14 @@ import { createServer, type ViteDevServer } from "vite";
 
 type ProjectFactsModule = typeof import("../../src/core/modules/projectFacts.ts");
 type ModuleComposition = typeof import("../../src/core/modules/moduleComposition.ts");
-type GitModule = typeof import("../../modules/git/frontend/src/index.ts");
+type GitStoreModule = typeof import("../../modules/git/frontend/src/store.ts");
 
 let vite: ViteDevServer;
 let refreshProjectFacts: ProjectFactsModule["refreshProjectFacts"];
 let resolveProjectFacts: ProjectFactsModule["resolveProjectFacts"];
 let subscribeProjectFacts: ProjectFactsModule["subscribeProjectFacts"];
 let enabledProjectFactsProvider: ModuleComposition["enabledProjectFactsProvider"];
-let useGitStore: GitModule["useGitStore"];
+let useGitStore: GitStoreModule["useGitStore"];
 
 before(async () => {
   vite = await createServer({
@@ -38,8 +38,8 @@ before(async () => {
     "/src/core/modules/moduleComposition.ts",
   ) as ModuleComposition);
   ({ useGitStore } = await vite.ssrLoadModule(
-    "/modules/git/frontend/src/index.ts",
-  ) as GitModule);
+    "/modules/git/frontend/src/store.ts",
+  ) as GitStoreModule);
 });
 
 after(async () => {
@@ -48,6 +48,15 @@ after(async () => {
 
 const project: ProjectRef = { id: "/fixture", name: "fixture", path: "/fixture" };
 const services = {
+  panels: {
+    open: () => "fixture-panel",
+    reveal: () => undefined,
+    close: () => undefined,
+  },
+  appearance: {
+    getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
+    subscribe: () => () => undefined,
+  },
   settings: {
     getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
     subscribe: () => () => undefined,

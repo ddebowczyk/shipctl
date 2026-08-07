@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectActionSurfaceProps } from "@shep/module-api";
 
-import { getErrorMessage } from "../../lib/errors";
-import { gitCreateWorktree } from "../../lib/tauri";
+import { getErrorMessage } from "./errors";
+import { gitCreateWorktree } from "./client";
 
 export default function CreateWorktreeProjectActionSurface({
   project,

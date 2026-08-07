@@ -7,6 +7,7 @@ import type {
   ProjectActionContribution,
   ProjectFactsProviderContribution,
   ProjectLayoutContribution,
+  ProjectImportContribution,
   ProjectNavigationContribution,
   SettingsContribution,
   ShepModule,
@@ -23,10 +24,6 @@ import {
 import { ENABLED_MODULES } from "./enabledModules";
 import { GlobalSurfaceRegistry } from "./globalSurfaceRegistry";
 import { PanelRegistry } from "./panelRegistry";
-import {
-  BUILTIN_PROJECT_ACTION_CONTRIBUTIONS,
-  BUILTIN_PROJECT_LAYOUT_CONTRIBUTIONS,
-} from "./builtinProjectAdapters";
 
 export function modulePanelContributions(
   modules: readonly ShepModule[] = ENABLED_MODULES,
@@ -76,10 +73,8 @@ export function moduleProjectActionContributions(
 
 export function enabledProjectActionContributions(
   modules: readonly ShepModule[] = ENABLED_MODULES,
-  builtin: readonly ProjectActionContribution[] = BUILTIN_PROJECT_ACTION_CONTRIBUTIONS,
 ): readonly ProjectActionContribution[] {
-  return [...builtin, ...moduleProjectActionContributions(modules)]
-    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+  return moduleProjectActionContributions(modules);
 }
 
 export function moduleProjectLayoutContributions(
@@ -92,10 +87,28 @@ export function moduleProjectLayoutContributions(
 
 export function enabledProjectLayoutContributions(
   modules: readonly ShepModule[] = ENABLED_MODULES,
-  builtin: readonly ProjectLayoutContribution[] = BUILTIN_PROJECT_LAYOUT_CONTRIBUTIONS,
 ): readonly ProjectLayoutContribution[] {
-  return [...builtin, ...moduleProjectLayoutContributions(modules)]
-    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+  return moduleProjectLayoutContributions(modules);
+}
+
+export function moduleProjectImportContributions(
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): readonly ProjectImportContribution[] {
+  return modules.flatMap((module) => module.projectImport ? [module.projectImport] : []);
+}
+
+export async function discoverRelatedProjectPaths(
+  projectPath: string,
+  options: { readonly expandRelated: boolean },
+  services: ModuleHostServices,
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): Promise<readonly string[]> {
+  const results = await Promise.allSettled(
+    moduleProjectImportContributions(modules).map((contribution) =>
+      contribution.relatedPaths(projectPath, options, services)),
+  );
+  return [...new Set(results.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : []))];
 }
 
 export function moduleProjectFactsProviders(

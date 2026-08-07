@@ -192,3 +192,13 @@ export interface ModuleProjectLifecycle {
     services: ModuleHostServices,
   ): void | Promise<void>;
 }
+
+export interface ProjectImportContribution {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  relatedPaths(
+    projectPath: string,
+    options: { readonly expandRelated: boolean },
+    services: ModuleHostServices,
+  ): readonly string[] | Promise<readonly string[]>;
+}

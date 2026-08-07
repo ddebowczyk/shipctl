@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
-import type { ShepTheme } from "../../lib/themes";
-import { hexLuminance } from "../../lib/themes";
-import { shikiThemeFor } from "../../lib/shikiHighlighter";
+import type { ModuleAppearanceSnapshot } from "@shep/module-api";
+import { hexLuminance } from "./appearance";
+import { shikiThemeFor } from "./shikiHighlighter";
 
 export const CODE_VIEW_FONT_STACK = "\"SF Mono\", \"Fira Code\", \"Cascadia Code\", monospace";
 export const CODE_VIEW_FONT_SIZE = "12px";
@@ -33,8 +33,8 @@ export function getCodeViewCSSVariables(): CSSProperties {
   } as CSSProperties;
 }
 
-export function getDiffViewOptions(theme: ShepTheme) {
-  const themeType: "light" | "dark" = hexLuminance(theme.appBg) > 0.3 ? "light" : "dark";
+export function getDiffViewOptions(theme: ModuleAppearanceSnapshot) {
+  const themeType: "light" | "dark" = hexLuminance(theme.background) > 0.3 ? "light" : "dark";
   return {
     theme: shikiThemeFor(theme),
     themeType,

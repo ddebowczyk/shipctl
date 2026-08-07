@@ -1,4 +1,4 @@
-import { FolderTree, Terminal, SquareTerminal, List, PanelsTopLeft, ExternalLink } from "lucide-react";
+import { Terminal, SquareTerminal, List, PanelsTopLeft, ExternalLink } from "lucide-react";
 import type { TabKind } from "./types";
 
 export interface TabKindMeta {
@@ -22,11 +22,6 @@ const meta: Record<TabKind, TabKindMeta> = {
     label: "Commands",
     icon: (size) => <List size={size} />,
     shortcut: "⇧⌘C",
-  },
-  git: {
-    label: "Files",
-    icon: (size) => <FolderTree size={size} />,
-    shortcut: "⌘G",
   },
   launcher: {
     label: "New Agent",

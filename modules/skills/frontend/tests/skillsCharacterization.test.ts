@@ -201,6 +201,15 @@ test("module entry owns the provider, project action, and error notice", async (
   setupError = new Error("write denied");
   const notices: Array<{ tone: string; title: string; message?: string }> = [];
   const services = {
+    panels: {
+      open: () => "fixture-panel",
+      reveal: () => undefined,
+      close: () => undefined,
+    },
+    appearance: {
+      getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
+      subscribe: () => () => undefined,
+    },
     settings: {
       getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
       subscribe: () => () => undefined,

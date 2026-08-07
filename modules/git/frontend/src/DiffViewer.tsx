@@ -1,8 +1,10 @@
 import { PatchDiff } from "@pierre/diffs/react";
-import { useThemeStore } from "../../stores/useThemeStore";
+import { useAppearance } from "./useAppearance";
+import type { ModuleAppearancePort } from "@shep/module-api";
 import { getCodeViewCSSVariables, getDiffViewOptions } from "./codeViewTheme";
 
 interface DiffViewerProps {
+  appearance: ModuleAppearancePort;
   diff: string;
   filePath: string;
   loading?: boolean;
@@ -10,12 +12,13 @@ interface DiffViewerProps {
 }
 
 export default function DiffViewer({
+  appearance,
   diff,
   filePath,
   loading = false,
   error = null,
 }: DiffViewerProps) {
-  const theme = useThemeStore((s) => s.theme);
+  const theme = useAppearance(appearance);
   const codeViewCSSVariables = getCodeViewCSSVariables();
   const diffViewOptions = getDiffViewOptions(theme);
 

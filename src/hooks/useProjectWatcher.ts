@@ -12,10 +12,10 @@ interface FsChangedPayload {
 }
 
 /**
- * Watches repo paths for git changes via file system events.
+ * Watches project paths and forwards file-system events to module lifecycles.
  * Each project (including worktrees added as separate projects) is watched independently.
  */
-export function useGitWatcher(repoPaths: string[]) {
+export function useProjectWatcher(projectPaths: string[]) {
   const watchedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -29,7 +29,7 @@ export function useGitWatcher(repoPaths: string[]) {
   }, []);
 
   useEffect(() => {
-    const current = new Set(repoPaths);
+    const current = new Set(projectPaths);
     const watched = watchedRef.current;
 
     // Watch newly added paths
@@ -51,8 +51,8 @@ export function useGitWatcher(repoPaths: string[]) {
     }
 
     // Initial refresh
-    void notifyModulesProjectsChanged(repoPaths, MODULE_HOST_SERVICES);
-  }, [repoPaths.join("\0")]);
+    void notifyModulesProjectsChanged(projectPaths, MODULE_HOST_SERVICES);
+  }, [projectPaths.join("\0")]);
 
   useEffect(() => {
     return () => {

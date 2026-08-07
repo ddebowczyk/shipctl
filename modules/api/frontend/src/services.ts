@@ -1,3 +1,5 @@
+import type { PanelHostPort } from "./panels";
+
 export interface ModuleSettingsSnapshot {
   readonly values: Readonly<Record<string, unknown>>;
   readonly isSaving: boolean;
@@ -42,8 +44,20 @@ export interface ModuleExternalLinksPort {
 }
 
 export interface ModuleHostServices {
+  readonly panels: PanelHostPort;
+  readonly appearance: ModuleAppearancePort;
   readonly settings: ModuleSettingsPort;
   readonly skills: ModuleSkillsPort;
   readonly notices: ModuleNoticesPort;
   readonly externalLinks: ModuleExternalLinksPort;
+}
+
+export interface ModuleAppearanceSnapshot {
+  readonly themeId: string;
+  readonly background: string;
+}
+
+export interface ModuleAppearancePort {
+  getSnapshot(): ModuleAppearanceSnapshot;
+  subscribe(listener: () => void): () => void;
 }

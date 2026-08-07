@@ -1,5 +1,4 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
-import { ENABLED_GIT_FRONTEND } from "../core/modules/enabledModules";
 import type {
   RepoInfo,
   RepoGroup,
@@ -8,10 +7,6 @@ import type {
   PtyColorTheme,
   PtyOutput,
   ProjectSettings,
-  GitStatus,
-  ChangedFile,
-  WorktreeEntry,
-  CreatedWorktree,
   EditorSettings,
   KeybindingSettings,
   TerminalSettings,
@@ -26,7 +21,6 @@ import type {
   UsageProjectAliasReviewItem,
   PiConfig,
   PiSettings,
-  DiffFileStat,
   AssistantSessionRecord,
   PrepareAssistantSessionRequest,
   SpawnAssistantSessionRequest,
@@ -282,73 +276,6 @@ export function watchRepo(path: string): Promise<void> {
 
 export function unwatchRepo(path: string): Promise<void> {
   return invoke("unwatch_repo", { path });
-}
-
-// ── Git commands ──────────────────────────────────────────────────
-
-export function isGitRepo(path: string): Promise<boolean> {
-  return ENABLED_GIT_FRONTEND.isGitRepo(path);
-}
-
-export function gitInit(path: string): Promise<void> {
-  return ENABLED_GIT_FRONTEND.gitInit(path);
-}
-
-export function gitCurrentBranch(path: string): Promise<string> {
-  return ENABLED_GIT_FRONTEND.gitCurrentBranch(path);
-}
-
-export function gitListBranches(path: string): Promise<string[]> {
-  return ENABLED_GIT_FRONTEND.gitListBranches(path);
-}
-
-export function gitListWorktrees(path: string): Promise<WorktreeEntry[]> {
-  return ENABLED_GIT_FRONTEND.gitListWorktrees(path);
-}
-
-export function gitCreateWorktree(path: string, branchName: string): Promise<CreatedWorktree> {
-  return ENABLED_GIT_FRONTEND.gitCreateWorktree(path, branchName);
-}
-
-export function gitStatus(path: string): Promise<GitStatus> {
-  return ENABLED_GIT_FRONTEND.gitStatus(path);
-}
-
-export function gitChangedFiles(path: string): Promise<ChangedFile[]> {
-  return ENABLED_GIT_FRONTEND.gitChangedFiles(path);
-}
-
-export function gitFileDiff(path: string, filePath: string, staged: boolean): Promise<string> {
-  return ENABLED_GIT_FRONTEND.gitFileDiff(path, filePath, staged);
-}
-
-/** Read a file's contents for preview in file-viewer mode. `source` is one
- *  of: "working" (from disk), "staged" (from git index), "head" (from HEAD). */
-export function gitFileContents(
-  path: string,
-  filePath: string,
-  source: "working" | "staged" | "head",
-): Promise<string> {
-  return ENABLED_GIT_FRONTEND.gitFileContents(path, filePath, source);
-}
-
-/** List all files known to git — tracked + untracked-but-not-ignored.
- *  Returns repo-relative paths, same set a user would consider "files in
- *  this project" (build artifacts and node_modules are excluded). */
-export function gitListFiles(path: string): Promise<string[]> {
-  return ENABLED_GIT_FRONTEND.gitListFiles(path);
-}
-
-export function gitSwitchBranch(path: string, branchName: string): Promise<void> {
-  return ENABLED_GIT_FRONTEND.gitSwitchBranch(path, branchName);
-}
-
-export function gitCreateBranch(path: string, branchName: string): Promise<void> {
-  return ENABLED_GIT_FRONTEND.gitCreateBranch(path, branchName);
-}
-
-export function gitDiffStats(path: string): Promise<DiffFileStat[]> {
-  return ENABLED_GIT_FRONTEND.gitDiffStats(path);
 }
 
 // ── System commands ────────────────────────────────────────────────

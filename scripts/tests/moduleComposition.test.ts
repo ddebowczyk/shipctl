@@ -11,6 +11,7 @@ import {
   hydratePanelReference,
   PANEL_REFERENCE_SCHEMA_VERSION,
 } from "../../src/core/modules/panelPersistence.ts";
+import { matchesPanelShortcut } from "../../src/core/modules/panelShortcuts.ts";
 
 type ModuleComposition = typeof import("../../src/core/modules/moduleComposition.ts");
 
@@ -62,7 +63,6 @@ after(async () => {
 });
 
 const builtinPanelLoaders: BuiltinPanelLoaders = {
-  git: async () => ({ default: () => null }),
   commands: async () => ({ default: () => null }),
   launcher: async () => ({ default: () => null }),
 };
@@ -154,6 +154,15 @@ const fixtureModule: ShepModule = {
 };
 
 const services = {
+  panels: {
+    open: () => "fixture-panel",
+    reveal: () => undefined,
+    close: () => undefined,
+  },
+  appearance: {
+    getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
+    subscribe: () => () => undefined,
+  },
   settings: {
     getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
     subscribe: () => () => undefined,
@@ -261,16 +270,18 @@ test("project rails are optional, ordered, and absent from disabled composition"
   assert.equal(enabledProjectFactsProvider([]), null);
 });
 
-test("Git composition keeps stable contribution identity and existing menu order", () => {
-  assert.deepEqual(
-    enabledProjectActionContributions().map(({ id }) => id),
-    ["skills.project-actions", "git.project-actions"],
-  );
-  assert.deepEqual(
-    enabledProjectLayoutContributions().map(({ id, slot }) => ({ id, slot })),
-    [{ id: "git.diff-summary", slot: "workspace.trailing" }],
-  );
-  assert.equal(enabledProjectFactsProvider()?.id, "git.project-facts");
+test("module panel shortcuts use the generic host matcher", () => {
+  const commandG = {
+    key: "g",
+    metaKey: true,
+    shiftKey: false,
+    altKey: false,
+  };
+
+  assert.equal(matchesPanelShortcut(commandG, "⌘G"), true);
+  assert.equal(matchesPanelShortcut({ ...commandG, metaKey: false }, "⌘G"), false);
+  assert.equal(matchesPanelShortcut({ ...commandG, shiftKey: true }, "⌘G"), false);
+  assert.equal(matchesPanelShortcut({ ...commandG, altKey: true }, "⌘G"), false);
 });
 
 test("project facts selection is singular and module-owned", () => {

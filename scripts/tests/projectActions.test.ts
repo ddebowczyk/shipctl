@@ -39,6 +39,15 @@ after(async () => {
 
 const project: ProjectRef = { id: "/fixture", name: "fixture", path: "/fixture" };
 const services = {
+  panels: {
+    open: () => "fixture-panel",
+    reveal: () => undefined,
+    close: () => undefined,
+  },
+  appearance: {
+    getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
+    subscribe: () => () => undefined,
+  },
   settings: {
     getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
     subscribe: () => () => undefined,

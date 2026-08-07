@@ -377,19 +377,6 @@ export default function SettingsPanel() {
 
         <div className="settings-row">
           <span className="settings-row__label flex items-center gap-2">
-            <span>Auto-import Worktrees</span>
-            <InfoTip text="When enabled, adding a main repo also imports its existing Git worktrees. Adding a worktree directly still adds its main repo so the relationship stays intact." />
-          </span>
-          <button
-            onClick={() => void updateProjectSettings({ autoImportWorktrees: !projectSettings.autoImportWorktrees })}
-            className={`option-card option-card--compact ${projectSettings.autoImportWorktrees ? "selected" : ""}`}
-          >
-            {projectSettings.autoImportWorktrees ? "On" : "Off"}
-          </button>
-        </div>
-
-        <div className="settings-row">
-          <span className="settings-row__label flex items-center gap-2">
             <span>Agent Sessions in Sidebar</span>
             <InfoTip text="Shows the global agent session section above Projects. Project tabs and agent sessions remain available inside each project when this is off." />
           </span>

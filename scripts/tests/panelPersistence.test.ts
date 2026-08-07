@@ -9,6 +9,8 @@ import {
 } from "../../src/core/modules/panelPersistence.ts";
 
 const allBuiltinPanels = Object.values(BUILTIN_PANEL_IDS);
+const gitPanel = { kind: "git", panelId: "core.git", label: "Files" };
+const allAvailablePanels = [...allBuiltinPanels, gitPanel.panelId];
 
 test("legacy panel tabs migrate to equivalent stable references", () => {
   for (const [kind, panelId] of Object.entries(BUILTIN_PANEL_IDS)) {
@@ -35,12 +37,27 @@ test("current references preserve opaque module state", () => {
     legacyKind: "git",
     state,
   });
-  const result = hydratePanelReference(raw, { availablePanelIds: allBuiltinPanels });
+  const result = hydratePanelReference(raw, {
+    availablePanelIds: allAvailablePanels,
+    legacyPanels: [gitPanel],
+  });
 
   assert.equal(raw.schemaVersion, PANEL_REFERENCE_SCHEMA_VERSION);
   assert.equal(result.status, "available");
   assert.equal(result.source, "current");
   assert.equal(result.state, state);
+});
+
+test("module migration metadata restores pre-module Git tabs", () => {
+  const raw = { id: "panel-git", kind: "git", label: "Files" };
+  const result = hydratePanelReference(raw, {
+    availablePanelIds: allAvailablePanels,
+    legacyPanels: [gitPanel],
+  });
+
+  assert.equal(result.status, "available");
+  assert.equal(result.source, "legacy");
+  assert.equal(result.panelId, "core.git");
 });
 
 test("unknown panel IDs remain retryable and removable", () => {

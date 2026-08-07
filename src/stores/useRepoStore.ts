@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import type { RepoInfo, RepoGroup, WorkspaceConfig } from "../lib/types";
 import {
-  gitListWorktrees,
   listRepos,
   registerRepo,
   unregisterRepo,
@@ -12,7 +11,10 @@ import {
   deleteGroup as ipcDeleteGroup,
   moveRepoToGroup as ipcMoveRepoToGroup,
 } from "../lib/tauri";
-import { useProjectSettingsStore } from "./useProjectSettingsStore";
+import {
+  discoverRelatedProjectPaths,
+  MODULE_HOST_SERVICES,
+} from "../core/modules";
 
 const EMPTY_REPOS: RepoInfo[] = [];
 const EMPTY_GROUPS: RepoGroup[] = [];
@@ -112,26 +114,15 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
         primaryRegistered = registered;
       }
 
-      let worktrees;
-      try {
-        worktrees = await gitListWorktrees(canonicalPath);
-      } catch {
-        continue;
-      }
+      const relatedPaths = await discoverRelatedProjectPaths(
+        canonicalPath,
+        {
+          expandRelated: next.mode === "expand-main",
+        },
+        MODULE_HOST_SERVICES,
+      );
 
-      const currentEntry = worktrees.find((wt) => wt.path === canonicalPath);
-      if (!currentEntry) {
-        continue;
-      }
-
-      const relatedPaths =
-        currentEntry.is_main
-          ? next.mode === "expand-main" && useProjectSettingsStore.getState().settings.autoImportWorktrees
-            ? worktrees.filter((wt) => !wt.is_main).map((wt) => wt.path)
-            : []
-          : worktrees.filter((wt) => wt.is_main).map((wt) => wt.path);
-
-      for (const relatedPath of uniquePaths(relatedPaths)) {
+      for (const relatedPath of uniquePaths([...relatedPaths])) {
         if (knownPaths.has(relatedPath) || queuedPaths.has(relatedPath)) {
           continue;
         }

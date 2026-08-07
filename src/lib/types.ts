@@ -38,7 +38,6 @@ export interface EditorSettings {
 }
 
 export interface ProjectSettings {
-  autoImportWorktrees: boolean;
   showAgentSessionsInSidebar: boolean;
   /** Capability-owned values are preserved without becoming host contracts. */
   [key: string]: unknown;
@@ -149,7 +148,7 @@ export interface ResumeAssistantSessionRequest {
 
 // ── Unified tab model ──────────────────────────────────────────────
 
-export type PanelTabKind = "git" | "commands" | "launcher";
+export type PanelTabKind = "commands" | "launcher";
 export type TabKind = "terminal" | "assistant" | "panel" | PanelTabKind;
 
 interface TabBase {
@@ -194,7 +193,6 @@ export function contributedPanelTabId(panelId: `${string}.${string}`): string {
 }
 
 export const panelTabDefaults: Record<PanelTabKind, { label: string }> = {
-  git: { label: "Files" },
   commands: { label: "Commands" },
   launcher: { label: "New Agent" },
 };
@@ -225,14 +223,6 @@ export interface CodingAssistant {
 }
 
 export type AssistantConfig = CodingAssistant;
-
-export type {
-  ChangedFile,
-  CreatedWorktree,
-  DiffFileStat,
-  GitStatus,
-  WorktreeEntry,
-} from "../core/modules/enabledModules";
 
 // ── Pi config ──────────────────────────────────────────────────────
 

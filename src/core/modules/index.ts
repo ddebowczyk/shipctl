@@ -59,6 +59,7 @@ export { ENABLED_MODULES } from "./enabledModules";
 export {
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
+  discoverRelatedProjectPaths,
   enabledProjectActionContributions,
   enabledProjectFactsProvider,
   enabledProjectLayoutContributions,
@@ -69,6 +70,7 @@ export {
   moduleProjectActionContributions,
   moduleProjectFactsProviders,
   moduleProjectLayoutContributions,
+  moduleProjectImportContributions,
   moduleProjectNavigationContributions,
   moduleSkillsProvider,
   moduleSettingsContributions,

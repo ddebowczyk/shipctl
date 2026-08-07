@@ -3,13 +3,11 @@ import type { PanelTabKind, UnifiedTab } from "../../lib/types";
 export const PANEL_REFERENCE_SCHEMA_VERSION = 1 as const;
 
 export const BUILTIN_PANEL_IDS = {
-  git: "core.git",
   commands: "core.commands",
   launcher: "core.launcher",
 } as const satisfies Record<PanelTabKind, `${string}.${string}`>;
 
 const LEGACY_PANEL_LABELS = {
-  git: "Files",
   commands: "Commands",
   launcher: "New Agent",
 } as const satisfies Record<PanelTabKind, string>;

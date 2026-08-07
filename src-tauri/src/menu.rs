@@ -53,7 +53,6 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+Shift+C"),
     )?;
-    let new_git = MenuItem::with_id(app, "new_git", "New Git Panel", true, Some("CmdOrCtrl+G"))?;
     let open_in_editor = MenuItem::with_id(
         app,
         "open_in_editor",
@@ -66,7 +65,6 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
         .item(&new_terminal)
         .item(&new_agent)
         .item(&new_commands)
-        .item(&new_git)
         .separator()
         .item(&open_in_editor)
         .separator()

@@ -1,19 +1,9 @@
 import { GitBranch } from "lucide-react";
-import { useGitStore } from "../../stores/useGitStore";
-import { useTerminalStore } from "../../stores/useTerminalStore";
-import { panelTabId } from "../../lib/types";
+import type { ProjectNavigationContributionProps } from "@shep/module-api";
+import { useGitStore } from "./store";
 
-interface GitStatusRowProps {
-  repoPath: string;
-}
-
-export default function GitStatusRow({ repoPath }: GitStatusRowProps) {
-  const status = useGitStore((s) => s.projectGitStatus[repoPath]);
-  const isActive = useTerminalStore((s) => {
-    const path = s.activeProjectPath;
-    if (!path) return false;
-    return s.projectState[path]?.activeTabId === panelTabId("git");
-  });
+export default function GitStatusRow({ project, active, open }: ProjectNavigationContributionProps) {
+  const status = useGitStore((s) => s.projectGitStatus[project.path]);
 
   if (!status?.is_git_repo) return null;
 
@@ -22,8 +12,8 @@ export default function GitStatusRow({ repoPath }: GitStatusRowProps) {
 
   return (
     <button
-      onClick={() => useTerminalStore.getState().addPanelTab("git")}
-      className={`section-toggle ${isActive ? "!text-[var(--text-primary)] !bg-white/6" : ""}`}
+      onClick={open}
+      className={`section-toggle ${active ? "!text-[var(--text-primary)] !bg-white/6" : ""}`}
     >
       <span className="shrink-0" style={{ color: "var(--section-icon-color)" }}><GitBranch size={14} /></span>
       <span className="truncate" title={label}>{label}</span>

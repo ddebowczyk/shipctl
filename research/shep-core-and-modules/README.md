@@ -131,6 +131,12 @@ capability ceiling.
 - [26-git-native-extraction.md](./26-git-native-extraction.md) records the
   namespaced Git plugin, registered-project authority, relative-file security
   policy, flat-command removal, and Git-disabled native build.
+- [27-git-frontend-state-and-facts.md](./27-git-frontend-state-and-facts.md)
+  records module-owned Git DTOs, client, stores, lifecycle, and project facts
+  plus the temporary visual bridge used for the safe cutover.
+- [28-git-visual-surfaces-and-plugout.md](./28-git-visual-surfaces-and-plugout.md)
+  records complete frontend/resource ownership and the enabled, disabled, and
+  physically source-absent Git verification matrix.
 
 ## Target dependency shape
 

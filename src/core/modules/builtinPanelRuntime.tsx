@@ -48,10 +48,6 @@ function useBuiltinPanelRuntime(): BuiltinPanelRuntimeValue {
 }
 
 export const BUILTIN_PANEL_LOADERS = {
-  git: async () => {
-    const { default: GitPanel } = await import("../../components/git/GitPanel");
-    return { default: GitPanel };
-  },
   commands: async () => {
     const { default: CommandsPanel } = await import("../../components/commands/CommandsPanel");
     return {

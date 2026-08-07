@@ -1,28 +1,27 @@
 import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Search, X, PanelLeft, PanelLeftOpen, FileText, Diff } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { useGitStore } from "../../stores/useGitStore";
-import { useTerminalStore } from "../../stores/useTerminalStore";
-import { useGitPanelStore } from "../../stores/useGitPanelStore";
+import type { ModulePanelProps } from "@shep/module-api";
+import { useGitStore } from "./store";
+import { useGitPanelStore } from "./panelStore";
 import {
   gitChangedFiles, gitFileContents, gitFileDiff, gitListFiles,
-} from "../../lib/tauri";
-import type { ChangedFile } from "../../lib/types";
+} from "./client";
+import type { ChangedFile } from "./types";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
-import ErrorBoundary from "../shared/ErrorBoundary";
-import { useNoticeStore } from "../../stores/useNoticeStore";
-import { getErrorMessage } from "../../lib/errors";
-import { isMarkdownFile } from "../../lib/markdownRenderer";
+import ErrorBoundary from "./ErrorBoundary";
+import { getErrorMessage } from "./errors";
+import { isMarkdownFile } from "./markdownRenderer";
 import { getCodeViewCSSVariables } from "./codeViewTheme";
 
 const diffViewerLoader = () => import("./DiffViewer");
 diffViewerLoader();
 const DiffViewer = lazy(diffViewerLoader);
 
-export default function GitPanel() {
-  const activeProjectPath = useTerminalStore((s) => s.activeProjectPath);
-  const pushNotice = useNoticeStore((s) => s.pushNotice);
+export default function GitPanel({ project, services }: ModulePanelProps) {
+  const activeProjectPath = project?.path ?? null;
+  const pushNotice = services.notices.push;
 
   const gitStatus = useGitStore(
     (s) => activeProjectPath ? s.projectGitStatus[activeProjectPath] ?? null : null,
@@ -539,6 +538,7 @@ export default function GitPanel() {
                   )}
                 >
                   <DiffViewer
+                    appearance={services.appearance}
                     key={`${repoSelectedPath}:${resolvedDiffArea ?? "none"}`}
                     diff={repoDiffContent}
                     filePath={repoSelectedPath}
@@ -549,6 +549,7 @@ export default function GitPanel() {
               </ErrorBoundary>
             ) : (
               <FileViewer
+                appearance={services.appearance}
                 key={repoSelectedPath}
                 contents={repoFileContent}
                 filePath={repoSelectedPath}

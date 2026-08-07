@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
-import { useThemeStore } from "../../stores/useThemeStore";
+import { useAppearance } from "./useAppearance";
+import type { ModuleAppearancePort } from "@shep/module-api";
 import {
   getMarkdownRenderer,
   getPlainMarkdownRenderer,
-} from "../../lib/markdownRenderer";
-import { shikiThemeFor } from "../../lib/shikiHighlighter";
+} from "./markdownRenderer";
+import { shikiThemeFor } from "./shikiHighlighter";
 
 interface MarkdownViewerProps {
   contents: string;
+  appearance: ModuleAppearancePort;
 }
 
-export default function MarkdownViewer({ contents }: MarkdownViewerProps) {
-  const theme = useThemeStore((s) => s.theme);
+export default function MarkdownViewer({ contents, appearance }: MarkdownViewerProps) {
+  const theme = useAppearance(appearance);
   const [html, setHtml] = useState("");
 
   useEffect(() => {

@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
-import type { GitStatus } from "../../modules/git/frontend/src/types.ts";
+import type { ModuleHostServices } from "@shep/module-api";
+import type {
+  GitStatus,
+  WorktreeEntry,
+} from "../../modules/git/frontend/src/types.ts";
 
 type GitStoreModule = typeof import("../../modules/git/frontend/src/store.ts");
 type GitPanelStoreModule = typeof import("../../modules/git/frontend/src/panelStore.ts");
@@ -13,6 +17,7 @@ type GitFrontendModule = typeof import("../../modules/git/frontend/src/index.ts"
 
 interface NativeMock {
   gitStatus(repoPath: string): Promise<GitStatus>;
+  gitListWorktrees(repoPath: string): Promise<WorktreeEntry[]>;
 }
 
 const virtualNativeId = "\0git-native-characterization";
@@ -24,7 +29,10 @@ const nativePlugin: Plugin = {
   name: "git-native-characterization",
   enforce: "pre",
   resolveId(source, importer) {
-    if (source === "./client" && importer?.endsWith("/modules/git/frontend/src/store.ts")) {
+    if (source === "./client" && (
+      importer?.endsWith("/modules/git/frontend/src/store.ts")
+      || importer?.endsWith("/modules/git/frontend/src/index.ts")
+    )) {
       return virtualNativeId;
     }
     return null;
@@ -34,6 +42,7 @@ const nativePlugin: Plugin = {
     return `
       const native = () => globalThis.__shepGitNativeMock;
       export const gitStatus = (...args) => native().gitStatus(...args);
+      export const gitListWorktrees = (...args) => native().gitListWorktrees(...args);
     `;
   },
 };
@@ -74,6 +83,7 @@ let useGitStore: GitStoreModule["useGitStore"];
 let useGitPanelStore: GitPanelStoreModule["useGitPanelStore"];
 let gitModule: GitFrontendModule["gitModule"];
 let implementations: Map<string, () => Promise<GitStatus>>;
+let worktrees: Map<string, WorktreeEntry[]>;
 
 function status(overrides: Partial<GitStatus> = {}): GitStatus {
   return {
@@ -116,13 +126,104 @@ after(async () => {
 
 beforeEach(() => {
   implementations = new Map();
+  worktrees = new Map();
   nativeGlobal.__shepGitNativeMock = {
     gitStatus(repoPath) {
       return (implementations.get(repoPath) ?? (async () => status()))();
     },
+    async gitListWorktrees(repoPath) {
+      return worktrees.get(repoPath) ?? [];
+    },
   };
   useGitStore.setState({ projectGitStatus: {} });
   useGitPanelStore.setState({ perRepo: {} });
+});
+
+function services(autoImportWorktrees = true): ModuleHostServices {
+  return {
+    panels: {
+      open: () => "git-panel",
+      reveal: () => undefined,
+      close: () => undefined,
+    },
+    appearance: {
+      getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
+      subscribe: () => () => undefined,
+    },
+    settings: {
+      getSnapshot: () => ({
+        values: { autoImportWorktrees },
+        isSaving: false,
+        error: null,
+      }),
+      subscribe: () => () => undefined,
+      update: async () => undefined,
+    },
+    skills: {
+      getSnapshot: () => ({ byProject: {} }),
+      subscribe: () => () => undefined,
+      install: async () => undefined,
+    },
+    notices: { push: () => undefined },
+    externalLinks: { open: async () => undefined },
+  };
+}
+
+test("module entry owns every Git contribution and its stable panel shortcut", () => {
+  assert.equal(gitModule.id, "shep.git");
+  assert.deepEqual(gitModule.panels.map(({ id, shortcut }) => ({ id, shortcut })), [
+    { id: "core.git", shortcut: "⌘G" },
+  ]);
+  assert.deepEqual(gitModule.projectNavigation.map(({ id }) => id), [
+    "git.project-navigation",
+  ]);
+  assert.deepEqual(gitModule.projectLayout.map(({ id }) => id), ["git.diff-summary"]);
+  assert.deepEqual(gitModule.projectActions.map(({ id }) => id), ["git.project-actions"]);
+  assert.equal(gitModule.projectFactsProvider.id, "git.project-facts");
+  assert.equal(gitModule.projectImport.id, "git.related-projects");
+  assert.deepEqual(gitModule.settings.map(({ id }) => id), ["git.settings"]);
+});
+
+test("module-owned project import preserves main and linked worktree behavior", async () => {
+  const entries: WorktreeEntry[] = [
+    { path: "/repo", branch: "main", is_main: true },
+    { path: "/repo-feature", branch: "feature", is_main: false },
+  ];
+  worktrees.set("/repo", entries);
+  worktrees.set("/repo-feature", entries);
+
+  assert.deepEqual(
+    await gitModule.projectImport.relatedPaths(
+      "/repo",
+      { expandRelated: true },
+      services(true),
+    ),
+    ["/repo-feature"],
+  );
+  assert.deepEqual(
+    await gitModule.projectImport.relatedPaths(
+      "/repo",
+      { expandRelated: true },
+      services(false),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    await gitModule.projectImport.relatedPaths(
+      "/repo",
+      { expandRelated: false },
+      services(true),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    await gitModule.projectImport.relatedPaths(
+      "/repo-feature",
+      { expandRelated: false },
+      services(false),
+    ),
+    ["/repo"],
+  );
 });
 
 test("batch refresh updates fulfilled projects and preserves failed project snapshots", async () => {
@@ -196,13 +297,16 @@ test("generic host project chrome has no direct Git state dependency", () => {
     "../../src/components/sidebar/ProjectList.tsx",
     "../../src/components/sidebar/Sidebar.tsx",
     "../../src/components/sidebar/TerminalItem.tsx",
-    "../../src/hooks/useGitWatcher.ts",
+    "../../src/hooks/useProjectWatcher.ts",
     "../../src/lib/projectGrouping.ts",
   ];
 
   for (const file of files) {
     const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
-    assert.doesNotMatch(source, /useGitStore|projectGitStatus|worktree_parent/);
+    assert.doesNotMatch(
+      source,
+      /@shep\/module-git|useGitStore|useGitPanelStore|projectGitStatus|worktree_parent|GitPanel|GitStatusRow/,
+    );
   }
 });
 

@@ -13,7 +13,7 @@ import { useUIStore } from "../../stores/useUIStore";
 import { useShallow } from "zustand/shallow";
 import { usePty } from "../../hooks/usePty";
 import { useThemeApplicator } from "../../hooks/useThemeApplicator";
-import { useGitWatcher } from "../../hooks/useGitWatcher";
+import { useProjectWatcher } from "../../hooks/useProjectWatcher";
 import { computeTerminalSize } from "../../lib/terminalMeasure";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -53,6 +53,7 @@ import {
   PanelHost,
 } from "../../core/modules";
 import type { BuiltinPanelRuntimeValue } from "../../core/modules";
+import { matchesPanelShortcut } from "../../core/modules/panelShortcuts";
 
 import type {
   AssistantSessionRecord,
@@ -71,6 +72,8 @@ const LAST_REPO_STORAGE_KEY = "shep:last-repo-path";
 const EMPTY_TABS: UnifiedTab[] = [];
 const EMPTY_COMMANDS: CommandState[] = [];
 const PANEL_REGISTRY = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
+const MODULE_PANEL_CONTRIBUTIONS = PANEL_REGISTRY.list()
+  .filter((panel) => panel.moduleId !== "core");
 const GLOBAL_SURFACE_REGISTRY = createEnabledGlobalSurfaceRegistry(
   BUILTIN_GLOBAL_SURFACE_LOADERS,
 );
@@ -134,12 +137,11 @@ export default function AppShell() {
   // every call — zustand v5 + useSyncExternalStore would infinite-loop otherwise.
   const projectState = useTerminalStore((s) => s.projectState);
 
-  // Git watching: main repo paths only — worktree paths are discovered automatically
-  const gitRepoPaths = useMemo(
+  const projectPaths = useMemo(
     () => repos.map((r) => r.path),
     [repos],
   );
-  useGitWatcher(gitRepoPaths);
+  useProjectWatcher(projectPaths);
   // Collect only PTY-backed tabs for TerminalView rendering (panel tabs have no terminal)
   const allTerminalTabs = useMemo(() => {
     const all: Array<{ tab: TerminalTabData; projectPath: string }> = [];
@@ -780,9 +782,6 @@ export default function AppShell() {
         case "new_commands":
           useTerminalStore.getState().addPanelTab("commands");
           break;
-        case "new_git":
-          useTerminalStore.getState().addPanelTab("git");
-          break;
         case "toggle_sidebar":
           useUIStore.getState().toggleSidebar();
           break;
@@ -816,10 +815,18 @@ export default function AppShell() {
   // page instead of the native application menu.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Tab" || (!event.metaKey && !event.ctrlKey) || event.altKey) return;
+      if (event.key === "Tab" && (event.metaKey || event.ctrlKey) && !event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        cycleTabs(event.shiftKey ? -1 : 1);
+        return;
+      }
+      const panel = MODULE_PANEL_CONTRIBUTIONS.find((contribution) =>
+        contribution.shortcut && matchesPanelShortcut(event, contribution.shortcut));
+      if (!panel) return;
       event.preventDefault();
       event.stopPropagation();
-      cycleTabs(event.shiftKey ? -1 : 1);
+      useTerminalStore.getState().addContributedPanelTab(panel.id, panel.label);
     };
 
     window.addEventListener("keydown", handleKeyDown, true);
@@ -925,7 +932,8 @@ export default function AppShell() {
             onNewShell={handleNewShell}
             onNewAssistant={handleNewAssistant}
             onNewCommands={() => useTerminalStore.getState().addPanelTab("commands")}
-            onNewGit={() => useTerminalStore.getState().addPanelTab("git")}
+            panels={MODULE_PANEL_CONTRIBUTIONS}
+            onOpenPanel={(panel) => useTerminalStore.getState().addContributedPanelTab(panel.id, panel.label)}
             onOpenInEditor={() => { const p = useTerminalStore.getState().activeProjectPath; if (p) handleOpenInEditor(p); }}
             onRenameTab={handleRenameTab}
             onMoveTab={handleMoveTab}

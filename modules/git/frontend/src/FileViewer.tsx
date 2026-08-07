@@ -1,15 +1,17 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useThemeStore } from "../../stores/useThemeStore";
+import { useAppearance } from "./useAppearance";
+import type { ModuleAppearancePort } from "@shep/module-api";
 import {
   highlightSource,
   langForFile,
   shikiThemeFor,
   type ThemedToken,
-} from "../../lib/shikiHighlighter";
+} from "./shikiHighlighter";
 import MarkdownViewer from "./MarkdownViewer";
-import { isMarkdownFile } from "../../lib/markdownRenderer";
+import { isMarkdownFile } from "./markdownRenderer";
 
 interface FileViewerProps {
+  appearance: ModuleAppearancePort;
   contents: string;
   filePath: string;
   loading?: boolean;
@@ -33,6 +35,7 @@ interface FileViewerProps {
 const SHIKI_MAX_BYTES = 200 * 1024; // 200 KB
 
 export default function FileViewer({
+  appearance,
   contents,
   filePath,
   loading,
@@ -42,7 +45,7 @@ export default function FileViewer({
   initialScrollTop,
   onScrollChange,
 }: FileViewerProps) {
-  const theme = useThemeStore((s) => s.theme);
+  const theme = useAppearance(appearance);
   const [tokens, setTokens] = useState<ThemedToken[][] | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -133,7 +136,7 @@ export default function FileViewer({
   if (markdownFile && !rawMarkdown) {
     return (
       <div className="git-panel__diff" ref={scrollRef} onScroll={handleScroll}>
-        <MarkdownViewer contents={contents} />
+        <MarkdownViewer contents={contents} appearance={appearance} />
       </div>
     );
   }

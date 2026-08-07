@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import type { ProjectLayoutContributionProps } from "@shep/module-api";
 import { Diff } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -7,11 +8,10 @@ import {
   getBuiltInSpriteSheet,
   type FileTreeIconConfig,
 } from "@pierre/trees";
-import { useTerminalStore } from "../../stores/useTerminalStore";
-import { useGitStore } from "../../stores/useGitStore";
-import { useGitPanelStore } from "../../stores/useGitPanelStore";
-import { gitChangedFiles, gitDiffStats } from "../../lib/tauri";
-import type { ChangedFile, DiffFileStat } from "../../lib/types";
+import { useGitStore } from "./store";
+import { useGitPanelStore } from "./panelStore";
+import { gitChangedFiles, gitDiffStats } from "./client";
+import type { ChangedFile, DiffFileStat } from "./types";
 
 // Clicking a row opens GitPanel in diff mode. Both chunks are lazy in AppShell,
 // so preload them here — this module is evaluated whenever a repo is active,
@@ -91,8 +91,8 @@ function DiffTooltip({ tip }: { tip: TooltipState }) {
   );
 }
 
-export default function DiffSummaryPanel() {
-  const activeProjectPath = useTerminalStore((s) => s.activeProjectPath);
+export default function DiffSummaryPanel({ project, services }: ProjectLayoutContributionProps) {
+  const activeProjectPath = project.path;
   const gitStatus = useGitStore(
     (s) => (activeProjectPath ? s.projectGitStatus[activeProjectPath] ?? null : null),
   );
@@ -178,11 +178,11 @@ export default function DiffSummaryPanel() {
   const handleFileClick = useCallback((file: ChangedFile) => {
     if (!activeProjectPath) return;
     if (file.area !== "staged" && file.area !== "unstaged" && file.area !== "untracked") return;
-    useTerminalStore.getState().addPanelTab("git");
+    services.panels.open("core.git");
     useGitPanelStore.getState().setRepoSelection(activeProjectPath, file.path);
     useGitPanelStore.getState().setRepoPreferredDiffArea(activeProjectPath, file.path, file.area);
     useGitPanelStore.getState().setViewerMode(activeProjectPath, "diff");
-  }, [activeProjectPath]);
+  }, [activeProjectPath, services.panels]);
 
   const handleMouseLeave = useCallback(() => setTooltip(null), []);
 

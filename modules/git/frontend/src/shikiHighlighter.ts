@@ -1,6 +1,7 @@
 import { createHighlighterCore, type HighlighterCore, type ThemedToken } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
-import { hexLuminance, type ShepTheme } from "./themes";
+import type { ModuleAppearanceSnapshot } from "@shep/module-api";
+import { hexLuminance } from "./appearance";
 
 /**
  * The set of languages and themes actually registered with the highlighter
@@ -91,10 +92,10 @@ const EXT_TO_LANG: Record<string, string> = {
 
 /** Pick a Shiki theme for a given Shep theme. Unknown Shep themes fall back
  *  based on background luminance so custom themes still get readable colors. */
-export function shikiThemeFor(theme: ShepTheme): string {
-  const mapped = SHEP_TO_SHIKI[theme.id];
+export function shikiThemeFor(theme: ModuleAppearanceSnapshot): string {
+  const mapped = SHEP_TO_SHIKI[theme.themeId];
   if (mapped) return mapped;
-  return hexLuminance(theme.appBg) > 0.3 ? "github-light" : "tokyo-night";
+  return hexLuminance(theme.background) > 0.3 ? "github-light" : "tokyo-night";
 }
 
 /** Detect a Shiki language from a file path, or null if unsupported.
