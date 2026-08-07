@@ -16,7 +16,6 @@ import type { PtyOutput } from "@shep/core/platform";
 import { toPtyColorTheme } from "./ptyColorTheme.ts";
 import { useTerminalStore, nextTabId } from "./useTerminalStore.ts";
 import { useNoticeStore } from "@shep/core/shared";
-import type { Terminal } from "@xterm/xterm";
 import { getErrorMessage } from "@shep/core/platform";
 import {
   bindTerminalSessionsRuntime,
@@ -24,19 +23,7 @@ import {
   requestTerminalSessionOwnerAction,
   terminalSessionExitReason,
 } from "./terminalSessions.ts";
-
-// Map ptyId -> xterm instance for writing output
-const terminalInstances = new Map<number, Terminal>();
-
-// Buffer for PTY output that arrives before terminal is registered
-const pendingOutput = new Map<number, string[]>();
-
-// Batch buffer for coalescing rapid PTY writes into single animation frames.
-// Prevents screen tearing when TUI apps (Claude Code, opencode) send screen
-// redraws larger than the 4KB PTY read buffer — without batching, xterm
-// renders intermediate states where only the top of the screen is drawn.
-const writeBatch = new Map<number, string[]>();
-const writeBatchScheduled = new Set<number>();
+import { unregisterTerminal, writeTerminalOutput } from "./terminalOutputQueue.ts";
 
 // Debounce timers for activity detection — clears "active" after 3s of silence.
 // Activity state is tracked here (not in the store) on every data event to avoid
@@ -91,62 +78,8 @@ function cleanupActivityState(ptyId: number) {
   activityActive.delete(ptyId);
 }
 
-export function registerTerminal(ptyId: number, term: Terminal) {
-  terminalInstances.set(ptyId, term);
-}
-
-export function flushPendingOutput(ptyId: number) {
-  const term = terminalInstances.get(ptyId);
-  if (!term) return;
-
-  // Flush any buffered output
-  const buffered = pendingOutput.get(ptyId);
-  if (buffered) {
-    term.write(buffered.join(""));
-    pendingOutput.delete(ptyId);
-  }
-}
-
-export function unregisterTerminal(ptyId: number) {
-  terminalInstances.delete(ptyId);
-  pendingOutput.delete(ptyId);
-  writeBatch.delete(ptyId);
-  writeBatchScheduled.delete(ptyId);
-}
-
-function writeToPty(ptyId: number, data: string) {
-  const term = terminalInstances.get(ptyId);
-  if (term) {
-    // Accumulate data and flush once per animation frame so xterm processes
-    // a complete (or near-complete) screen update before the renderer paints.
-    let batch = writeBatch.get(ptyId);
-    if (!batch) {
-      batch = [];
-      writeBatch.set(ptyId, batch);
-    }
-    batch.push(data);
-
-    if (!writeBatchScheduled.has(ptyId)) {
-      writeBatchScheduled.add(ptyId);
-      requestAnimationFrame(() => {
-        writeBatchScheduled.delete(ptyId);
-        const chunks = writeBatch.get(ptyId);
-        if (chunks && chunks.length > 0) {
-          term.write(chunks.join(""));
-          chunks.length = 0;
-        }
-      });
-    }
-  } else {
-    // Terminal not mounted yet — buffer the output
-    let buf = pendingOutput.get(ptyId);
-    if (!buf) {
-      buf = [];
-      pendingOutput.set(ptyId, buf);
-    }
-    buf.push(data);
-  }
-}
+// Terminal registration, the write queue, and output acknowledgement live in
+// "./terminalOutputQueue.ts"; this hook owns PTY lifecycle and session state.
 
 export function usePty(
   activeProjectPath: string | null,
@@ -167,7 +100,7 @@ export function usePty(
   const handlePtyMessage = useCallback(
     (ptyId: number, msg: PtyOutput) => {
       if (msg.event === "data") {
-        writeToPty(ptyId, msg.data);
+        writeTerminalOutput(ptyId, msg.data);
 
         // Only update the store on the idle→active transition, not on every chunk.
         if (!activityActive.has(ptyId)) {

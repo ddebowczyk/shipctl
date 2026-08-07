@@ -88,6 +88,7 @@ pub fn run() {
             shep_core::settings::commands::open_in_editor,
             shep_core::terminal::commands::spawn_pty,
             shep_core::terminal::commands::write_pty,
+            shep_core::terminal::commands::acknowledge_pty_output,
             shep_core::terminal::commands::update_pty_color_theme,
             shep_core::terminal::commands::resize_pty,
             shep_core::terminal::commands::kill_pty,

@@ -10,6 +10,8 @@ export * from "./terminalCache.ts";
 // Only the renderer policy is exported here; "./terminalRendererAddons.ts"
 // value-imports the xterm addon bundles and stays out of this entry point.
 export * from "./terminalRenderer.ts";
+export * from "./terminalOutputQueue.ts";
+export * from "./terminalScrollPin.ts";
 export * from "./terminalTheme.ts";
 export * from "./terminalMeasure.ts";
 export * from "./terminalViewport.ts";

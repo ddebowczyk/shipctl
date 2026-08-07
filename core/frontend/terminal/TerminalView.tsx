@@ -16,13 +16,18 @@ import {
   flushPendingOutput,
   registerTerminal,
   unregisterTerminal,
-} from "./usePty.ts";
+} from "./terminalOutputQueue.ts";
 import { TERMINAL_LINE_HEIGHT, buildCSSFontFamily } from "@shep/core/appearance";
 import {
   preserveTerminalViewport,
   resyncTerminalViewport,
   terminalBottomOffset,
 } from "./terminalViewport.ts";
+import {
+  keyScrollPinIntent,
+  wheelScrollPinIntent,
+  type ScrollPinIntent,
+} from "./terminalScrollPin.ts";
 import { createTerminalTheme } from "./terminalTheme.ts";
 import { useThemeStore } from "@shep/core/appearance";
 import { notifyAgent } from "./notifications.ts";
@@ -49,7 +54,11 @@ export default function TerminalView({
   const containerRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(false);
   const attachedRef = useRef(false);
-  const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  // Whether the viewport is following output. Tracked here rather than read
+  // from xterm at write time: the queue writes in chunks across frames, so by
+  // the time a chunk lands the buffer has already moved.
+  const pinnedToBottomRef = useRef(true);
+  const columnResizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const getOrCreateTerminal = useCallback(() => {
     const cached = terminalCache.get(ptyId);
@@ -84,6 +93,10 @@ export default function TerminalView({
 
     // Send input to PTY
     term.onData((data) => {
+      // Typing resumes follow mode; the response to this input is the thing
+      // the user is waiting to see.
+      pinnedToBottomRef.current = true;
+      term.scrollToBottom();
       writePty(ptyId, data).catch((error) => {
         if (import.meta.env.DEV) {
           console.error("Failed to write PTY input:", error);
@@ -132,6 +145,24 @@ export default function TerminalView({
     return entry;
   }, [ptyId]);
 
+  const applyTerminalSize = useCallback(async (cols: number, rows: number) => {
+    const cached = terminalCache.get(ptyId);
+    if (!cached) return;
+
+    const size = { cols: Math.max(2, cols), rows: Math.max(2, rows) };
+    if (cached.term.cols === size.cols && cached.term.rows === size.rows) return;
+
+    preserveTerminalViewport(cached.term, () => {
+      cached.term.resize(size.cols, size.rows);
+    });
+
+    await resizePty(ptyId, size.cols, size.rows).catch((error) => {
+      if (import.meta.env.DEV) {
+        console.error("Failed to resize PTY:", error);
+      }
+    });
+  }, [ptyId]);
+
   const fitAndResize = useCallback(async () => {
     const cached = terminalCache.get(ptyId);
     if (!cached) return;
@@ -139,30 +170,36 @@ export default function TerminalView({
     const proposedSize = cached.fitAddon.proposeDimensions();
     if (!proposedSize) return;
 
-    const size = { cols: proposedSize.cols, rows: proposedSize.rows };
-    const lastSize = lastSizeRef.current;
+    const nextSize = { cols: proposedSize.cols, rows: proposedSize.rows };
+    const columnsChanged = cached.term.cols !== nextSize.cols;
+    const rowsChanged = cached.term.rows !== nextSize.rows;
+    if (!columnsChanged && !rowsChanged) return;
 
-    if (
-      lastSize &&
-      lastSize.cols === size.cols &&
-      lastSize.rows === size.rows &&
-      cached.term.cols === size.cols &&
-      cached.term.rows === size.rows
-    ) {
+    // Thresholds adopted from upstream 59e8fc7 rather than chosen here.
+    const shouldDebounceColumns =
+      columnsChanged && cached.term.buffer.active.length > 200;
+
+    if (!shouldDebounceColumns) {
+      if (columnResizeTimerRef.current) {
+        clearTimeout(columnResizeTimerRef.current);
+        columnResizeTimerRef.current = null;
+      }
+      await applyTerminalSize(nextSize.cols, nextSize.rows);
       return;
     }
 
-    preserveTerminalViewport(cached.term, () => {
-      cached.fitAddon.fit();
-    });
-
-    lastSizeRef.current = size;
-    await resizePty(ptyId, size.cols, size.rows).catch((error) => {
-      if (import.meta.env.DEV) {
-        console.error("Failed to resize PTY:", error);
-      }
-    });
-  }, [ptyId]);
+    // Reflowing a long scrollback buffer on every width observation is costly.
+    // Apply row changes immediately at the current width and settle columns
+    // after the resize gesture has been quiet for 100 ms.
+    if (rowsChanged) {
+      await applyTerminalSize(cached.term.cols, nextSize.rows);
+    }
+    if (columnResizeTimerRef.current) clearTimeout(columnResizeTimerRef.current);
+    columnResizeTimerRef.current = setTimeout(() => {
+      columnResizeTimerRef.current = null;
+      void applyTerminalSize(nextSize.cols, nextSize.rows);
+    }, 100);
+  }, [applyTerminalSize, ptyId]);
 
   useEffect(() => {
     if (!containerRef.current || !visible) return;
@@ -181,15 +218,43 @@ export default function TerminalView({
       }
     }
 
+    const surface = containerRef.current;
+    const applyScrollPinIntent = (intent: ScrollPinIntent) => {
+      if (intent === "unpin") {
+        pinnedToBottomRef.current = false;
+        return;
+      }
+      if (intent === "follow") {
+        // Resumed before xterm emits onData for this key.
+        pinnedToBottomRef.current = true;
+        term.scrollToBottom();
+        return;
+      }
+      // "resync": the gesture has not been applied to the buffer yet, so read
+      // the resulting position back rather than guess it.
+      queueMicrotask(() => {
+        if (disposed) return;
+        pinnedToBottomRef.current = terminalBottomOffset(term) === 0;
+      });
+    };
+    const handleWheelCapture = (event: WheelEvent) => {
+      applyScrollPinIntent(wheelScrollPinIntent(event.deltaY));
+    };
+    const handleKeyDownCapture = (event: KeyboardEvent) => {
+      const intent = keyScrollPinIntent(event);
+      applyScrollPinIntent(intent);
+      // A backward viewport key with no scrollback to move into leaves the
+      // viewport at the bottom, so read the result back instead of assuming
+      // the key moved it. The wheel needs no equivalent: a wheel-up gesture
+      // that cannot move produces no further events to correct.
+      if (intent === "unpin") applyScrollPinIntent("resync");
+    };
+    surface.addEventListener("wheel", handleWheelCapture, { capture: true });
+    surface.addEventListener("keydown", handleKeyDownCapture, { capture: true });
+
     const attachTerminal = async () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       if (disposed) return;
-
-      // Snapshot the scroll position from xterm's internal buffer before
-      // touching anything: while the container was display:none the browser
-      // zeroed the DOM viewport's scrollTop, so the internal position is the
-      // only surviving record of where the user was.
-      const bottomOffset = terminalBottomOffset(term);
 
       // Re-apply the current theme now that the container is visible.
       // Theme changes that occurred while hidden were deferred to avoid
@@ -234,10 +299,14 @@ export default function TerminalView({
       // fitAndResize skips the fit (and its viewport preservation) when the
       // dimensions didn't change — the common case when returning to a tab —
       // so the zeroed DOM scrollTop must be re-asserted unconditionally.
-      resyncTerminalViewport(term, bottomOffset);
+      // Compute the offset here rather than on entry: the theme, settings and
+      // fit work above can move the buffer, so an earlier snapshot is stale.
+      resyncTerminalViewport(term, terminalBottomOffset(term));
 
       if (!attachedRef.current) {
-        registerTerminal(ptyId, term);
+        registerTerminal(ptyId, term, () => {
+          if (pinnedToBottomRef.current) term.scrollToBottom();
+        });
         flushPendingOutput(ptyId);
         attachedRef.current = true;
       }
@@ -245,7 +314,6 @@ export default function TerminalView({
       window.setTimeout(() => {
         if (disposed) return;
         void fitAndResize();
-        resyncTerminalViewport(term, bottomOffset);
         term.focus();
       }, 100);
 
@@ -277,18 +345,23 @@ export default function TerminalView({
 
     void attachTerminal();
 
-    // ResizeObserver for auto-fitting
+    // ResizeObserver for auto-fitting. fitAndResize applies rows immediately
+    // and owns the long-buffer column debounce.
     const observer = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        if (disposed) return;
-        void fitAndResize();
-      });
+      if (disposed) return;
+      void fitAndResize();
     });
     observer.observe(containerRef.current);
 
     return () => {
       disposed = true;
       observer.disconnect();
+      surface.removeEventListener("wheel", handleWheelCapture, { capture: true });
+      surface.removeEventListener("keydown", handleKeyDownCapture, { capture: true });
+      if (columnResizeTimerRef.current) {
+        clearTimeout(columnResizeTimerRef.current);
+        columnResizeTimerRef.current = null;
+      }
     };
   }, [ptyId, visible, getOrCreateTerminal, fitAndResize]);
 
@@ -303,7 +376,11 @@ export default function TerminalView({
       }
       mountedRef.current = false;
       attachedRef.current = false;
-      lastSizeRef.current = null;
+      pinnedToBottomRef.current = true;
+      if (columnResizeTimerRef.current) {
+        clearTimeout(columnResizeTimerRef.current);
+        columnResizeTimerRef.current = null;
+      }
     };
   }, [ptyId]);
 

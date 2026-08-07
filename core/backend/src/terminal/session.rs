@@ -4,10 +4,24 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
+
+// Output flow-control thresholds, adopted from upstream 59e8fc7 rather than
+// chosen here. Reading pauses once this many dispatched bytes are still
+// unacknowledged by the frontend, and resumes only once the backlog has
+// drained to the low mark, so a burst cannot re-pause on every chunk.
+const FLOW_CONTROL_HIGH_WATERMARK_BYTES: usize = 100_000;
+const FLOW_CONTROL_LOW_WATERMARK_BYTES: usize = 5_000;
+// An unterminated OSC/CSI is held back until its terminator arrives. This caps
+// how much output one malformed introducer can hold hostage.
+const MAX_PENDING_CONTROL_BYTES: usize = 4 * 1024;
+// How long the coalescer keeps gathering reads before dispatching them as one
+// message, so a screen redraw crosses the IPC boundary intact.
+const OUTPUT_COALESCE_WINDOW: Duration = Duration::from_millis(5);
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
@@ -15,9 +29,169 @@ pub struct PtySession {
     color_theme: Arc<Mutex<PtyColorTheme>>,
     theme_mode_updates: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
+    output_flow: Arc<OutputFlowControl>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     child_pid: Option<u32>,
     termination_tree: Option<ProcessTree>,
+}
+
+#[derive(Default)]
+struct OutputFlowState {
+    unacked_bytes: usize,
+    paused: bool,
+}
+
+/// Backpressure between the PTY reader and the frontend. The reader blocks
+/// here while the frontend is behind, so a process producing faster than xterm
+/// can parse queues in the kernel's PTY buffer instead of in this process.
+#[derive(Default)]
+struct OutputFlowControl {
+    state: Mutex<OutputFlowState>,
+    readable: Condvar,
+}
+
+impl OutputFlowControl {
+    /// Block while paused. Returns false once the session is no longer alive,
+    /// which is how a killed session releases a parked reader thread.
+    fn wait_until_readable(&self, alive: &AtomicBool) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        while state.paused && alive.load(Ordering::SeqCst) {
+            state = self
+                .readable
+                .wait(state)
+                .unwrap_or_else(|error| error.into_inner());
+        }
+        alive.load(Ordering::SeqCst)
+    }
+
+    fn record_dispatched(&self, bytes: usize) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.unacked_bytes = state.unacked_bytes.saturating_add(bytes);
+        if state.unacked_bytes >= FLOW_CONTROL_HIGH_WATERMARK_BYTES {
+            state.paused = true;
+        }
+    }
+
+    fn acknowledge(&self, bytes: usize) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.unacked_bytes = state.unacked_bytes.saturating_sub(bytes);
+        if state.paused && state.unacked_bytes <= FLOW_CONTROL_LOW_WATERMARK_BYTES {
+            state.paused = false;
+            self.readable.notify_all();
+        }
+    }
+
+    fn wake(&self) {
+        self.readable.notify_all();
+    }
+
+    #[cfg(test)]
+    fn snapshot(&self) -> (usize, bool) {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        (state.unacked_bytes, state.paused)
+    }
+}
+
+/// What the reader thread hands to the coalescer thread.
+enum ReaderOutput {
+    Data(String),
+    Exit(i32),
+}
+
+/// Hold back a trailing bare ESC so an escape sequence is never split
+/// immediately after its introducer. Returns whether one was withheld.
+fn hold_trailing_escape(data: &mut String) -> bool {
+    if data.ends_with('\x1b') {
+        data.pop();
+        true
+    } else {
+        false
+    }
+}
+
+fn dispatch_output(
+    channel: &Channel<PtyOutput>,
+    output_flow: &OutputFlowControl,
+    data: String,
+) -> bool {
+    if data.is_empty() {
+        return true;
+    }
+
+    let bytes = data.len();
+    // Reserve before dispatch so an acknowledgement cannot race the counter.
+    output_flow.record_dispatched(bytes);
+    if channel.send(PtyOutput::Data(data)).is_err() {
+        output_flow.acknowledge(bytes);
+        return false;
+    }
+    true
+}
+
+/// Gather reads for one coalesce window and dispatch them as a single message.
+/// Without this, a screen redraw larger than the 4 KiB read buffer crosses the
+/// IPC boundary as several messages and xterm paints the partial states.
+fn run_output_coalescer(
+    receiver: Receiver<ReaderOutput>,
+    channel: Channel<PtyOutput>,
+    output_flow: Arc<OutputFlowControl>,
+    alive: Arc<AtomicBool>,
+) {
+    let mut trailing_escape = false;
+
+    while let Ok(message) = receiver.recv() {
+        let ReaderOutput::Data(first) = message else {
+            if trailing_escape {
+                let _ = dispatch_output(&channel, &output_flow, "\x1b".to_string());
+            }
+            if let ReaderOutput::Exit(code) = message {
+                let _ = channel.send(PtyOutput::Exit { code });
+            }
+            break;
+        };
+
+        let started = Instant::now();
+        let mut data = String::with_capacity(first.len());
+        if trailing_escape {
+            data.push('\x1b');
+            trailing_escape = false;
+        }
+        data.push_str(&first);
+        let mut exit_code = None;
+
+        while let Some(remaining) = OUTPUT_COALESCE_WINDOW.checked_sub(started.elapsed()) {
+            match receiver.recv_timeout(remaining) {
+                Ok(ReaderOutput::Data(next)) => data.push_str(&next),
+                Ok(ReaderOutput::Exit(code)) => {
+                    exit_code = Some(code);
+                    break;
+                }
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        if exit_code.is_none() {
+            trailing_escape = hold_trailing_escape(&mut data);
+        }
+
+        if !dispatch_output(&channel, &output_flow, data) {
+            alive.store(false, Ordering::SeqCst);
+            output_flow.wake();
+            return;
+        }
+
+        if let Some(code) = exit_code {
+            if trailing_escape {
+                let _ = dispatch_output(&channel, &output_flow, "\x1b".to_string());
+            }
+            let _ = channel.send(PtyOutput::Exit { code });
+            break;
+        }
+    }
+
+    alive.store(false, Ordering::SeqCst);
+    output_flow.wake();
 }
 
 /// The original process and descendants that must receive the same shutdown
@@ -234,7 +408,15 @@ fn respond_to_terminal_queries(
 
     if let Some(start) = incomplete_start {
         output.push_str(&text[emit_cursor..start]);
-        pending.push_str(&text[start..]);
+        let incomplete = &text[start..];
+        if incomplete.len() > MAX_PENDING_CONTROL_BYTES {
+            // An unterminated OSC/CSI must not retain an unbounded tail. Once
+            // the cap is exceeded, forward it verbatim and resume scanning new
+            // input instead of holding subsequent terminal output hostage.
+            output.push_str(incomplete);
+        } else {
+            pending.push_str(incomplete);
+        }
         output
     } else {
         output.push_str(&text[emit_cursor..]);
@@ -381,12 +563,28 @@ impl PtySession {
             .map_err(|e| format!("Failed to get PTY reader: {e}"))?;
 
         let alive = Arc::new(AtomicBool::new(true));
-        let alive_clone = alive.clone();
         let color_theme = Arc::new(Mutex::new(color_theme));
         let reader_color_theme = color_theme.clone();
         let reader_writer = writer.clone();
         let theme_mode_updates = Arc::new(AtomicBool::new(false));
         let reader_theme_mode_updates = theme_mode_updates.clone();
+        let output_flow = Arc::new(OutputFlowControl::default());
+        let reader_output_flow = output_flow.clone();
+        let reader_alive = alive.clone();
+        let coalescer_output_flow = output_flow.clone();
+        let coalescer_alive = alive.clone();
+        // A one-message handoff bounds read-ahead while still letting the
+        // coalescer collect all output produced during its window.
+        let (output_sender, output_receiver) = sync_channel::<ReaderOutput>(1);
+
+        thread::spawn(move || {
+            run_output_coalescer(
+                output_receiver,
+                channel,
+                coalescer_output_flow,
+                coalescer_alive,
+            );
+        });
 
         // Spawn reader thread
         thread::spawn(move || {
@@ -394,6 +592,9 @@ impl PtySession {
             let mut pending = Vec::new();
             let mut pending_control = String::new();
             loop {
+                if !reader_output_flow.wait_until_readable(&reader_alive) {
+                    break;
+                }
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
@@ -408,7 +609,7 @@ impl PtySession {
                             if text.is_empty() {
                                 continue;
                             }
-                            if channel.send(PtyOutput::Data(text)).is_err() {
+                            if output_sender.send(ReaderOutput::Data(text)).is_err() {
                                 return;
                             }
                         }
@@ -427,16 +628,22 @@ impl PtySession {
                     &reader_writer,
                 );
                 if !text.is_empty() {
-                    let _ = channel.send(PtyOutput::Data(text));
+                    let _ = output_sender.send(ReaderOutput::Data(text));
                 }
             }
 
-            alive_clone.store(false, Ordering::SeqCst);
+            // An unterminated control sequence still holds real output. Release
+            // it rather than losing the tail of the session.
+            if !pending_control.is_empty() {
+                let _ = output_sender.send(ReaderOutput::Data(pending_control));
+            }
+
+            reader_alive.store(false, Ordering::SeqCst);
             let exit_code = child
                 .wait()
                 .map(|status| status.exit_code() as i32)
                 .unwrap_or(1);
-            let _ = channel.send(PtyOutput::Exit { code: exit_code });
+            let _ = output_sender.send(ReaderOutput::Exit(exit_code));
         });
 
         Ok(PtySession {
@@ -445,6 +652,7 @@ impl PtySession {
             color_theme,
             theme_mode_updates,
             alive,
+            output_flow,
             killer,
             child_pid,
             termination_tree: None,
@@ -463,6 +671,12 @@ impl PtySession {
         writer
             .write_all(data)
             .map_err(|e| format!("Failed to write to PTY: {e}"))
+    }
+
+    /// Record that the frontend has parsed `bytes` of dispatched output,
+    /// releasing that much of the reader's flow-control budget.
+    pub fn acknowledge_output(&self, bytes: usize) {
+        self.output_flow.acknowledge(bytes);
     }
 
     pub fn set_color_theme(&self, color_theme: PtyColorTheme) -> Result<(), String> {
@@ -517,6 +731,9 @@ impl PtySession {
     /// window, rather than granting one full window per terminal.
     pub fn request_termination(&mut self) {
         self.alive.store(false, Ordering::SeqCst);
+        // Release a reader parked on flow control so termination is not
+        // deferred until the frontend happens to acknowledge.
+        self.output_flow.wake();
 
         if self.termination_tree.is_none() {
             if let Some(pid) = self.child_pid {
@@ -582,10 +799,16 @@ fn process_tree_is_alive(pid: i32, descendants: &[i32]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_utf8_chunks, respond_to_terminal_queries, PtyColorTheme};
+    use super::{
+        decode_utf8_chunks, hold_trailing_escape, respond_to_terminal_queries, OutputFlowControl,
+        PtyColorTheme, FLOW_CONTROL_HIGH_WATERMARK_BYTES, FLOW_CONTROL_LOW_WATERMARK_BYTES,
+        MAX_PENDING_CONTROL_BYTES,
+    };
     use std::io::{Result as IoResult, Write};
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::Duration;
 
     struct TestWriter(Arc<Mutex<Vec<u8>>>);
 
@@ -689,5 +912,126 @@ mod tests {
 
         assert_eq!(forwarded, "beforeafter");
         assert_eq!(response, "\x1b[?2031;2$y\x1b[?997;2n\x1b[?997;2n");
+    }
+
+    #[test]
+    fn flow_control_pauses_at_high_watermark_and_resumes_at_low() {
+        let flow = OutputFlowControl::default();
+
+        flow.record_dispatched(FLOW_CONTROL_HIGH_WATERMARK_BYTES - 1);
+        assert_eq!(
+            flow.snapshot(),
+            (FLOW_CONTROL_HIGH_WATERMARK_BYTES - 1, false)
+        );
+
+        flow.record_dispatched(1);
+        assert_eq!(flow.snapshot(), (FLOW_CONTROL_HIGH_WATERMARK_BYTES, true));
+
+        // Partial acknowledgement above the low mark must not resume reading,
+        // otherwise a burst re-pauses on every following chunk.
+        flow.acknowledge(FLOW_CONTROL_HIGH_WATERMARK_BYTES - FLOW_CONTROL_LOW_WATERMARK_BYTES - 1);
+        assert_eq!(
+            flow.snapshot(),
+            (FLOW_CONTROL_LOW_WATERMARK_BYTES + 1, true)
+        );
+
+        flow.acknowledge(1);
+        assert_eq!(flow.snapshot(), (FLOW_CONTROL_LOW_WATERMARK_BYTES, false));
+    }
+
+    #[test]
+    fn flow_control_never_underflows_on_excess_acknowledgement() {
+        let flow = OutputFlowControl::default();
+
+        flow.record_dispatched(10);
+        flow.acknowledge(50);
+        assert_eq!(flow.snapshot(), (0, false));
+    }
+
+    #[test]
+    fn a_paused_reader_resumes_once_acknowledged() {
+        let flow = Arc::new(OutputFlowControl::default());
+        let alive = Arc::new(AtomicBool::new(true));
+        flow.record_dispatched(FLOW_CONTROL_HIGH_WATERMARK_BYTES);
+
+        let waiter_flow = flow.clone();
+        let waiter_alive = alive.clone();
+        let waiter = thread::spawn(move || waiter_flow.wait_until_readable(&waiter_alive));
+
+        // Give the waiter time to park before releasing it.
+        thread::sleep(Duration::from_millis(20));
+        flow.acknowledge(FLOW_CONTROL_HIGH_WATERMARK_BYTES);
+
+        assert!(waiter.join().unwrap(), "an acknowledged reader stays alive");
+    }
+
+    #[test]
+    fn a_paused_reader_is_released_when_the_session_dies() {
+        let flow = Arc::new(OutputFlowControl::default());
+        let alive = Arc::new(AtomicBool::new(true));
+        flow.record_dispatched(FLOW_CONTROL_HIGH_WATERMARK_BYTES);
+
+        let waiter_flow = flow.clone();
+        let waiter_alive = alive.clone();
+        let waiter = thread::spawn(move || waiter_flow.wait_until_readable(&waiter_alive));
+
+        thread::sleep(Duration::from_millis(20));
+        alive.store(false, Ordering::SeqCst);
+        flow.wake();
+
+        assert!(
+            !waiter.join().unwrap(),
+            "a killed session must release its parked reader"
+        );
+    }
+
+    #[test]
+    fn bounds_and_flushes_unterminated_control_sequences() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let writer = Arc::new(Mutex::new(
+            Box::new(TestWriter(captured)) as Box<dyn Write + Send>
+        ));
+        let theme = Arc::new(Mutex::new(test_theme()));
+        let theme_mode_updates = Arc::new(AtomicBool::new(false));
+        let mut pending = String::new();
+        let at_limit = format!("\x1b]{}", "x".repeat(MAX_PENDING_CONTROL_BYTES - 2));
+
+        let first = respond_to_terminal_queries(
+            &mut pending,
+            &at_limit,
+            &theme,
+            &theme_mode_updates,
+            &writer,
+        );
+        assert!(first.is_empty(), "an in-progress sequence is still held");
+        assert_eq!(pending.len(), MAX_PENDING_CONTROL_BYTES);
+
+        let second =
+            respond_to_terminal_queries(&mut pending, "x", &theme, &theme_mode_updates, &writer);
+        assert_eq!(second, format!("{at_limit}x"));
+        assert!(pending.is_empty(), "the cap releases the held tail");
+    }
+
+    #[test]
+    fn preserves_screen_clears_and_colors_inside_synchronized_output() {
+        let (forwarded, _) = run_query(
+            "before\x1b[?2026h\x1b[1;36minside\x1b[2Jmiddle\x1b[31mafter\x1b[3J\x1b[0mtail\x1b[?2026l\x1b[2Jend",
+        );
+
+        assert_eq!(
+            forwarded,
+            "before\x1b[?2026h\x1b[1;36minside\x1b[2Jmiddle\x1b[31mafter\x1b[3J\x1b[0mtail\x1b[?2026l\x1b[2Jend"
+        );
+    }
+
+    #[test]
+    fn holds_a_bare_trailing_escape_for_the_next_chunk() {
+        let mut data = "output\x1b".to_string();
+        assert!(hold_trailing_escape(&mut data));
+        assert_eq!(data, "output");
+
+        let mut complete = "output\x1b[2J".to_string();
+        assert!(!hold_trailing_escape(&mut complete));
+        assert_eq!(complete, "output\x1b[2J");
     }
 }

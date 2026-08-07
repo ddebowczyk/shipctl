@@ -166,6 +166,11 @@ export function writePty(ptyId: number, data: string): Promise<void> {
   return invoke("write_pty", { ptyId, data });
 }
 
+/** Report parsed output bytes so the host can release its flow-control budget. */
+export function acknowledgePtyOutput(ptyId: number, bytes: number): Promise<void> {
+  return invoke("acknowledge_pty_output", { ptyId, bytes });
+}
+
 export function updatePtyColorTheme(colorTheme: PtyColorTheme): Promise<void> {
   return invoke("update_pty_color_theme", { colorTheme });
 }
