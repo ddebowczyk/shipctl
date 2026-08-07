@@ -74,7 +74,6 @@ after(async () => {
 
 const builtinGlobalSurfaceLoaders: BuiltinGlobalSurfaceLoaders = {
   settings: async () => ({ default: () => null }),
-  usage: async () => ({ default: () => null }),
 };
 
 const fixtureSkills = {
@@ -118,6 +117,7 @@ const fixtureModule: ShepModule = {
     {
       id: "fixture.sidebar",
       moduleId: "shep.fixture",
+      surfaceId: "fixture.global-surface",
       order: 10,
       load: async () => ({ default: () => null }),
     },
@@ -231,7 +231,6 @@ test("enabled profile composes global surfaces and navigation", () => {
     [
       { id: "fixture.global-navigation", surfaceId: "fixture.global-surface" },
       { id: "core.settings-navigation", surfaceId: "core.settings" },
-      { id: "core.usage-navigation", surfaceId: "core.usage" },
     ],
   );
 });
@@ -257,6 +256,23 @@ test("default profile enables the extracted Ports surface", () => {
   assert.equal(
     registry.navigation().some(({ id }) => id === "ports.global-navigation"),
     true,
+  );
+});
+
+test("default profile composes Usage only through its module contributions", () => {
+  const registry = createEnabledGlobalSurfaceRegistry(builtinGlobalSurfaceLoaders);
+  assert.equal(registry.surface("core.usage")?.moduleId, "shep.usage");
+  assert.equal(
+    registry.navigation().find(({ id }) => id === "usage.global-navigation")?.surfaceId,
+    "core.usage",
+  );
+  assert.equal(
+    moduleSidebarContributions().find(({ id }) => id === "usage.sidebar")?.surfaceId,
+    "core.usage",
+  );
+  assert.deepEqual(
+    moduleSettingsContributions(undefined, "terminal.after").map(({ id }) => id),
+    ["usage.settings"],
   );
 });
 
@@ -308,15 +324,29 @@ test("module surfaces compose without feature-specific host branches", () => {
     moduleSettingsContributions([fixtureModule]).map(({ id }) => id),
     ["fixture.settings"],
   );
+  assert.deepEqual(
+    moduleSettingsContributions([fixtureModule], "projects.after").map(({ id }) => id),
+    ["fixture.settings"],
+  );
+  assert.deepEqual(
+    moduleSettingsContributions([fixtureModule], "terminal.after"),
+    [],
+  );
 });
 
 test("sidebar contributions are ordered, module-owned, and absent when disabled", () => {
   const earlier: ShepModule = {
     id: "shep.earlier",
     version: "0",
+    globalSurfaces: [{
+      id: "earlier.global-surface",
+      moduleId: "shep.earlier",
+      load: async () => ({ default: () => null }),
+    }],
     sidebar: [{
       id: "earlier.sidebar",
       moduleId: "shep.earlier",
+      surfaceId: "earlier.global-surface",
       order: -10,
       load: async () => ({ default: () => null }),
     }],
@@ -333,6 +363,13 @@ test("sidebar contributions are ordered, module-owned, and absent when disabled"
       id: "shep.other",
     }]),
     /belongs to shep\.earlier, not shep\.other/,
+  );
+  assert.throws(
+    () => moduleSidebarContributions([{
+      ...earlier,
+      globalSurfaces: [],
+    }]),
+    /targets missing module surface earlier\.global-surface/,
   );
 });
 

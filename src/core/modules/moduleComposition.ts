@@ -12,6 +12,7 @@ import type {
   ProjectNavigationContribution,
   SidebarContribution,
   SettingsContribution,
+  SettingsSlot,
   ShepModule,
 } from "@shep/module-api";
 
@@ -63,6 +64,14 @@ export function moduleSidebarContributions(
       if (contribution.moduleId !== module.id) {
         throw new Error(
           `Sidebar contribution ${contribution.id} belongs to ${contribution.moduleId}, not ${module.id}`,
+        );
+      }
+      const surface = (module.globalSurfaces ?? []).find(
+        (candidate) => candidate.id === contribution.surfaceId,
+      );
+      if (!surface) {
+        throw new Error(
+          `Sidebar contribution ${contribution.id} targets missing module surface ${contribution.surfaceId}`,
         );
       }
       return contribution;
@@ -177,9 +186,12 @@ export function moduleSkillsProvider(
 
 export function moduleSettingsContributions(
   modules: readonly ShepModule[] = ENABLED_MODULES,
+  slot?: SettingsSlot,
 ): readonly SettingsContribution[] {
   return modules
     .flatMap((module) => module.settings ?? [])
+    .filter((contribution) => slot === undefined
+      || (contribution.slot ?? "projects.after") === slot)
     .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
 }
 

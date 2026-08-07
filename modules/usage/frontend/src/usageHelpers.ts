@@ -1,4 +1,4 @@
-import type { ProviderUsageSnapshot, UsageProvider, UsageWindowSnapshot } from "../../lib/types";
+import type { ProviderUsageSnapshot, UsageProvider, UsageWindowSnapshot } from "./types";
 
 const WINDOW_PRIORITY = ["5h", "7d", "30d"];
 export const ALL_USAGE_PROVIDERS: UsageProvider[] = ["claude", "codex", "antigravity", "gemini", "opencode", "pi"];

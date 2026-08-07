@@ -10,15 +10,12 @@ import { useKeybindingStore } from "../../stores/useKeybindingStore";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
 import { useRepoStore } from "../../stores/useRepoStore";
 import { useTerminalSettingsStore } from "../../stores/useTerminalSettingsStore";
-import { useUsageSettingsStore } from "../../stores/useUsageSettingsStore";
 import { useUpdateStore } from "../../stores/useUpdateStore";
-import { usageProviderLogoSrc, getUsageProviderLogoClass } from "../../lib/usageProviderLogos";
 import {
   FONT_SIZE_OPTIONS,
   TERMINAL_FONT_FAMILY,
 } from "../../lib/terminalConfig";
-import { ALL_USAGE_PROVIDERS } from "../usage/usageHelpers";
-import type { CursorStyle, BudgetMode, FontFamily } from "../../lib/types";
+import type { CursorStyle, FontFamily } from "../../lib/types";
 import { getErrorMessage } from "../../lib/errors";
 import { listMonospaceFamilies } from "../../lib/tauri";
 import { ModuleSettingsSurfaces } from "../../core/modules";
@@ -89,14 +86,6 @@ export default function SettingsPanel() {
   const loadTermSettings = useTerminalSettingsStore((s) => s.loadSettings);
   const updateTermSettings = useTerminalSettingsStore((s) => s.updateSettings);
 
-  const usageSettings = useUsageSettingsStore((s) => s.settings);
-  const usageHasLoaded = useUsageSettingsStore((s) => s.hasLoaded);
-  const usageIsSaving = useUsageSettingsStore((s) => s.isSaving);
-  const usageError = useUsageSettingsStore((s) => s.error);
-  const loadUsageSettings = useUsageSettingsStore((s) => s.loadSettings);
-  const updateProvider = useUsageSettingsStore((s) => s.updateProvider);
-  const [budgetInputs, setBudgetInputs] = useState<Record<string, string>>({});
-
   const updateStatus = useUpdateStore((s) => s.status);
   const availableVersion = useUpdateStore((s) => s.availableVersion);
   const releaseNotesUrl = useUpdateStore((s) => s.releaseNotesUrl);
@@ -112,8 +101,7 @@ export default function SettingsPanel() {
     if (!projectHasLoaded) void loadProjectSettings();
     if (!kbHasLoaded) void loadKbSettings();
     if (!termHasLoaded) void loadTermSettings();
-    if (!usageHasLoaded) void loadUsageSettings();
-  }, [hasLoaded, loadSettings, projectHasLoaded, loadProjectSettings, kbHasLoaded, loadKbSettings, termHasLoaded, loadTermSettings, usageHasLoaded, loadUsageSettings]);
+  }, [hasLoaded, loadSettings, projectHasLoaded, loadProjectSettings, kbHasLoaded, loadKbSettings, termHasLoaded, loadTermSettings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -392,7 +380,7 @@ export default function SettingsPanel() {
         {projectError && <div className="mt-2 text-sm text-red-300">{projectError}</div>}
       </section>
 
-      <ModuleSettingsSurfaces projectPaths={moduleProjectPaths} />
+      <ModuleSettingsSurfaces projectPaths={moduleProjectPaths} slot="projects.after" />
 
       {/* ── Terminal ───────────────────────────────────────── */}
       <section className="settings-section">
@@ -530,92 +518,7 @@ export default function SettingsPanel() {
         {termError && <div className="mt-2 text-sm text-red-300">{termError}</div>}
       </section>
 
-      {/* ── Usage ──────────────────────────────────────────── */}
-      <section className="settings-section">
-        <h2 className="section-label !p-0 settings-section__header">Usage Providers</h2>
-
-        <div className="usage-provider-grid">
-          {ALL_USAGE_PROVIDERS.map((provider) => {
-            const config = usageSettings[provider];
-            const logo = usageProviderLogoSrc[provider];
-            const label = provider === "claude"
-              ? "Claude"
-              : provider === "codex"
-                ? "Codex"
-                : provider === "antigravity"
-                  ? "Antigravity"
-                  : provider === "gemini"
-                    ? "Gemini"
-                    : provider === "opencode"
-                      ? "opencode"
-                      : "pi";
-            const budgetInput = budgetInputs[provider] ?? (config.monthlyBudget != null ? String(config.monthlyBudget) : "");
-            return (
-              <div key={provider} className="usage-provider-row">
-                <span className="usage-provider-row__name">
-                  {logo && <img src={logo} alt="" width={18} height={18} className={`shrink-0 ${getUsageProviderLogoClass(provider) ?? ""}`} />}
-                  <span>{label}</span>
-                </span>
-
-                <button
-                  onClick={() => void updateProvider(provider, { show: !config.show })}
-                  className={`option-card option-card--compact ${config.show ? "selected" : ""}`}
-                >
-                  {config.show ? "On" : "Off"}
-                </button>
-
-                {config.show && (
-                  <>
-                    {(["subscription", "custom"] as BudgetMode[]).map((mode) => (
-                      <button
-                        key={mode}
-                        onClick={() => void updateProvider(provider, { budgetMode: mode })}
-                        className={`option-card option-card--compact ${config.budgetMode === mode ? "selected" : ""}`}
-                      >
-                        <span className="capitalize">{mode}</span>
-                      </button>
-                    ))}
-
-                    {config.budgetMode === "custom" && (
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        inputMode="decimal"
-                        placeholder="$ / month"
-                        value={budgetInput}
-                        onChange={(event) =>
-                          setBudgetInputs((prev) => ({ ...prev, [provider]: event.target.value }))
-                        }
-                        onBlur={() => {
-                          const trimmed = budgetInput.trim();
-                          const nextBudget = trimmed === "" ? null : Number(trimmed);
-                          if (nextBudget == null || Number.isFinite(nextBudget)) {
-                            void updateProvider(provider, { monthlyBudget: nextBudget });
-                          }
-                          setBudgetInputs((prev) => {
-                            const next = { ...prev };
-                            delete next[provider];
-                            return next;
-                          });
-                        }}
-                        className="usage-provider-row__budget-input"
-                      />
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {usageIsSaving && <div className="mt-2 text-xs text-[var(--text-muted)]">Saving...</div>}
-        {usageError && <div className="mt-2 text-sm text-red-300">{usageError}</div>}
-
-        <p className="text-xs text-[var(--text-muted)] mt-4">
-          Settings are saved to ~/.shep/config.yml
-        </p>
-      </section>
+      <ModuleSettingsSurfaces projectPaths={moduleProjectPaths} slot="terminal.after" />
 
       {/* ── Updates ─────────────────────────────────────────── */}
       <section className="settings-section">

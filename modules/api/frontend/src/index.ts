@@ -65,6 +65,7 @@ export type {
   SidebarContributionProps,
   SettingsContribution,
   SettingsContributionProps,
+  SettingsSlot,
 } from "./surfaces";
 export type {
   ModuleDeactivation,

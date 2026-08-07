@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { getAllUsageSnapshots } from "../lib/tauri";
-import type { ProviderUsageSnapshot, UsageProvider } from "../lib/types";
+import { getAllUsageSnapshots } from "./client";
+import type { ProviderUsageSnapshot, UsageProvider } from "./types";
 
 export type TimeWindow = "5h" | "7d" | "30d" | "365d";
 

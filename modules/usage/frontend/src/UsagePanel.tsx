@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCcw } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { getUsageOverview, refreshUsageData } from "../../lib/tauri";
+import { getUsageOverview, refreshUsageData } from "./client";
 import type {
   UsageCost,
   UsageBreakdownItem,
@@ -10,10 +10,10 @@ import type {
   UsageTrendBucket,
   UsageSettings,
   ProviderUsageSnapshot,
-} from "../../lib/types";
-import { usageProviderLogoSrc, getUsageProviderLogoClass } from "../../lib/usageProviderLogos";
-import { useUsageStore, type TimeWindow } from "../../stores/useUsageStore";
-import { useUsageSettingsStore } from "../../stores/useUsageSettingsStore";
+} from "./types";
+import { usageProviderLogoSrc, getUsageProviderLogoClass } from "./branding";
+import { useUsageStore, type TimeWindow } from "./usageStore";
+import { useUsageSettingsStore } from "./usageSettingsStore";
 import {
   ALL_USAGE_PROVIDERS,
   TONE_COLORS,

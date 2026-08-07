@@ -1,8 +1,8 @@
-import claudeSrc from "../../assets/claude.svg";
-import codexSrc from "../../assets/openai.svg";
-import geminiSrc from "../../assets/gemini.svg";
-import opencodeSrc from "../../assets/opencode-logo-dark.svg";
-import piSrc from "../../assets/pi.svg";
+import claudeSrc from "./assets/claude.svg";
+import codexSrc from "./assets/openai.svg";
+import geminiSrc from "./assets/gemini.svg";
+import opencodeSrc from "./assets/opencode-logo-dark.svg";
+import piSrc from "./assets/pi.svg";
 
 export const usageProviderLogoSrc: Record<string, string> = {
   claude: claudeSrc,

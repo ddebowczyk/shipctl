@@ -1,9 +1,8 @@
 import { useMemo, useState, useCallback } from "react";
-import { useUsageStore, type TimeWindow } from "../../stores/useUsageStore";
-import { useUsageSettingsStore } from "../../stores/useUsageSettingsStore";
-import { useUIStore } from "../../stores/useUIStore";
-import { BUILTIN_GLOBAL_SURFACE_IDS } from "../../core/modules/builtinGlobalSurfaceAdapters";
-import { usageProviderLogoSrc, getUsageProviderLogoClass } from "../../lib/usageProviderLogos";
+import type { SidebarContributionProps } from "@shep/module-api";
+import { useUsageStore, type TimeWindow } from "./usageStore";
+import { useUsageSettingsStore } from "./usageSettingsStore";
+import { usageProviderLogoSrc, getUsageProviderLogoClass } from "./branding";
 import {
   ALL_USAGE_PROVIDERS,
   TONE_COLORS,
@@ -18,9 +17,9 @@ import {
   paceLabel,
   syntheticBudgetWindow,
   type PaceStatus,
-} from "../usage/usageHelpers";
-import type { UsageProvider, UsageSettings, ProviderUsageSnapshot } from "../../lib/types";
-import type { UsageWindowSnapshot } from "../../lib/types";
+} from "./usageHelpers";
+import type { UsageProvider, UsageSettings, ProviderUsageSnapshot } from "./types";
+import type { UsageWindowSnapshot } from "./types";
 
 type SidebarWindow = Extract<TimeWindow, "5h" | "7d">;
 
@@ -222,7 +221,7 @@ function UsageTooltip({ tip }: { tip: TooltipState }) {
   );
 }
 
-export default function SidebarUsage() {
+export default function SidebarUsage({ open }: SidebarContributionProps) {
   const snapshots = useUsageStore((s) => s.snapshots);
   const window = useUsageStore((s) => s.sidebarWindow);
   const usageSettings = useUsageSettingsStore((s) => s.settings);
@@ -267,9 +266,7 @@ export default function SidebarUsage() {
               key={item.id}
               type="button"
               className="sidebar-usage__row"
-              onClick={() => {
-                useUIStore.getState().toggleGlobalSurface(BUILTIN_GLOBAL_SURFACE_IDS.usage);
-              }}
+              onClick={open}
               onMouseEnter={(e) => setTooltip({ item, rect: e.currentTarget.getBoundingClientRect() })}
               onMouseLeave={handleMouseLeave}
             >

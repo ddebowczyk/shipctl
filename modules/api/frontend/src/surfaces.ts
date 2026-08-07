@@ -33,12 +33,14 @@ export interface GlobalNavigationContribution {
 }
 
 export interface SidebarContributionProps {
+  readonly open: () => void;
   readonly services: ModuleHostServices;
 }
 
 export interface SidebarContribution {
   readonly id: ContributionId;
   readonly moduleId: ModuleId;
+  readonly surfaceId: ContributionId;
   readonly order?: number;
   readonly load: () => Promise<{
     readonly default: ComponentType<SidebarContributionProps>;
@@ -182,9 +184,12 @@ export interface SettingsContributionProps {
   readonly services: ModuleHostServices;
 }
 
+export type SettingsSlot = "projects.after" | "terminal.after";
+
 export interface SettingsContribution {
   readonly id: ContributionId;
   readonly moduleId: ModuleId;
+  readonly slot?: SettingsSlot;
   readonly order?: number;
   readonly load: () => Promise<{
     readonly default: ComponentType<SettingsContributionProps>;

@@ -1,0 +1,21 @@
+{
+  "name": "@shep/module-usage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "./src/usage.css"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@shep/module-api": "workspace:*",
+    "@tauri-apps/api": "^2.10.1",
+    "lucide-react": "^0.577.0",
+    "zustand": "^5.0.11"
+  },
+  "peerDependencies": {
+    "react": "^19.2.4"
+  }
+}

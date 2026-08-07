@@ -3,14 +3,13 @@ import type {
   GlobalSurfaceContribution,
 } from "@shep/module-api";
 
-export type BuiltinGlobalSurfaceKind = "settings" | "usage";
+export type BuiltinGlobalSurfaceKind = "settings";
 export type BuiltinGlobalSurfaceLoaders = Readonly<
   Record<BuiltinGlobalSurfaceKind, GlobalSurfaceContribution["load"]>
 >;
 
 export const BUILTIN_GLOBAL_SURFACE_IDS = {
   settings: "core.settings",
-  usage: "core.usage",
 } as const;
 
 const BUILTIN_GLOBAL_SURFACE_DEFINITIONS = {
@@ -20,14 +19,6 @@ const BUILTIN_GLOBAL_SURFACE_DEFINITIONS = {
     unavailable: {
       title: "Settings unavailable",
       description: "The built-in settings surface could not be loaded.",
-    },
-  },
-  usage: {
-    id: BUILTIN_GLOBAL_SURFACE_IDS.usage,
-    moduleId: "core",
-    unavailable: {
-      title: "Usage unavailable",
-      description: "The built-in usage surface could not be loaded.",
     },
   },
 } as const satisfies Record<
@@ -43,14 +34,6 @@ export const BUILTIN_GLOBAL_NAVIGATION = [
     label: "Settings",
     icon: { name: "settings" },
     order: 10,
-  },
-  {
-    id: "core.usage-navigation",
-    moduleId: "core",
-    surfaceId: BUILTIN_GLOBAL_SURFACE_IDS.usage,
-    label: "Usage",
-    icon: { name: "chart-no-axes-combined" },
-    order: 20,
   },
 ] as const satisfies readonly GlobalNavigationContribution[];
 

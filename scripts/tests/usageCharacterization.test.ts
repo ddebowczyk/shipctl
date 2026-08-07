@@ -14,8 +14,11 @@ import {
   getPrimaryWindow,
   getProviderLabel,
   usageTone,
-} from "../../src/components/usage/usageHelpers.ts";
-import type { ProviderUsageSnapshot, UsageWindowSnapshot } from "../../src/lib/types.ts";
+} from "../../modules/usage/frontend/src/usageHelpers.ts";
+import type {
+  ProviderUsageSnapshot,
+  UsageWindowSnapshot,
+} from "../../modules/usage/frontend/src/types.ts";
 
 const source = (path: string) => readFileSync(
   fileURLToPath(new URL(path, import.meta.url)),
@@ -82,7 +85,7 @@ test("reset formatting and pace use provider reset timestamps without guessing",
 });
 
 test("sidebar semantics preserve settings visibility, provider-only quotas, and zero fallback", () => {
-  const sidebar = source("../../src/components/sidebar/SidebarUsage.tsx");
+  const sidebar = source("../../modules/usage/frontend/src/SidebarUsage.tsx");
 
   assert.match(sidebar, /const WINDOWS:[\s\S]*key: "5h"[\s\S]*key: "7d"/);
   assert.match(sidebar, /if \(!config\.show \|\| !snap\) return/);
@@ -91,12 +94,12 @@ test("sidebar semantics preserve settings visibility, provider-only quotas, and 
   assert.match(sidebar, /provider !== "gemini"[\s\S]*window === "24h_pro"/);
   assert.match(sidebar, /Show providers with show=true even if \$0\/no activity/);
   assert.match(sidebar, /if \(items\.length === 0\) return null/);
-  assert.match(sidebar, /toggleGlobalSurface\(BUILTIN_GLOBAL_SURFACE_IDS\.usage\)/);
+  assert.match(sidebar, /onClick=\{open\}/);
 });
 
 test("snapshot and persisted-settings stores bound success and failure behavior", () => {
-  const snapshots = source("../../src/stores/useUsageStore.ts");
-  const settings = source("../../src/stores/useUsageSettingsStore.ts");
+  const snapshots = source("../../modules/usage/frontend/src/usageStore.ts");
+  const settings = source("../../modules/usage/frontend/src/usageSettingsStore.ts");
 
   assert.match(snapshots, /set\(\{ loading: true, error: null \}\)/);
   assert.match(snapshots, /Object\.fromEntries\(snapshots\.map\(\(snapshot\) => \[snapshot\.provider, snapshot\]\)\)/);
@@ -109,8 +112,8 @@ test("snapshot and persisted-settings stores bound success and failure behavior"
 
 test("Usage remains global across project switches and refreshes on module cadence", () => {
   const shell = source("../../src/components/layout/AppShell.tsx");
-  const adapter = source("../../src/core/modules/usageHostAdapter.ts");
-  const store = source("../../src/stores/useUsageStore.ts");
+  const adapter = source("../../modules/usage/frontend/src/index.ts");
+  const store = source("../../modules/usage/frontend/src/usageStore.ts");
 
   assert.doesNotMatch(store, /useRepoStore|activeRepoPath|projectPath/);
   assert.doesNotMatch(shell, /useUsageStore|useUsageSettingsStore|refreshUsageData/);
@@ -119,6 +122,9 @@ test("Usage remains global across project switches and refreshes on module caden
   assert.match(adapter, /schedule: \{ kind: "interval", intervalMs: 60_000 \}/);
   assert.match(adapter, /await refreshUsageData\(\);[\s\S]*await fetchUsageSnapshots\(\)/);
   assert.match(adapter, /listen\("usage-ingest-complete", fetchUsageSnapshots\)/);
+  assert.match(adapter, /USAGE_SURFACE_ID = "core\.usage"/);
+  assert.match(adapter, /surfaceId: USAGE_SURFACE_ID/);
+  assert.match(adapter, /slot: "terminal\.after"/);
 });
 
 test("native cache, unavailable states, and persisted config remain bounded", () => {

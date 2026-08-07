@@ -120,6 +120,7 @@ export type {
   SidebarContributionProps,
   SettingsContribution,
   SettingsContributionProps,
+  SettingsSlot,
   ShepModule,
   SkillsProviderContribution,
 } from "@shep/module-api";

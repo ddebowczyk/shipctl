@@ -5,14 +5,14 @@ import { gitModule } from "@shep/module-git";
 import { portsModule } from "@shep/module-ports";
 import { skillsModule } from "@shep/module-skills";
 import { todosModule } from "@shep/module-todos";
-import { usageHostAdapter } from "./usageHostAdapter";
+import { usageModule } from "@shep/module-usage";
 
 /**
  * Compile-time frontend module profile. Optional modules are imported here,
  * through their public package entrypoints, and nowhere else in host code.
  */
 export const ENABLED_MODULES = [
-  ...(import.meta.env.VITE_SHEP_USAGE_MODULE === "disabled" ? [] : [usageHostAdapter]),
+  ...(import.meta.env.VITE_SHEP_USAGE_MODULE === "disabled" ? [] : [usageModule]),
   ...(import.meta.env.VITE_SHEP_ASSISTANTS_MODULE === "disabled" ? [] : [assistantsModule]),
   portsModule,
   ...(import.meta.env.VITE_SHEP_COMMANDS_MODULE === "disabled" ? [] : [commandsModule]),

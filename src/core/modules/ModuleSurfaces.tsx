@@ -11,10 +11,12 @@ import type {
   ProjectSurfaceAction,
   SidebarContribution,
   SettingsContribution,
+  SettingsSlot,
 } from "@shep/module-api";
 
 import { contributedPanelTabId } from "../../lib/types";
 import { useTerminalStore } from "../../stores/useTerminalStore";
+import { useUIStore } from "../../stores/useUIStore";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices";
 import {
   enabledProjectLayoutContributions,
@@ -170,7 +172,10 @@ function SidebarSurface({
   return (
     <ModuleSurfaceBoundary>
       <Suspense fallback={null}>
-        <Surface services={MODULE_HOST_SERVICES} />
+        <Surface
+          open={() => useUIStore.getState().toggleGlobalSurface(contribution.surfaceId)}
+          services={MODULE_HOST_SERVICES}
+        />
       </Suspense>
     </ModuleSurfaceBoundary>
   );
@@ -201,10 +206,12 @@ function SettingsSurface({
 
 export function ModuleSettingsSurfaces({
   projectPaths,
+  slot = "projects.after",
 }: {
   readonly projectPaths: readonly string[];
+  readonly slot?: SettingsSlot;
 }) {
-  return moduleSettingsContributions().map((contribution) => (
+  return moduleSettingsContributions(undefined, slot).map((contribution) => (
     <SettingsSurface
       key={contribution.id}
       contribution={contribution}

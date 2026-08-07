@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { getUsageSettings, saveUsageSettings } from "../lib/tauri";
-import type { UsageSettings, UsageProvider, ProviderBudgetConfig } from "../lib/types";
+import { getUsageSettings, saveUsageSettings } from "./client";
+import type { UsageSettings, UsageProvider, ProviderBudgetConfig } from "./types";
 
 const DEFAULT_SETTINGS: UsageSettings = {
   claude: { show: true, budgetMode: "subscription", monthlyBudget: null },

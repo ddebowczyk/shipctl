@@ -7,10 +7,4 @@ export const BUILTIN_GLOBAL_SURFACE_LOADERS = {
     );
     return { default: SettingsPanel };
   },
-  usage: async () => {
-    const { default: UsagePanel } = await import(
-      "../../components/usage/UsagePanel"
-    );
-    return { default: UsagePanel };
-  },
 } satisfies BuiltinGlobalSurfaceLoaders;

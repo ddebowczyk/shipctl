@@ -174,6 +174,10 @@ capability ceiling.
   generic sidebar, scheduler, and global capability-data contracts, the
   temporary Usage adapter, and the global-config concurrency risk filed before
   typed host ownership can be removed.
+- [41-usage-frontend-module.md](./41-usage-frontend-module.md) records complete
+  Usage frontend/resource ownership, declarative sidebar activation and
+  settings placement, the preserved native compatibility seam, and enabled and
+  disabled production-build evidence.
 
 ## Target dependency shape
 
