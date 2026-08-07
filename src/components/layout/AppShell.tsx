@@ -56,7 +56,7 @@ const LAST_REPO_STORAGE_KEY = "shep:last-repo-path";
 // Stable empty arrays to avoid infinite re-render loops with zustand v5's
 // useSyncExternalStore — selectors must return the same reference for the same state.
 const EMPTY_TABS: UnifiedTab[] = [];
-const PANEL_REGISTRY = createEnabledPanelRegistry(null);
+const PANEL_REGISTRY = createEnabledPanelRegistry();
 const MODULE_PANEL_CONTRIBUTIONS = PANEL_REGISTRY.list()
   .filter((panel) => panel.moduleId !== "core");
 const GLOBAL_SURFACE_REGISTRY = createEnabledGlobalSurfaceRegistry(
@@ -129,7 +129,7 @@ export default function AppShell() {
     const all: Array<{ tab: TerminalTabData; projectPath: string }> = [];
     for (const [projectPath, ps] of Object.entries(projectState)) {
       for (const tab of ps.tabs) {
-        if (tab.kind === "terminal" || tab.kind === "assistant") {
+        if (tab.kind === "terminal") {
           all.push({ tab, projectPath });
         }
       }
@@ -247,7 +247,7 @@ export default function AppShell() {
       if (!sourceEntry || sourceEntry[0] === destinationPath) return;
       const [sourcePath, sourceProject] = sourceEntry;
       const tab = sourceProject.tabs.find((entry) => entry.id === tabId);
-      if (!tab || (tab.kind !== "terminal" && tab.kind !== "assistant")) return;
+      if (!tab || tab.kind !== "terminal") return;
 
       await handleSelectRepo(destinationPath);
       const destinationStore = useTerminalStore.getState();
@@ -290,7 +290,7 @@ export default function AppShell() {
         .find((entry) => entry.id === tabId);
       if (!tab) return;
 
-      if ((tab.kind === "terminal" || tab.kind === "assistant") && tab.moduleSessionId) {
+      if (tab.kind === "terminal" && tab.moduleSessionId) {
         try {
           await requestTerminalSessionRename(tab.moduleSessionId, label);
         } catch (error) {
@@ -412,7 +412,7 @@ export default function AppShell() {
     const store = useTerminalStore.getState();
     const allTabs = activeRepoPath ? store.getAllProjectTabs(activeRepoPath) : [];
     const tab = allTabs.find((t) => t.id === tabId);
-    if (tab && (tab.kind === "terminal" || tab.kind === "assistant")) {
+    if (tab?.kind === "terminal") {
       store.clearTabBell(tab.ptyId);
     }
   }, [setActiveTab, activeRepoPath]);
@@ -426,7 +426,7 @@ export default function AppShell() {
     const store = useTerminalStore.getState();
     store.setActiveTab(tabId);
     const tab = store.projectState[repoPath]?.tabs.find((entry) => entry.id === tabId);
-    if (tab && (tab.kind === "terminal" || tab.kind === "assistant")) {
+    if (tab?.kind === "terminal") {
       store.clearTabBell(tab.ptyId);
     }
   }, [activeRepoPath, handleSelectRepo]);
@@ -437,22 +437,22 @@ export default function AppShell() {
     if (!path) return;
     const tab = store.projectState[path]?.tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    if (tab.kind === "terminal" || tab.kind === "assistant") {
+    if (tab.kind === "terminal") {
       closeTab(tabId);
     } else {
       store.removeTab(tabId);
     }
   }, [closeTab]);
 
-  const handleNewAssistant = useCallback(() => {
+  const handleNewModuleSession = useCallback(() => {
     const launcher = MODULE_PANEL_CONTRIBUTIONS
       .filter((panel) => panel.newSession)
       .sort((left, right) => (left.newSession?.order ?? 0) - (right.newSession?.order ?? 0))[0];
     if (!launcher) {
       pushNotice({
         tone: "info",
-        title: "Agent launcher unavailable",
-        message: "No enabled module provides an agent session launcher.",
+        title: "Session launcher unavailable",
+        message: "No enabled module provides a session launcher.",
       });
       return;
     }
@@ -558,9 +558,6 @@ export default function AppShell() {
         case "new_terminal":
           handleNewShell();
           break;
-        case "new_agent":
-          handleNewAssistant();
-          break;
         case "toggle_sidebar":
           useUIStore.getState().toggleSidebar();
           break;
@@ -588,7 +585,7 @@ export default function AppShell() {
       }
     });
     return () => { unlisten.then((f) => f()); };
-  }, [cycleTabs, handleNewShell, handleNewAssistant, handleOpenInEditor, pushNotice]);
+  }, [cycleTabs, handleNewShell, handleOpenInEditor, pushNotice]);
 
   // Renderer fallback for platforms/webviews that deliver the shortcut to the
   // page instead of the native application menu.
@@ -667,7 +664,7 @@ export default function AppShell() {
             onSelectRepo={handleSelectRepo}
             onAddProject={handleAddProject}
             onRemoveProject={handleRemoveProject}
-            onNewAssistant={handleNewAssistant}
+            onNewModuleSession={handleNewModuleSession}
             onOpenInEditor={handleOpenInEditor}
             onSelectTab={handleSelectSidebarTab}
             onSelectProjectTab={handleSelectSidebarProjectTab}
@@ -686,7 +683,6 @@ export default function AppShell() {
           <TabBar
             onClose={handleCloseTab}
             onNewShell={handleNewShell}
-            onNewAssistant={handleNewAssistant}
             panels={MODULE_PANEL_CONTRIBUTIONS}
             onOpenPanel={(panel) => useTerminalStore.getState().addContributedPanelTab(panel.id, panel.label)}
             onOpenInEditor={() => { const p = useTerminalStore.getState().activeProjectPath; if (p) handleOpenInEditor(p); }}
@@ -724,7 +720,7 @@ export default function AppShell() {
             {!showGlobalSurface && !activeTab && tabs.length === 0 && (
               <div className="terminal-empty">
                 {activeRepoPath
-                  ? "Launch an assistant or open a terminal"
+                  ? "Open a session or terminal"
                   : "Select or add a project to begin"}
               </div>
             )}

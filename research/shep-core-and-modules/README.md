@@ -161,6 +161,9 @@ capability ceiling.
 - [36-assistants-native-module.md](./36-assistants-native-module.md) records the
   namespaced native plugin, narrow terminal-authority port, explicit
   permissions, shutdown ordering, and Assistant-disabled native build.
+- [37-assistants-host-compatibility-removal.md](./37-assistants-host-compatibility-removal.md)
+  records generic host tabs and launch routing, removal of retired adapters and
+  provider DTOs, panel migration aliases, and opaque workspace-data retention.
 
 ## Target dependency shape
 

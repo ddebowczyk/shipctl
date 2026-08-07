@@ -25,7 +25,6 @@ export interface CommandConfig {
 export interface WorkspaceConfig {
   name: string;
   commands: CommandConfig[];
-  assistants: AssistantConfig[];
   /** Module-owned top-level values are preserved without entering host schema. */
   [capabilityId: string]: unknown;
 }
@@ -86,62 +85,9 @@ export interface FontFaceData {
   stretch: number;
 }
 
-// ── Runtime state types ─────────────────────────────────────────────
-
-export type SessionMode = "standard" | "yolo";
-
-export type RestorableAssistantProvider = "claude" | "codex";
-export type AssistantCaptureState = "pending" | "ready" | "failed";
-
-/** Backend-owned data needed to resume an assistant, never PTY state. */
-export interface AssistantSessionRecord {
-  recordId: string;
-  provider: RestorableAssistantProvider;
-  providerSessionId: string | null;
-  launchRepoPath: string;
-  placementProjectPath: string;
-  label: string;
-  sessionMode: SessionMode;
-  model: string | null;
-  captureState: AssistantCaptureState;
-  restoreOnNextLaunch: boolean;
-  startedAt: number;
-  updatedAt: number;
-}
-
-export interface PrepareAssistantSessionRequest {
-  provider: RestorableAssistantProvider;
-  launchRepoPath: string;
-  placementProjectPath: string;
-  label: string;
-  sessionMode: SessionMode;
-  model?: string;
-}
-
-export interface SpawnAssistantSessionRequest extends PrepareAssistantSessionRequest {
-  env: Record<string, string>;
-  cols: number;
-  rows: number;
-  colorTheme: PtyColorTheme;
-}
-
-export interface SpawnedAssistantSession {
-  ptyId: number;
-  record: AssistantSessionRecord;
-}
-
-export interface ResumeAssistantSessionRequest {
-  recordId: string;
-  env: Record<string, string>;
-  cols: number;
-  rows: number;
-  colorTheme: PtyColorTheme;
-}
-
 // ── Unified tab model ──────────────────────────────────────────────
 
-export type PanelTabKind = "commands" | "launcher";
-export type TabKind = "terminal" | "assistant" | "panel" | PanelTabKind;
+export type TabKind = "terminal" | "panel";
 
 interface TabBase {
   id: string;
@@ -150,23 +96,13 @@ interface TabBase {
 }
 
 export interface TerminalTabData extends TabBase {
-  kind: "terminal" | "assistant";
+  kind: "terminal";
   ptyId: number;
   repoPath: string;
   commandName: string | null;
-  assistantId: string | null;
-  sessionMode: SessionMode | null;
-  /** Durable backend record for a Claude/Codex tab, never a transcript. */
-  restoreRecordId: string | null;
-  providerSessionId: string | null;
-  captureState: AssistantCaptureState | null;
   /** Opaque module session identity; native PTY identity stays host-owned. */
   moduleSessionId?: string;
   modulePresentation?: ModuleTerminalSessionPresentation;
-}
-
-export interface BuiltinPanelTabData extends TabBase {
-  kind: PanelTabKind;
 }
 
 export interface ContributedPanelTabData extends TabBase {
@@ -174,24 +110,14 @@ export interface ContributedPanelTabData extends TabBase {
   panelId: `${string}.${string}`;
 }
 
-export type PanelTabData = BuiltinPanelTabData | ContributedPanelTabData;
+export type PanelTabData = ContributedPanelTabData;
 export type UnifiedTab = TerminalTabData | PanelTabData;
 
 export type TabCycleDirection = 1 | -1;
 
-export function panelTabId(kind: PanelTabKind): string {
-  return `panel-${kind}`;
-}
-
 export function contributedPanelTabId(panelId: `${string}.${string}`): string {
   return `panel-${panelId}`;
 }
-
-export const panelTabDefaults: Record<PanelTabKind, { label: string }> = {
-  commands: { label: "Commands" },
-  launcher: { label: "New Agent" },
-};
-
 
 // ── Tab activity tracking ────────────────────────────────────────────
 
@@ -204,20 +130,6 @@ export interface TabActivity {
   lastAttentionAt: number | null;
   lastNotificationMessage: string | null;
 }
-
-// ── Coding assistants ───────────────────────────────────────────────
-
-export interface CodingAssistant {
-  id: string;
-  name: string;
-  command: string;
-  yoloFlag: string | null;
-  modelFlag: string;
-  description?: string;
-  docsUrl?: string;
-}
-
-export type AssistantConfig = CodingAssistant;
 
 // ── Pi config ──────────────────────────────────────────────────────
 

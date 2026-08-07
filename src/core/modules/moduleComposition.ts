@@ -14,9 +14,7 @@ import type {
 } from "@shep/module-api";
 
 import type { BuiltinGlobalSurfaceLoaders } from "./builtinGlobalSurfaceAdapters";
-import type { BuiltinPanelLoaders } from "./builtinPanelAdapters";
-import type { LegacyPanelDefinition } from "./panelPersistence";
-import { createBuiltinPanelContributions } from "./builtinPanelAdapters";
+import type { PanelMigrationAlias } from "./panelPersistence";
 import {
   BUILTIN_GLOBAL_NAVIGATION,
   createBuiltinGlobalSurfaceContributions,
@@ -31,14 +29,14 @@ export function modulePanelContributions(
   return modules.flatMap((module) => module.panels ?? []);
 }
 
-export function moduleLegacyPanelDefinitions(
+export function modulePanelMigrationAliases(
   modules: readonly ShepModule[] = ENABLED_MODULES,
-): readonly LegacyPanelDefinition[] {
-  return modulePanelContributions(modules).flatMap((panel) => panel.legacyTab
+): readonly PanelMigrationAlias[] {
+  return modulePanelContributions(modules).flatMap((panel) => panel.migrationAlias
     ? [{
-        kind: panel.legacyTab.kind,
+        kind: panel.migrationAlias.kind,
         panelId: panel.id,
-        label: panel.legacyTab.label ?? panel.label,
+        label: panel.migrationAlias.label ?? panel.label,
       }]
     : []);
 }
@@ -251,13 +249,9 @@ export function notifyModulesProjectRemoved(
 }
 
 export function createEnabledPanelRegistry(
-  builtinLoaders: BuiltinPanelLoaders | null,
   modules: readonly ShepModule[] = ENABLED_MODULES,
 ): PanelRegistry {
-  return PanelRegistry.create([
-    ...(builtinLoaders ? createBuiltinPanelContributions(builtinLoaders) : []),
-    ...modulePanelContributions(modules),
-  ]);
+  return PanelRegistry.create(modulePanelContributions(modules));
 }
 
 export function createEnabledGlobalSurfaceRegistry(

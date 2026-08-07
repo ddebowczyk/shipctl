@@ -4,7 +4,7 @@ import geminiSrc from "../../assets/gemini.svg";
 import opencodeSrc from "../../assets/opencode-logo-dark.svg";
 import piSrc from "../../assets/pi.svg";
 
-export const assistantLogoSrc: Record<string, string> = {
+export const usageProviderLogoSrc: Record<string, string> = {
   claude: claudeSrc,
   codex: codexSrc,
   gemini: geminiSrc,
@@ -14,8 +14,8 @@ export const assistantLogoSrc: Record<string, string> = {
   pi: piSrc,
 };
 
-const MONO_ASSISTANT_LOGOS = new Set(["codex", "opencode", "pi"]);
+const MONO_USAGE_PROVIDER_LOGOS = new Set(["codex", "opencode", "pi"]);
 
-export function getAssistantLogoClass(assistantId: string): string | undefined {
-  return MONO_ASSISTANT_LOGOS.has(assistantId) ? "themed-mono-logo" : undefined;
+export function getUsageProviderLogoClass(provider: string): string | undefined {
+  return MONO_USAGE_PROVIDER_LOGOS.has(provider) ? "themed-mono-logo" : undefined;
 }

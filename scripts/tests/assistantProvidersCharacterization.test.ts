@@ -135,7 +135,6 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   const composition = source("../../src/core/modules/enabledModules.ts");
   const shell = source("../../src/components/layout/AppShell.tsx");
   const pty = source("../../src/hooks/usePty.ts");
-  const builtinRuntime = source("../../src/core/modules/builtinPanelRuntime.tsx");
   const nativeHost = source("../../src-tauri/src/lib.rs");
   const nativeComposition = source("../../src-tauri/src/enabled_modules.rs");
   const terminalAdapter = source("../../src-tauri/src/assistants_module.rs");
@@ -148,7 +147,6 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   assert.match(composition, /import \{ assistantsModule \} from "@shep\/module-assistants"/);
   assert.doesNotMatch(shell, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|listRestorableAssistantSessions/);
   assert.doesNotMatch(pty, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|CODEX_CAPTURE_RETRY_MS|RESTORE_PROBATION_MS/);
-  assert.doesNotMatch(builtinRuntime, /components\/session\/SessionLauncher/);
   assert.doesNotMatch(nativeHost, /AssistantSessionRegistry|commands::spawn_assistant_session|commands::begin_assistant_session_preserving_shutdown/);
   assert.match(nativeComposition, /shep_module_assistants::init\(/);
   assert.match(terminalAdapter, /impl TerminalAuthority for HostTerminalAuthority/);

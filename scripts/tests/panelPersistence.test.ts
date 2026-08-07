@@ -3,26 +3,32 @@ import test from "node:test";
 
 import {
   hydratePanelReference,
-  BUILTIN_PANEL_IDS,
   PANEL_REFERENCE_SCHEMA_VERSION,
   toPersistedPanelReference,
 } from "../../src/core/modules/panelPersistence.ts";
 
-const allBuiltinPanels = Object.values(BUILTIN_PANEL_IDS);
+const migrationAliases = [
+  { kind: "commands", panelId: "core.commands", label: "Commands" },
+  { kind: "launcher", panelId: "assistants.launcher", label: "New Agent" },
+] as const;
+const allModulePanels = migrationAliases.map(({ panelId }) => panelId);
 const gitPanel = { kind: "git", panelId: "core.git", label: "Files" };
-const allAvailablePanels = [...allBuiltinPanels, gitPanel.panelId];
+const allAvailablePanels = [...allModulePanels, gitPanel.panelId];
 
-test("legacy panel tabs migrate to equivalent stable references", () => {
-  for (const [kind, panelId] of Object.entries(BUILTIN_PANEL_IDS)) {
+test("pre-registry panel tabs migrate to equivalent stable references", () => {
+  for (const { kind, panelId } of migrationAliases) {
     const raw = { id: `panel-${kind}`, kind, label: `Custom ${kind}` };
-    const result = hydratePanelReference(raw, { availablePanelIds: allBuiltinPanels });
+    const result = hydratePanelReference(raw, {
+      availablePanelIds: allModulePanels,
+      migrationAliases,
+    });
 
     assert.equal(result.status, "available");
-    assert.equal(result.source, "legacy");
+    assert.equal(result.source, "migrated");
     assert.equal(result.instanceId, raw.id);
     assert.equal(result.panelId, panelId);
     assert.equal(result.label, raw.label);
-    assert.equal(result.legacyKind, kind);
+    assert.equal(result.migrationKind, kind);
     assert.equal(result.raw, raw);
     assert.equal(result.recovery, null);
   }
@@ -34,12 +40,12 @@ test("current references preserve opaque module state", () => {
     instanceId: "panel-git",
     panelId: "core.git",
     label: "Files",
-    legacyKind: "git",
+    migrationKind: "git",
     state,
   });
   const result = hydratePanelReference(raw, {
     availablePanelIds: allAvailablePanels,
-    legacyPanels: [gitPanel],
+    migrationAliases: [gitPanel],
   });
 
   assert.equal(raw.schemaVersion, PANEL_REFERENCE_SCHEMA_VERSION);
@@ -52,11 +58,11 @@ test("module migration metadata restores pre-module Git tabs", () => {
   const raw = { id: "panel-git", kind: "git", label: "Files" };
   const result = hydratePanelReference(raw, {
     availablePanelIds: allAvailablePanels,
-    legacyPanels: [gitPanel],
+    migrationAliases: [gitPanel],
   });
 
   assert.equal(result.status, "available");
-  assert.equal(result.source, "legacy");
+  assert.equal(result.source, "migrated");
   assert.equal(result.panelId, "core.git");
 });
 
@@ -68,7 +74,7 @@ test("unknown panel IDs remain retryable and removable", () => {
     label: "Timeline",
     state: { cursor: 7 },
   };
-  const result = hydratePanelReference(raw, { availablePanelIds: allBuiltinPanels });
+  const result = hydratePanelReference(raw, { availablePanelIds: allModulePanels });
 
   assert.equal(result.status, "unavailable");
   assert.equal(result.recovery?.reason, "unknown");
@@ -87,7 +93,7 @@ test("known but disabled panels are distinguished from unknown panels", () => {
   };
   const result = hydratePanelReference(raw, {
     availablePanelIds: ["core.git"],
-    knownPanelIds: [...allBuiltinPanels, "example.timeline"],
+    knownPanelIds: [...allModulePanels, "example.timeline"],
   });
 
   assert.equal(result.status, "unavailable");
@@ -107,7 +113,7 @@ test("malformed entries never throw and retain the original value", () => {
 
   for (const [index, raw] of fixtures.entries()) {
     const result = hydratePanelReference(raw, {
-      availablePanelIds: allBuiltinPanels,
+      availablePanelIds: allModulePanels,
       fallbackInstanceId: `malformed-${index}`,
     });
     assert.equal(result.status, "unavailable");

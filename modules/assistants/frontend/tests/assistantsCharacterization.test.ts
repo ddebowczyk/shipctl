@@ -110,7 +110,7 @@ function fixtureServices() {
 test("module identity and launcher migration metadata remain stable", () => {
   assert.equal(assistants.assistantsModule.id, "shep.assistants");
   assert.equal(assistants.assistantsModule.panels[0].id, "assistants.launcher");
-  assert.equal(assistants.assistantsModule.panels[0].legacyTab.kind, "launcher");
+  assert.equal(assistants.assistantsModule.panels[0].migrationAlias.kind, "launcher");
   assert.equal(assistants.assistantsModule.panels[0].newSession.label, "Agent");
 });
 
@@ -156,7 +156,7 @@ test("non-restorable providers launch through the generic terminal port", async 
     columns: 132,
     rows: 42,
   });
-  assert.equal(request.presentation?.role, "assistant");
+  assert.equal(request.presentation?.showInSessionList, true);
 });
 
 test("Claude and Codex launch only through the managed terminal seam", async () => {
@@ -169,7 +169,7 @@ test("Claude and Codex launch only through the managed terminal seam", async () 
   const request = fixture.calls.find(([kind]) => kind === "launch-managed")?.[1] as ModuleManagedTerminalSessionLaunchRequest;
   assert.equal(request.ownerKey, "assistants:claude");
   assert.equal(request.cwd, "/repo");
-  assert.equal(request.presentation?.role, "assistant");
+  assert.equal(request.presentation?.showInSessionList, true);
   assert.equal(request.presentation?.badge?.label, "saving");
   assert.deepEqual(request.ownerMetadata, {
     provider: "claude",

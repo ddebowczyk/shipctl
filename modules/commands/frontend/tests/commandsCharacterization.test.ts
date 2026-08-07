@@ -129,7 +129,7 @@ test("module identity, panel identity, navigation, and migration metadata are st
   assert.equal(commands.commandsModule.id, "shep.commands");
   assert.equal(commands.commandsModule.panels[0].id, "core.commands");
   assert.equal(commands.commandsModule.panels[0].shortcut, "⇧⌘C");
-  assert.equal(commands.commandsModule.panels[0].legacyTab.kind, "commands");
+  assert.equal(commands.commandsModule.panels[0].migrationAlias.kind, "commands");
   assert.equal(commands.commandsModule.projectNavigation[0].panelId, "core.commands");
 });
 

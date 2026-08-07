@@ -7,10 +7,6 @@ import { skillsModule } from "@shep/module-skills";
 
 import "../../../src/styles/globals.css";
 import PanelHost from "../../../src/core/modules/PanelHost";
-import {
-  BUILTIN_PANEL_LOADERS,
-  BuiltinPanelRuntimeProvider,
-} from "../../../src/core/modules/builtinPanelRuntime";
 import { createEnabledPanelRegistry } from "../../../src/core/modules/moduleComposition";
 import { MODULE_HOST_SERVICES } from "../../../src/core/modules/moduleHostServices";
 import { useRepoStore } from "../../../src/stores/useRepoStore";
@@ -88,12 +84,12 @@ mockIPC(
 useTerminalStore.getState().switchProject(PROJECT_PATH);
 useRepoStore.setState({
   activeRepoPath: PROJECT_PATH,
-  activeConfig: { name: PROJECT.name, commands: [], assistants: [] },
+  activeConfig: { name: PROJECT.name, commands: [] },
 });
 await gitModule.projectLifecycle.onProjectsChanged([PROJECT_PATH]);
 await skillsModule.projectLifecycle.onProjectsChanged([PROJECT_PATH]);
 
-const registry = createEnabledPanelRegistry(BUILTIN_PANEL_LOADERS);
+const registry = createEnabledPanelRegistry();
 registry.register({
   id: "smoke.crash",
   moduleId: "smoke",
@@ -124,12 +120,7 @@ function SmokeApp() {
   const [title, setTitle] = useState<string | null>(null);
 
   return (
-    <BuiltinPanelRuntimeProvider
-      value={{
-        onStartSession: async () => false,
-      }}
-    >
-      <main className="h-full flex bg-[var(--app-bg)] text-[var(--app-fg)]">
+    <main className="h-full flex bg-[var(--app-bg)] text-[var(--app-fg)]">
         <nav className="w-52 shrink-0 border-r border-white/10 p-3" aria-label="Smoke panels">
           <h1 className="mb-3 text-sm font-semibold">Panel host smoke</h1>
           <div className="flex flex-col gap-1">
@@ -161,8 +152,7 @@ function SmokeApp() {
             services={MODULE_HOST_SERVICES}
           />
         </section>
-      </main>
-    </BuiltinPanelRuntimeProvider>
+    </main>
   );
 }
 

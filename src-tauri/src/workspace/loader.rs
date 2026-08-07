@@ -316,7 +316,6 @@ pub fn migrate_old_projects() -> Result<(), String> {
                 name
             },
             commands,
-            assistants: Vec::new(),
             capability_data: Default::default(),
         };
 
@@ -471,7 +470,6 @@ fn load_or_default_workspace(repo_path: &str) -> Result<WorkspaceConfig, String>
         let config = WorkspaceConfig {
             name,
             commands: Vec::new(),
-            assistants: Vec::new(),
             capability_data: Default::default(),
         };
 

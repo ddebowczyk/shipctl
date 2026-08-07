@@ -276,16 +276,11 @@ export function usePty() {
           hostTerminalSessionIdsByPty.set(ptyId, session.id);
           addTabToProject(request.projectPath, {
             id: tabId,
-            kind: request.presentation?.role ?? "terminal",
+            kind: "terminal",
             label: request.label,
             ptyId,
             repoPath: request.projectPath,
             commandName: null,
-            assistantId: null,
-            sessionMode: null,
-            restoreRecordId: null,
-            providerSessionId: null,
-            captureState: null,
             moduleSessionId: session.id,
             modulePresentation: request.presentation,
           });
@@ -343,16 +338,11 @@ export function usePty() {
       hostTerminalSessionIdsByPty.set(started.terminalId, session.id);
       addTabToProject(request.projectPath, {
         id: tabId,
-        kind: session.presentation?.role ?? "terminal",
+        kind: "terminal",
         label: session.label,
         ptyId: started.terminalId,
         repoPath: request.cwd,
         commandName: null,
-        assistantId: null,
-        sessionMode: null,
-        restoreRecordId: null,
-        providerSessionId: null,
-        captureState: null,
         moduleSessionId: session.id,
         modulePresentation: session.presentation,
       });
@@ -387,10 +377,7 @@ export function usePty() {
       ...(patch.label === undefined ? {} : { label: patch.label }),
       ...(patch.presentation === undefined
         ? {}
-        : {
-            kind: patch.presentation.role,
-            modulePresentation: patch.presentation,
-          }),
+        : { modulePresentation: patch.presentation }),
     });
     return next;
   }, [updateTerminalTabById]);
@@ -486,11 +473,6 @@ export function usePty() {
           ptyId,
           repoPath: activeRepoPath,
           commandName: null,
-          assistantId: null,
-          sessionMode: null,
-          restoreRecordId: null,
-          providerSessionId: null,
-          captureState: null,
         });
 
         return ptyId;
@@ -518,7 +500,7 @@ export function usePty() {
       if (!tabEntry) return;
       const [tabProjectPath, project] = tabEntry;
       const tab = project.tabs.find((entry) => entry.id === tabId);
-      if (!tab || (tab.kind !== "terminal" && tab.kind !== "assistant")) return;
+      if (!tab || tab.kind !== "terminal") return;
 
       if (tab.moduleSessionId) {
         const owned = hostTerminalSessions.get(tab.moduleSessionId);
@@ -564,7 +546,7 @@ export function usePty() {
     const tabs = state.getAllProjectTabs(repoPath);
 
     for (const tab of tabs) {
-      if (tab.kind !== "terminal" && tab.kind !== "assistant") continue;
+      if (tab.kind !== "terminal") continue;
       if (tab.moduleSessionId) {
         const owned = hostTerminalSessions.get(tab.moduleSessionId);
         if (!owned) continue;

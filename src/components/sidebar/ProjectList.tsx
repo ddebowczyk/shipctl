@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import type { RepoInfo, RepoGroup, TerminalTabData } from "../../lib/types";
 import { open } from "@tauri-apps/plugin-dialog";
+import { SquareTerminal } from "lucide-react";
 import tabKindMeta from "../../lib/tabKindMeta";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useRepoStore } from "../../stores/useRepoStore";
@@ -9,7 +10,7 @@ import { getErrorMessage } from "../../lib/errors";
 import ProjectItem from "./ProjectItem";
 import GroupHeader from "./GroupHeader";
 import CollapsibleSection from "./CollapsibleSection";
-import AssistantList from "./AssistantList";
+import ModuleSessionList from "./ModuleSessionList";
 import TerminalList from "./TerminalList";
 import { ModuleProjectNavigationSurfaces, useProjectFactsMap } from "../../core/modules";
 import { groupProjects } from "../../lib/projectGrouping";
@@ -23,7 +24,7 @@ interface ProjectListProps {
   onSelectRepo: (repoPath: string) => void;
   onAddProject: (repoPath: string) => Promise<void>;
   onRemoveProject: (repoPath: string) => void;
-  onNewAssistant: () => void;
+  onNewModuleSession: () => void;
   onOpenInEditor: (repoPath: string) => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
@@ -44,7 +45,7 @@ export default function ProjectList({
   onSelectRepo,
   onAddProject,
   onRemoveProject,
-  onNewAssistant,
+  onNewModuleSession,
   onOpenInEditor,
   onSelectTab,
   onCloseTab,
@@ -154,14 +155,16 @@ export default function ProjectList({
     (s) => activeRepoPath ? s.projectState[activeRepoPath]?.tabs ?? null : null,
   );
 
-  const assistantTabs = useMemo(() => {
+  const sessionTabs = useMemo(() => {
     if (!projectTabs) return [];
-    return projectTabs.filter((t): t is TerminalTabData => t.kind === "assistant");
+    return projectTabs.filter((tab): tab is TerminalTabData =>
+      tab.kind === "terminal" && tab.modulePresentation?.showInSessionList === true);
   }, [projectTabs]);
 
   const shellTabs = useMemo(() => {
     if (!projectTabs) return [];
-    return projectTabs.filter((t): t is TerminalTabData => t.kind === "terminal");
+    return projectTabs.filter((tab): tab is TerminalTabData =>
+      tab.kind === "terminal" && !tab.modulePresentation?.showInSessionList);
   }, [projectTabs]);
 
   const projectFacts = useProjectFactsMap(repos);
@@ -221,14 +224,14 @@ export default function ProjectList({
         {isExpanded && (
           <div className="mt-1 mb-2 flex flex-col gap-0.5 pl-2">
             <CollapsibleSection
-              label={tabKindMeta.assistant.label + "s"}
-              icon={tabKindMeta.assistant.icon(14)}
-              badge={assistantTabs.length || null}
-              hasItems={assistantTabs.length > 0}
-              onAdd={onNewAssistant}
+              label="Agents"
+              icon={<SquareTerminal size={14} />}
+              badge={sessionTabs.length || null}
+              hasItems={sessionTabs.length > 0}
+              onAdd={onNewModuleSession}
             >
-              <AssistantList
-                assistantTabs={assistantTabs}
+              <ModuleSessionList
+                sessions={sessionTabs}
                 activeTabId={activeTabId}
                 onSelectTab={onSelectTab}
                 onCloseTab={onCloseTab}

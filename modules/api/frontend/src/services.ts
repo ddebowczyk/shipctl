@@ -76,7 +76,8 @@ export interface ModuleTerminalSessionBadge {
 }
 
 export interface ModuleTerminalSessionPresentation {
-  readonly role: "terminal" | "assistant";
+  /** Opt this module-owned terminal into the host's generic sessions list. */
+  readonly showInSessionList?: boolean;
   readonly icon?: ModuleTerminalSessionIcon;
   readonly badge?: ModuleTerminalSessionBadge;
 }

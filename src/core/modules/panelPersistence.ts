@@ -1,24 +1,14 @@
-import type { PanelTabKind, UnifiedTab } from "../../lib/types";
+import type { UnifiedTab } from "../../lib/types";
 
 export const PANEL_REFERENCE_SCHEMA_VERSION = 1 as const;
-
-export const BUILTIN_PANEL_IDS = {
-  commands: "core.commands",
-  launcher: "core.launcher",
-} as const satisfies Record<PanelTabKind, `${string}.${string}`>;
-
-const LEGACY_PANEL_LABELS = {
-  commands: "Commands",
-  launcher: "New Agent",
-} as const satisfies Record<PanelTabKind, string>;
 
 export interface PersistedPanelReference {
   readonly schemaVersion: typeof PANEL_REFERENCE_SCHEMA_VERSION;
   readonly instanceId: string;
   readonly panelId: string;
   readonly label: string;
-  /** Retained while legacy tab shapes remain readable. */
-  readonly legacyKind?: string;
+  /** Records which pre-registry tab kind was migrated into this reference. */
+  readonly migrationKind?: string;
   /** Opaque module-owned state. The host must preserve it without interpretation. */
   readonly state?: unknown;
 }
@@ -35,11 +25,11 @@ export interface PanelReferenceRecovery {
 
 export interface HydratedPanelReference {
   readonly status: "available" | "unavailable";
-  readonly source: "current" | "legacy" | "malformed";
+  readonly source: "current" | "migrated" | "malformed";
   readonly instanceId: string;
   readonly panelId: string | null;
   readonly label: string;
-  readonly legacyKind: string | null;
+  readonly migrationKind: string | null;
   readonly state: unknown;
   /** Original persisted value, retained even when it cannot currently resolve. */
   readonly raw: unknown;
@@ -49,32 +39,22 @@ export interface HydratedPanelReference {
 export interface HydratePanelReferenceOptions {
   readonly availablePanelIds: Iterable<string>;
   readonly knownPanelIds?: Iterable<string>;
-  readonly legacyPanels?: Iterable<LegacyPanelDefinition>;
+  readonly migrationAliases?: Iterable<PanelMigrationAlias>;
   readonly fallbackInstanceId?: string;
 }
 
-export interface LegacyPanelDefinition {
+export interface PanelMigrationAlias {
   readonly kind: string;
   readonly panelId: string;
   readonly label: string;
 }
 
-interface LegacyPanelTabShape {
+interface MigratablePanelTabShape {
   readonly id: string;
   readonly kind: string;
   readonly label: string;
   readonly panelId: string;
 }
-
-const BUILTIN_LEGACY_PANELS: readonly LegacyPanelDefinition[] = Object.entries(
-  BUILTIN_PANEL_IDS,
-).map(([kind, panelId]) => ({
-  kind,
-  panelId,
-  label: LEGACY_PANEL_LABELS[kind as PanelTabKind],
-}));
-
-const KNOWN_BUILTIN_PANEL_IDS = new Set<string>(Object.values(BUILTIN_PANEL_IDS));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -88,13 +68,13 @@ function isPanelId(value: unknown): value is string {
   return isNonEmptyString(value) && /^[^.\s]+\.[^.\s]+(?:\.[^.\s]+)*$/.test(value);
 }
 
-function readLegacyPanelTab(
+function readMigratablePanelTab(
   value: unknown,
-  legacyPanels: ReadonlyMap<string, LegacyPanelDefinition>,
-): LegacyPanelTabShape | null {
+  migrationAliases: ReadonlyMap<string, PanelMigrationAlias>,
+): MigratablePanelTabShape | null {
   if (!isRecord(value)) return null;
   if (!isNonEmptyString(value.id) || !isNonEmptyString(value.kind)) return null;
-  const definition = legacyPanels.get(value.kind);
+  const definition = migrationAliases.get(value.kind);
   if (!definition) return null;
   return {
     id: value.id,
@@ -109,14 +89,14 @@ function readCurrentPanelReference(value: unknown): PersistedPanelReference | nu
   if (value.schemaVersion !== PANEL_REFERENCE_SCHEMA_VERSION) return null;
   if (!isNonEmptyString(value.instanceId) || !isPanelId(value.panelId)) return null;
   if (!isNonEmptyString(value.label)) return null;
-  if (value.legacyKind !== undefined && !isNonEmptyString(value.legacyKind)) return null;
+  if (value.migrationKind !== undefined && !isNonEmptyString(value.migrationKind)) return null;
 
   return {
     schemaVersion: PANEL_REFERENCE_SCHEMA_VERSION,
     instanceId: value.instanceId,
     panelId: value.panelId,
     label: value.label,
-    ...(value.legacyKind === undefined ? {} : { legacyKind: value.legacyKind }),
+    ...(value.migrationKind === undefined ? {} : { migrationKind: value.migrationKind }),
     ...(Object.prototype.hasOwnProperty.call(value, "state") ? { state: value.state } : {}),
   };
 }
@@ -153,15 +133,8 @@ export function toPersistedPanelReference(
   };
 }
 
-export function panelIdForTabKind(kind: string): `${string}.${string}` | null {
-  return kind in BUILTIN_PANEL_IDS
-    ? BUILTIN_PANEL_IDS[kind as PanelTabKind]
-    : null;
-}
-
 export function panelIdForTab(tab: UnifiedTab): `${string}.${string}` | null {
-  if (tab.kind === "panel") return tab.panelId;
-  return panelIdForTabKind(tab.kind);
+  return tab.kind === "panel" ? tab.panelId : null;
 }
 
 export function hydratePanelReference(
@@ -169,15 +142,15 @@ export function hydratePanelReference(
   options: HydratePanelReferenceOptions,
 ): HydratedPanelReference {
   const availablePanelIds = new Set(options.availablePanelIds);
-  const knownPanelIds = new Set(options.knownPanelIds ?? KNOWN_BUILTIN_PANEL_IDS);
-  const legacyPanels = new Map(
-    [...BUILTIN_LEGACY_PANELS, ...(options.legacyPanels ?? [])]
-      .map((definition) => [definition.kind, definition] as const),
+  const knownPanelIds = new Set(options.knownPanelIds ?? []);
+  const migrationAliases = new Map(
+    [...(options.migrationAliases ?? [])]
+      .map((alias) => [alias.kind, alias] as const),
   );
   const current = readCurrentPanelReference(raw);
-  const legacy = current === null ? readLegacyPanelTab(raw, legacyPanels) : null;
+  const migrated = current === null ? readMigratablePanelTab(raw, migrationAliases) : null;
 
-  if (current === null && legacy === null) {
+  if (current === null && migrated === null) {
     const fallbackId = isRecord(raw) && isNonEmptyString(raw.id)
       ? raw.id
       : (options.fallbackInstanceId ?? "unavailable-panel");
@@ -190,7 +163,7 @@ export function hydratePanelReference(
       instanceId: fallbackId,
       panelId: null,
       label: fallbackLabel,
-      legacyKind: null,
+      migrationKind: null,
       state: undefined,
       raw,
       recovery: recoveryFor("malformed", null),
@@ -199,12 +172,12 @@ export function hydratePanelReference(
 
   const reference = current ?? {
     schemaVersion: PANEL_REFERENCE_SCHEMA_VERSION,
-    instanceId: legacy!.id,
-    panelId: legacy!.panelId,
-    label: legacy!.label,
-    legacyKind: legacy!.kind,
+    instanceId: migrated!.id,
+    panelId: migrated!.panelId,
+    label: migrated!.label,
+    migrationKind: migrated!.kind,
   };
-  const source = current === null ? "legacy" : "current";
+  const source = current === null ? "migrated" : "current";
   const status = availablePanelIds.has(reference.panelId) ? "available" : "unavailable";
   const unavailableReason = knownPanelIds.has(reference.panelId) ? "disabled" : "unknown";
 
@@ -214,7 +187,7 @@ export function hydratePanelReference(
     instanceId: reference.instanceId,
     panelId: reference.panelId,
     label: reference.label,
-    legacyKind: reference.legacyKind ?? null,
+    migrationKind: reference.migrationKind ?? null,
     state: reference.state,
     raw,
     recovery: status === "available" ? null : recoveryFor(unavailableReason, reference.panelId),

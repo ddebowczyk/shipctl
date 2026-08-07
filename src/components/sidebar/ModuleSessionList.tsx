@@ -1,8 +1,8 @@
 import type { TerminalTabData } from "../../lib/types";
-import AssistantButton from "./AssistantButton";
+import ModuleSessionButton from "./ModuleSessionButton";
 
-interface AssistantListProps {
-  assistantTabs: TerminalTabData[];
+interface ModuleSessionListProps {
+  sessions: TerminalTabData[];
   activeTabId: string | null;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
@@ -10,19 +10,19 @@ interface AssistantListProps {
   onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
 }
 
-export default function AssistantList({
-  assistantTabs,
+export default function ModuleSessionList({
+  sessions,
   activeTabId,
   onSelectTab,
   onCloseTab,
   projectPath,
   onMoveTab,
-}: AssistantListProps) {
+}: ModuleSessionListProps) {
   return (
     <>
-      {assistantTabs.map((tab) => (
+      {sessions.map((tab) => (
         <div key={tab.id}>
-          <AssistantButton
+          <ModuleSessionButton
             tab={tab}
             isActive={tab.id === activeTabId}
             onClick={() => onSelectTab(tab.id)}

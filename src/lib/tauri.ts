@@ -21,11 +21,6 @@ import type {
   UsageProjectAliasReviewItem,
   PiConfig,
   PiSettings,
-  AssistantSessionRecord,
-  PrepareAssistantSessionRequest,
-  SpawnAssistantSessionRequest,
-  SpawnedAssistantSession,
-  ResumeAssistantSessionRequest,
 } from "./types";
 
 // ── Workspace commands ──────────────────────────────────────────────
@@ -181,85 +176,6 @@ export function resizePty(
 
 export function killPty(ptyId: number): Promise<void> {
   return invoke("kill_pty", { ptyId });
-}
-
-// ── Assistant session restore commands ─────────────────────────────
-
-export function spawnAssistantSession(
-  request: SpawnAssistantSessionRequest,
-  onMessage: (msg: PtyOutput) => void,
-): Promise<SpawnedAssistantSession> {
-  const channel = new Channel<PtyOutput>();
-  channel.onmessage = onMessage;
-  return invoke("spawn_assistant_session", { request, onData: channel });
-}
-
-export function resumeAssistantSession(
-  request: ResumeAssistantSessionRequest,
-  onMessage: (msg: PtyOutput) => void,
-): Promise<SpawnedAssistantSession> {
-  const channel = new Channel<PtyOutput>();
-  channel.onmessage = onMessage;
-  return invoke("resume_assistant_session", { request, onData: channel });
-}
-
-export function prepareAssistantSession(
-  request: PrepareAssistantSessionRequest,
-): Promise<AssistantSessionRecord> {
-  return invoke("prepare_assistant_session", { request });
-}
-
-export function confirmAssistantSessionCapture(
-  recordId: string,
-  providerSessionId: string,
-): Promise<AssistantSessionRecord> {
-  return invoke("confirm_assistant_session_capture", { recordId, providerSessionId });
-}
-
-export function tryCaptureCodexAssistantSession(
-  recordId: string,
-): Promise<AssistantSessionRecord | null> {
-  return invoke("try_capture_codex_assistant_session", { recordId });
-}
-
-export function failAssistantSessionCapture(
-  recordId: string,
-): Promise<AssistantSessionRecord> {
-  return invoke("fail_assistant_session_capture", { recordId });
-}
-
-export function updateAssistantSessionPlacement(
-  recordId: string,
-  placementProjectPath: string,
-): Promise<AssistantSessionRecord> {
-  return invoke("update_assistant_session_placement", { recordId, placementProjectPath });
-}
-
-export function updateAssistantSessionLabel(
-  recordId: string,
-  label: string,
-): Promise<AssistantSessionRecord> {
-  return invoke("update_assistant_session_label", { recordId, label });
-}
-
-export function discardAssistantSession(recordId: string): Promise<void> {
-  return invoke("discard_assistant_session", { recordId });
-}
-
-export function rearmAssistantSession(recordId: string): Promise<void> {
-  return invoke("rearm_assistant_session", { recordId });
-}
-
-export function listRestorableAssistantSessions(): Promise<AssistantSessionRecord[]> {
-  return invoke("list_restorable_assistant_sessions");
-}
-
-export function takeAssistantSessionStartupWarning(): Promise<string | null> {
-  return invoke("take_assistant_session_startup_warning");
-}
-
-export function beginAssistantSessionPreservingShutdown(): Promise<void> {
-  return invoke("begin_assistant_session_preserving_shutdown");
 }
 
 // ── App lifecycle commands ────────────────────────────────────────

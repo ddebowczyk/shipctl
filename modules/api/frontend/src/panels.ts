@@ -51,7 +51,7 @@ export interface PanelContribution {
   readonly requiredCapabilities?: readonly ContributionId[];
   readonly unavailable?: PanelUnavailableMetadata;
   /** Module-owned migration metadata for tabs persisted before generic panels. */
-  readonly legacyTab?: {
+  readonly migrationAlias?: {
     readonly kind: string;
     readonly label?: string;
   };

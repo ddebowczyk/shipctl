@@ -4,10 +4,9 @@ import { handleActionKey } from "../../lib/a11y";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useRepoStore } from "../../stores/useRepoStore";
 import { useProjectFactsMap } from "../../core/modules";
-import tabKindMeta from "../../lib/tabKindMeta";
 import SidebarSectionToggle from "./SidebarSectionToggle";
 import ActivityIndicator, { getTabActivityStatus } from "./ActivityIndicator";
-import { FolderInput } from "lucide-react";
+import { FolderInput, SquareTerminal } from "lucide-react";
 import ContextMenu from "../shared/ContextMenu";
 import type { ContextMenuItem } from "../shared/ContextMenu";
 import { buildProjectMoveMenuItems } from "../shared/projectMoveMenu";
@@ -90,7 +89,7 @@ function AgentSessionRow({
             className={logoClassName}
           />
         ) : (
-          <span className="shrink-0">{tabKindMeta.assistant.icon(14)}</span>
+          <SquareTerminal size={14} className="shrink-0" />
         )}
         <span className="agent-session-row__text">
           <span className="agent-session-row__project">{projectName}</span>

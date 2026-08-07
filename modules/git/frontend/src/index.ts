@@ -41,7 +41,7 @@ export const gitModule = {
         title: "Files panel unavailable",
         description: "The Git and file browser module could not be loaded.",
       },
-      legacyTab: { kind: "git", label: "Files" },
+      migrationAlias: { kind: "git", label: "Files" },
       load: () => import("./GitPanel"),
     },
   ],

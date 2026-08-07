@@ -25,7 +25,7 @@ export const todosModule = {
         title: "To-dos panel unavailable",
         description: "The project to-do module could not be loaded.",
       },
-      legacyTab: { kind: "todos", label: "To-dos" },
+      migrationAlias: { kind: "todos", label: "To-dos" },
       load: () => import("./TodosPanel"),
     },
   ],

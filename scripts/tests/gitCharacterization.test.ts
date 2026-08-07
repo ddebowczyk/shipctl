@@ -316,7 +316,7 @@ test("generic host project chrome has no direct Git state dependency", () => {
     "../../src/components/layout/TabBar.tsx",
     "../../src/components/shared/projectMoveMenu.tsx",
     "../../src/components/sidebar/AgentSessionList.tsx",
-    "../../src/components/sidebar/AssistantButton.tsx",
+    "../../src/components/sidebar/ModuleSessionButton.tsx",
     "../../src/components/sidebar/ProjectList.tsx",
     "../../src/components/sidebar/Sidebar.tsx",
     "../../src/components/sidebar/TerminalItem.tsx",

@@ -3,7 +3,7 @@ import { useUsageStore, type TimeWindow } from "../../stores/useUsageStore";
 import { useUsageSettingsStore } from "../../stores/useUsageSettingsStore";
 import { useUIStore } from "../../stores/useUIStore";
 import { BUILTIN_GLOBAL_SURFACE_IDS } from "../../core/modules/builtinGlobalSurfaceAdapters";
-import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
+import { usageProviderLogoSrc, getUsageProviderLogoClass } from "../../lib/usageProviderLogos";
 import {
   ALL_USAGE_PROVIDERS,
   TONE_COLORS,
@@ -176,11 +176,11 @@ function UsageTooltip({ tip }: { tip: TooltipState }) {
       style={{ top, left, transform: "translateY(-50%)" }}
     >
       <div className="sidebar-usage__tooltip-header">
-        {assistantLogoSrc[item.provider] && (
+        {usageProviderLogoSrc[item.provider] && (
           <img
-            src={assistantLogoSrc[item.provider]}
+            src={usageProviderLogoSrc[item.provider]}
             alt=""
-            className={`sidebar-usage__icon ${getAssistantLogoClass(item.provider) ?? ""}`}
+            className={`sidebar-usage__icon ${getUsageProviderLogoClass(item.provider) ?? ""}`}
             style={{ opacity: 1 }}
           />
         )}
@@ -260,7 +260,7 @@ export default function SidebarUsage() {
       <div className="sidebar-usage__providers">
         {items.map((item) => {
           const tone = barTone(item.pace, item.pct);
-          const logoSrc = assistantLogoSrc[item.provider];
+          const logoSrc = usageProviderLogoSrc[item.provider];
 
           return (
             <button
@@ -274,7 +274,7 @@ export default function SidebarUsage() {
               onMouseLeave={handleMouseLeave}
             >
               {logoSrc ? (
-                <img src={logoSrc} alt={item.provider} className={`sidebar-usage__icon ${getAssistantLogoClass(item.provider) ?? ""}`} />
+                <img src={logoSrc} alt={item.provider} className={`sidebar-usage__icon ${getUsageProviderLogoClass(item.provider) ?? ""}`} />
               ) : (
                 <span className="sidebar-usage__name">{item.provider}</span>
               )}

@@ -19,7 +19,7 @@ interface SidebarProps {
   onSelectRepo: (repoPath: string) => void;
   onAddProject: (repoPath: string) => Promise<void>;
   onRemoveProject: (repoPath: string) => void;
-  onNewAssistant: () => void;
+  onNewModuleSession: () => void;
   onOpenInEditor: (repoPath: string) => void;
   onSelectTab: (tabId: string) => void;
   onSelectProjectTab: (repoPath: string, tabId: string) => void;
@@ -41,7 +41,7 @@ export default function Sidebar({
   onSelectRepo,
   onAddProject,
   onRemoveProject,
-  onNewAssistant,
+  onNewModuleSession,
   onOpenInEditor,
   onSelectTab,
   onSelectProjectTab,
@@ -90,7 +90,7 @@ export default function Sidebar({
       let hasActive = false;
       let liveTerminalCount = 0;
       for (const tab of repoTabs) {
-        if (tab.kind !== "terminal" && tab.kind !== "assistant") continue;
+        if (tab.kind !== "terminal") continue;
         const a = tabActivity[tab.ptyId];
         if (a) {
           if (a.bell) hasAttention = true;
@@ -117,7 +117,7 @@ export default function Sidebar({
       const projectName = repoNames.get(repoPath) ?? repoPath.split("/").filter(Boolean).pop() ?? repoPath;
       const branchName = projectFacts[repoPath]?.revision?.label.trim() || null;
       for (const tab of state.tabs) {
-        if (tab.kind !== "assistant") continue;
+        if (tab.kind !== "terminal" || !tab.modulePresentation?.showInSessionList) continue;
         const activity = tabActivity[tab.ptyId];
         if (activity && !activity.alive && activity.exitCode === 0) continue;
         sessions.push({ tab, projectPath: repoPath, projectName, branchName });
@@ -200,7 +200,7 @@ export default function Sidebar({
               onSelectRepo={onSelectRepo}
               onAddProject={onAddProject}
               onRemoveProject={onRemoveProject}
-              onNewAssistant={onNewAssistant}
+              onNewModuleSession={onNewModuleSession}
               onOpenInEditor={onOpenInEditor}
               onSelectTab={onSelectTab}
               onCloseTab={onCloseTab}

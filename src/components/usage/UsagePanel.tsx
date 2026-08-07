@@ -11,7 +11,7 @@ import type {
   UsageSettings,
   ProviderUsageSnapshot,
 } from "../../lib/types";
-import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
+import { usageProviderLogoSrc, getUsageProviderLogoClass } from "../../lib/usageProviderLogos";
 import { useUsageStore, type TimeWindow } from "../../stores/useUsageStore";
 import { useUsageSettingsStore } from "../../stores/useUsageSettingsStore";
 import {
@@ -559,13 +559,13 @@ function UtilizationSection({
       </div>
       {sortedItems.map((item) => {
         const tone = barTone(item.pace, item.pct);
-        const logoSrc = assistantLogoSrc[item.provider];
+        const logoSrc = usageProviderLogoSrc[item.provider];
 
         return (
           <div key={item.id} className="usage-limit">
             <div className="usage-limit__header">
               <span className="usage-limit__provider">
-                {logoSrc && <img src={logoSrc} alt="" className={`usage-list__icon ${getAssistantLogoClass(item.provider) ?? ""}`} />}
+                {logoSrc && <img src={logoSrc} alt="" className={`usage-list__icon ${getUsageProviderLogoClass(item.provider) ?? ""}`} />}
                 {getProviderLabel(item.provider)} · {item.label}
               </span>
               <span className="usage-limit__pct">{formatPercent(item.pct)}</span>
@@ -638,12 +638,12 @@ function OverviewPanel({ overview, snapshots }: { overview: UsageOverview; snaps
         <div className="usage-list">
           <UsageListHeader title="Provider" withSparklines />
           {sortedProviders.map((provider) => {
-            const logoSrc = assistantLogoSrc[provider.provider];
+            const logoSrc = usageProviderLogoSrc[provider.provider];
             return (
               <div key={provider.provider} className="usage-list__row">
                 <div className="usage-list__info">
                   <span className="usage-list__label usage-list__label--provider">
-                    {logoSrc ? <img src={logoSrc} alt="" className={`usage-list__icon ${getAssistantLogoClass(provider.provider) ?? ""}`} /> : null}
+                    {logoSrc ? <img src={logoSrc} alt="" className={`usage-list__icon ${getUsageProviderLogoClass(provider.provider) ?? ""}`} /> : null}
                     {getProviderLabel(provider.provider)}
                   </span>
                   <span className="usage-list__meta">

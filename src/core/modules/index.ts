@@ -16,20 +16,9 @@ export type {
   BuiltinGlobalSurfaceLoaders,
 } from "./builtinGlobalSurfaceAdapters";
 export {
-  BUILTIN_PANEL_DEFINITIONS,
-  CORE_TAB_EXCEPTIONS,
-  CORE_SURFACE_EXCEPTIONS,
-  createBuiltinPanelContributions,
-} from "./builtinPanelAdapters";
-export type {
-  BuiltinPanelLoaders,
-} from "./builtinPanelAdapters";
-export {
   hydratePanelReference,
-  BUILTIN_PANEL_IDS,
   PANEL_REFERENCE_SCHEMA_VERSION,
   panelIdForTab,
-  panelIdForTabKind,
   toPersistedPanelReference,
 } from "./panelPersistence";
 export { default as PanelHost } from "./PanelHost";
@@ -66,7 +55,7 @@ export {
   enabledProjectLayoutContributions,
   moduleGlobalNavigationContributions,
   moduleGlobalSurfaceContributions,
-  moduleLegacyPanelDefinitions,
+  modulePanelMigrationAliases,
   modulePanelContributions,
   moduleProjectActionContributions,
   moduleProjectFactsProviders,
@@ -84,15 +73,10 @@ export {
 } from "./moduleComposition";
 export { bindTerminalSessionDimensions } from "./terminalSessions";
 export { BUILTIN_GLOBAL_SURFACE_LOADERS } from "./builtinGlobalSurfaceRuntime";
-export {
-  BUILTIN_PANEL_LOADERS,
-  BuiltinPanelRuntimeProvider,
-} from "./builtinPanelRuntime";
-export type { BuiltinPanelRuntimeValue } from "./builtinPanelRuntime";
 export type {
   HydratedPanelReference,
   HydratePanelReferenceOptions,
-  LegacyPanelDefinition,
+  PanelMigrationAlias,
   PanelReferenceRecovery,
   PanelReferenceUnavailableReason,
   PersistedPanelReference,

@@ -24,7 +24,7 @@ export const commandsModule = {
         title: "Commands panel unavailable",
         description: "The project command runner module could not be loaded.",
       },
-      legacyTab: { kind: "commands", label: "Commands" },
+      migrationAlias: { kind: "commands", label: "Commands" },
       load: () => import("./CommandsPanel"),
     },
   ],

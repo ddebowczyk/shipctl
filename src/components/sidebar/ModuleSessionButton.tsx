@@ -10,7 +10,7 @@ import { useRepoStore } from "../../stores/useRepoStore";
 import { useProjectFactsMap } from "../../core/modules";
 import ActivityIndicator, { getTabActivityStatus } from "./ActivityIndicator";
 
-interface AssistantButtonProps {
+interface ModuleSessionButtonProps {
   tab: TerminalTabData;
   isActive: boolean;
   onClick: () => void;
@@ -19,14 +19,14 @@ interface AssistantButtonProps {
   onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
 }
 
-export default function AssistantButton({
+export default function ModuleSessionButton({
   tab,
   isActive,
   onClick,
   onClose,
   projectPath,
   onMoveTab,
-}: AssistantButtonProps) {
+}: ModuleSessionButtonProps) {
   const contributedIcon = tab.modulePresentation?.icon;
   const logoUrl = contributedIcon?.src ?? null;
   const logoClassName = contributedIcon?.className;
@@ -35,18 +35,14 @@ export default function AssistantButton({
   const groups = useRepoStore((s) => s.groups);
   const projectFacts = useProjectFactsMap(repos);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const restoreStatus = tab.modulePresentation?.badge ?? (tab.captureState === "pending"
-    ? { label: "saving", title: "Identifying this session for restore", color: "var(--text-muted)" }
-    : tab.captureState === "failed"
-      ? { label: "not saved", title: "This live session cannot be restored", color: "var(--status-attention)" }
-      : null);
-  const restoreStatusColor = restoreStatus && "tone" in restoreStatus
-    ? restoreStatus.tone === "attention"
+  const statusBadge = tab.modulePresentation?.badge ?? null;
+  const statusBadgeColor = statusBadge
+    ? statusBadge.tone === "attention"
       ? "var(--status-attention)"
-      : restoreStatus.tone === "success"
+      : statusBadge.tone === "success"
         ? "var(--status-success)"
         : "var(--text-muted)"
-    : restoreStatus?.color;
+    : undefined;
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -90,17 +86,17 @@ export default function AssistantButton({
         role="button"
         tabIndex={0}
         aria-pressed={isActive}
-        aria-label={`Open assistant tab ${tab.label}`}
+        aria-label={`Open module session ${tab.label}`}
       >
         {logoUrl && <img src={logoUrl} alt={contributedIcon?.alt ?? ""} width={14} height={14} className={logoClassName} />}
         <span className="truncate text-left">{tab.label}</span>
-        {restoreStatus && (
+        {statusBadge && (
           <span
             className="ml-auto shrink-0 text-[10px]"
-            style={{ color: restoreStatusColor }}
-            title={restoreStatus.title}
+            style={{ color: statusBadgeColor }}
+            title={statusBadge.title}
           >
-            {restoreStatus.label}
+            {statusBadge.label}
           </span>
         )}
         <ActivityIndicator status={getTabActivityStatus(activity)} activity={activity} />

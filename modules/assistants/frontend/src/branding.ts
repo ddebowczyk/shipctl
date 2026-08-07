@@ -27,7 +27,7 @@ export function assistantPresentation(
 ): ModuleTerminalSessionPresentation {
   const src = assistantLogoSrc[provider];
   return {
-    role: "assistant",
+    showInSessionList: true,
     ...(src
       ? { icon: { src, alt: provider, className: getAssistantLogoClass(provider) } }
       : {}),

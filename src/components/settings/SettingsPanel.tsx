@@ -12,7 +12,7 @@ import { useRepoStore } from "../../stores/useRepoStore";
 import { useTerminalSettingsStore } from "../../stores/useTerminalSettingsStore";
 import { useUsageSettingsStore } from "../../stores/useUsageSettingsStore";
 import { useUpdateStore } from "../../stores/useUpdateStore";
-import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
+import { usageProviderLogoSrc, getUsageProviderLogoClass } from "../../lib/usageProviderLogos";
 import {
   FONT_SIZE_OPTIONS,
   TERMINAL_FONT_FAMILY,
@@ -537,7 +537,7 @@ export default function SettingsPanel() {
         <div className="usage-provider-grid">
           {ALL_USAGE_PROVIDERS.map((provider) => {
             const config = usageSettings[provider];
-            const logo = assistantLogoSrc[provider];
+            const logo = usageProviderLogoSrc[provider];
             const label = provider === "claude"
               ? "Claude"
               : provider === "codex"
@@ -553,7 +553,7 @@ export default function SettingsPanel() {
             return (
               <div key={provider} className="usage-provider-row">
                 <span className="usage-provider-row__name">
-                  {logo && <img src={logo} alt="" width={18} height={18} className={`shrink-0 ${getAssistantLogoClass(provider) ?? ""}`} />}
+                  {logo && <img src={logo} alt="" width={18} height={18} className={`shrink-0 ${getUsageProviderLogoClass(provider) ?? ""}`} />}
                   <span>{label}</span>
                 </span>
 

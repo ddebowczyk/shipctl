@@ -356,20 +356,10 @@ pub struct CommandConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssistantConfig {
-    pub id: String,
-    pub name: String,
-    pub command: String,
-    pub yolo_flag: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
     pub name: String,
     #[serde(default)]
     pub commands: Vec<CommandConfig>,
-    #[serde(default)]
-    pub assistants: Vec<AssistantConfig>,
     /// Module-owned top-level values remain human-editable without expanding host schema.
     #[serde(default, flatten)]
     pub capability_data: HashMap<String, serde_yaml::Value>,
@@ -411,8 +401,13 @@ mod tests {
                 )]
             ))),
         );
+        assert_eq!(
+            workspace.capability_data.get("assistants"),
+            Some(&serde_yaml::Value::Sequence(Vec::new())),
+        );
 
         let serialized = serde_yaml::to_string(&workspace).unwrap();
+        assert!(serialized.contains("assistants: []"));
         assert!(serialized.contains("futureCapability:"));
         assert!(serialized.contains("enabled: true"));
     }

@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import type { ModuleHostServices, ShepModule } from "@shep/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
-import type { BuiltinPanelLoaders } from "../../src/core/modules/builtinPanelAdapters.ts";
 import type { BuiltinGlobalSurfaceLoaders } from "../../src/core/modules/builtinGlobalSurfaceAdapters.ts";
 import {
   hydratePanelReference,
@@ -27,7 +26,7 @@ let moduleProjectFactsProviders: ModuleComposition["moduleProjectFactsProviders"
 let moduleProjectLayoutContributions: ModuleComposition["moduleProjectLayoutContributions"];
 let moduleSettingsContributions: ModuleComposition["moduleSettingsContributions"];
 let moduleSkillsProvider: ModuleComposition["moduleSkillsProvider"];
-let moduleLegacyPanelDefinitions: ModuleComposition["moduleLegacyPanelDefinitions"];
+let modulePanelMigrationAliases: ModuleComposition["modulePanelMigrationAliases"];
 let notifyModulesFilesystemChanged: ModuleComposition["notifyModulesFilesystemChanged"];
 let notifyModulesBeforeShutdown: ModuleComposition["notifyModulesBeforeShutdown"];
 let notifyModulesProjectOpened: ModuleComposition["notifyModulesProjectOpened"];
@@ -52,7 +51,7 @@ before(async () => {
     moduleProjectNavigationContributions,
     moduleSettingsContributions,
     moduleSkillsProvider,
-    moduleLegacyPanelDefinitions,
+    modulePanelMigrationAliases,
     notifyModulesFilesystemChanged,
     notifyModulesBeforeShutdown,
     notifyModulesProjectOpened,
@@ -65,10 +64,6 @@ before(async () => {
 after(async () => {
   await vite.close();
 });
-
-const builtinPanelLoaders: BuiltinPanelLoaders = {
-  launcher: async () => ({ default: () => null }),
-};
 
 const builtinGlobalSurfaceLoaders: BuiltinGlobalSurfaceLoaders = {
   settings: async () => ({ default: () => null }),
@@ -92,7 +87,7 @@ const fixtureModule: ShepModule = {
       label: "Fixture",
       icon: { name: "test" },
       singleton: "per-project",
-      legacyTab: { kind: "fixture", label: "Legacy fixture" },
+      migrationAlias: { kind: "fixture", label: "Migrated fixture" },
       load: async () => ({ default: () => null }),
     },
   ],
@@ -202,7 +197,7 @@ const services = {
 } satisfies ModuleHostServices;
 
 test("enabled profile contributes module panels", () => {
-  const registry = createEnabledPanelRegistry(builtinPanelLoaders, [fixtureModule]);
+  const registry = createEnabledPanelRegistry([fixtureModule]);
   assert.equal(registry.has("fixture.panel"), true);
 });
 
@@ -232,9 +227,9 @@ test("disabled profile removes module global surfaces and navigation", () => {
 });
 
 test("default profile enables the extracted TODO panel", () => {
-  const registry = createEnabledPanelRegistry(builtinPanelLoaders);
+  const registry = createEnabledPanelRegistry();
   assert.equal(registry.has("todos.board"), true);
-  assert.equal(registry.panel("todos.board")?.legacyTab?.kind, "todos");
+  assert.equal(registry.panel("todos.board")?.migrationAlias?.kind, "todos");
 });
 
 test("default profile enables the extracted Ports surface", () => {
@@ -247,9 +242,9 @@ test("default profile enables the extracted Ports surface", () => {
 });
 
 test("default profile enables the extracted Commands surfaces", () => {
-  const registry = createEnabledPanelRegistry(builtinPanelLoaders);
+  const registry = createEnabledPanelRegistry();
   assert.equal(registry.has("core.commands"), true);
-  assert.equal(registry.panel("core.commands")?.legacyTab?.kind, "commands");
+  assert.equal(registry.panel("core.commands")?.migrationAlias?.kind, "commands");
   assert.equal(
     moduleProjectNavigationContributions().some(
       ({ id, panelId }) => id === "commands.project-navigation" && panelId === "core.commands",
@@ -258,19 +253,19 @@ test("default profile enables the extracted Commands surfaces", () => {
   );
 });
 
-test("modules own legacy tab migration metadata", () => {
+test("modules own tab migration metadata", () => {
   const result = hydratePanelReference(
     { id: "panel-fixture", kind: "fixture", label: "Saved fixture" },
     {
       availablePanelIds: ["fixture.panel"],
-      legacyPanels: moduleLegacyPanelDefinitions([fixtureModule]),
+      migrationAliases: modulePanelMigrationAliases([fixtureModule]),
     },
   );
 
   assert.equal(result.status, "available");
-  assert.equal(result.source, "legacy");
+  assert.equal(result.source, "migrated");
   assert.equal(result.panelId, "fixture.panel");
-  assert.equal(result.legacyKind, "fixture");
+  assert.equal(result.migrationKind, "fixture");
 });
 
 test("module surfaces compose without feature-specific host branches", () => {
@@ -421,7 +416,7 @@ test("pre-shutdown lifecycle is ordered and stops before native shutdown on fail
 });
 
 test("disabled profile omits implementation and retains recoverable identity", () => {
-  const registry = createEnabledPanelRegistry(builtinPanelLoaders, []);
+  const registry = createEnabledPanelRegistry([]);
   assert.equal(registry.has("fixture.panel"), false);
 
   const result = hydratePanelReference(

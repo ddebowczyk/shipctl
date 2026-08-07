@@ -3,11 +3,9 @@ import type {
   TerminalTabData,
   TabActivity,
   UnifiedTab,
-  PanelTabKind,
   PanelTabData,
   TabCycleDirection,
 } from "../lib/types";
-import { panelTabId, panelTabDefaults } from "../lib/types";
 import { contributedPanelTabId } from "../lib/types";
 import { useUIStore } from "./useUIStore";
 
@@ -18,7 +16,7 @@ interface ProjectTerminalState {
 
 type TerminalTabPatch = Partial<Pick<
   TerminalTabData,
-  "kind" | "label" | "providerSessionId" | "captureState" | "modulePresentation"
+  "label" | "modulePresentation"
 >>;
 
 interface TerminalStore {
@@ -37,10 +35,7 @@ interface TerminalStore {
   reorderTab: (tabId: string, toIndex: number) => void;
   moveTab: (tabId: string, destinationPath: string) => boolean;
   removeTabFromProject: (repoPath: string, id: string) => void;
-  addPanelTab: (kind: PanelTabKind) => void;
   addContributedPanelTab: (panelId: `${string}.${string}`, label: string) => void;
-  removePanelTab: (kind: PanelTabKind) => void;
-  togglePanelTab: (kind: PanelTabKind) => void;
   findTabByCommand: (commandName: string) => TerminalTabData | undefined;
   findTabByCommandForProject: (repoPath: string, commandName: string) => TerminalTabData | undefined;
   findTabByPtyId: (ptyId: number) => TerminalTabData | undefined;
@@ -88,7 +83,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       const tabActivity = { ...state.tabActivity };
       if (project) {
         for (const tab of project.tabs) {
-          if (tab.kind === "terminal" || tab.kind === "assistant") {
+          if (tab.kind === "terminal") {
             delete tabActivity[tab.ptyId];
           }
         }
@@ -203,7 +198,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const path = state.activeProjectPath;
     const project = path ? state.projectState[path] : null;
     const tab = project?.tabs.find((entry) => entry.id === project.activeTabId);
-    if (tab && (tab.kind === "terminal" || tab.kind === "assistant")) {
+    if (tab?.kind === "terminal") {
       state.clearTabBell(tab.ptyId);
     }
   },
@@ -240,7 +235,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
           [path]: {
             ...project,
             tabs: project.tabs.map((tab) => (
-              (tab.kind === "terminal" || tab.kind === "assistant") && tab.id === id
+              tab.kind === "terminal" && tab.id === id
                 ? { ...tab, ...patch }
                 : tab
             )),
@@ -284,7 +279,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
     const [sourcePath, sourceProject] = sourceEntry;
     const tab = sourceProject.tabs.find((entry) => entry.id === tabId);
-    if (!tab || (tab.kind !== "terminal" && tab.kind !== "assistant")) return false;
+    if (!tab || tab.kind !== "terminal") return false;
 
     set((state) => {
       const source = state.projectState[sourcePath];
@@ -328,32 +323,6 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 
-  addPanelTab: (kind: PanelTabKind) => {
-    useUIStore.getState().closeGlobalSurface();
-    set((state) => {
-      const path = state.activeProjectPath;
-      if (!path) return state;
-      const ps = state.projectState[path] ?? emptyState();
-      const id = panelTabId(kind);
-      const existing = ps.tabs.find((t) => t.id === id);
-      if (existing) {
-        return {
-          projectState: {
-            ...state.projectState,
-            [path]: { ...ps, activeTabId: id },
-          },
-        };
-      }
-      const tab: PanelTabData = { id, kind, label: panelTabDefaults[kind].label };
-      return {
-        projectState: {
-          ...state.projectState,
-          [path]: { tabs: [...ps.tabs, tab], activeTabId: id },
-        },
-      };
-    });
-  },
-
   addContributedPanelTab: (panelId: `${string}.${string}`, label: string) => {
     useUIStore.getState().closeGlobalSurface();
     set((state) => {
@@ -380,33 +349,6 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 
-  removePanelTab: (kind: PanelTabKind) => {
-    get().removeTab(panelTabId(kind));
-  },
-
-  togglePanelTab: (kind: PanelTabKind) => {
-    const state = get();
-    const path = state.activeProjectPath;
-    if (!path) return;
-    const ps = state.projectState[path];
-    const id = panelTabId(kind);
-    const existing = ps?.tabs.find((t) => t.id === id);
-    if (existing && ps?.activeTabId === id) {
-      get().removeTab(id);
-    } else if (existing) {
-      useUIStore.getState().closeGlobalSurface();
-      set((s) => {
-        const p = s.projectState[path];
-        if (!p) return s;
-        return {
-          projectState: { ...s.projectState, [path]: { ...p, activeTabId: id } },
-        };
-      });
-    } else {
-      get().addPanelTab(kind);
-    }
-  },
-
   findTabByCommand: (commandName: string) => {
     const state = get();
     if (!state.activeProjectPath) return undefined;
@@ -417,7 +359,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     for (const project of Object.values(get().projectState)) {
       const tab = project.tabs.find(
         (t): t is TerminalTabData =>
-          (t.kind === "terminal" || t.kind === "assistant") && t.ptyId === ptyId,
+          t.kind === "terminal" && t.ptyId === ptyId,
       );
       if (tab) return tab;
     }
@@ -508,7 +450,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     for (const project of Object.values(get().projectState)) {
       const tab = project.tabs.find(
         (entry): entry is TerminalTabData =>
-          (entry.kind === "terminal" || entry.kind === "assistant") &&
+          entry.kind === "terminal" &&
           entry.repoPath === repoPath &&
           entry.commandName === commandName,
       );

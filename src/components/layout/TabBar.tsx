@@ -26,7 +26,7 @@ function panelIcon(panel: PanelContribution, size: number) {
   return <Icon size={size} />;
 }
 
-function NewSessionButton({ onNewAssistant, onNewShell, panels, onOpenPanel, onOpenInEditor }: { onNewAssistant: () => void; onNewShell: () => void; panels: readonly PanelContribution[]; onOpenPanel: (panel: PanelContribution) => void; onOpenInEditor: () => void }) {
+function NewSessionButton({ onNewShell, panels, onOpenPanel, onOpenInEditor }: { onNewShell: () => void; panels: readonly PanelContribution[]; onOpenPanel: (panel: PanelContribution) => void; onOpenInEditor: () => void }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -47,14 +47,14 @@ function NewSessionButton({ onNewAssistant, onNewShell, panels, onOpenPanel, onO
   }, [open]);
 
   const menuItems = [
-    { key: "assistant", meta: tabKindMeta.assistant, action: onNewAssistant },
     { key: "terminal", meta: tabKindMeta.terminal, action: onNewShell },
     ...panels
-      .filter((panel) => panel.scope === "project" && panel.shortcut)
+      .filter((panel) => panel.scope === "project" && panel.newSession)
+      .sort((left, right) => (left.newSession?.order ?? 0) - (right.newSession?.order ?? 0))
       .map((panel) => ({
         key: panel.id,
         meta: {
-          label: panel.label,
+          label: panel.newSession?.label ?? panel.label,
           icon: (size: number) => panelIcon(panel, size),
           shortcut: panel.shortcut,
         },
@@ -108,7 +108,7 @@ function NewSessionButton({ onNewAssistant, onNewShell, panels, onOpenPanel, onO
 
 /** Render the icon for a tab based on its kind */
 function TabIcon({ tab, panels }: { tab: UnifiedTab; panels: readonly PanelContribution[] }) {
-  if ((tab.kind === "terminal" || tab.kind === "assistant") && tab.modulePresentation?.icon) {
+  if (tab.kind === "terminal" && tab.modulePresentation?.icon) {
     const icon = tab.modulePresentation.icon;
     return <img src={icon.src} alt={icon.alt ?? ""} width={12} height={12} className={icon.className} />;
   }
@@ -123,7 +123,6 @@ function TabIcon({ tab, panels }: { tab: UnifiedTab; panels: readonly PanelContr
 interface TabBarProps {
   onClose: (tabId: string) => void;
   onNewShell: () => void;
-  onNewAssistant: () => void;
   panels: readonly PanelContribution[];
   onOpenPanel: (panel: PanelContribution) => void;
   onOpenInEditor: () => void;
@@ -135,7 +134,6 @@ interface TabBarProps {
 export default function TabBar({
   onClose,
   onNewShell,
-  onNewAssistant,
   panels,
   onOpenPanel,
   onOpenInEditor,
@@ -216,7 +214,7 @@ export default function TabBar({
       }
       if (d.didDrag) {
         const draggedTab = tabs.find((tab) => tab.id === tabId);
-        const projectPath = draggedTab && (draggedTab.kind === "terminal" || draggedTab.kind === "assistant")
+        const projectPath = draggedTab?.kind === "terminal"
           ? getProjectPathAt(ev.clientX, ev.clientY)
           : null;
         const canMoveToProject = Boolean(projectPath && projectPath !== activeProjectPath);
@@ -256,12 +254,12 @@ export default function TabBar({
     useUIStore.getState().closeGlobalSurface();
     setActiveTab(tabId);
     const tab = tabs.find((t) => t.id === tabId);
-    if (tab && (tab.kind === "terminal" || tab.kind === "assistant")) {
+    if (tab?.kind === "terminal") {
       useTerminalStore.getState().clearTabBell(tab.ptyId);
     }
   };
 
-  const isRenameable = (tab: UnifiedTab) => tab.kind === "terminal" || tab.kind === "assistant";
+  const isRenameable = (tab: UnifiedTab) => tab.kind === "terminal";
   const tabMenuTab = tabMenu ? tabs.find((tab) => tab.id === tabMenu.tabId) : null;
   const moveToChildren = buildProjectMoveMenuItems({
     repos,
@@ -375,7 +373,7 @@ export default function TabBar({
           );
         })}
 
-        <NewSessionButton onNewAssistant={onNewAssistant} onNewShell={onNewShell} panels={panels} onOpenPanel={onOpenPanel} onOpenInEditor={onOpenInEditor} />
+        <NewSessionButton onNewShell={onNewShell} panels={panels} onOpenPanel={onOpenPanel} onOpenInEditor={onOpenInEditor} />
       </div>
       {projectName && (
         <span className="tab-bar__breadcrumb">
