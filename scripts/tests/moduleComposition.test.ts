@@ -253,15 +253,15 @@ test("project rails are optional, ordered, and absent from disabled composition"
     ["fixture.project-layout"],
   );
   assert.equal(
-    enabledProjectFactsProvider([fixtureModule], [])?.id,
+    enabledProjectFactsProvider([fixtureModule])?.id,
     "fixture.project-facts",
   );
   assert.deepEqual(enabledProjectActionContributions([], []), []);
   assert.deepEqual(enabledProjectLayoutContributions([], []), []);
-  assert.equal(enabledProjectFactsProvider([], []), null);
+  assert.equal(enabledProjectFactsProvider([]), null);
 });
 
-test("temporary Git adapters keep stable contribution identity and existing menu order", () => {
+test("Git composition keeps stable contribution identity and existing menu order", () => {
   assert.deepEqual(
     enabledProjectActionContributions().map(({ id }) => id),
     ["skills.project-actions", "git.project-actions"],

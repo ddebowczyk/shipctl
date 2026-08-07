@@ -3,7 +3,6 @@ import type { RepoInfo, RepoGroup, CommandState, TerminalTabData } from "../../l
 import { open } from "@tauri-apps/plugin-dialog";
 import tabKindMeta from "../../lib/tabKindMeta";
 import { useTerminalStore } from "../../stores/useTerminalStore";
-import { useGitStore } from "../../stores/useGitStore";
 import { useRepoStore } from "../../stores/useRepoStore";
 import { useNoticeStore } from "../../stores/useNoticeStore";
 import { getErrorMessage } from "../../lib/errors";
@@ -14,7 +13,7 @@ import AssistantList from "./AssistantList";
 import TerminalList from "./TerminalList";
 import CommandsRow from "./CommandsRow";
 import GitStatusRow from "./GitStatusRow";
-import { ModuleProjectNavigationSurfaces } from "../../core/modules";
+import { ModuleProjectNavigationSurfaces, useProjectFactsMap } from "../../core/modules";
 import { groupProjects } from "../../lib/projectGrouping";
 
 interface ProjectListProps {
@@ -170,12 +169,12 @@ export default function ProjectList({
   }, [projectTabs]);
 
   const commandsBadge = commands.length > 0 ? String(commands.length) : null;
-  const gitStatuses = useGitStore((s) => s.projectGitStatus);
+  const projectFacts = useProjectFactsMap(repos);
 
   // Build grouped layout
   const { sections: groupedSections, ungroupedRepos } = useMemo(
-    () => groupProjects(repos, groups, gitStatuses),
-    [repos, groups, gitStatuses],
+    () => groupProjects(repos, groups, projectFacts),
+    [repos, groups, projectFacts],
   );
 
   const groupActivity = useMemo(() => {
@@ -202,7 +201,7 @@ export default function ProjectList({
   const renderRepoItem = (repo: RepoInfo) => {
     const isActive = repo.path === activeRepoPath;
     const isExpanded = isActive && expandedPaths.has(repo.path);
-    const worktreeParent = gitStatuses[repo.path]?.worktree_parent ?? null;
+    const worktreeParent = projectFacts[repo.path]?.lineage?.parentLabel ?? null;
     return (
       <div key={repo.path}>
         <ProjectItem

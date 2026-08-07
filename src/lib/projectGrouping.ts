@@ -1,4 +1,5 @@
-import type { GitStatus, RepoGroup, RepoInfo } from "./types";
+import type { ProjectFactsByPath } from "../core/modules/projectFacts";
+import type { RepoGroup, RepoInfo } from "./types";
 
 export interface ProjectGroupSection {
   group: RepoGroup;
@@ -14,7 +15,7 @@ export interface ProjectGrouping {
 export function groupProjects(
   repos: RepoInfo[],
   groups: RepoGroup[],
-  gitStatuses: Record<string, GitStatus>,
+  projectFacts: ProjectFactsByPath,
 ): ProjectGrouping {
   const validGroupIds = new Set(groups.map((group) => group.id));
   const grouped = new Map<string, RepoInfo[]>();
@@ -31,8 +32,8 @@ export function groupProjects(
   }
 
   const sortRepos = (a: RepoInfo, b: RepoInfo) => {
-    const aWorktreeParent = gitStatuses[a.path]?.worktree_parent ?? null;
-    const bWorktreeParent = gitStatuses[b.path]?.worktree_parent ?? null;
+    const aWorktreeParent = projectFacts[a.path]?.lineage?.parentLabel ?? null;
+    const bWorktreeParent = projectFacts[b.path]?.lineage?.parentLabel ?? null;
     const aSortName = aWorktreeParent ?? a.name;
     const bSortName = bWorktreeParent ?? b.name;
     const groupCompare = aSortName.localeCompare(bSortName);

@@ -4,7 +4,7 @@ import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogo
 import { handleActionKey } from "../../lib/a11y";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useRepoStore } from "../../stores/useRepoStore";
-import { useGitStore } from "../../stores/useGitStore";
+import { useProjectFactsMap } from "../../core/modules";
 import tabKindMeta from "../../lib/tabKindMeta";
 import SidebarSectionToggle from "./SidebarSectionToggle";
 import ActivityIndicator, { getTabActivityStatus } from "./ActivityIndicator";
@@ -46,13 +46,13 @@ function AgentSessionRow({
   const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.ptyId]);
   const repos = useRepoStore((s) => s.repos);
   const groups = useRepoStore((s) => s.groups);
-  const gitStatuses = useGitStore((s) => s.projectGitStatus);
+  const projectFacts = useProjectFactsMap(repos);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const title = branchName ? `${projectName} - ${branchName}` : projectName;
   const moveToChildren = buildProjectMoveMenuItems({
     repos,
     groups,
-    gitStatuses,
+    projectFacts,
     currentProjectPath: item.projectPath,
     onMove: (destinationPath) => { void onMoveTab(tab.id, destinationPath); },
   });

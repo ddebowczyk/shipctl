@@ -1,4 +1,5 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
+import { ENABLED_GIT_FRONTEND } from "../core/modules/enabledModules";
 import type {
   RepoInfo,
   RepoGroup,
@@ -285,57 +286,40 @@ export function unwatchRepo(path: string): Promise<void> {
 
 // ── Git commands ──────────────────────────────────────────────────
 
-const GIT_COMMANDS = {
-  isRepo: "plugin:shep-git|is_git_repo",
-  init: "plugin:shep-git|git_init",
-  currentBranch: "plugin:shep-git|git_current_branch",
-  listBranches: "plugin:shep-git|git_list_branches",
-  listWorktrees: "plugin:shep-git|git_list_worktrees",
-  createWorktree: "plugin:shep-git|git_create_worktree",
-  status: "plugin:shep-git|git_status",
-  changedFiles: "plugin:shep-git|git_changed_files",
-  fileDiff: "plugin:shep-git|git_file_diff",
-  fileContents: "plugin:shep-git|git_file_contents",
-  listFiles: "plugin:shep-git|git_list_files",
-  switchBranch: "plugin:shep-git|git_switch_branch",
-  createBranch: "plugin:shep-git|git_create_branch",
-  diffStats: "plugin:shep-git|git_diff_stats",
-} as const;
-
 export function isGitRepo(path: string): Promise<boolean> {
-  return invoke(GIT_COMMANDS.isRepo, { path });
+  return ENABLED_GIT_FRONTEND.isGitRepo(path);
 }
 
 export function gitInit(path: string): Promise<void> {
-  return invoke(GIT_COMMANDS.init, { path });
+  return ENABLED_GIT_FRONTEND.gitInit(path);
 }
 
 export function gitCurrentBranch(path: string): Promise<string> {
-  return invoke(GIT_COMMANDS.currentBranch, { path });
+  return ENABLED_GIT_FRONTEND.gitCurrentBranch(path);
 }
 
 export function gitListBranches(path: string): Promise<string[]> {
-  return invoke(GIT_COMMANDS.listBranches, { path });
+  return ENABLED_GIT_FRONTEND.gitListBranches(path);
 }
 
 export function gitListWorktrees(path: string): Promise<WorktreeEntry[]> {
-  return invoke(GIT_COMMANDS.listWorktrees, { path });
+  return ENABLED_GIT_FRONTEND.gitListWorktrees(path);
 }
 
 export function gitCreateWorktree(path: string, branchName: string): Promise<CreatedWorktree> {
-  return invoke(GIT_COMMANDS.createWorktree, { path, branchName });
+  return ENABLED_GIT_FRONTEND.gitCreateWorktree(path, branchName);
 }
 
 export function gitStatus(path: string): Promise<GitStatus> {
-  return invoke(GIT_COMMANDS.status, { path });
+  return ENABLED_GIT_FRONTEND.gitStatus(path);
 }
 
 export function gitChangedFiles(path: string): Promise<ChangedFile[]> {
-  return invoke(GIT_COMMANDS.changedFiles, { path });
+  return ENABLED_GIT_FRONTEND.gitChangedFiles(path);
 }
 
 export function gitFileDiff(path: string, filePath: string, staged: boolean): Promise<string> {
-  return invoke(GIT_COMMANDS.fileDiff, { path, filePath, staged });
+  return ENABLED_GIT_FRONTEND.gitFileDiff(path, filePath, staged);
 }
 
 /** Read a file's contents for preview in file-viewer mode. `source` is one
@@ -345,26 +329,26 @@ export function gitFileContents(
   filePath: string,
   source: "working" | "staged" | "head",
 ): Promise<string> {
-  return invoke(GIT_COMMANDS.fileContents, { path, filePath, source });
+  return ENABLED_GIT_FRONTEND.gitFileContents(path, filePath, source);
 }
 
 /** List all files known to git — tracked + untracked-but-not-ignored.
  *  Returns repo-relative paths, same set a user would consider "files in
  *  this project" (build artifacts and node_modules are excluded). */
 export function gitListFiles(path: string): Promise<string[]> {
-  return invoke(GIT_COMMANDS.listFiles, { path });
+  return ENABLED_GIT_FRONTEND.gitListFiles(path);
 }
 
 export function gitSwitchBranch(path: string, branchName: string): Promise<void> {
-  return invoke(GIT_COMMANDS.switchBranch, { path, branchName });
+  return ENABLED_GIT_FRONTEND.gitSwitchBranch(path, branchName);
 }
 
 export function gitCreateBranch(path: string, branchName: string): Promise<void> {
-  return invoke(GIT_COMMANDS.createBranch, { path, branchName });
+  return ENABLED_GIT_FRONTEND.gitCreateBranch(path, branchName);
 }
 
 export function gitDiffStats(path: string): Promise<DiffFileStat[]> {
-  return invoke(GIT_COMMANDS.diffStats, { path });
+  return ENABLED_GIT_FRONTEND.gitDiffStats(path);
 }
 
 // ── System commands ────────────────────────────────────────────────

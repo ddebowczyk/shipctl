@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { watchRepo, unwatchRepo } from "../lib/tauri";
-import { useGitStore } from "../stores/useGitStore";
 import {
   MODULE_HOST_SERVICES,
   notifyModulesFilesystemChanged,
@@ -21,7 +20,6 @@ export function useGitWatcher(repoPaths: string[]) {
 
   useEffect(() => {
     const unlisten = listen<FsChangedPayload>("git-fs-changed", (event) => {
-      void useGitStore.getState().refreshAll(event.payload.paths);
       void notifyModulesFilesystemChanged(event.payload.paths, MODULE_HOST_SERVICES);
     });
 
@@ -31,7 +29,6 @@ export function useGitWatcher(repoPaths: string[]) {
   }, []);
 
   useEffect(() => {
-    const { refreshAll } = useGitStore.getState();
     const current = new Set(repoPaths);
     const watched = watchedRef.current;
 
@@ -54,7 +51,6 @@ export function useGitWatcher(repoPaths: string[]) {
     }
 
     // Initial refresh
-    void refreshAll(repoPaths);
     void notifyModulesProjectsChanged(repoPaths, MODULE_HOST_SERVICES);
   }, [repoPaths.join("\0")]);
 

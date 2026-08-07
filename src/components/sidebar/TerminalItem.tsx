@@ -8,7 +8,7 @@ import ContextMenu from "../shared/ContextMenu";
 import type { ContextMenuItem } from "../shared/ContextMenu";
 import { buildProjectMoveMenuItems } from "../shared/projectMoveMenu";
 import { useRepoStore } from "../../stores/useRepoStore";
-import { useGitStore } from "../../stores/useGitStore";
+import { useProjectFactsMap } from "../../core/modules";
 import ActivityIndicator, { getTabActivityStatus } from "./ActivityIndicator";
 
 interface TerminalItemProps {
@@ -31,7 +31,7 @@ export default function TerminalItem({
   const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.ptyId]);
   const repos = useRepoStore((s) => s.repos);
   const groups = useRepoStore((s) => s.groups);
-  const gitStatuses = useGitStore((s) => s.projectGitStatus);
+  const projectFacts = useProjectFactsMap(repos);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -42,7 +42,7 @@ export default function TerminalItem({
   const moveToChildren = buildProjectMoveMenuItems({
     repos,
     groups,
-    gitStatuses,
+    projectFacts,
     currentProjectPath: projectPath,
     onMove: (destinationPath) => { void onMoveTab(tab.id, destinationPath); },
   });

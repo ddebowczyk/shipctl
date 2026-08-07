@@ -17,6 +17,9 @@ importers:
       '@shep/module-api':
         specifier: workspace:*
         version: link:modules/api/frontend
+      '@shep/module-git':
+        specifier: workspace:*
+        version: link:modules/git/frontend
       '@shep/module-ports':
         specifier: workspace:*
         version: link:modules/ports/frontend
@@ -132,6 +135,18 @@ importers:
       react:
         specifier: ^19.2.4
         version: 19.2.4
+
+  modules/git/frontend:
+    dependencies:
+      '@shep/module-api':
+        specifier: workspace:*
+        version: link:../../api/frontend
+      '@tauri-apps/api':
+        specifier: ^2.10.1
+        version: 2.10.1
+      zustand:
+        specifier: ^5.0.11
+        version: 5.0.11(@types/react@19.2.14)(react@19.2.4)
 
   modules/ports/frontend:
     dependencies:

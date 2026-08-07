@@ -25,7 +25,6 @@ import { GlobalSurfaceRegistry } from "./globalSurfaceRegistry";
 import { PanelRegistry } from "./panelRegistry";
 import {
   BUILTIN_PROJECT_ACTION_CONTRIBUTIONS,
-  BUILTIN_PROJECT_FACTS_PROVIDERS,
   BUILTIN_PROJECT_LAYOUT_CONTRIBUTIONS,
 } from "./builtinProjectAdapters";
 
@@ -125,12 +124,8 @@ export function selectProjectFactsProvider(
 
 export function enabledProjectFactsProvider(
   modules: readonly ShepModule[] = ENABLED_MODULES,
-  builtin: readonly ProjectFactsProviderContribution[] = BUILTIN_PROJECT_FACTS_PROVIDERS,
 ): ProjectFactsProviderContribution | null {
-  return selectProjectFactsProvider([
-    ...builtin,
-    ...moduleProjectFactsProviders(modules),
-  ]);
+  return selectProjectFactsProvider(moduleProjectFactsProviders(modules));
 }
 
 export function moduleSkillsProvider(

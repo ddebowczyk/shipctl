@@ -226,49 +226,13 @@ export interface CodingAssistant {
 
 export type AssistantConfig = CodingAssistant;
 
-// ── Git status ──────────────────────────────────────────────────────
-
-export interface GitStatus {
-  is_git_repo: boolean;
-  branch: string;
-  dirty: boolean;
-  staged: number;
-  unstaged: number;
-  untracked: number;
-  ahead: number;
-  behind: number;
-  worktree_parent: string | null;
-}
-
-// ── Git worktree ─────────────────────────────────────────────────────
-
-export interface WorktreeEntry {
-  path: string;
-  branch: string | null;
-  is_main: boolean;
-}
-
-export interface CreatedWorktree {
-  path: string;
-  branch: string;
-}
-
-// ── Git diff stats ───────────────────────────────────────────────────
-
-export interface DiffFileStat {
-  path: string;
-  additions: number;
-  deletions: number;
-}
-
-// ── Git changed files ────────────────────────────────────────────────
-
-export interface ChangedFile {
-  path: string;
-  status: string;         // "M", "A", "D", "R", "?"
-  area: string;           // "staged", "unstaged", "untracked"
-  old_path: string | null;
-}
+export type {
+  ChangedFile,
+  CreatedWorktree,
+  DiffFileStat,
+  GitStatus,
+  WorktreeEntry,
+} from "../core/modules/enabledModules";
 
 // ── Pi config ──────────────────────────────────────────────────────
 

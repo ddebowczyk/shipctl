@@ -1,12 +1,13 @@
 import { Folder } from "lucide-react";
 import type { ContextMenuItem } from "./ContextMenu";
-import type { GitStatus, RepoGroup, RepoInfo } from "../../lib/types";
+import type { ProjectFactsByPath } from "../../core/modules/projectFacts";
+import type { RepoGroup, RepoInfo } from "../../lib/types";
 import { groupProjects } from "../../lib/projectGrouping";
 
 interface ProjectMoveMenuOptions {
   repos: RepoInfo[];
   groups: RepoGroup[];
-  gitStatuses: Record<string, GitStatus>;
+  projectFacts: ProjectFactsByPath;
   currentProjectPath: string | null;
   onMove: (destinationPath: string) => void;
 }
@@ -15,12 +16,12 @@ interface ProjectMoveMenuOptions {
 export function buildProjectMoveMenuItems({
   repos,
   groups,
-  gitStatuses,
+  projectFacts,
   currentProjectPath,
   onMove,
 }: ProjectMoveMenuOptions): ContextMenuItem[] {
   const moveTargets = repos.filter((repo) => repo.path !== currentProjectPath);
-  const { sections, ungroupedRepos } = groupProjects(moveTargets, groups, gitStatuses);
+  const { sections, ungroupedRepos } = groupProjects(moveTargets, groups, projectFacts);
   const projectItem = (repo: RepoInfo): ContextMenuItem => ({
     label: repo.name,
     onClick: () => onMove(repo.path),

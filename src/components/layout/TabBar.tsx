@@ -6,8 +6,8 @@ import { useShallow } from "zustand/shallow";
 import { FolderInput, GitBranch } from "lucide-react";
 import { assistantLogoSrc, getAssistantLogoClass } from "../../lib/assistantLogos";
 import { handleActionKey } from "../../lib/a11y";
-import { useGitStore } from "../../stores/useGitStore";
 import { useRepoStore } from "../../stores/useRepoStore";
+import { useProjectFactsMap } from "../../core/modules";
 import ContextMenu from "../shared/ContextMenu";
 import type { ContextMenuItem } from "../shared/ContextMenu";
 import tabKindMeta, { extraActions } from "../../lib/tabKindMeta";
@@ -128,12 +128,12 @@ export default function TabBar({
   const repos = useRepoStore((s) => s.repos);
   const groups = useRepoStore((s) => s.groups);
   const projectName = activeProjectPath ? activeProjectPath.split("/").pop() : null;
-  const gitStatus = useGitStore((s) => activeProjectPath ? s.projectGitStatus[activeProjectPath] : null);
-  const gitStatuses = useGitStore((s) => s.projectGitStatus);
-  const branch = gitStatus?.branch ?? null;
-  const branchIconColor = !gitStatus || !gitStatus.is_git_repo
+  const projectFacts = useProjectFactsMap(repos);
+  const activeFacts = activeProjectPath ? projectFacts[activeProjectPath] : null;
+  const branch = activeFacts?.revision?.label ?? null;
+  const branchIconColor = !activeFacts?.revision
     ? undefined
-    : gitStatus.dirty
+    : activeFacts.revision.state === "changed"
       ? "var(--status-attention)"
       : "var(--status-clean)";
   const tabs = projectTerminals?.tabs ?? [];
@@ -244,7 +244,7 @@ export default function TabBar({
   const moveToChildren = buildProjectMoveMenuItems({
     repos,
     groups,
-    gitStatuses,
+    projectFacts,
     currentProjectPath: activeProjectPath,
     onMove: (destinationPath) => {
       if (tabMenuTab) void onMoveTab(tabMenuTab.id, destinationPath);

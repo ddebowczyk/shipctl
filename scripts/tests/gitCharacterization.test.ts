@@ -5,10 +5,11 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
-import type { GitStatus } from "../../src/lib/types.ts";
+import type { GitStatus } from "../../modules/git/frontend/src/types.ts";
 
-type GitStoreModule = typeof import("../../src/stores/useGitStore.ts");
-type GitPanelStoreModule = typeof import("../../src/stores/useGitPanelStore.ts");
+type GitStoreModule = typeof import("../../modules/git/frontend/src/store.ts");
+type GitPanelStoreModule = typeof import("../../modules/git/frontend/src/panelStore.ts");
+type GitFrontendModule = typeof import("../../modules/git/frontend/src/index.ts");
 
 interface NativeMock {
   gitStatus(repoPath: string): Promise<GitStatus>;
@@ -23,7 +24,7 @@ const nativePlugin: Plugin = {
   name: "git-native-characterization",
   enforce: "pre",
   resolveId(source, importer) {
-    if (source === "../lib/tauri" && importer?.endsWith("/src/stores/useGitStore.ts")) {
+    if (source === "./client" && importer?.endsWith("/modules/git/frontend/src/store.ts")) {
       return virtualNativeId;
     }
     return null;
@@ -38,8 +39,8 @@ const nativePlugin: Plugin = {
 };
 
 test("frontend Git calls use the namespaced plugin command surface", () => {
-  const tauriClient = readFileSync(
-    fileURLToPath(new URL("../../src/lib/tauri.ts", import.meta.url)),
+  const gitClient = readFileSync(
+    fileURLToPath(new URL("../../modules/git/frontend/src/client.ts", import.meta.url)),
     "utf8",
   );
   const commands = [
@@ -60,9 +61,9 @@ test("frontend Git calls use the namespaced plugin command surface", () => {
   ];
 
   for (const command of commands) {
-    assert.match(tauriClient, new RegExp(`plugin:shep-git\\|${command}`));
+    assert.match(gitClient, new RegExp(`plugin:shep-git\\|${command}`));
     assert.doesNotMatch(
-      tauriClient,
+      gitClient,
       new RegExp(`invoke(?:<[^>]+>)?\\(\\s*[\"']${command}[\"']`),
     );
   }
@@ -71,6 +72,7 @@ test("frontend Git calls use the namespaced plugin command surface", () => {
 let vite: ViteDevServer;
 let useGitStore: GitStoreModule["useGitStore"];
 let useGitPanelStore: GitPanelStoreModule["useGitPanelStore"];
+let gitModule: GitFrontendModule["gitModule"];
 let implementations: Map<string, () => Promise<GitStatus>>;
 
 function status(overrides: Partial<GitStatus> = {}): GitStatus {
@@ -97,11 +99,14 @@ before(async () => {
     server: { hmr: false, middlewareMode: true },
   });
   ({ useGitStore } = await vite.ssrLoadModule(
-    "/src/stores/useGitStore.ts",
+    "/modules/git/frontend/src/store.ts",
   ) as GitStoreModule);
   ({ useGitPanelStore } = await vite.ssrLoadModule(
-    "/src/stores/useGitPanelStore.ts",
+    "/modules/git/frontend/src/panelStore.ts",
   ) as GitPanelStoreModule);
+  ({ gitModule } = await vite.ssrLoadModule(
+    "/modules/git/frontend/src/index.ts",
+  ) as GitFrontendModule);
 });
 
 after(async () => {
@@ -165,6 +170,40 @@ test("project removal evicts only the requested Git status snapshot", () => {
   useGitStore.getState().removeProject("/alpha");
 
   assert.deepEqual(useGitStore.getState().projectGitStatus, { "/beta": beta });
+});
+
+test("module lifecycle owns project refresh, filesystem refresh, and removal", async () => {
+  implementations.set("/alpha", async () => status({ branch: "alpha" }));
+  implementations.set("/beta", async () => status({ branch: "beta", dirty: true }));
+
+  await gitModule.projectLifecycle.onProjectsChanged(["/alpha"]);
+  await gitModule.projectLifecycle.onFilesystemChanged(["/beta"]);
+  assert.equal(useGitStore.getState().projectGitStatus["/alpha"].branch, "alpha");
+  assert.equal(useGitStore.getState().projectGitStatus["/beta"].dirty, true);
+
+  gitModule.projectLifecycle.onProjectRemoved("/alpha");
+  assert.equal(useGitStore.getState().projectGitStatus["/alpha"], undefined);
+  assert.equal(useGitStore.getState().projectGitStatus["/beta"].branch, "beta");
+});
+
+test("generic host project chrome has no direct Git state dependency", () => {
+  const files = [
+    "../../src/components/layout/AppShell.tsx",
+    "../../src/components/layout/TabBar.tsx",
+    "../../src/components/shared/projectMoveMenu.tsx",
+    "../../src/components/sidebar/AgentSessionList.tsx",
+    "../../src/components/sidebar/AssistantButton.tsx",
+    "../../src/components/sidebar/ProjectList.tsx",
+    "../../src/components/sidebar/Sidebar.tsx",
+    "../../src/components/sidebar/TerminalItem.tsx",
+    "../../src/hooks/useGitWatcher.ts",
+    "../../src/lib/projectGrouping.ts",
+  ];
+
+  for (const file of files) {
+    const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
+    assert.doesNotMatch(source, /useGitStore|projectGitStatus|worktree_parent/);
+  }
 });
 
 test("panel state is process-local, project-keyed, and preserves independent fields", () => {

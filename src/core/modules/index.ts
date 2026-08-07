@@ -52,7 +52,9 @@ export {
   resolveProjectFacts,
   subscribeProjectFacts,
   useProjectFacts,
+  useProjectFactsMap,
 } from "./projectFacts";
+export type { ProjectFactsByPath } from "./projectFacts";
 export { ENABLED_MODULES } from "./enabledModules";
 export {
   createEnabledGlobalSurfaceRegistry,

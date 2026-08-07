@@ -3,7 +3,7 @@ import type { GlobalNavigationContribution } from "@shep/module-api";
 import type { RepoInfo, RepoGroup, CommandState } from "../../lib/types";
 import { useTerminalStore } from "../../stores/useTerminalStore";
 import { useCommandStore } from "../../stores/useCommandStore";
-import { useGitStore } from "../../stores/useGitStore";
+import { useProjectFactsMap } from "../../core/modules";
 import { useProjectSettingsStore } from "../../stores/useProjectSettingsStore";
 import { useSidebarSettingsStore } from "../../stores/useSidebarSettingsStore";
 import ProjectList from "./ProjectList";
@@ -62,7 +62,7 @@ export default function Sidebar({
   const projectState = useTerminalStore((s) => s.projectState);
   const projectCommands = useCommandStore((s) => s.projectCommands);
   const tabActivity = useTerminalStore((s) => s.tabActivity);
-  const gitStatuses = useGitStore((s) => s.projectGitStatus);
+  const projectFacts = useProjectFactsMap(repos);
   const projectSettings = useProjectSettingsStore((s) => s.settings);
   const projectSettingsLoaded = useProjectSettingsStore((s) => s.hasLoaded);
   const loadProjectSettings = useProjectSettingsStore((s) => s.loadSettings);
@@ -121,7 +121,7 @@ export default function Sidebar({
     const sessions: AgentSessionItem[] = [];
     for (const [repoPath, state] of Object.entries(projectState)) {
       const projectName = repoNames.get(repoPath) ?? repoPath.split("/").filter(Boolean).pop() ?? repoPath;
-      const branchName = gitStatuses[repoPath]?.branch?.trim() || null;
+      const branchName = projectFacts[repoPath]?.revision?.label.trim() || null;
       for (const tab of state.tabs) {
         if (tab.kind !== "assistant") continue;
         const activity = tabActivity[tab.ptyId];
@@ -151,7 +151,7 @@ export default function Sidebar({
 
       return a.projectName.localeCompare(b.projectName) || a.tab.label.localeCompare(b.tab.label);
     });
-  }, [repos, projectState, tabActivity, gitStatuses, activeRepoPath, activeTabId]);
+  }, [repos, projectState, tabActivity, projectFacts, activeRepoPath, activeTabId]);
 
   const handleToggleProjects = useCallback(() => {
     setProjectsCollapsed((value) => !value);

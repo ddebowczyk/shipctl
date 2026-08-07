@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import type {
   ModuleHostServices,
   ProjectFacts,
@@ -61,5 +61,45 @@ export function useProjectFacts(project: ProjectRef): ProjectFacts | null {
     () => resolveProjectFacts(project, MODULE_HOST_SERVICES, provider),
     [project, provider],
   );
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+export type ProjectFactsByPath = Readonly<Record<string, ProjectFacts | null>>;
+
+/** Subscribe once while resolving generic facts for project-list host chrome. */
+export function useProjectFactsMap(
+  projects: readonly { readonly path: string; readonly name: string }[],
+): ProjectFactsByPath {
+  const provider = useMemo(() => enabledProjectFactsProvider(), []);
+  const projectRefs = useMemo<readonly ProjectRef[]>(
+    () => projects.map((project) => ({
+      id: project.path,
+      name: project.name,
+      path: project.path,
+    })),
+    [projects],
+  );
+  const cache = useRef<ProjectFactsByPath>({});
+  const subscribe = useCallback(
+    (listener: () => void) => subscribeProjectFacts(
+      listener,
+      MODULE_HOST_SERVICES,
+      provider,
+    ),
+    [provider],
+  );
+  const snapshot = useCallback(() => {
+    const previous = cache.current;
+    const next: Record<string, ProjectFacts | null> = {};
+    let unchanged = Object.keys(previous).length === projectRefs.length;
+    for (const project of projectRefs) {
+      const facts = resolveProjectFacts(project, MODULE_HOST_SERVICES, provider);
+      next[project.path] = facts;
+      if (previous[project.path] !== facts) unchanged = false;
+    }
+    if (unchanged) return previous;
+    cache.current = next;
+    return next;
+  }, [projectRefs, provider]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
