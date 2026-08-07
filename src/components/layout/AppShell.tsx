@@ -47,6 +47,7 @@ import {
   GlobalSurfaceHost,
   MODULE_HOST_SERVICES,
   ModuleProjectLayoutSurfaces,
+  notifyModulesBeforeShutdown,
   notifyModulesProjectOpened,
   notifyModulesProjectRemoved,
   panelIdForTab,
@@ -84,8 +85,15 @@ export default function AppShell() {
   const { repos, groups, activeRepoPath, fetchRepos, fetchGroups, openRepo, addRepo, removeRepo, renameGroup, deleteGroup, moveRepoToGroup } =
     useRepoStore();
   const pushNotice = useNoticeStore((s) => s.pushNotice);
-  const { spawnBlankShell, launchAssistant, resumeAssistant, closeTab, killProjectPtys } =
-    usePty();
+  const {
+    spawnBlankShell,
+    launchAssistant,
+    resumeAssistant,
+    closeTab,
+    killProjectPtys,
+    requestTerminalSessionPlacement,
+    requestTerminalSessionRename,
+  } = usePty();
 
   const initialProjectAttemptedRef = useRef(false);
   const assistantRestoreAttemptedRef = useRef(false);
@@ -247,7 +255,18 @@ export default function AppShell() {
       await handleSelectRepo(destinationPath);
       const destinationStore = useTerminalStore.getState();
       if (destinationStore.activeProjectPath !== destinationPath) return;
-      if (tab.restoreRecordId) {
+      if (tab.moduleSessionId) {
+        try {
+          await requestTerminalSessionPlacement(tab.moduleSessionId, destinationPath);
+        } catch (error) {
+          pushNotice({
+            tone: "error",
+            title: "Couldn’t move session",
+            message: getErrorMessage(error),
+          });
+          return;
+        }
+      } else if (tab.restoreRecordId) {
         try {
           await updateAssistantSessionPlacement(tab.restoreRecordId, destinationPath);
         } catch (error) {
@@ -260,7 +279,9 @@ export default function AppShell() {
         }
       }
       if (!destinationStore.moveTab(tabId, destinationPath)) {
-        if (tab.restoreRecordId) {
+        if (tab.moduleSessionId) {
+          void requestTerminalSessionPlacement(tab.moduleSessionId, sourcePath).catch(() => {});
+        } else if (tab.restoreRecordId) {
           void updateAssistantSessionPlacement(tab.restoreRecordId, sourcePath).catch(() => {});
         }
         return;
@@ -274,7 +295,7 @@ export default function AppShell() {
           : "The session keeps its original working directory.",
       });
     },
-    [handleSelectRepo, pushNotice],
+    [handleSelectRepo, pushNotice, requestTerminalSessionPlacement],
   );
 
   const handleRenameTab = useCallback(
@@ -285,7 +306,18 @@ export default function AppShell() {
         .find((entry) => entry.id === tabId);
       if (!tab) return;
 
-      if ((tab.kind === "terminal" || tab.kind === "assistant") && tab.restoreRecordId) {
+      if ((tab.kind === "terminal" || tab.kind === "assistant") && tab.moduleSessionId) {
+        try {
+          await requestTerminalSessionRename(tab.moduleSessionId, label);
+        } catch (error) {
+          pushNotice({
+            tone: "error",
+            title: "Couldn’t rename session",
+            message: getErrorMessage(error),
+          });
+          return;
+        }
+      } else if ((tab.kind === "terminal" || tab.kind === "assistant") && tab.restoreRecordId) {
         try {
           await updateAssistantSessionLabel(tab.restoreRecordId, label);
         } catch (error) {
@@ -299,7 +331,7 @@ export default function AppShell() {
       }
       store.updateTab(tabId, { label });
     },
-    [pushNotice],
+    [pushNotice, requestTerminalSessionRename],
   );
 
   const handleAddProject = useCallback(
@@ -604,6 +636,7 @@ export default function AppShell() {
         );
         if (confirmed) {
           try {
+            await notifyModulesBeforeShutdown(MODULE_HOST_SERVICES);
             await shutdownAndQuit();
           } catch (error) {
             pushNotice({

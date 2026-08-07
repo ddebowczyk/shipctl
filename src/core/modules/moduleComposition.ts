@@ -168,6 +168,17 @@ export function moduleSettingsContributions(
     .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
 }
 
+/**
+ * Run sequentially in registration order. Shutdown is a transaction boundary:
+ * a failed module preparation must prevent native PTYs from being signalled.
+ */
+export async function notifyModulesBeforeShutdown(
+  services: ModuleHostServices,
+  modules: readonly ShepModule[] = ENABLED_MODULES,
+): Promise<void> {
+  for (const module of modules) await module.beforeShutdown?.(services);
+}
+
 async function notifyProjectLifecycle(
   callback: "onProjectOpened" | "onProjectsChanged" | "onFilesystemChanged" | "onProjectRemoved",
   value: readonly string[] | string,

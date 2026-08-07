@@ -46,5 +46,7 @@ export interface ShepModule {
   readonly settings?: readonly SettingsContribution[];
   readonly skillsProvider?: SkillsProviderContribution;
   readonly projectLifecycle?: ModuleProjectLifecycle;
+  /** Runs in module registration order before native process shutdown begins. */
+  beforeShutdown?(services: ModuleHostServices): void | Promise<void>;
   activate?(host: ModuleHost): void | ModuleDeactivation;
 }

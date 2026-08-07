@@ -76,6 +76,7 @@ export {
   moduleSettingsContributions,
   notifyModulesFilesystemChanged,
   notifyModulesProjectOpened,
+  notifyModulesBeforeShutdown,
   notifyModulesProjectRemoved,
   notifyModulesProjectsChanged,
   selectProjectFactsProvider,

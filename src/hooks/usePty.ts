@@ -2,6 +2,7 @@ import { useCallback, useEffect } from "react";
 import type {
   ModuleTerminalSession,
   ModuleTerminalSessionLaunchRequest,
+  ModuleTerminalSessionUpdate,
 } from "@shep/module-api";
 import {
   discardAssistantSession,
@@ -32,6 +33,7 @@ import { getErrorMessage } from "../lib/errors";
 import {
   bindTerminalSessionsRuntime,
   publishTerminalSessionEvent,
+  requestTerminalSessionOwnerAction,
   terminalSessionExitReason,
 } from "../core/modules/terminalSessions";
 
@@ -362,6 +364,8 @@ export function usePty() {
         projectPath: request.projectPath,
         ownerKey: request.ownerKey,
         label: request.label,
+        ownerMetadata: request.ownerMetadata,
+        presentation: request.presentation,
       };
       const tabId = nextTabId();
 
@@ -382,7 +386,7 @@ export function usePty() {
           hostTerminalSessionIdsByPty.set(ptyId, session.id);
           addTabToProject(request.projectPath, {
             id: tabId,
-            kind: "terminal",
+            kind: request.presentation?.role ?? "terminal",
             label: request.label,
             ptyId,
             repoPath: request.projectPath,
@@ -392,6 +396,8 @@ export function usePty() {
             restoreRecordId: null,
             providerSessionId: null,
             captureState: null,
+            moduleSessionId: session.id,
+            modulePresentation: request.presentation,
           });
           publishTerminalSessionEvent({ type: "started", session });
         },
@@ -401,6 +407,36 @@ export function usePty() {
     },
     [addTabToProject, spawnSession],
   );
+
+  const updateTerminalSession = useCallback(async (
+    sessionId: string,
+    patch: ModuleTerminalSessionUpdate,
+  ) => {
+    const owned = hostTerminalSessions.get(sessionId);
+    if (!owned) throw new Error(`Terminal session ${sessionId} is unavailable`);
+
+    const next: ModuleTerminalSession = {
+      ...owned.session,
+      ...(patch.label === undefined ? {} : { label: patch.label }),
+      ...(Object.prototype.hasOwnProperty.call(patch, "ownerMetadata")
+        ? { ownerMetadata: patch.ownerMetadata }
+        : {}),
+      ...(patch.presentation === undefined
+        ? {}
+        : { presentation: patch.presentation }),
+    };
+    owned.session = next;
+    updateTerminalTabById(owned.tabId, {
+      ...(patch.label === undefined ? {} : { label: patch.label }),
+      ...(patch.presentation === undefined
+        ? {}
+        : {
+            kind: patch.presentation.role,
+            modulePresentation: patch.presentation,
+          }),
+    });
+    return next;
+  }, [updateTerminalTabById]);
 
   const stopTerminalSession = useCallback(async (sessionId: string) => {
     const owned = hostTerminalSessions.get(sessionId);
@@ -433,11 +469,40 @@ export function usePty() {
     useTerminalStore.getState().setActiveTab(owned.tabId);
   }, []);
 
+  const requestTerminalSessionRename = useCallback(async (
+    sessionId: string,
+    label: string,
+  ) => {
+    const owned = hostTerminalSessions.get(sessionId);
+    if (!owned) throw new Error(`Terminal session ${sessionId} is unavailable`);
+    await requestTerminalSessionOwnerAction({
+      type: "rename-requested",
+      session: owned.session,
+      label,
+    });
+    owned.session = { ...owned.session, label };
+  }, []);
+
+  const requestTerminalSessionPlacement = useCallback(async (
+    sessionId: string,
+    projectPath: string,
+  ) => {
+    const owned = hostTerminalSessions.get(sessionId);
+    if (!owned) throw new Error(`Terminal session ${sessionId} is unavailable`);
+    await requestTerminalSessionOwnerAction({
+      type: "placement-requested",
+      session: owned.session,
+      projectPath,
+    });
+    owned.session = { ...owned.session, projectPath };
+  }, []);
+
   useEffect(() => bindTerminalSessionsRuntime({
     launch: launchTerminalSession,
+    update: updateTerminalSession,
     stop: stopTerminalSession,
     focus: focusTerminalSession,
-  }), [focusTerminalSession, launchTerminalSession, stopTerminalSession]);
+  }), [focusTerminalSession, launchTerminalSession, stopTerminalSession, updateTerminalSession]);
 
   const spawnBlankShell = useCallback(
     async (cols: number, rows: number) => {
@@ -676,6 +741,26 @@ export function usePty() {
       const tab = project.tabs.find((entry) => entry.id === tabId);
       if (!tab || (tab.kind !== "terminal" && tab.kind !== "assistant")) return;
 
+      if (tab.moduleSessionId) {
+        const owned = hostTerminalSessions.get(tab.moduleSessionId);
+        if (!owned) return;
+        try {
+          await requestTerminalSessionOwnerAction({
+            type: "stop-requested",
+            session: owned.session,
+            reason: "tab-close",
+          });
+          await stopTerminalSession(tab.moduleSessionId);
+        } catch (error) {
+          pushNotice({
+            tone: "error",
+            title: "Couldn’t close session",
+            message: getErrorMessage(error),
+          });
+        }
+        return;
+      }
+
       if (tab.restoreRecordId) {
         clearCodexCaptureTimer(tab.restoreRecordId);
         try {
@@ -704,6 +789,7 @@ export function usePty() {
       removeTabFromProject,
       removeActivity,
       pushNotice,
+      stopTerminalSession,
     ],
   );
 
@@ -713,6 +799,17 @@ export function usePty() {
 
     for (const tab of tabs) {
       if (tab.kind !== "terminal" && tab.kind !== "assistant") continue;
+      if (tab.moduleSessionId) {
+        const owned = hostTerminalSessions.get(tab.moduleSessionId);
+        if (!owned) continue;
+        await requestTerminalSessionOwnerAction({
+          type: "stop-requested",
+          session: owned.session,
+          reason: "project-removal",
+        });
+        await stopTerminalSession(tab.moduleSessionId);
+        continue;
+      }
       if (tab.restoreRecordId) {
         clearCodexCaptureTimer(tab.restoreRecordId);
         await discardAssistantSession(tab.restoreRecordId).catch((error) => {
@@ -733,7 +830,7 @@ export function usePty() {
       unregisterTerminal(tab.ptyId);
       removeActivity(tab.ptyId);
     }
-  }, [removeActivity, pushNotice]);
+  }, [removeActivity, pushNotice, stopTerminalSession]);
 
   return {
     spawnBlankShell,
@@ -741,5 +838,7 @@ export function usePty() {
     resumeAssistant,
     closeTab,
     killProjectPtys,
+    requestTerminalSessionPlacement,
+    requestTerminalSessionRename,
   };
 }

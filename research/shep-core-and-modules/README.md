@@ -152,6 +152,9 @@ capability ceiling.
 - [33-assistant-providers-characterization-and-seam.md](./33-assistant-providers-characterization-and-seam.md)
   protects provider launch, identity capture, resume, placement, recovery, and
   shutdown behavior and defines the Assistant module boundary.
+- [34-assistant-terminal-and-lifecycle-rails.md](./34-assistant-terminal-and-lifecycle-rails.md)
+  records the generic session presentation, opaque owner data, transactional
+  rename/move/stop requests, and ordered pre-shutdown lifecycle boundary.
 
 ## Target dependency shape
 

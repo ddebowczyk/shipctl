@@ -60,6 +60,12 @@ const services = {
       ownerKey: request.ownerKey,
       label: request.label,
     }),
+    update: async (sessionId, patch) => ({
+      id: sessionId,
+      projectPath: "/fixture",
+      ownerKey: "fixture",
+      label: patch.label ?? "fixture",
+    }),
     stop: async () => undefined,
     focus: async () => undefined,
     subscribe: () => () => undefined,

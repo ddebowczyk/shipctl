@@ -29,6 +29,7 @@ let moduleSettingsContributions: ModuleComposition["moduleSettingsContributions"
 let moduleSkillsProvider: ModuleComposition["moduleSkillsProvider"];
 let moduleLegacyPanelDefinitions: ModuleComposition["moduleLegacyPanelDefinitions"];
 let notifyModulesFilesystemChanged: ModuleComposition["notifyModulesFilesystemChanged"];
+let notifyModulesBeforeShutdown: ModuleComposition["notifyModulesBeforeShutdown"];
 let notifyModulesProjectOpened: ModuleComposition["notifyModulesProjectOpened"];
 let selectProjectFactsProvider: ModuleComposition["selectProjectFactsProvider"];
 
@@ -53,6 +54,7 @@ before(async () => {
     moduleSkillsProvider,
     moduleLegacyPanelDefinitions,
     notifyModulesFilesystemChanged,
+    notifyModulesBeforeShutdown,
     notifyModulesProjectOpened,
     selectProjectFactsProvider,
   } = await vite.ssrLoadModule(
@@ -175,6 +177,14 @@ const services = {
       projectPath: request.projectPath,
       ownerKey: request.ownerKey,
       label: request.label,
+    }),
+    update: async (sessionId, patch) => ({
+      id: sessionId,
+      projectPath: "/fixture",
+      ownerKey: "fixture",
+      label: patch.label ?? "fixture",
+      ownerMetadata: patch.ownerMetadata,
+      presentation: patch.presentation,
     }),
     stop: async () => undefined,
     focus: async () => undefined,
@@ -372,6 +382,41 @@ test("project lifecycle dispatch isolates module failures", async () => {
   await notifyModulesProjectOpened("/fixture", services, modules);
   await notifyModulesFilesystemChanged(["/fixture"], services, modules);
   assert.deepEqual(calls, ["/fixture", ["/fixture"]]);
+});
+
+test("pre-shutdown lifecycle is ordered and stops before native shutdown on failure", async () => {
+  const calls: string[] = [];
+  const modules: ShepModule[] = [
+    {
+      id: "fixture.first",
+      version: "0",
+      beforeShutdown: async () => {
+        await Promise.resolve();
+        calls.push("first");
+      },
+    },
+    {
+      id: "fixture.failing",
+      version: "0",
+      beforeShutdown: () => {
+        calls.push("failing");
+        throw new Error("capture failed");
+      },
+    },
+    {
+      id: "fixture.skipped",
+      version: "0",
+      beforeShutdown: () => {
+        calls.push("skipped");
+      },
+    },
+  ];
+
+  await assert.rejects(
+    notifyModulesBeforeShutdown(services, modules),
+    /capture failed/,
+  );
+  assert.deepEqual(calls, ["first", "failing"]);
 });
 
 test("disabled profile omits implementation and retains recoverable identity", () => {

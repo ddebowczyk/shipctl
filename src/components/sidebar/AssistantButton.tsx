@@ -28,17 +28,27 @@ export default function AssistantButton({
   projectPath,
   onMoveTab,
 }: AssistantButtonProps) {
-  const logoUrl = tab.assistantId ? assistantLogoSrc[tab.assistantId] : null;
+  const contributedIcon = tab.modulePresentation?.icon;
+  const logoUrl = contributedIcon?.src ?? (tab.assistantId ? assistantLogoSrc[tab.assistantId] : null);
+  const logoClassName = contributedIcon?.className
+    ?? (tab.assistantId ? getAssistantLogoClass(tab.assistantId) : undefined);
   const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.ptyId]);
   const repos = useRepoStore((s) => s.repos);
   const groups = useRepoStore((s) => s.groups);
   const projectFacts = useProjectFactsMap(repos);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const restoreStatus = tab.captureState === "pending"
+  const restoreStatus = tab.modulePresentation?.badge ?? (tab.captureState === "pending"
     ? { label: "saving", title: "Identifying this session for restore", color: "var(--text-muted)" }
     : tab.captureState === "failed"
       ? { label: "not saved", title: "This live session cannot be restored", color: "var(--status-attention)" }
-      : null;
+      : null);
+  const restoreStatusColor = restoreStatus && "tone" in restoreStatus
+    ? restoreStatus.tone === "attention"
+      ? "var(--status-attention)"
+      : restoreStatus.tone === "success"
+        ? "var(--status-success)"
+        : "var(--text-muted)"
+    : restoreStatus?.color;
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -84,12 +94,12 @@ export default function AssistantButton({
         aria-pressed={isActive}
         aria-label={`Open assistant tab ${tab.label}`}
       >
-        {logoUrl && <img src={logoUrl} alt="" width={14} height={14} className={tab.assistantId ? getAssistantLogoClass(tab.assistantId) : undefined} />}
+        {logoUrl && <img src={logoUrl} alt={contributedIcon?.alt ?? ""} width={14} height={14} className={logoClassName} />}
         <span className="truncate text-left">{tab.label}</span>
         {restoreStatus && (
           <span
             className="ml-auto shrink-0 text-[10px]"
-            style={{ color: restoreStatus.color }}
+            style={{ color: restoreStatusColor }}
             title={restoreStatus.title}
           >
             {restoreStatus.label}

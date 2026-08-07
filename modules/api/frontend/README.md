@@ -22,6 +22,15 @@ host internals ─────────────────────�
   and either executable or lazy interactive project actions. Interactive
   actions receive only project registration and placement callbacks from the
   host.
+- Terminal-owning capabilities launch sessions through a generic host port.
+  The host owns PTY, xterm, tab placement, and focus mechanics; the module owns
+  opaque session metadata, optional presentation, and policy for rename, move,
+  stop, and pre-shutdown requests.
+- Owner requests are awaited in registration order. A rejected request stops
+  the host mutation, while process-started and process-exited notifications are
+  best-effort because the process event cannot be rolled back.
+- `beforeShutdown` hooks run sequentially before native PTYs are signalled. A
+  failure aborts shutdown so a module can protect continuity data.
 
 The host's boundary and profile tests enforce this dependency direction. A
 capability may be disabled without requiring placeholder implementations in the

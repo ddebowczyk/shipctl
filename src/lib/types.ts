@@ -1,3 +1,5 @@
+import type { ModuleTerminalSessionPresentation } from "@shep/module-api";
+
 // ── Config types (match Rust structs) ────────────────────────────────
 
 export interface RepoInfo {
@@ -158,6 +160,9 @@ export interface TerminalTabData extends TabBase {
   restoreRecordId: string | null;
   providerSessionId: string | null;
   captureState: AssistantCaptureState | null;
+  /** Opaque module session identity; native PTY identity stays host-owned. */
+  moduleSessionId?: string;
+  modulePresentation?: ModuleTerminalSessionPresentation;
 }
 
 export interface BuiltinPanelTabData extends TabBase {

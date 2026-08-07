@@ -109,6 +109,10 @@ function NewSessionButton({ onNewAssistant, onNewShell, panels, onOpenPanel, onO
 
 /** Render the icon for a tab based on its kind */
 function TabIcon({ tab, panels }: { tab: UnifiedTab; panels: readonly PanelContribution[] }) {
+  if ((tab.kind === "terminal" || tab.kind === "assistant") && tab.modulePresentation?.icon) {
+    const icon = tab.modulePresentation.icon;
+    return <img src={icon.src} alt={icon.alt ?? ""} width={12} height={12} className={icon.className} />;
+  }
   if (tab.kind === "assistant" && tab.assistantId) {
     const logoUrl = assistantLogoSrc[tab.assistantId];
     if (logoUrl) {

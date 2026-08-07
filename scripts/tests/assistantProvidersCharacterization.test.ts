@@ -94,9 +94,11 @@ test("startup restore keeps missing projects and failed resumes recoverable", ()
 });
 
 test("normal shutdown freezes ready records before PTYs receive signals", () => {
+  const shell = source("../../src/components/layout/AppShell.tsx");
   const commands = source("../../src-tauri/src/commands.rs");
   const registry = source("../../src-tauri/src/assistant_sessions/mod.rs");
 
+  assert.match(shell, /await notifyModulesBeforeShutdown\(MODULE_HOST_SERVICES\);\s*await shutdownAndQuit\(\)/);
   assert.match(commands, /registry\.try_capture_pending_codex_sessions\(\);\s*registry\.begin_preserving_shutdown\(\)\?;[\s\S]*pty_manager\.kill_all\(\)/);
   assert.match(registry, /retain\(\|record\| \{\s*record\.capture_state == CaptureState::Ready\s*&& record\.provider_session_id\.is_some\(\)/);
   assert.match(registry, /record\.restore_on_next_launch = true/);
@@ -120,7 +122,7 @@ test("the current extraction seam is explicit and still host-owned", () => {
   const nativeHost = source("../../src-tauri/src/lib.rs");
 
   assert.match(runtime, /import\("\.\.\/\.\.\/components\/session\/SessionLauncher"\)/);
-  assert.match(shell, /const \{ spawnBlankShell, launchAssistant, resumeAssistant, closeTab, killProjectPtys \} =\s*usePty\(\)/);
+  assert.match(shell, /launchAssistant,[\s\S]*resumeAssistant,[\s\S]*closeTab,[\s\S]*killProjectPtys,[\s\S]*\} = usePty\(\)/);
   assert.match(shell, /listRestorableAssistantSessions/);
   assert.match(nativeHost, /\.manage\(AssistantSessionRegistry::new\(\)\)/);
   assert.match(nativeHost, /commands::spawn_assistant_session/);

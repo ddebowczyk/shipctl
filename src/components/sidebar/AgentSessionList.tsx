@@ -42,7 +42,10 @@ function AgentSessionRow({
   onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
 }) {
   const { tab, projectName, branchName } = item;
-  const logoUrl = tab.assistantId ? assistantLogoSrc[tab.assistantId] : null;
+  const contributedIcon = tab.modulePresentation?.icon;
+  const logoUrl = contributedIcon?.src ?? (tab.assistantId ? assistantLogoSrc[tab.assistantId] : null);
+  const logoClassName = contributedIcon?.className
+    ?? (tab.assistantId ? getAssistantLogoClass(tab.assistantId) : undefined);
   const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.ptyId]);
   const repos = useRepoStore((s) => s.repos);
   const groups = useRepoStore((s) => s.groups);
@@ -83,10 +86,10 @@ function AgentSessionRow({
         {logoUrl ? (
           <img
             src={logoUrl}
-            alt=""
+            alt={contributedIcon?.alt ?? ""}
             width={14}
             height={14}
-            className={tab.assistantId ? getAssistantLogoClass(tab.assistantId) : undefined}
+            className={logoClassName}
           />
         ) : (
           <span className="shrink-0">{tabKindMeta.assistant.icon(14)}</span>

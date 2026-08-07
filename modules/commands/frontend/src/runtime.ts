@@ -34,6 +34,7 @@ function applyLifecycle(event: ModuleTerminalSessionLifecycleEvent) {
     store.setRuntime(owner.projectPath, owner.commandName, "running", event.session.id);
     return;
   }
+  if (event.type !== "exited") return;
 
   store.setRuntime(
     owner.projectPath,

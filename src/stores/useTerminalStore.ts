@@ -18,7 +18,7 @@ interface ProjectTerminalState {
 
 type TerminalTabPatch = Partial<Pick<
   TerminalTabData,
-  "label" | "providerSessionId" | "captureState"
+  "kind" | "label" | "providerSessionId" | "captureState" | "modulePresentation"
 >>;
 
 interface TerminalStore {

@@ -52,6 +52,24 @@ export interface ModuleProjectDataPort {
   ): Promise<void>;
 }
 
+export interface ModuleTerminalSessionIcon {
+  readonly src: string;
+  readonly alt?: string;
+  readonly className?: string;
+}
+
+export interface ModuleTerminalSessionBadge {
+  readonly label: string;
+  readonly title: string;
+  readonly tone: "muted" | "attention" | "success";
+}
+
+export interface ModuleTerminalSessionPresentation {
+  readonly role: "terminal" | "assistant";
+  readonly icon?: ModuleTerminalSessionIcon;
+  readonly badge?: ModuleTerminalSessionBadge;
+}
+
 export interface ModuleTerminalSessionLaunchRequest {
   readonly projectPath: string;
   readonly ownerKey: string;
@@ -60,6 +78,9 @@ export interface ModuleTerminalSessionLaunchRequest {
   readonly environment?: Readonly<Record<string, string>>;
   readonly cwd: string;
   readonly label: string;
+  /** Passed back to the owner unchanged. Core must not inspect this value. */
+  readonly ownerMetadata?: unknown;
+  readonly presentation?: ModuleTerminalSessionPresentation;
   readonly columns: number;
   readonly rows: number;
 }
@@ -70,6 +91,15 @@ export interface ModuleTerminalSession {
   readonly projectPath: string;
   readonly ownerKey: string;
   readonly label: string;
+  /** Passed back to the owner unchanged. Core must not inspect this value. */
+  readonly ownerMetadata?: unknown;
+  readonly presentation?: ModuleTerminalSessionPresentation;
+}
+
+export interface ModuleTerminalSessionUpdate {
+  readonly label?: string;
+  readonly ownerMetadata?: unknown;
+  readonly presentation?: ModuleTerminalSessionPresentation;
 }
 
 export interface ModuleTerminalDimensions {
@@ -92,15 +122,36 @@ export type ModuleTerminalSessionLifecycleEvent =
       readonly session: ModuleTerminalSession;
       readonly reason: ModuleTerminalSessionExitReason;
       readonly exitCode: number | null;
+    }
+  | {
+      readonly type: "rename-requested";
+      readonly session: ModuleTerminalSession;
+      readonly label: string;
+    }
+  | {
+      readonly type: "placement-requested";
+      readonly session: ModuleTerminalSession;
+      readonly projectPath: string;
+    }
+  | {
+      readonly type: "stop-requested";
+      readonly session: ModuleTerminalSession;
+      readonly reason: "tab-close" | "project-removal";
     };
 
 export interface ModuleTerminalSessionsPort {
   getDimensions(): ModuleTerminalDimensions;
   launch(request: ModuleTerminalSessionLaunchRequest): Promise<ModuleTerminalSession>;
+  update(
+    sessionId: string,
+    patch: ModuleTerminalSessionUpdate,
+  ): Promise<ModuleTerminalSession>;
   stop(sessionId: string): Promise<void>;
   focus(sessionId: string): Promise<void>;
   subscribe(
-    listener: (event: ModuleTerminalSessionLifecycleEvent) => void,
+    listener: (
+      event: ModuleTerminalSessionLifecycleEvent,
+    ) => void | Promise<void>,
   ): () => void;
 }
 

@@ -83,6 +83,12 @@ function fixtureServices(options: {
         listener?.({ type: "started", session });
         return session;
       },
+      update: async (sessionId, patch) => ({
+        id: sessionId,
+        projectPath: "/repo",
+        ownerKey: "commands:fixture",
+        label: patch.label ?? "fixture",
+      }),
       stop: async (sessionId) => {
         calls.push(["stop", sessionId]);
       },

@@ -7,7 +7,17 @@ import type {
 
 export type TerminalSessionsRuntime = Pick<
   ModuleTerminalSessionsPort,
-  "launch" | "stop" | "focus"
+  "launch" | "update" | "stop" | "focus"
+>;
+
+type TerminalSessionNotification = Extract<
+  ModuleTerminalSessionLifecycleEvent,
+  { readonly type: "started" | "exited" }
+>;
+
+export type TerminalSessionOwnerRequest = Extract<
+  ModuleTerminalSessionLifecycleEvent,
+  { readonly type: "rename-requested" | "placement-requested" | "stop-requested" }
 >;
 
 let runtime: TerminalSessionsRuntime | null = null;
@@ -16,7 +26,7 @@ let dimensionsProvider: () => ModuleTerminalDimensions = () => ({
   rows: 24,
 });
 const listeners = new Set<
-  (event: ModuleTerminalSessionLifecycleEvent) => void
+  (event: ModuleTerminalSessionLifecycleEvent) => void | Promise<void>
 >();
 
 function getRuntime() {
@@ -53,14 +63,31 @@ export function bindTerminalSessionDimensions(
 }
 
 export function publishTerminalSessionEvent(
-  event: ModuleTerminalSessionLifecycleEvent,
+  event: TerminalSessionNotification,
 ) {
-  for (const listener of listeners) listener(event);
+  for (const listener of listeners) {
+    try {
+      void Promise.resolve(listener(event)).catch(() => undefined);
+    } catch {
+      // Lifecycle notifications cannot roll back a process event.
+    }
+  }
+}
+
+/**
+ * Give the owning module a transactional boundary before a host mutation.
+ * Listeners run in subscription order and a rejection prevents the mutation.
+ */
+export async function requestTerminalSessionOwnerAction(
+  event: TerminalSessionOwnerRequest,
+) {
+  for (const listener of listeners) await listener(event);
 }
 
 export const MODULE_TERMINAL_SESSIONS: ModuleTerminalSessionsPort = {
   getDimensions: () => dimensionsProvider(),
   launch: (request) => getRuntime().launch(request),
+  update: (sessionId, patch) => getRuntime().update(sessionId, patch),
   stop: (sessionId) => getRuntime().stop(sessionId),
   focus: (sessionId) => getRuntime().focus(sessionId),
   subscribe(listener) {
