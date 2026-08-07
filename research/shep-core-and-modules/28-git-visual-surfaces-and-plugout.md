@@ -4,6 +4,8 @@ Date: 2026-08-07
 
 Task: `shep-3w1.8.3.2.4`
 
+Gate: `shep-3w1.8.3.3`
+
 ## Outcome
 
 Git is now an encapsulated vertical module. `modules/git/frontend` owns the
@@ -75,6 +77,18 @@ smoke typechecking, production frontend build, 43 host Rust tests, and a Tauri
 debug build. The standalone frontend-disabled and native-disabled builds also
 passed.
 
+## Smoke scope
+
+Automated coverage exercises the changed Git panel, status, tree, diff,
+worktree, project lifecycle/import, shortcut, migration, unavailable-panel,
+error-containment, and native-command paths. The complete enabled, disabled,
+and source-absent matrix also builds a desktop executable in every profile.
+
+The full Phase 0 interactive desktop checklist was not run because the user's
+live Shep process owns active PTY and agent sessions. No claim is made here
+about unrelated interactive terminal, assistant, shutdown, or restoration
+paths; they were deliberately left undisturbed.
+
 ## Verification evidence
 
 ```sh
@@ -88,9 +102,11 @@ pnpm exec tsc --noEmit
 pnpm verify:git-frontend-disabled
 pnpm verify:git-native-disabled
 pnpm verify:git-plugout -- --source-absent-only
+pnpm verify:git-plugout
 git diff --check
 ```
 
 Results: nine frontend and nine backend Git characterization tests passed; 23
 project-surface tests passed; all generic surface/panel tests passed; enabled,
 frontend-disabled, native-disabled, and physically source-absent builds passed.
+The final complete matrix passed from committed checkpoint `4ee1d6e`.
