@@ -128,7 +128,7 @@ test("Usage remains global across project switches and refreshes on module caden
 });
 
 test("native cache, unavailable states, and persisted config remain bounded", () => {
-  const usage = source("../../src-tauri/src/usage/mod.rs");
+  const usage = source("../../modules/usage/backend/src/usage/mod.rs");
   const config = source("../../src-tauri/src/workspace/config.rs");
   const loader = source("../../src-tauri/src/workspace/loader.rs");
 
@@ -148,16 +148,26 @@ test("native cache, unavailable states, and persisted config remain bounded", ()
 
 test("native ownership seam includes ingestion, query DB, and provider subprocess access", () => {
   const host = source("../../src-tauri/src/lib.rs");
+  const installer = source("../../src-tauri/src/enabled_modules.rs");
   const commands = source("../../src-tauri/src/commands.rs");
-  const usage = source("../../src-tauri/src/usage/mod.rs");
-  const providers = source("../../src-tauri/src/usage/providers.rs");
+  const client = source("../../modules/usage/frontend/src/client.ts");
+  const plugin = source("../../modules/usage/backend/src/lib.rs");
+  const usage = source("../../modules/usage/backend/src/usage/mod.rs");
+  const providers = source("../../modules/usage/backend/src/usage/providers.rs");
 
-  assert.match(host, /\.manage\(UsageDb::open\(\)/);
-  assert.match(host, /usage::run_background_ingest\(&db\)/);
+  assert.doesNotMatch(host, /\.manage\(UsageDb::open\(\)/);
+  assert.doesNotMatch(host, /usage::run_background_ingest\(&db\)/);
+  assert.match(installer, /shep_module_usage::init\([\s\S]*usage_module::host_services\(\)/);
+  assert.match(plugin, /plugin::Builder::new\(PLUGIN_NAME\)/);
+  assert.match(plugin, /app\.manage\(UsagePluginState/);
+  assert.match(plugin, /spawn_ingest\(db, app\.clone\(\)\)/);
+  assert.match(plugin, /"plugin:shep-usage\|get_all_usage_snapshots"/);
+  assert.match(client, /invoke\("plugin:shep-usage\|get_all_usage_snapshots"\)/);
+  assert.match(client, /invoke\("plugin:shep-usage\|refresh_usage_data"\)/);
   assert.match(commands, /pub async fn get_all_usage_snapshots/);
   assert.match(commands, /pub fn refresh_usage_data/);
-  assert.match(host, /commands::get_all_usage_snapshots/);
-  assert.match(host, /commands::refresh_usage_data/);
+  assert.doesNotMatch(host, /commands::get_all_usage_snapshots/);
+  assert.doesNotMatch(host, /commands::refresh_usage_data/);
   assert.match(usage, /queries::usage_overview\(&conn, window\)/);
   assert.match(providers, /run_command\(\s*"curl"/);
   assert.match(providers, /find-generic-password/);

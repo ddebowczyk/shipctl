@@ -13,14 +13,16 @@ mod ports_module;
 mod pty;
 #[cfg(feature = "skills-module")]
 mod skills_module;
+#[cfg(feature = "usage-module")]
 mod usage;
+#[cfg(feature = "usage-module")]
+mod usage_module;
 mod watcher;
 mod workspace;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
 use pty::manager::PtyManager;
-use usage::UsageDb;
 use watcher::GitWatcher;
 use workspace::manager::WorkspaceManager;
 
@@ -36,10 +38,6 @@ pub fn run() {
     let app = enabled_modules::install(builder, pty_manager.clone())
         .manage(pty_manager)
         .manage(WorkspaceManager::new())
-        .manage(UsageDb::open().unwrap_or_else(|e| {
-            eprintln!("Usage database failed to open ({e}), using in-memory fallback");
-            UsageDb::open_in_memory()
-        }))
         .setup(|app| {
             // Run migration from old project-based config
             let workspace = app.state::<WorkspaceManager>();
@@ -52,14 +50,6 @@ pub fn run() {
 
             // Start file system watcher for git status updates
             app.manage(GitWatcher::new(app.handle().clone()));
-
-            // Kick off background usage ingestion so it doesn't block startup
-            let db = app.state::<UsageDb>().inner().clone();
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                usage::run_background_ingest(&db);
-                let _ = handle.emit("usage-ingest-complete", ());
-            });
 
             menu::setup(app.handle())?;
 
@@ -126,13 +116,8 @@ pub fn run() {
             commands::save_usage_settings,
             global_capability_data::get_global_capability_data,
             global_capability_data::replace_global_capability_data,
-            commands::get_all_usage_snapshots,
-            commands::get_usage_snapshot,
-            commands::get_usage_details,
-            commands::get_usage_overview,
-            commands::get_project_alias_review_queue,
+            #[cfg(feature = "usage-module")]
             commands::get_models_for_provider,
-            commands::refresh_usage_data,
             commands::get_memory_stats,
             commands::watch_repo,
             commands::unwatch_repo,

@@ -25,6 +25,11 @@ pub fn install<R: Runtime>(builder: Builder<R>, pty_manager: PtyManager) -> Buil
         crate::assistants_module::host_services(pty_manager),
     ));
 
+    #[cfg(feature = "usage-module")]
+    let builder = builder.plugin(shep_module_usage::init(
+        crate::usage_module::host_services(),
+    ));
+
     #[cfg(not(feature = "assistants-module"))]
     let _ = pty_manager;
 

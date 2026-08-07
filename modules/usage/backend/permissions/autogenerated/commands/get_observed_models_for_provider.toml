@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-get-observed-models-for-provider"
+description = "Enables the get_observed_models_for_provider command without any pre-configured scope."
+commands.allow = ["get_observed_models_for_provider"]
+
+[[permission]]
+identifier = "deny-get-observed-models-for-provider"
+description = "Denies the get_observed_models_for_provider command without any pre-configured scope."
+commands.deny = ["get_observed_models_for_provider"]

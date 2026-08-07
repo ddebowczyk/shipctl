@@ -1,36 +1,5 @@
 {
-  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "shep",
-  "version": "0.5.0",
-  "identifier": "com.shep.terminal",
-  "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
-  },
   "app": {
-    "macOSPrivateApi": true,
-    "windows": [
-      {
-        "title": "Shep",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
-        "resizable": true,
-        "fullscreen": false,
-        "dragDropEnabled": false,
-        "transparent": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "acceptFirstMouse": true,
-        "trafficLightPosition": {
-          "x": 20,
-          "y": 24
-        }
-      }
-    ],
     "security": {
       "capabilities": [
         "default",
@@ -110,66 +79,8 @@
             "shep-assistants:allow-take-assistant-session-startup-warning",
             "shep-assistants:allow-begin-assistant-session-preserving-shutdown"
           ]
-        },
-        {
-          "identifier": "usage",
-          "description": "Enables the internal Usage module commands",
-          "windows": ["main"],
-          "permissions": [
-            "shep-usage:allow-get-all-usage-snapshots",
-            "shep-usage:allow-get-usage-snapshot",
-            "shep-usage:allow-get-usage-details",
-            "shep-usage:allow-get-usage-overview",
-            "shep-usage:allow-get-project-alias-review-queue",
-            "shep-usage:allow-get-observed-models-for-provider",
-            "shep-usage:allow-refresh-usage-data"
-          ]
         }
-      ],
-      "csp": {
-        "default-src": "'self' customprotocol: asset:",
-        "script-src": "'self' 'wasm-unsafe-eval'",
-        "connect-src": "ipc: http://ipc.localhost https://github.com https://objects.githubusercontent.com",
-        "img-src": "'self' asset: http://asset.localhost data: blob:",
-        "style-src": "'unsafe-inline' 'self'",
-        "font-src": "'self' data:",
-        "object-src": "'none'",
-        "base-uri": "'self'",
-        "frame-ancestors": "'none'"
-      },
-      "devCsp": {
-        "default-src": "'self' customprotocol: asset: http://localhost:5173",
-        "connect-src": "ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173 https://github.com https://objects.githubusercontent.com",
-        "img-src": "'self' asset: http://asset.localhost data: blob: http://localhost:5173",
-        "style-src": "'unsafe-inline' 'self' http://localhost:5173",
-        "font-src": "'self' data: http://localhost:5173",
-        "object-src": "'none'",
-        "base-uri": "'self'",
-        "frame-ancestors": "'none'"
-      }
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "createUpdaterArtifacts": true,
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "macOS": {
-      "entitlements": "./Entitlements.plist"
-    }
-  },
-  "plugins": {
-    "updater": {
-      "endpoints": [
-        "https://github.com/stumptowndoug/shep/releases/latest/download/latest.json"
-      ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFENUI5MjhFQ0I1QThGM0IKUldRN2oxckxqcEpiSGZocmVQUDBpSFN4dDFZempVSWgrMDNzZmFCWHphTkpSR2xvaDZvMzAyNVUK"
+      ]
     }
   }
 }

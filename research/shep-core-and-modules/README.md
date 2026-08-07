@@ -178,6 +178,9 @@ capability ceiling.
   Usage frontend/resource ownership, declarative sidebar activation and
   settings placement, the preserved native compatibility seam, and enabled and
   disabled production-build evidence.
+- [42-usage-native-module.md](./42-usage-native-module.md) records plugin-owned
+  persistence, ingestion, providers, queries, namespaced commands, the narrow
+  settings authority, compatibility bounds, and native-disabled build proof.
 
 ## Target dependency shape
 

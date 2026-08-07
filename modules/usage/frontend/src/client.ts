@@ -17,25 +17,25 @@ export function saveUsageSettings(settings: UsageSettings): Promise<void> {
 }
 
 export function getAllUsageSnapshots(): Promise<ProviderUsageSnapshot[]> {
-  return invoke("get_all_usage_snapshots");
+  return invoke("plugin:shep-usage|get_all_usage_snapshots");
 }
 
 export function getUsageSnapshot(provider: string): Promise<ProviderUsageSnapshot> {
-  return invoke("get_usage_snapshot", { provider });
+  return invoke("plugin:shep-usage|get_usage_snapshot", { provider });
 }
 
 export function getUsageDetails(provider: string, window: string): Promise<LocalUsageDetails> {
-  return invoke("get_usage_details", { provider, window });
+  return invoke("plugin:shep-usage|get_usage_details", { provider, window });
 }
 
 export function getUsageOverview(window: string): Promise<UsageOverview> {
-  return invoke("get_usage_overview", { window });
+  return invoke("plugin:shep-usage|get_usage_overview", { window });
 }
 
 export function getProjectAliasReviewQueue(): Promise<UsageProjectAliasReviewItem[]> {
-  return invoke("get_project_alias_review_queue");
+  return invoke("plugin:shep-usage|get_project_alias_review_queue");
 }
 
 export function refreshUsageData(): Promise<void> {
-  return invoke("refresh_usage_data");
+  return invoke("plugin:shep-usage|refresh_usage_data");
 }

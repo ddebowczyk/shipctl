@@ -3998,6 +3998,7 @@ dependencies = [
  "tauri-plugin-shep-ports",
  "tauri-plugin-shep-skills",
  "tauri-plugin-shep-todos",
+ "tauri-plugin-shep-usage",
  "tauri-plugin-updater",
  "url",
  "uuid",
@@ -4587,6 +4588,18 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "shep-module-api",
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
+name = "tauri-plugin-shep-usage"
+version = "0.0.0"
+dependencies = [
+ "dirs",
+ "rusqlite",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-plugin",
 ]

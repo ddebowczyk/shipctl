@@ -11,6 +11,7 @@ use url::Url;
 use crate::fonts::{self, FontFaceData, FontFamily};
 use crate::pty::manager::PtyManager;
 use crate::pty::session::{PtyColorTheme, PtyOutput};
+#[cfg(feature = "usage-module")]
 use crate::usage::{
     LocalUsageDetails, ProviderUsageSnapshot, UsageDb, UsageOverview, UsageProjectAliasReviewItem,
 };
@@ -372,6 +373,7 @@ pub fn check_command_exists(command: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(feature = "usage-module")]
 #[tauri::command]
 pub async fn get_all_usage_snapshots(
     db: State<'_, UsageDb>,
@@ -381,6 +383,7 @@ pub async fn get_all_usage_snapshots(
     Ok(crate::usage::get_all_usage_snapshots(&db, &enabled))
 }
 
+#[cfg(feature = "usage-module")]
 #[tauri::command]
 pub async fn get_usage_snapshot(
     db: State<'_, UsageDb>,
@@ -391,6 +394,7 @@ pub async fn get_usage_snapshot(
     crate::usage::get_usage_snapshot(&db, &provider, &enabled)
 }
 
+#[cfg(feature = "usage-module")]
 fn enabled_providers(workspace: &State<'_, WorkspaceManager>) -> crate::usage::EnabledProviders {
     let settings = workspace.load_usage_settings().unwrap_or_default();
     crate::usage::EnabledProviders {
@@ -416,16 +420,19 @@ pub fn save_usage_settings(
     workspace.save_usage_settings(&settings)
 }
 
+#[cfg(feature = "usage-module")]
 #[tauri::command]
 pub async fn get_usage_details(db: State<'_, UsageDb>, provider: String, window: String) -> Result<LocalUsageDetails, String> {
     crate::usage::get_windowed_details(&db, &provider, &window)
 }
 
+#[cfg(feature = "usage-module")]
 #[tauri::command]
 pub async fn get_usage_overview(db: State<'_, UsageDb>, window: String) -> Result<UsageOverview, String> {
     crate::usage::get_usage_overview(&db, &window)
 }
 
+#[cfg(feature = "usage-module")]
 #[tauri::command]
 pub async fn get_project_alias_review_queue(
     db: State<'_, UsageDb>,
@@ -433,6 +440,7 @@ pub async fn get_project_alias_review_queue(
     Ok(crate::usage::get_project_alias_review_queue(&db))
 }
 
+#[cfg(feature = "usage-module")]
 #[tauri::command]
 pub async fn get_models_for_provider(
     db: State<'_, UsageDb>,
@@ -445,6 +453,7 @@ pub async fn get_models_for_provider(
     }
 }
 
+#[cfg(feature = "usage-module")]
 fn query_cli_models(
     cmd: &str,
     args: &[&str],
@@ -498,6 +507,7 @@ fn query_cli_models(
     }
 }
 
+#[cfg(feature = "usage-module")]
 fn sort_cli_models(db: &UsageDb, models: Vec<String>) -> Vec<String> {
     let conn = db.conn.lock().unwrap();
     let mut dated: Vec<(String, String)> = models
@@ -520,6 +530,7 @@ fn sort_cli_models(db: &UsageDb, models: Vec<String>) -> Vec<String> {
 }
 
 /// Parse `pi --list-models` table: "provider  model  context  ..."
+#[cfg(feature = "usage-module")]
 fn parse_pi_models(text: &str) -> Vec<String> {
     text.lines()
         .skip(1) // header row
@@ -533,6 +544,7 @@ fn parse_pi_models(text: &str) -> Vec<String> {
 }
 
 /// Parse `opencode models` output: "provider/model" per line
+#[cfg(feature = "usage-module")]
 fn parse_opencode_models(text: &str) -> Vec<String> {
     text.lines()
         .map(|l| l.trim().to_string())
@@ -540,6 +552,7 @@ fn parse_opencode_models(text: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(feature = "usage-module")]
 #[tauri::command]
 pub fn refresh_usage_data(db: State<'_, UsageDb>, app: tauri::AppHandle) {
     let db = db.inner().clone();
