@@ -138,7 +138,7 @@ function writeToPty(ptyId: number, data: string) {
   }
 }
 
-function resolveCommandCwd(repoPath: string, commandCwd: string | null) {
+export function resolveCommandCwd(repoPath: string, commandCwd: string | null) {
   const trimmed = commandCwd?.trim();
   if (!trimmed) return repoPath;
   const relativePath = trimmed.replace(/^\.?\//, "").replace(/^\/+/, "");

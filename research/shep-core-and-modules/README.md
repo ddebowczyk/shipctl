@@ -137,6 +137,9 @@ capability ceiling.
 - [28-git-visual-surfaces-and-plugout.md](./28-git-visual-surfaces-and-plugout.md)
   records complete frontend/resource ownership and the enabled, disabled, and
   physically source-absent Git verification matrix.
+- [29-commands-characterization-and-seam.md](./29-commands-characterization-and-seam.md)
+  protects Commands catalogue, persistence, autostart, and PTY behavior and
+  defines the generic project-data and terminal-session boundaries.
 
 ## Target dependency shape
 

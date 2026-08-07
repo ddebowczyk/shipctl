@@ -27,7 +27,7 @@ function createDraft(command?: CommandState): CommandDraft {
   };
 }
 
-function generateCommandName(commandText: string, commands: CommandState[]) {
+export function generateCommandName(commandText: string, commands: CommandState[]) {
   const base = commandText
     .trim()
     .toLowerCase()

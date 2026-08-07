@@ -11,6 +11,7 @@
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
     "test:module-boundaries": "node --test scripts/tests/moduleBoundaries.test.mjs",
     "test:module-composition": "node --test scripts/tests/moduleComposition.test.ts",
+    "test:commands-characterization": "node --test --test-concurrency=1 scripts/tests/commandsCharacterization.test.ts",
     "test:global-surfaces": "node --test scripts/tests/globalSurfaces.test.ts",
     "test:git-characterization": "node --test --test-concurrency=1 scripts/tests/gitCharacterization.test.ts && cargo test --manifest-path modules/git/backend/Cargo.toml -- --test-threads=1",
     "test:panel-persistence": "node --test scripts/tests/panelPersistence.test.ts",
