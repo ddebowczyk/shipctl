@@ -20,7 +20,7 @@ frontend and backend directories, features live in removable modules, and
 repository operations run through `ops/`.
 
 **stumptowndoug continues to maintain the original, and it is likely the more
-stable choice for users — see <https://shep.tool>.**
+stable choice for users — see <https://shep.tools>.**
 
 ## Requirements
 
