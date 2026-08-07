@@ -11,6 +11,7 @@ import {
   readJson,
   removeCargoDefaultFeature,
   removeFrontendModuleComposition,
+  removeNativeModuleFeatureFromScripts,
   replaceOnce,
   run,
   verifyModulePlugout,
@@ -102,12 +103,7 @@ function prepareSourceAbsent(root) {
   delete packageJson.scripts["test:skills-characterization"];
   delete packageJson.scripts["verify:skills-native-disabled"];
   delete packageJson.scripts["verify:skills-plugout"];
-  packageJson.scripts["verify:todos-native-disabled"] = packageJson.scripts[
-    "verify:todos-native-disabled"
-  ].replace("ports-module,skills-module", "ports-module");
-  packageJson.scripts["verify:ports-native-disabled"] = packageJson.scripts[
-    "verify:ports-native-disabled"
-  ].replace("todos-module,skills-module", "todos-module");
+  removeNativeModuleFeatureFromScripts(packageJson, "skills-module");
   writeJson(root, "package.json", packageJson);
 
   removeSkillsCapability(root, "src-tauri/tauri.conf.json");

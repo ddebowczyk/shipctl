@@ -11,6 +11,7 @@ import {
   readJson,
   removeCargoDefaultFeature,
   removeFrontendModuleComposition,
+  removeNativeModuleFeatureFromScripts,
   replaceOnce,
   run,
   verifyModulePlugout,
@@ -73,6 +74,7 @@ function prepareSourceAbsent(root) {
   delete packageJson.scripts["test:todos-characterization"];
   delete packageJson.scripts["verify:todos-native-disabled"];
   delete packageJson.scripts["verify:todos-plugout"];
+  removeNativeModuleFeatureFromScripts(packageJson, "todos-module");
   writeJson(root, "package.json", packageJson);
 
   removeTodoCapability(root, "src-tauri/tauri.conf.json");

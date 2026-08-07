@@ -10,6 +10,7 @@ import {
   nativeModuleFeaturesExcept,
   readJson,
   removeCargoDefaultFeature,
+  removeNativeModuleFeatureFromScripts,
   replaceOnce,
   run,
   verifyModulePlugout,
@@ -148,15 +149,7 @@ function prepareSourceAbsent(root) {
   delete packageJson.scripts["verify:git-native-disabled"];
   delete packageJson.scripts["verify:git-frontend-disabled"];
   delete packageJson.scripts["verify:git-plugout"];
-  packageJson.scripts["verify:todos-native-disabled"] = packageJson.scripts[
-    "verify:todos-native-disabled"
-  ].replace(",git-module", "");
-  packageJson.scripts["verify:ports-native-disabled"] = packageJson.scripts[
-    "verify:ports-native-disabled"
-  ].replace(",git-module", "");
-  packageJson.scripts["verify:skills-native-disabled"] = packageJson.scripts[
-    "verify:skills-native-disabled"
-  ].replace(",git-module", "");
+  removeNativeModuleFeatureFromScripts(packageJson, "git-module");
   writeJson(root, "package.json", packageJson);
 
   for (const configPath of [

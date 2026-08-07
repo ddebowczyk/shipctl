@@ -10,6 +10,7 @@ import {
   nativeModuleFeaturesExcept,
   readJson,
   removeCargoDefaultFeature,
+  removeNativeModuleFeatureFromScripts,
   replaceOnce,
   run,
   verifyModulePlugout,
@@ -120,6 +121,7 @@ function prepareSourceAbsent(root) {
   delete packageJson.scripts["verify:assistants-native-disabled"];
   delete packageJson.scripts["verify:assistants-frontend-disabled"];
   delete packageJson.scripts["verify:assistants-plugout"];
+  removeNativeModuleFeatureFromScripts(packageJson, "assistants-module");
   writeJson(root, "package.json", packageJson);
 
   removeAssistantCapability(root, "src-tauri/tauri.conf.json");

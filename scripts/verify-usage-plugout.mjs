@@ -10,6 +10,7 @@ import {
   nativeModuleFeaturesExcept,
   readJson,
   removeCargoDefaultFeature,
+  removeNativeModuleFeatureFromScripts,
   replaceOnce,
   run,
   verifyModulePlugout,
@@ -130,6 +131,7 @@ function prepareSourceAbsent(root) {
   delete packageJson.scripts["verify:usage-native-disabled"];
   delete packageJson.scripts["verify:usage-frontend-disabled"];
   delete packageJson.scripts["verify:usage-plugout"];
+  removeNativeModuleFeatureFromScripts(packageJson, "usage-module");
   writeJson(root, "package.json", packageJson);
 
   removeUsageCapability(root, "src-tauri/tauri.conf.json");

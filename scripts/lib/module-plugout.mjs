@@ -32,6 +32,25 @@ export function nativeModuleFeaturesExcept(featureName) {
   return NATIVE_MODULE_FEATURES.filter((feature) => feature !== featureName).join(",");
 }
 
+export function removeNativeModuleFeatureFromScripts(packageJson, featureName) {
+  if (!NATIVE_MODULE_FEATURES.includes(featureName)) {
+    throw new Error(`Unknown native module feature: ${featureName}`);
+  }
+
+  for (const [scriptName, command] of Object.entries(packageJson.scripts ?? {})) {
+    if (typeof command !== "string") continue;
+    packageJson.scripts[scriptName] = command.replace(
+      /(--features\s+)([^\s]+)/g,
+      (match, prefix, featureList) => {
+        const features = featureList.split(",");
+        if (!features.includes(featureName)) return match;
+        const remaining = features.filter((feature) => feature !== featureName);
+        return remaining.length > 0 ? `${prefix}${remaining.join(",")}` : "";
+      },
+    );
+  }
+}
+
 export function run(
   command,
   args,

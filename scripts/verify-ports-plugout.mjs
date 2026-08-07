@@ -11,6 +11,7 @@ import {
   readJson,
   removeCargoDefaultFeature,
   removeFrontendModuleComposition,
+  removeNativeModuleFeatureFromScripts,
   replaceOnce,
   run,
   verifyModulePlugout,
@@ -80,6 +81,7 @@ function prepareSourceAbsent(root) {
   delete packageJson.scripts["test:ports-characterization"];
   delete packageJson.scripts["verify:ports-native-disabled"];
   delete packageJson.scripts["verify:ports-plugout"];
+  removeNativeModuleFeatureFromScripts(packageJson, "ports-module");
   writeJson(root, "package.json", packageJson);
 
   removePortsCapability(root, "src-tauri/tauri.conf.json");
