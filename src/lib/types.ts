@@ -131,19 +131,6 @@ export interface TabActivity {
   lastNotificationMessage: string | null;
 }
 
-// ── Pi config ──────────────────────────────────────────────────────
-
-export interface PiSettings {
-  defaultProvider: string | null;
-  defaultModel: string | null;
-  defaultThinkingLevel: string | null;
-}
-
-export interface PiConfig {
-  settings: PiSettings;
-  configuredProviders: string[];
-}
-
 // ── PTY output ──────────────────────────────────────────────────────
 
 export type PtyOutput =

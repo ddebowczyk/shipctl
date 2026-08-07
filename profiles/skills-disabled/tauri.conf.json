@@ -6,7 +6,9 @@
         {
           "identifier": "todos",
           "description": "Enables the internal TODO module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-todos:allow-read-todos",
             "shep-todos:allow-toggle-todo",
@@ -17,7 +19,9 @@
         {
           "identifier": "ports",
           "description": "Enables the internal Ports module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-ports:allow-list-listening-ports",
             "shep-ports:allow-kill-port"
@@ -26,7 +30,9 @@
         {
           "identifier": "git",
           "description": "Enables the internal Git module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-git:allow-is-git-repo",
             "shep-git:allow-git-init",
@@ -48,6 +54,48 @@
             "shep-git:allow-git-switch-branch",
             "shep-git:allow-git-create-branch",
             "shep-git:allow-git-diff-stats"
+          ]
+        },
+        {
+          "identifier": "assistants",
+          "description": "Enables the internal Assistant provider commands",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "shep-assistants:allow-spawn-assistant-session",
+            "shep-assistants:allow-resume-assistant-session",
+            "shep-assistants:allow-prepare-assistant-session",
+            "shep-assistants:allow-confirm-assistant-session-capture",
+            "shep-assistants:allow-try-capture-codex-assistant-session",
+            "shep-assistants:allow-fail-assistant-session-capture",
+            "shep-assistants:allow-update-assistant-session-placement",
+            "shep-assistants:allow-update-assistant-session-label",
+            "shep-assistants:allow-discard-assistant-session",
+            "shep-assistants:allow-rearm-assistant-session",
+            "shep-assistants:allow-list-restorable-assistant-sessions",
+            "shep-assistants:allow-take-assistant-session-startup-warning",
+            "shep-assistants:allow-begin-assistant-session-preserving-shutdown",
+            "shep-assistants:allow-get-models-for-provider",
+            "shep-assistants:allow-get-pi-config",
+            "shep-assistants:allow-save-pi-settings",
+            "shep-assistants:allow-save-pi-api-key",
+            "shep-assistants:allow-delete-pi-api-key"
+          ]
+        },
+        {
+          "identifier": "usage",
+          "description": "Enables the internal Usage module commands",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "shep-usage:allow-get-all-usage-snapshots",
+            "shep-usage:allow-get-usage-snapshot",
+            "shep-usage:allow-get-usage-details",
+            "shep-usage:allow-get-usage-overview",
+            "shep-usage:allow-get-project-alias-review-queue",
+            "shep-usage:allow-refresh-usage-data"
           ]
         }
       ]

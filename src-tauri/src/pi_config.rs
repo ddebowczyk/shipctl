@@ -4,35 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PiSettings {
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "defaultProvider"
-    )]
-    pub default_provider: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "defaultModel"
-    )]
-    pub default_model: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "defaultThinkingLevel"
-    )]
-    pub default_thinking_level: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiConfig {
-    pub settings: PiSettings,
-    #[serde(rename = "configuredProviders")]
-    pub configured_providers: Vec<String>,
-}
+use shep_module_assistants::{PiConfig, PiSettings};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PiAuthEntry {

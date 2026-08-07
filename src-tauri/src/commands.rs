@@ -452,25 +452,3 @@ fn editor_app_name(editor_id: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-
-// ── Pi config commands ─────────────────────────────────────────────
-
-#[tauri::command]
-pub fn get_pi_config() -> Result<crate::pi_config::PiConfig, String> {
-    crate::pi_config::get_pi_config()
-}
-
-#[tauri::command]
-pub fn save_pi_settings(settings: crate::pi_config::PiSettings) -> Result<(), String> {
-    crate::pi_config::save_pi_settings(settings)
-}
-
-#[tauri::command]
-pub fn save_pi_api_key(provider: String, api_key: String) -> Result<(), String> {
-    crate::pi_config::save_pi_api_key(&provider, &api_key)
-}
-
-#[tauri::command]
-pub fn delete_pi_api_key(provider: String) -> Result<(), String> {
-    crate::pi_config::delete_pi_api_key(&provider)
-}

@@ -6,7 +6,9 @@
         {
           "identifier": "todos",
           "description": "Enables the internal TODO module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-todos:allow-read-todos",
             "shep-todos:allow-toggle-todo",
@@ -17,7 +19,9 @@
         {
           "identifier": "ports",
           "description": "Enables the internal Ports module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-ports:allow-list-listening-ports",
             "shep-ports:allow-kill-port"
@@ -26,7 +30,9 @@
         {
           "identifier": "skills",
           "description": "Enables the internal Skills module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-skills:allow-list-skills",
             "shep-skills:allow-setup-skill",
@@ -36,7 +42,9 @@
         {
           "identifier": "git",
           "description": "Enables the internal Git module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-git:allow-is-git-repo",
             "shep-git:allow-git-init",
@@ -58,6 +66,21 @@
             "shep-git:allow-git-switch-branch",
             "shep-git:allow-git-create-branch",
             "shep-git:allow-git-diff-stats"
+          ]
+        },
+        {
+          "identifier": "usage",
+          "description": "Enables the internal Usage module commands",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "shep-usage:allow-get-all-usage-snapshots",
+            "shep-usage:allow-get-usage-snapshot",
+            "shep-usage:allow-get-usage-details",
+            "shep-usage:allow-get-usage-overview",
+            "shep-usage:allow-get-project-alias-review-queue",
+            "shep-usage:allow-refresh-usage-data"
           ]
         }
       ]

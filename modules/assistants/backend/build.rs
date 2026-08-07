@@ -13,6 +13,10 @@ const COMMANDS: &[&str] = &[
     "take_assistant_session_startup_warning",
     "begin_assistant_session_preserving_shutdown",
     "get_models_for_provider",
+    "get_pi_config",
+    "save_pi_settings",
+    "save_pi_api_key",
+    "delete_pi_api_key",
 ];
 
 fn main() {

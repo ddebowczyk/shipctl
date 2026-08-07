@@ -319,6 +319,18 @@
           "markdownDescription": "Denies the confirm_assistant_session_capture command without any pre-configured scope."
         },
         {
+          "description": "Enables the delete_pi_api_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-pi-api-key",
+          "markdownDescription": "Enables the delete_pi_api_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_pi_api_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-pi-api-key",
+          "markdownDescription": "Denies the delete_pi_api_key command without any pre-configured scope."
+        },
+        {
           "description": "Enables the discard_assistant_session command without any pre-configured scope.",
           "type": "string",
           "const": "allow-discard-assistant-session",
@@ -353,6 +365,18 @@
           "type": "string",
           "const": "deny-get-models-for-provider",
           "markdownDescription": "Denies the get_models_for_provider command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_pi_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-pi-config",
+          "markdownDescription": "Enables the get_pi_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_pi_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-pi-config",
+          "markdownDescription": "Denies the get_pi_config command without any pre-configured scope."
         },
         {
           "description": "Enables the list_restorable_assistant_sessions command without any pre-configured scope.",
@@ -401,6 +425,30 @@
           "type": "string",
           "const": "deny-resume-assistant-session",
           "markdownDescription": "Denies the resume_assistant_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_pi_api_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-pi-api-key",
+          "markdownDescription": "Enables the save_pi_api_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_pi_api_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-pi-api-key",
+          "markdownDescription": "Denies the save_pi_api_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_pi_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-pi-settings",
+          "markdownDescription": "Enables the save_pi_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_pi_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-pi-settings",
+          "markdownDescription": "Denies the save_pi_settings command without any pre-configured scope."
         },
         {
           "description": "Enables the spawn_assistant_session command without any pre-configured scope.",

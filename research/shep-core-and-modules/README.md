@@ -192,6 +192,12 @@ capability ceiling.
   records why no cross-module runtime is justified yet, compares explicit
   composition injection, typed capability tokens, and an event bus, and defines
   the evidence required before introducing a shared information-flow contract.
+- [46-final-host-boundary-audit.md](./46-final-host-boundary-audit.md) records
+  the final dependency graph, ownership inventory, intentional exceptions,
+  closeout corrections, and Brooks architecture score.
+- [47-module-build-operations.md](./47-module-build-operations.md) defines the
+  maintained feature/permission/profile catalogue and the time-bounded master
+  verification workflow.
 
 ## Target dependency shape
 

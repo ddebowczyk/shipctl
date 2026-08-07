@@ -16,6 +16,22 @@ import path from "node:path";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 15 * 60 * 1000;
 
+export const NATIVE_MODULE_FEATURES = Object.freeze([
+  "todos-module",
+  "ports-module",
+  "skills-module",
+  "git-module",
+  "assistants-module",
+  "usage-module",
+]);
+
+export function nativeModuleFeaturesExcept(featureName) {
+  if (!NATIVE_MODULE_FEATURES.includes(featureName)) {
+    throw new Error(`Unknown native module feature: ${featureName}`);
+  }
+  return NATIVE_MODULE_FEATURES.filter((feature) => feature !== featureName).join(",");
+}
+
 export function run(
   command,
   args,

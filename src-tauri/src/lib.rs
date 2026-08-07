@@ -7,6 +7,7 @@ mod global_capability_data;
 #[cfg(feature = "git-module")]
 mod git_module;
 mod menu;
+#[cfg(feature = "assistants-module")]
 mod pi_config;
 #[cfg(feature = "ports-module")]
 mod ports_module;
@@ -116,10 +117,6 @@ pub fn run() {
             commands::watch_repo,
             commands::unwatch_repo,
             commands::open_url,
-            commands::get_pi_config,
-            commands::save_pi_settings,
-            commands::save_pi_api_key,
-            commands::delete_pi_api_key,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -7,6 +7,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import {
+  nativeModuleFeaturesExcept,
   readJson,
   removeCargoDefaultFeature,
   replaceOnce,
@@ -78,7 +79,14 @@ function removeNativeComposition(root) {
     '#[cfg(feature = "assistants-module")]\nmod assistants_module;\n',
     "",
   );
+  replaceOnce(
+    root,
+    "src-tauri/src/lib.rs",
+    '#[cfg(feature = "assistants-module")]\nmod pi_config;\n',
+    "",
+  );
   rmSync(path.join(root, "src-tauri/src/assistants_module.rs"), { force: true });
+  rmSync(path.join(root, "src-tauri/src/pi_config.rs"), { force: true });
 }
 
 function removeAssistantCapability(root, relativePath) {
@@ -156,6 +164,10 @@ function assertSourceAbsent(root) {
       "SessionLauncher",
       "AssistantSessionRecord",
       "spawnAssistantSession",
+      "get_pi_config",
+      "save_pi_settings",
+      "save_pi_api_key",
+      "delete_pi_api_key",
       "ASSISTANT_LAUNCHER_PANEL_ID",
       "new_agent",
     ],
@@ -209,7 +221,7 @@ function verifyDisabled(root) {
     "--",
     "--no-default-features",
     "--features",
-    "todos-module,ports-module,skills-module,git-module",
+    nativeModuleFeaturesExcept("assistants-module"),
   ], root, cargoEnv);
 }
 

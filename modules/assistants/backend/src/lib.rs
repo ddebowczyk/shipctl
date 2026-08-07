@@ -56,6 +56,10 @@ pub const TAKE_ASSISTANT_SESSION_STARTUP_WARNING_COMMAND: &str =
 pub const BEGIN_ASSISTANT_SESSION_PRESERVING_SHUTDOWN_COMMAND: &str =
     "plugin:shep-assistants|begin_assistant_session_preserving_shutdown";
 pub const GET_MODELS_FOR_PROVIDER_COMMAND: &str = "plugin:shep-assistants|get_models_for_provider";
+pub const GET_PI_CONFIG_COMMAND: &str = "plugin:shep-assistants|get_pi_config";
+pub const SAVE_PI_SETTINGS_COMMAND: &str = "plugin:shep-assistants|save_pi_settings";
+pub const SAVE_PI_API_KEY_COMMAND: &str = "plugin:shep-assistants|save_pi_api_key";
+pub const DELETE_PI_API_KEY_COMMAND: &str = "plugin:shep-assistants|delete_pi_api_key";
 
 /// The only host authority required by the Assistant provider module.
 ///
@@ -71,6 +75,36 @@ pub trait TerminalAuthority: Send + Sync {
     fn kill(&self, terminal_id: u32) -> Result<(), String>;
 }
 
+/// Host-owned secure storage primitives used by the Pi provider UI.
+///
+/// The Assistant module owns Pi's DTOs and commands. The host adapter retains
+/// filesystem and macOS Keychain authority so the module never receives an
+/// unrestricted shell or arbitrary path capability.
+pub trait PiConfigAuthority: Send + Sync {
+    fn get(&self) -> Result<PiConfig, String>;
+    fn save_settings(&self, settings: PiSettings) -> Result<(), String>;
+    fn save_api_key(&self, provider: &str, api_key: &str) -> Result<(), String>;
+    fn delete_api_key(&self, provider: &str) -> Result<(), String>;
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PiSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_thinking_level: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PiConfig {
+    pub settings: PiSettings,
+    pub configured_providers: Vec<String>,
+}
+
 pub struct TerminalLaunchRequest {
     pub command: String,
     pub arguments: Vec<String>,
@@ -84,11 +118,18 @@ pub struct TerminalLaunchRequest {
 #[derive(Clone)]
 pub struct HostServices {
     terminal: Arc<dyn TerminalAuthority>,
+    pi_config: Arc<dyn PiConfigAuthority>,
 }
 
 impl HostServices {
-    pub fn new(terminal: Arc<dyn TerminalAuthority>) -> Self {
-        Self { terminal }
+    pub fn new(
+        terminal: Arc<dyn TerminalAuthority>,
+        pi_config: Arc<dyn PiConfigAuthority>,
+    ) -> Self {
+        Self {
+            terminal,
+            pi_config,
+        }
     }
 }
 
@@ -823,6 +864,36 @@ async fn get_models_for_provider(provider: String) -> Result<Vec<String>, String
     model_catalog::query(&provider)
 }
 
+#[tauri::command]
+fn get_pi_config(state: State<'_, AssistantPluginState>) -> Result<PiConfig, String> {
+    state.services.pi_config.get()
+}
+
+#[tauri::command]
+fn save_pi_settings(
+    settings: PiSettings,
+    state: State<'_, AssistantPluginState>,
+) -> Result<(), String> {
+    state.services.pi_config.save_settings(settings)
+}
+
+#[tauri::command]
+fn save_pi_api_key(
+    provider: String,
+    api_key: String,
+    state: State<'_, AssistantPluginState>,
+) -> Result<(), String> {
+    state.services.pi_config.save_api_key(&provider, &api_key)
+}
+
+#[tauri::command]
+fn delete_pi_api_key(
+    provider: String,
+    state: State<'_, AssistantPluginState>,
+) -> Result<(), String> {
+    state.services.pi_config.delete_api_key(&provider)
+}
+
 pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
     tauri::plugin::Builder::new(PLUGIN_NAME)
         .setup(move |app, _api| {
@@ -847,6 +918,10 @@ pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
             take_assistant_session_startup_warning,
             begin_assistant_session_preserving_shutdown,
             get_models_for_provider,
+            get_pi_config,
+            save_pi_settings,
+            save_pi_api_key,
+            delete_pi_api_key,
         ])
         .build()
 }

@@ -127,17 +127,17 @@ export function beginAssistantSessionPreservingShutdown(): Promise<void> {
 }
 
 export function getPiConfig(): Promise<PiConfig> {
-  return invoke("get_pi_config");
+  return invoke(assistantCommand("get_pi_config"));
 }
 
 export function savePiSettings(settings: PiSettings): Promise<void> {
-  return invoke("save_pi_settings", { settings });
+  return invoke(assistantCommand("save_pi_settings"), { settings });
 }
 
 export function savePiApiKey(provider: string, apiKey: string): Promise<void> {
-  return invoke("save_pi_api_key", { provider, apiKey });
+  return invoke(assistantCommand("save_pi_api_key"), { provider, apiKey });
 }
 
 export function deletePiApiKey(provider: string): Promise<void> {
-  return invoke("delete_pi_api_key", { provider });
+  return invoke(assistantCommand("delete_pi_api_key"), { provider });
 }

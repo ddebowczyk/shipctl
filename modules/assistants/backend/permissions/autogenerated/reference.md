@@ -62,6 +62,32 @@ Denies the confirm_assistant_session_capture command without any pre-configured 
 <tr>
 <td>
 
+`shep-assistants:allow-delete-pi-api-key`
+
+</td>
+<td>
+
+Enables the delete_pi_api_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shep-assistants:deny-delete-pi-api-key`
+
+</td>
+<td>
+
+Denies the delete_pi_api_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `shep-assistants:allow-discard-assistant-session`
 
 </td>
@@ -133,6 +159,32 @@ Enables the get_models_for_provider command without any pre-configured scope.
 <td>
 
 Denies the get_models_for_provider command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shep-assistants:allow-get-pi-config`
+
+</td>
+<td>
+
+Enables the get_pi_config command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shep-assistants:deny-get-pi-config`
+
+</td>
+<td>
+
+Denies the get_pi_config command without any pre-configured scope.
 
 </td>
 </tr>
@@ -237,6 +289,58 @@ Enables the resume_assistant_session command without any pre-configured scope.
 <td>
 
 Denies the resume_assistant_session command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shep-assistants:allow-save-pi-api-key`
+
+</td>
+<td>
+
+Enables the save_pi_api_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shep-assistants:deny-save-pi-api-key`
+
+</td>
+<td>
+
+Denies the save_pi_api_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shep-assistants:allow-save-pi-settings`
+
+</td>
+<td>
+
+Enables the save_pi_settings command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shep-assistants:deny-save-pi-settings`
+
+</td>
+<td>
+
+Denies the save_pi_settings command without any pre-configured scope.
 
 </td>
 </tr>

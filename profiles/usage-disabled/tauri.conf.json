@@ -6,7 +6,9 @@
         {
           "identifier": "todos",
           "description": "Enables the internal TODO module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-todos:allow-read-todos",
             "shep-todos:allow-toggle-todo",
@@ -17,7 +19,9 @@
         {
           "identifier": "ports",
           "description": "Enables the internal Ports module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-ports:allow-list-listening-ports",
             "shep-ports:allow-kill-port"
@@ -26,7 +30,9 @@
         {
           "identifier": "skills",
           "description": "Enables the internal Skills module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-skills:allow-list-skills",
             "shep-skills:allow-setup-skill",
@@ -36,7 +42,9 @@
         {
           "identifier": "git",
           "description": "Enables the internal Git module commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-git:allow-is-git-repo",
             "shep-git:allow-git-init",
@@ -63,7 +71,9 @@
         {
           "identifier": "assistants",
           "description": "Enables the internal Assistant provider commands",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "shep-assistants:allow-spawn-assistant-session",
             "shep-assistants:allow-resume-assistant-session",
@@ -77,7 +87,12 @@
             "shep-assistants:allow-rearm-assistant-session",
             "shep-assistants:allow-list-restorable-assistant-sessions",
             "shep-assistants:allow-take-assistant-session-startup-warning",
-            "shep-assistants:allow-begin-assistant-session-preserving-shutdown"
+            "shep-assistants:allow-begin-assistant-session-preserving-shutdown",
+            "shep-assistants:allow-get-models-for-provider",
+            "shep-assistants:allow-get-pi-config",
+            "shep-assistants:allow-save-pi-settings",
+            "shep-assistants:allow-save-pi-api-key",
+            "shep-assistants:allow-delete-pi-api-key"
           ]
         }
       ]

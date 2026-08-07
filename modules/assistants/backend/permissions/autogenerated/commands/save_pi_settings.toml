@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-save-pi-settings"
+description = "Enables the save_pi_settings command without any pre-configured scope."
+commands.allow = ["save_pi_settings"]
+
+[[permission]]
+identifier = "deny-save-pi-settings"
+description = "Denies the save_pi_settings command without any pre-configured scope."
+commands.deny = ["save_pi_settings"]

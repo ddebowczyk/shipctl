@@ -7,6 +7,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import {
+  nativeModuleFeaturesExcept,
   readJson,
   removeCargoDefaultFeature,
   replaceOnce,
@@ -232,7 +233,7 @@ function verifyDisabled(root) {
     "--",
     "--no-default-features",
     "--features",
-    "todos-module,ports-module,skills-module,git-module,assistants-module",
+    nativeModuleFeaturesExcept("usage-module"),
   ], root, cargoEnv);
 }
 

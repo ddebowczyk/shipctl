@@ -406,6 +406,35 @@ module crate -X-> src-tauri private modules
 An explicit integration module can depend on two modules later, but ordinary
 features must not create hidden sibling dependencies.
 
+## Migration closeout implementation
+
+The completed migration preserves the architectural choice above without the
+speculative `app/` directory move:
+
+- `src/core/modules/enabledModules.ts` is the only frontend composition root;
+- `src-tauri/src/enabled_modules.rs` is the only native plugin composition root;
+- `modules/api` contains the stable frontend and backend leaf contracts;
+- Todos, Ports, Skills, Git, Assistants, and Usage own frontend and native
+  packages; Commands owns a frontend package and uses generic host ports;
+- AppShell renders generic panels, surfaces, settings sections, project
+  actions, and lifecycle contributions without capability branches;
+- root native command registration contains core workspace, settings, PTY,
+  lifecycle, and host-data primitives only; and
+- every native module has an enabled, disabled, and physically source-absent
+  build shape.
+
+The host intentionally retains registered-project authority, workspace and
+layout persistence, PTY/terminal infrastructure, lifecycle and window policy,
+settings primitives, and module registration. Privileged module needs are
+expressed as narrow host authority traits. In particular, Pi configuration
+commands and DTOs belong to Assistants, while its host adapter retains only
+filesystem and macOS Keychain authority.
+
+Static feature lists and Tauri capability profiles are guarded by
+`scripts/check-module-profiles.mjs`. The complete operational matrix is defined
+by `scripts/verify-modular-monolith.mjs` and documented in
+`47-module-build-operations.md`.
+
 ## Architecture gates
 
 Add gates as the boundaries become real:
