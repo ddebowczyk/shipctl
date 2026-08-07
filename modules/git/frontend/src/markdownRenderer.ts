@@ -1,32 +1,30 @@
-import MarkdownIt from "markdown-it";
-import type Token from "markdown-it/lib/token.mjs";
-import type Renderer from "markdown-it/lib/renderer.mjs";
+import markdownit, { type MarkdownIt, type RendererRule } from "markdown-it";
 import { fromHighlighter } from "@shikijs/markdown-it/core";
 import type { HighlighterGeneric } from "shiki";
-import { getHighlighter } from "./shikiHighlighter";
+// Explicit extension: the renderer's configuration is covered by node --test,
+// which resolves relative specifiers the way the ESM spec does, not the way
+// the bundler does.
+import { getHighlighter } from "./shikiHighlighter.ts";
 
 const cached = new Map<string, Promise<MarkdownIt>>();
 let plainRenderer: MarkdownIt | null = null;
 
 function createMarkdownRenderer(): MarkdownIt {
-  const markdown = new MarkdownIt({
+  const markdown = markdownit({
     html: false,
     linkify: true,
     typographer: true,
   });
 
-  const defaultLinkOpen =
-    markdown.renderer.rules.link_open ??
-    ((tokens: Token[], idx: number, options: any, _env: unknown, self: Renderer) =>
-      self.renderToken(tokens, idx, options));
+  // markdown-it 15 stopped linkifying bare domains by default. Shep's file
+  // viewer relied on it, so ask for it back explicitly.
+  markdown.linkify.set({ fuzzyLink: true });
 
-  markdown.renderer.rules.link_open = (
-    tokens: Token[],
-    idx: number,
-    options: any,
-    env: unknown,
-    self: Renderer,
-  ) => {
+  const defaultLinkOpen: RendererRule =
+    markdown.renderer.rules.link_open ??
+    ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+
+  markdown.renderer.rules.link_open = (tokens, idx, options, env, self) => {
     const token = tokens[idx];
     token.attrSet("target", "_blank");
     token.attrSet("rel", "noreferrer noopener");

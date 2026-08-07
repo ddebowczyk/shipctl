@@ -1,7 +1,7 @@
 import { createHighlighterCore, type HighlighterCore, type ThemedToken } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import type { ModuleAppearanceSnapshot } from "@shep/module-api";
-import { hexLuminance } from "./appearance";
+import { hexLuminance } from "./appearance.ts";
 
 /**
  * The set of languages and themes actually registered with the highlighter

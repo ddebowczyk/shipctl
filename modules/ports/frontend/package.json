@@ -8,8 +8,8 @@
   },
   "dependencies": {
     "@shep/module-api": "workspace:*",
-    "@tauri-apps/api": "^2.10.1",
-    "lucide-react": "^0.577.0"
+    "@tauri-apps/api": "^2.11.1",
+    "lucide-react": "^1.30.0"
   },
   "peerDependencies": {
     "react": "^19.2.4"
