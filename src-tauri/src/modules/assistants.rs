@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use shep_module_api::TerminalOutput;
-use shep_module_assistants::{HostServices, TerminalAuthority, TerminalLaunchRequest};
+use shipctl_module_api::TerminalOutput;
+use shipctl_module_assistants::{HostServices, TerminalAuthority, TerminalLaunchRequest};
 use tauri::ipc::Channel;
 
-use shep_core::terminal::manager::PtyManager;
+use shipctl_core::terminal::manager::PtyManager;
 
 struct HostTerminalAuthority {
     manager: PtyManager,

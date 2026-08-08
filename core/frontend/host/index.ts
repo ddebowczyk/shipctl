@@ -114,7 +114,7 @@ export type {
   SettingsContribution,
   SettingsContributionProps,
   SettingsSlot,
-  ShepModule,
+  ShipctlModule,
   SkillsProviderContribution,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 export { matchesPanelShortcut } from "./panelShortcuts.ts";

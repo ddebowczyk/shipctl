@@ -11,5 +11,5 @@ Two directories are intentionally different:
 - `commands/` is frontend-only because it contributes saved-command UI and
   launches through host terminal services; it owns no native capability.
 
-Modules import host services only through `@shep/module-api` or
-`shep-module-api`. Host composition imports module public entrypoints only.
+Modules import host services only through `@shipctl/module-api` or
+`shipctl-module-api`. Host composition imports module public entrypoints only.

@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use shep_module_git::{HostServices, ProjectRootAuthority};
+use shipctl_module_git::{HostServices, ProjectRootAuthority};
 
-use shep_core::workspace::manager::WorkspaceManager;
+use shipctl_core::workspace::manager::WorkspaceManager;
 
 struct WorkspaceProjectRootAuthority;
 
@@ -43,7 +43,7 @@ mod tests {
     #[test]
     fn accepts_only_an_exact_registered_root() {
         let fixture =
-            std::env::temp_dir().join(format!("shep-git-host-authority-{}", std::process::id()));
+            std::env::temp_dir().join(format!("shipctl-git-host-authority-{}", std::process::id()));
         let _ = fs::remove_dir_all(&fixture);
         let alpha = fixture.join("alpha");
         let beta = fixture.join("beta");

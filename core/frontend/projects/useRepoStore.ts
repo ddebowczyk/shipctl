@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { ModuleHostServices } from "@shep/module-api";
-import type { RepoInfo, RepoGroup, WorkspaceConfig } from "@shep/core/platform";
+import type { ModuleHostServices } from "@shipctl/module-api";
+import type { RepoInfo, RepoGroup, WorkspaceConfig } from "@shipctl/core/platform";
 import {
   listRepos,
   registerRepo,
@@ -11,8 +11,8 @@ import {
   renameGroup as ipcRenameGroup,
   deleteGroup as ipcDeleteGroup,
   moveRepoToGroup as ipcMoveRepoToGroup,
-} from "@shep/core/platform";
-import { discoverRelatedProjectPaths } from "@shep/core/host";
+} from "@shipctl/core/platform";
+import { discoverRelatedProjectPaths } from "@shipctl/core/host";
 
 const EMPTY_REPOS: RepoInfo[] = [];
 const EMPTY_GROUPS: RepoGroup[] = [];

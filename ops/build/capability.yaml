@@ -5,8 +5,8 @@ provides: build
 description: Build and package application artifacts.
 status: supported
 requires:
-  tools: [bash, ditto, git, jq, pnpm, shasum, ys]
-  capabilities: [modularity]
+  tools: [bash, ditto, git, jq, just, pnpm, shasum, ys]
+  capabilities: [check, modularity]
 owns: [ops/build/**]
 reads: [core/**, modules/**, src/**, src-tauri/**]
 generates: [dist/**, builds/**, target/**]
@@ -24,6 +24,9 @@ commands:
   - name: release
     summary: Build a signed and notarized release.
     lane: slow
+  - name: verify-key
+    summary: Verify the updater key matches the app's compiled public key.
+    lane: fast
   - name: dmg
     summary: Patch and re-sign the release DMG.
     lane: slow
@@ -37,4 +40,6 @@ commands:
   - name: update-json
     summary: Generate Tauri updater metadata.
     lane: slow
-skills: []
+skills:
+  - name: releasing
+    summary: Cut a signed, notarized release and publish an update clients accept.

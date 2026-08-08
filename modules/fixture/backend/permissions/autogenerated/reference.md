@@ -10,7 +10,7 @@
 <tr>
 <td>
 
-`shep-fixture:allow-ping`
+`shipctl-fixture:allow-ping`
 
 </td>
 <td>
@@ -23,7 +23,7 @@ Enables the ping command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-fixture:deny-ping`
+`shipctl-fixture:deny-ping`
 
 </td>
 <td>

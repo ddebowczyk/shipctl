@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
-import type { ModuleHostServices } from "@shep/module-api";
+import type { ModuleHostServices } from "@shipctl/module-api";
 import { SKILL_COMMANDS } from "../src/client.ts";
 import type { SkillInfo } from "../src/types.ts";
 
@@ -19,7 +19,7 @@ interface NativeMock {
 
 const virtualNativeId = "\0skills-native-characterization";
 const nativeGlobal = globalThis as typeof globalThis & {
-  __shepSkillsNativeMock: NativeMock;
+  __shipctlSkillsNativeMock: NativeMock;
 };
 
 const nativePlugin: Plugin = {
@@ -34,7 +34,7 @@ const nativePlugin: Plugin = {
   load(id) {
     if (id !== virtualNativeId) return null;
     return `
-      const native = () => globalThis.__shepSkillsNativeMock;
+      const native = () => globalThis.__shipctlSkillsNativeMock;
       export const listSkills = (...args) => native().listSkills(...args);
       export const setupSkill = (...args) => native().setupSkill(...args);
       export const removeSkill = (...args) => native().removeSkill(...args);
@@ -53,10 +53,10 @@ let removeError: Error | null;
 function catalog(installedName?: string): SkillInfo[] {
   return [
     {
-      name: "shep-todos",
+      name: "shipctl-todos",
       title: "Project to-dos",
       description: "Synthetic to-dos fixture",
-      installed: installedName === "shep-todos",
+      installed: installedName === "shipctl-todos",
     },
     {
       name: "orchestrate",
@@ -85,7 +85,7 @@ before(async () => {
 
 after(async () => {
   await vite.close();
-  delete (globalThis as Partial<typeof nativeGlobal>).__shepSkillsNativeMock;
+  delete (globalThis as Partial<typeof nativeGlobal>).__shipctlSkillsNativeMock;
 });
 
 beforeEach(() => {
@@ -93,7 +93,7 @@ beforeEach(() => {
   listImplementations = new Map();
   setupError = null;
   removeError = null;
-  nativeGlobal.__shepSkillsNativeMock = {
+  nativeGlobal.__shipctlSkillsNativeMock = {
     async listSkills(repoPath) {
       calls.push({ operation: "listSkills", args: [repoPath] });
       return (listImplementations.get(repoPath) ?? (async () => []))();
@@ -111,7 +111,7 @@ beforeEach(() => {
 });
 
 test("refreshAll keeps independent project snapshots, including an empty catalog", async () => {
-  const alpha = catalog("shep-todos");
+  const alpha = catalog("shipctl-todos");
   listImplementations.set("/alpha", async () => alpha);
   listImplementations.set("/beta", async () => []);
 
@@ -126,7 +126,7 @@ test("refreshAll keeps independent project snapshots, including an empty catalog
 test("failed refreshes leave the last successful project cache untouched", async () => {
   const oldAlpha = catalog();
   const oldBeta = catalog("orchestrate");
-  const nextAlpha = catalog("shep-todos");
+  const nextAlpha = catalog("shipctl-todos");
   useSkillStore.setState({
     skillsByRepo: { "/alpha": oldAlpha, "/beta": oldBeta },
   });
@@ -146,25 +146,25 @@ test("failed refreshes leave the last successful project cache untouched", async
 
 test("install and uninstall mutate first, then refresh the target project", async () => {
   let installed = false;
-  listImplementations.set("/repo", async () => catalog(installed ? "shep-todos" : undefined));
-  nativeGlobal.__shepSkillsNativeMock.setupSkill = async (repoPath, name) => {
+  listImplementations.set("/repo", async () => catalog(installed ? "shipctl-todos" : undefined));
+  nativeGlobal.__shipctlSkillsNativeMock.setupSkill = async (repoPath, name) => {
     calls.push({ operation: "setupSkill", args: [repoPath, name] });
     installed = true;
   };
-  nativeGlobal.__shepSkillsNativeMock.removeSkill = async (repoPath, name) => {
+  nativeGlobal.__shipctlSkillsNativeMock.removeSkill = async (repoPath, name) => {
     calls.push({ operation: "removeSkill", args: [repoPath, name] });
     installed = false;
   };
 
-  await useSkillStore.getState().install("/repo", "shep-todos");
+  await useSkillStore.getState().install("/repo", "shipctl-todos");
   assert.equal(useSkillStore.getState().skillsByRepo["/repo"][0].installed, true);
-  await useSkillStore.getState().uninstall("/repo", "shep-todos");
+  await useSkillStore.getState().uninstall("/repo", "shipctl-todos");
   assert.equal(useSkillStore.getState().skillsByRepo["/repo"][0].installed, false);
 
   assert.deepEqual(calls, [
-    { operation: "setupSkill", args: ["/repo", "shep-todos"] },
+    { operation: "setupSkill", args: ["/repo", "shipctl-todos"] },
     { operation: "listSkills", args: ["/repo"] },
-    { operation: "removeSkill", args: ["/repo", "shep-todos"] },
+    { operation: "removeSkill", args: ["/repo", "shipctl-todos"] },
     { operation: "listSkills", args: ["/repo"] },
   ]);
 });
@@ -175,18 +175,18 @@ test("mutation errors reject without refreshing or changing cached state", async
   setupError = new Error("write denied");
 
   await assert.rejects(
-    useSkillStore.getState().install("/repo", "shep-todos"),
+    useSkillStore.getState().install("/repo", "shipctl-todos"),
     /write denied/,
   );
 
   assert.deepEqual(calls, [
-    { operation: "setupSkill", args: ["/repo", "shep-todos"] },
+    { operation: "setupSkill", args: ["/repo", "shipctl-todos"] },
   ]);
   assert.equal(useSkillStore.getState().skillsByRepo["/repo"], cached);
 });
 
 test("removing a project evicts only its process-local render cache", () => {
-  const alpha = catalog("shep-todos");
+  const alpha = catalog("shipctl-todos");
   const beta = catalog("orchestrate");
   useSkillStore.setState({ skillsByRepo: { "/alpha": alpha, "/beta": beta } });
 
@@ -247,7 +247,7 @@ test("module entry owns the provider, project action, and error notice", async (
     externalLinks: { open: async () => undefined },
   } satisfies ModuleHostServices;
 
-  assert.equal(skillsModule.id, "shep.skills");
+  assert.equal(skillsModule.id, "shipctl.skills");
   assert.equal(skillsModule.skillsProvider.id, "skills.provider");
   assert.equal(skillsModule.projectActions[0].id, "skills.project-actions");
   assert.equal(
@@ -264,7 +264,7 @@ test("module entry owns the provider, project action, and error notice", async (
   await group?.actions[0].run();
 
   assert.deepEqual(calls, [
-    { operation: "setupSkill", args: ["/repo", "shep-todos"] },
+    { operation: "setupSkill", args: ["/repo", "shipctl-todos"] },
   ]);
   assert.deepEqual(notices, [
     {
@@ -277,8 +277,8 @@ test("module entry owns the provider, project action, and error notice", async (
 
 test("native client uses only namespaced Skills plugin commands", () => {
   assert.deepEqual(SKILL_COMMANDS, {
-    list: "plugin:shep-skills|list_skills",
-    setup: "plugin:shep-skills|setup_skill",
-    remove: "plugin:shep-skills|remove_skill",
+    list: "plugin:shipctl-skills|list_skills",
+    setup: "plugin:shipctl-skills|setup_skill",
+    remove: "plugin:shipctl-skills|remove_skill",
   });
 });

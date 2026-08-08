@@ -148,7 +148,7 @@ Tell the user, in this order: what was built and whether verification
 passed (with the actual command output as evidence), what the worker did
 vs. what you did or took over, audit findings and how each was resolved,
 any model/CLI substitutions that happened, and anything left open. If
-the project has a `TODO.md` board (shep-todos), update it to reflect the
+the project has a `TODO.md` board (shipctl-todos), update it to reflect the
 finished work.
 
 ## Rules

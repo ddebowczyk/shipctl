@@ -1,4 +1,4 @@
-import type { TerminalTabData } from "@shep/core/platform";
+import type { TerminalTabData } from "@shipctl/core/platform";
 import TerminalItem from "./TerminalItem.tsx";
 
 interface TerminalListProps {

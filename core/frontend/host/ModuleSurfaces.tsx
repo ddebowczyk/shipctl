@@ -12,11 +12,11 @@ import type {
   SidebarContribution,
   SettingsContribution,
   SettingsSlot,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
-import { contributedPanelTabId } from "@shep/core/platform";
-import { useTerminalStore } from "@shep/core/terminal";
-import { useUIStore } from "@shep/core/shared";
+import { contributedPanelTabId } from "@shipctl/core/platform";
+import { useTerminalStore } from "@shipctl/core/terminal";
+import { useUIStore } from "@shipctl/core/shared";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";
 import {
   enabledProjectLayoutContributions,

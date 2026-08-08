@@ -51,7 +51,7 @@ import {
 } from "../host/index.ts";
 
 import type { TabCycleDirection, TerminalTabData, UnifiedTab } from "../platform/index.ts";
-const LAST_REPO_STORAGE_KEY = "shep:last-repo-path";
+const LAST_REPO_STORAGE_KEY = "shipctl:last-repo-path";
 
 // Stable empty arrays to avoid infinite re-render loops with zustand v5's
 // useSyncExternalStore — selectors must return the same reference for the same state.
@@ -308,7 +308,7 @@ export default function AppShell() {
     async (repoPath: string) => {
       const repoName = repoPath.split("/").filter(Boolean).pop() ?? "this project";
       const confirmed = await ask(
-        `Remove "${repoName}" from Shep? The files on disk will not be deleted.`,
+        `Remove "${repoName}" from Shipctl? The files on disk will not be deleted.`,
         { title: "Remove project", kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" },
       );
       if (!confirmed) return;
@@ -487,9 +487,9 @@ export default function AppShell() {
         const count = event.payload;
         const confirmed = await ask(
           count > 0
-            ? `Quit Shep and stop ${count} running session${count === 1 ? "" : "s"}?`
-            : "Quit Shep?",
-          { title: "Quit Shep", kind: "warning", okLabel: "Quit", cancelLabel: "Cancel" },
+            ? `Quit Shipctl and stop ${count} running session${count === 1 ? "" : "s"}?`
+            : "Quit Shipctl?",
+          { title: "Quit Shipctl", kind: "warning", okLabel: "Quit", cancelLabel: "Cancel" },
         );
         if (confirmed) {
           try {

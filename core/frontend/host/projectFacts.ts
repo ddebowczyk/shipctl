@@ -4,7 +4,7 @@ import type {
   ProjectFacts,
   ProjectFactsProviderContribution,
   ProjectRef,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
 import type { ProjectFactsByPath } from "../projects/projectFacts.ts";
 import { enabledProjectFactsProvider } from "./moduleComposition.ts";

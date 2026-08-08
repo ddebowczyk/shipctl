@@ -1,6 +1,6 @@
 import { Component, lazy, Suspense, useMemo, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
-import type { ContributionId, ModuleHostServices } from "@shep/module-api";
+import type { ContributionId, ModuleHostServices } from "@shipctl/module-api";
 
 import type { GlobalSurfaceRegistry } from "./globalSurfaceRegistry.ts";
 

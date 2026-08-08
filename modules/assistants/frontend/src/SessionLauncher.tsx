@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { ModulePanelProps } from "@shep/module-api";
+import type { ModulePanelProps } from "@shipctl/module-api";
 import type { CodingAssistant, SessionMode } from "./types";
 import { ASSISTANT_INSTALL_URLS, CODING_ASSISTANTS } from "./catalog";
 import { checkCommandExists, getModelsForProvider } from "./client";

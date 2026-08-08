@@ -1,6 +1,6 @@
 import { PatchDiff } from "@pierre/diffs/react";
 import { useAppearance } from "./useAppearance";
-import type { ModuleAppearancePort } from "@shep/module-api";
+import type { ModuleAppearancePort } from "@shipctl/module-api";
 import { getCodeViewCSSVariables, getDiffViewOptions } from "./codeViewTheme";
 
 interface DiffViewerProps {

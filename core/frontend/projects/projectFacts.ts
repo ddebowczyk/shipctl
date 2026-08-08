@@ -1,4 +1,4 @@
-import type { ProjectFacts } from "@shep/module-api";
+import type { ProjectFacts } from "@shipctl/module-api";
 
 // Module-contributed facts keyed by project path. The host produces this map by
 // polling the enabled facts provider; the projects capability only consumes it,

@@ -16,7 +16,7 @@ function createMarkdownRenderer(): MarkdownIt {
     typographer: true,
   });
 
-  // markdown-it 15 stopped linkifying bare domains by default. Shep's file
+  // markdown-it 15 stopped linkifying bare domains by default. Shipctl's file
   // viewer relied on it, so ask for it back explicitly.
   markdown.linkify.set({ fuzzyLink: true });
 

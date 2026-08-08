@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use shep_module_skills::{HostServices, ProjectRootAuthority};
+use shipctl_module_skills::{HostServices, ProjectRootAuthority};
 
-use shep_core::workspace::manager::WorkspaceManager;
+use shipctl_core::workspace::manager::WorkspaceManager;
 
 struct WorkspaceProjectRootAuthority;
 

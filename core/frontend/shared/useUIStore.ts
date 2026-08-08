@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ContributionId } from "@shep/module-api";
+import type { ContributionId } from "@shipctl/module-api";
 
 interface UIStore {
   activeGlobalSurfaceId: ContributionId | null;

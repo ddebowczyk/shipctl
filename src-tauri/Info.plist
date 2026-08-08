@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Shep needs microphone access so terminal applications can use voice dictation and other audio input features.</string>
+  <string>Shipctl needs microphone access so terminal applications can use voice dictation and other audio input features.</string>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>Shep needs audio capture access so terminal applications can use audio input features.</string>
+  <string>Shipctl needs audio capture access so terminal applications can use audio input features.</string>
 </dict>
 </plist>

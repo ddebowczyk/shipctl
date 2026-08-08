@@ -1,4 +1,4 @@
-import { loadFontFamily } from "@shep/core/platform";
+import { loadFontFamily } from "@shipctl/core/platform";
 import { TERMINAL_FONT_FAMILY } from "./terminalConfig.ts";
 
 /**

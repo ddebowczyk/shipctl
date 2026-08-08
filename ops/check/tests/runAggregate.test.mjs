@@ -7,7 +7,7 @@ import test from "node:test";
 import { discoverAggregateCommands, runAggregate } from "../bin/run-aggregate.mjs";
 
 test("a declared fast check joins the aggregate without central wiring", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "shep-check-lane-"));
+  const root = await mkdtemp(join(tmpdir(), "shipctl-check-lane-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const capability = join(root, "ops", "probe");
   await mkdir(capability, { recursive: true });
@@ -31,7 +31,7 @@ commands:
 });
 
 test("a failed aggregate command identifies its capability and command", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "shep-check-failure-"));
+  const root = await mkdtemp(join(tmpdir(), "shipctl-check-failure-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const capability = join(root, "ops", "probe");
   await mkdir(capability, { recursive: true });

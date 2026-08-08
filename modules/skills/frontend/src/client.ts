@@ -3,9 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SkillInfo } from "./types";
 
 export const SKILL_COMMANDS = {
-  list: "plugin:shep-skills|list_skills",
-  setup: "plugin:shep-skills|setup_skill",
-  remove: "plugin:shep-skills|remove_skill",
+  list: "plugin:shipctl-skills|list_skills",
+  setup: "plugin:shipctl-skills|setup_skill",
+  remove: "plugin:shipctl-skills|remove_skill",
 } as const;
 
 export function listSkills(repoPath: string): Promise<SkillInfo[]> {

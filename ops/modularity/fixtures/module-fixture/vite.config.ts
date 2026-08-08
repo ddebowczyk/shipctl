@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@shep/module-fixture": fileURLToPath(
+      "@shipctl/module-fixture": fileURLToPath(
         new URL("../../../../modules/fixture/frontend/src/index.ts", import.meta.url),
       ),
     },

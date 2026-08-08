@@ -47,6 +47,10 @@ commands:
     summary: Cross-check module manifests against live declaration sites.
     lane: fast
     aggregate: check
+  - name: version
+    summary: Verify the app version is declared only in the Tauri config.
+    lane: fast
+    aggregate: check
   - name: all
     summary: Run every declared fast check.
     lane: fast

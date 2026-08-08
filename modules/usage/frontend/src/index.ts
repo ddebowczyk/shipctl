@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import type { ShepModule } from "@shep/module-api";
+import type { ShipctlModule } from "@shipctl/module-api";
 
 import "./usage.css";
 
@@ -17,12 +17,12 @@ function fetchUsageSnapshots() {
 }
 
 export const usageModule = {
-  id: "shep.usage",
+  id: "shipctl.usage",
   version: "0.0.0",
   globalSurfaces: [
     {
       id: USAGE_SURFACE_ID,
-      moduleId: "shep.usage",
+      moduleId: "shipctl.usage",
       unavailable: {
         title: "Usage unavailable",
         description: "The Usage module could not be loaded.",
@@ -33,7 +33,7 @@ export const usageModule = {
   globalNavigation: [
     {
       id: "usage.global-navigation",
-      moduleId: "shep.usage",
+      moduleId: "shipctl.usage",
       surfaceId: USAGE_SURFACE_ID,
       label: "Usage",
       icon: { name: "chart-no-axes-combined" },
@@ -43,7 +43,7 @@ export const usageModule = {
   sidebar: [
     {
       id: "usage.sidebar",
-      moduleId: "shep.usage",
+      moduleId: "shipctl.usage",
       surfaceId: USAGE_SURFACE_ID,
       order: 100,
       load: () => import("./SidebarUsage"),
@@ -52,7 +52,7 @@ export const usageModule = {
   settings: [
     {
       id: "usage.settings",
-      moduleId: "shep.usage",
+      moduleId: "shipctl.usage",
       slot: "terminal.after",
       order: 10,
       load: () => import("./UsageSettingsSection"),
@@ -61,13 +61,13 @@ export const usageModule = {
   scheduledTasks: [
     {
       id: "usage.snapshots-after-startup",
-      moduleId: "shep.usage",
+      moduleId: "shipctl.usage",
       schedule: { kind: "delay", delayMs: 3_000 },
       run: fetchUsageSnapshots,
     },
     {
       id: "usage.periodic-refresh",
-      moduleId: "shep.usage",
+      moduleId: "shipctl.usage",
       schedule: { kind: "interval", intervalMs: 60_000 },
       async run() {
         await refreshUsageData();
@@ -89,4 +89,4 @@ export const usageModule = {
       },
     };
   },
-} as const satisfies ShepModule;
+} as const satisfies ShipctlModule;

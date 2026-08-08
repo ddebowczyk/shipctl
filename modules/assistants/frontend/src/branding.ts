@@ -1,4 +1,4 @@
-import type { ModuleTerminalSessionPresentation } from "@shep/module-api";
+import type { ModuleTerminalSessionPresentation } from "@shipctl/module-api";
 
 import claudeSrc from "./assets/claude.svg";
 import codexSrc from "./assets/openai.svg";

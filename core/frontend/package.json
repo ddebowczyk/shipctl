@@ -1,5 +1,5 @@
 {
-  "name": "@shep/core",
+  "name": "@shipctl/core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -22,7 +22,7 @@
     "./shell": "./shell/index.ts"
   },
   "dependencies": {
-    "@shep/module-api": "workspace:*",
+    "@shipctl/module-api": "workspace:*",
     "@tauri-apps/api": "^2.11.1"
   },
   "peerDependencies": {

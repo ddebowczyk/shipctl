@@ -1,17 +1,17 @@
 import { useState, useCallback } from "react";
-import type { TerminalTabData, TabActivity } from "@shep/core/platform";
+import type { TerminalTabData, TabActivity } from "@shipctl/core/platform";
 import { FolderInput, X } from "lucide-react";
-import { tabKindMeta } from "@shep/core/shared/views";
-import { useTerminalStore } from "@shep/core/terminal";
-import { handleActionKey } from "@shep/core/shared";
-import { ContextMenu } from "@shep/core/shared/views";
-import type { ContextMenuItem } from "@shep/core/shared/views";
-import { buildProjectMoveMenuItems } from "@shep/core/projects/views";
-import { useRepoStore } from "@shep/core/projects";
+import { tabKindMeta } from "@shipctl/core/shared/views";
+import { useTerminalStore } from "@shipctl/core/terminal";
+import { handleActionKey } from "@shipctl/core/shared";
+import { ContextMenu } from "@shipctl/core/shared/views";
+import type { ContextMenuItem } from "@shipctl/core/shared/views";
+import { buildProjectMoveMenuItems } from "@shipctl/core/projects/views";
+import { useRepoStore } from "@shipctl/core/projects";
 import {
   useProjectFactsMap,
-} from "@shep/core/host";
-import { ActivityIndicator, getTabActivityStatus } from "@shep/core/shared/views";
+} from "@shipctl/core/host";
+import { ActivityIndicator, getTabActivityStatus } from "@shipctl/core/shared/views";
 
 interface TerminalItemProps {
   tab: TerminalTabData;

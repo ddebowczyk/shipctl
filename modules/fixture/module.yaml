@@ -2,20 +2,20 @@
 schema_version: 1
 id: fixture
 frontend:
-  package: "@shep/module-fixture"
+  package: "@shipctl/module-fixture"
   path: modules/fixture/frontend
   composition_symbol: fixtureModule
 backend:
-  crate: tauri-plugin-shep-fixture
+  crate: tauri-plugin-shipctl-fixture
   path: modules/fixture/backend
   cargo_feature: fixture-module
-  dependency_alias: shep-module-fixture
-  plugin_init: "shep_module_fixture::init()"
+  dependency_alias: shipctl-module-fixture
+  plugin_init: "shipctl_module_fixture::init()"
   host_glue: []
 tauri:
   capability_identifier: fixture
   permissions:
-    - shep-fixture:allow-ping
+    - shipctl-fixture:allow-ping
 profile: profiles/fixture/tauri.conf.json
 tests:
   frontend: null

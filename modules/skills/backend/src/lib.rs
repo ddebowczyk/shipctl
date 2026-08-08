@@ -8,10 +8,10 @@ use std::sync::Arc;
 
 use tauri::{plugin::TauriPlugin, Manager, Runtime, State};
 
-pub const PLUGIN_NAME: &str = "shep-skills";
-pub const LIST_SKILLS_COMMAND: &str = "plugin:shep-skills|list_skills";
-pub const SETUP_SKILL_COMMAND: &str = "plugin:shep-skills|setup_skill";
-pub const REMOVE_SKILL_COMMAND: &str = "plugin:shep-skills|remove_skill";
+pub const PLUGIN_NAME: &str = "shipctl-skills";
+pub const LIST_SKILLS_COMMAND: &str = "plugin:shipctl-skills|list_skills";
+pub const SETUP_SKILL_COMMAND: &str = "plugin:shipctl-skills|setup_skill";
+pub const REMOVE_SKILL_COMMAND: &str = "plugin:shipctl-skills|remove_skill";
 
 /// Host-owned authority for resolving an exact registered project root.
 pub trait ProjectRootAuthority: Send + Sync {
@@ -33,7 +33,7 @@ impl HostServices {
     }
 }
 
-/// A prebuilt agent skill Shep can install into a repo. The markdown is
+/// A prebuilt agent skill Shipctl can install into a repo. The markdown is
 /// embedded at compile time; `name` doubles as the directory name under
 /// `.agents/skills/` and must match the frontmatter `name:` in the file.
 struct BuiltinSkill {
@@ -45,7 +45,7 @@ struct BuiltinSkill {
 
 const BUILTIN_SKILLS: &[BuiltinSkill] = &[
     BuiltinSkill {
-        name: "shep-todos",
+        name: "shipctl-todos",
         title: "Project to-dos",
         description: "Teaches agents to keep TODO.md as a kanban board: move cards when starting or finishing work, add discovered work to the backlog, and reconcile the board before ending a session.",
         markdown: include_str!("../resources/todo_skill.md"),
@@ -253,7 +253,7 @@ mod tests {
     }
 
     fn temp_repo(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("shep-skills-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("shipctl-skills-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -274,24 +274,24 @@ mod tests {
     fn setup_writes_standard_location_and_claude_pointer() {
         let dir = temp_repo("setup");
 
-        assert!(!has_skill(&dir, "shep-todos"));
-        install_skill(&dir, "shep-todos").unwrap();
-        assert!(has_skill(&dir, "shep-todos"));
+        assert!(!has_skill(&dir, "shipctl-todos"));
+        install_skill(&dir, "shipctl-todos").unwrap();
+        assert!(has_skill(&dir, "shipctl-todos"));
 
-        let real = dir.join(".agents/skills/shep-todos/SKILL.md");
+        let real = dir.join(".agents/skills/shipctl-todos/SKILL.md");
         assert!(real.is_file());
         assert!(fs::read_to_string(&real)
             .unwrap()
-            .contains("name: shep-todos"));
+            .contains("name: shipctl-todos"));
 
         // The Claude pointer resolves to the same skill.
-        let pointer = dir.join(".claude/skills/shep-todos/SKILL.md");
+        let pointer = dir.join(".claude/skills/shipctl-todos/SKILL.md");
         assert!(fs::read_to_string(&pointer)
             .unwrap()
-            .contains("name: shep-todos"));
+            .contains("name: shipctl-todos"));
 
         // Idempotent — a second run doesn't fail on the existing pointer.
-        install_skill(&dir, "shep-todos").unwrap();
+        install_skill(&dir, "shipctl-todos").unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -315,7 +315,7 @@ mod tests {
         assert!(
             !after
                 .iter()
-                .find(|s| s.name == "shep-todos")
+                .find(|s| s.name == "shipctl-todos")
                 .unwrap()
                 .installed
         );
@@ -365,10 +365,10 @@ mod tests {
 
     #[test]
     fn exposes_namespaced_command_contract() {
-        assert_eq!(PLUGIN_NAME, "shep-skills");
-        assert_eq!(LIST_SKILLS_COMMAND, "plugin:shep-skills|list_skills");
-        assert_eq!(SETUP_SKILL_COMMAND, "plugin:shep-skills|setup_skill");
-        assert_eq!(REMOVE_SKILL_COMMAND, "plugin:shep-skills|remove_skill");
+        assert_eq!(PLUGIN_NAME, "shipctl-skills");
+        assert_eq!(LIST_SKILLS_COMMAND, "plugin:shipctl-skills|list_skills");
+        assert_eq!(SETUP_SKILL_COMMAND, "plugin:shipctl-skills|setup_skill");
+        assert_eq!(REMOVE_SKILL_COMMAND, "plugin:shipctl-skills|remove_skill");
     }
 
     #[test]
@@ -378,19 +378,20 @@ mod tests {
         let services = services_for(registered.clone());
 
         let error =
-            setup_registered_skill(&services, &unregistered.to_string_lossy(), "shep-todos")
+            setup_registered_skill(&services, &unregistered.to_string_lossy(), "shipctl-todos")
                 .unwrap_err();
 
         assert!(error.contains("not registered"));
-        assert!(!has_skill(&registered, "shep-todos"));
-        assert!(!has_skill(&unregistered, "shep-todos"));
+        assert!(!has_skill(&registered, "shipctl-todos"));
+        assert!(!has_skill(&unregistered, "shipctl-todos"));
         let _ = fs::remove_dir_all(&registered);
         let _ = fs::remove_dir_all(&unregistered);
     }
 
     #[test]
     fn registered_missing_root_keeps_the_uninstalled_catalog_contract() {
-        let root = std::env::temp_dir().join(format!("shep-skills-missing-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("shipctl-skills-missing-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let services = services_for(root.clone());
 

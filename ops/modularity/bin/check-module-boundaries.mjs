@@ -4,11 +4,11 @@ import process from "node:process";
 import ts from "typescript";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
-const MODULE_API_PACKAGE = "@shep/module-api";
+const MODULE_API_PACKAGE = "@shipctl/module-api";
 // The host's own capabilities ship as a workspace package so that node, tsc and
 // Vite resolve them identically. That makes the host reachable by name, so it
 // needs the same treatment as a relative reach into src/.
-const HOST_PACKAGE = "@shep/core";
+const HOST_PACKAGE = "@shipctl/core";
 const HOST_ROOTS = ["src", "core/frontend"];
 const COMPOSITION_FILES = new Set(["core/frontend/host/enabledModules.ts"]);
 const SRC_ENTRY_FILES = new Set(["src/main.tsx", "src/vite-env.d.ts"]);

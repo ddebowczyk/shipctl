@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
-import type { SettingsContributionProps } from "@shep/module-api";
+import type { SettingsContributionProps } from "@shipctl/module-api";
 
 function InfoTip({ text }: { readonly text: string }) {
   const [show, setShow] = useState(false);

@@ -1,5 +1,5 @@
 import type { Terminal } from "@xterm/xterm";
-import { acknowledgePtyOutput } from "@shep/core/platform";
+import { acknowledgePtyOutput } from "@shipctl/core/platform";
 
 // The terminal output seam: everything between a PTY data event arriving and
 // xterm having parsed it.

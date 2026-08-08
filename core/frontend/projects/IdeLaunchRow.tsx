@@ -1,6 +1,6 @@
 import { CodeXml } from "lucide-react";
-import { useUIStore } from "@shep/core/shared";
-import { BUILTIN_GLOBAL_SURFACE_IDS } from "@shep/core/shared";
+import { useUIStore } from "@shipctl/core/shared";
+import { BUILTIN_GLOBAL_SURFACE_IDS } from "@shipctl/core/shared";
 
 interface IdeLaunchRowProps {
   repoPath: string;

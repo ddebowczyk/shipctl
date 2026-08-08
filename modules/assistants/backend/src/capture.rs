@@ -6,7 +6,7 @@ use std::time::UNIX_EPOCH;
 
 use super::providers::AssistantProvider;
 
-/// Provider-owned metadata that is safe to persist in Shep's restore manifest.
+/// Provider-owned metadata that is safe to persist in Shipctl's restore manifest.
 ///
 /// This deliberately excludes transcript content, prompts, credentials, and
 /// process-local PTY information.
@@ -139,7 +139,7 @@ mod tests {
     fn fixture_path(name: &str) -> std::path::PathBuf {
         let sequence = FIXTURE_COUNTER.fetch_add(1, Ordering::SeqCst);
         let directory = std::env::temp_dir().join(format!(
-            "shep-assistant-session-capture-test-{}-{}-{}",
+            "shipctl-assistant-session-capture-test-{}-{}-{}",
             std::process::id(),
             sequence,
             name

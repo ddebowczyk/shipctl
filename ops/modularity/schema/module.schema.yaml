@@ -15,7 +15,7 @@ properties:
     properties:
       package:
         type: string
-        pattern: ^@shep/module-[a-z0-9-]+$
+        pattern: ^@shipctl/module-[a-z0-9-]+$
       path:
         type: string
         pattern: ^modules/[a-z0-9-]+/frontend$

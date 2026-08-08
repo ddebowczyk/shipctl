@@ -1,14 +1,14 @@
-import type { ShepModule } from "@shep/module-api";
+import type { ShipctlModule } from "@shipctl/module-api";
 
 export { FIXTURE_PING_COMMAND, pingFixture } from "./client";
 
 export const fixtureModule = {
-  id: "shep.fixture",
+  id: "shipctl.fixture",
   version: "0.0.0",
   panels: [
     {
       id: "fixture.panel",
-      moduleId: "shep.fixture",
+      moduleId: "shipctl.fixture",
       scope: "global",
       label: "Module Fixture",
       icon: { name: "flask-conical", label: "Fixture" },
@@ -21,4 +21,4 @@ export const fixtureModule = {
       load: () => import("./FixturePanel"),
     },
   ],
-} as const satisfies ShepModule;
+} as const satisfies ShipctlModule;

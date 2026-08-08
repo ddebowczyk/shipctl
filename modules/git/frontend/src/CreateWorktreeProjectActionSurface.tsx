@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ProjectActionSurfaceProps } from "@shep/module-api";
+import type { ProjectActionSurfaceProps } from "@shipctl/module-api";
 
 import { getErrorMessage } from "./errors";
 import { gitCreateWorktree } from "./client";
@@ -38,8 +38,8 @@ export default function CreateWorktreeProjectActionSurface({
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
   const createPathPreview = branchSlugPreview
-    ? `.shep-worktrees/${project.name}/${branchSlugPreview}`
-    : `.shep-worktrees/${project.name}/...`;
+    ? `.shipctl-worktrees/${project.name}/${branchSlugPreview}`
+    : `.shipctl-worktrees/${project.name}/...`;
 
   const createWorktree = async () => {
     const requestedBranch = branchName.trim();

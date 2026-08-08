@@ -1,7 +1,7 @@
-# Shep — Claude Code Guidelines
+# Shipctl — Claude Code Guidelines
 
 ## Project Overview
-Shep is a Tauri v2 desktop app (Rust backend + React/TypeScript frontend) for managing AI coding assistant sessions, terminals, git workflows, and usage tracking.
+Shipctl is a Tauri v2 desktop app (Rust backend + React/TypeScript frontend) for managing AI coding assistant sessions, terminals, git workflows, and usage tracking.
 
 ## Tech Stack
 - **Frontend**: React 19, TypeScript, Zustand (state management), xterm.js (terminal)
@@ -12,7 +12,7 @@ Shep is a Tauri v2 desktop app (Rust backend + React/TypeScript frontend) for ma
 
 - `core/frontend/<capability>/` owns host React, TypeScript, stores, styles, and
   assets by capability. Cross-capability imports use exported
-  `@shep/core/<capability>` entrypoints. Read `core/frontend/README.md` first.
+  `@shipctl/core/<capability>` entrypoints. Read `core/frontend/README.md` first.
 - `core/backend/src/<capability>/` owns native host logic and Tauri command
   implementations. Read `core/backend/README.md` first.
 - `modules/<name>/` owns removable features. `modules/api/` is the shared

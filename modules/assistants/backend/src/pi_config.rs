@@ -30,8 +30,17 @@ fn pi_auth_path() -> Result<PathBuf, String> {
 }
 
 pub fn get_pi_config() -> Result<PiConfig, String> {
-    let settings = load_pi_settings()?;
     let configured_providers = load_configured_providers()?;
+
+    // Copy any pre-rename Keychain entries across the first time we see them.
+    // Best-effort: a provider whose key cannot be copied still lists, it just
+    // keeps resolving through its legacy entry.
+    for provider in &configured_providers {
+        let _ = migrate_legacy_api_key(provider);
+    }
+
+    // Read settings after migration so a rewritten auth entry is reflected.
+    let settings = load_pi_settings()?;
     Ok(PiConfig {
         settings,
         configured_providers,
@@ -117,16 +126,46 @@ pub fn save_pi_settings(settings: PiSettings) -> Result<(), String> {
     fs::write(&path, json).map_err(|e| format!("Failed to write pi settings: {e}"))
 }
 
-pub fn save_pi_api_key(provider: &str, api_key: &str) -> Result<(), String> {
-    validate_provider_id(provider)?;
-    let service = format!("shep-pi-{provider}");
+// Keychain identity for stored provider API keys.
+//
+// Pre-rename keys live under `shep-pi`. They are *copied* to `shipctl-pi` on
+// demand and the originals are left in place, so an installed `shep` build
+// keeps working with its own credentials. Nothing here ever deletes a legacy
+// entry — only `delete_pi_api_key`, acting on an explicit user request,
+// removes anything, and then only the current-name entry.
+const KEYCHAIN_ACCOUNT: &str = "shipctl-pi";
+const LEGACY_KEYCHAIN_ACCOUNT: &str = "shep-pi";
 
+fn service_name(provider: &str) -> String {
+    format!("{KEYCHAIN_ACCOUNT}-{provider}")
+}
+
+fn legacy_service_name(provider: &str) -> String {
+    format!("{LEGACY_KEYCHAIN_ACCOUNT}-{provider}")
+}
+
+fn keychain_password(account: &str, service: &str) -> Option<String> {
+    let output = Command::new("security")
+        .args(["find-generic-password", "-a", account, "-s", service, "-w"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let secret = String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string();
+    (!secret.is_empty()).then_some(secret)
+}
+
+fn write_keychain(provider: &str, api_key: &str) -> Result<String, String> {
+    let service = service_name(provider);
     let output = Command::new("security")
         .args([
             "add-generic-password",
             "-U",
             "-a",
-            "shep-pi",
+            KEYCHAIN_ACCOUNT,
             "-s",
             &service,
             "-w",
@@ -140,19 +179,51 @@ pub fn save_pi_api_key(provider: &str, api_key: &str) -> Result<(), String> {
         return Err(format!("Failed to save API key to Keychain: {stderr}"));
     }
 
-    update_auth_entry(
-        provider,
-        &format!("!security find-generic-password -a shep-pi -ws {service}"),
-    )
+    Ok(service)
+}
+
+fn auth_command(service: &str) -> String {
+    format!("!security find-generic-password -a {KEYCHAIN_ACCOUNT} -ws {service}")
+}
+
+/// Copy a provider's pre-rename Keychain entry to the current name, once.
+///
+/// Returns `true` when a legacy key was found and copied. The legacy entry is
+/// left untouched so the old build keeps working.
+pub fn migrate_legacy_api_key(provider: &str) -> Result<bool, String> {
+    validate_provider_id(provider)?;
+    if keychain_password(KEYCHAIN_ACCOUNT, &service_name(provider)).is_some() {
+        return Ok(false);
+    }
+    let Some(secret) = keychain_password(LEGACY_KEYCHAIN_ACCOUNT, &legacy_service_name(provider))
+    else {
+        return Ok(false);
+    };
+
+    let service = write_keychain(provider, &secret)?;
+    update_auth_entry(provider, &auth_command(&service))?;
+    Ok(true)
+}
+
+pub fn save_pi_api_key(provider: &str, api_key: &str) -> Result<(), String> {
+    validate_provider_id(provider)?;
+    let service = write_keychain(provider, api_key)?;
+    update_auth_entry(provider, &auth_command(&service))
 }
 
 pub fn delete_pi_api_key(provider: &str) -> Result<(), String> {
     validate_provider_id(provider)?;
-    let service = format!("shep-pi-{provider}");
+    let service = service_name(provider);
 
     // Ignore errors — key may not exist in Keychain
     let _ = Command::new("security")
-        .args(["delete-generic-password", "-a", "shep-pi", "-s", &service])
+        .args([
+            "delete-generic-password",
+            "-a",
+            KEYCHAIN_ACCOUNT,
+            "-s",
+            &service,
+        ])
         .output();
 
     remove_auth_entry(provider)

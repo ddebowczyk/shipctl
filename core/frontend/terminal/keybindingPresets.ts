@@ -1,4 +1,4 @@
-import type { KeybindingSettings } from "@shep/core/platform";
+import type { KeybindingSettings } from "@shipctl/core/platform";
 
 export interface KeybindingPreset {
   id: keyof KeybindingSettings;

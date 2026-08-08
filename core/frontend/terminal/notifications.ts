@@ -42,10 +42,10 @@ export async function notifyAgent(ptyId: number, message: string) {
   try {
     const hasPermission = await ensureNotificationPermission();
     if (!hasPermission) return;
-    sendNativeNotification({ title: "Shep", body: message });
+    sendNativeNotification({ title: "Shipctl", body: message });
   } catch (error) {
     if (import.meta.env.DEV) {
-      console.error("[shep] notification error:", error);
+      console.error("[shipctl] notification error:", error);
     }
   }
 }

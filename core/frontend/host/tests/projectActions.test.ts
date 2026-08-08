@@ -7,7 +7,7 @@ import type {
   ModuleHostServices,
   ProjectActionContribution,
   ProjectRef,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 type ProjectActionsModule = typeof import("../projectActions.ts");

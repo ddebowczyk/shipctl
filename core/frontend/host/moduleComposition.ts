@@ -13,8 +13,8 @@ import type {
   SidebarContribution,
   SettingsContribution,
   SettingsSlot,
-  ShepModule,
-} from "@shep/module-api";
+  ShipctlModule,
+} from "@shipctl/module-api";
 
 import type { BuiltinGlobalSurfaceLoaders } from "./builtinGlobalSurfaceAdapters.ts";
 import type { PanelMigrationAlias } from "./panelPersistence.ts";
@@ -27,13 +27,13 @@ import { GlobalSurfaceRegistry } from "./globalSurfaceRegistry.ts";
 import { PanelRegistry } from "./panelRegistry.ts";
 
 export function modulePanelContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly PanelContribution[] {
   return modules.flatMap((module) => module.panels ?? []);
 }
 
 export function modulePanelMigrationAliases(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly PanelMigrationAlias[] {
   return modulePanelContributions(modules).flatMap((panel) => panel.migrationAlias
     ? [{
@@ -45,19 +45,19 @@ export function modulePanelMigrationAliases(
 }
 
 export function moduleGlobalSurfaceContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly GlobalSurfaceContribution[] {
   return modules.flatMap((module) => module.globalSurfaces ?? []);
 }
 
 export function moduleGlobalNavigationContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly GlobalNavigationContribution[] {
   return modules.flatMap((module) => module.globalNavigation ?? []);
 }
 
 export function moduleSidebarContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly SidebarContribution[] {
   return modules
     .flatMap((module) => (module.sidebar ?? []).map((contribution) => {
@@ -80,7 +80,7 @@ export function moduleSidebarContributions(
 }
 
 export function moduleProjectNavigationContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly ProjectNavigationContribution[] {
   return modules
     .flatMap((module) => module.projectNavigation ?? [])
@@ -88,7 +88,7 @@ export function moduleProjectNavigationContributions(
 }
 
 export function moduleProjectActionContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly ProjectActionContribution[] {
   return modules
     .flatMap((module) => module.projectActions ?? [])
@@ -96,13 +96,13 @@ export function moduleProjectActionContributions(
 }
 
 export function enabledProjectActionContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly ProjectActionContribution[] {
   return moduleProjectActionContributions(modules);
 }
 
 export function moduleProjectLayoutContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly ProjectLayoutContribution[] {
   return modules
     .flatMap((module) => module.projectLayout ?? [])
@@ -110,13 +110,13 @@ export function moduleProjectLayoutContributions(
 }
 
 export function enabledProjectLayoutContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly ProjectLayoutContribution[] {
   return moduleProjectLayoutContributions(modules);
 }
 
 export function moduleProjectImportContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly ProjectImportContribution[] {
   return modules.flatMap((module) => module.projectImport ? [module.projectImport] : []);
 }
@@ -125,7 +125,7 @@ export async function discoverRelatedProjectPaths(
   projectPath: string,
   options: { readonly expandRelated: boolean },
   services: ModuleHostServices,
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): Promise<readonly string[]> {
   const results = await Promise.allSettled(
     moduleProjectImportContributions(modules).map((contribution) =>
@@ -136,7 +136,7 @@ export async function discoverRelatedProjectPaths(
 }
 
 export function moduleProjectFactsProviders(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly ProjectFactsProviderContribution[] {
   return modules.flatMap((module) => {
     const provider = module.projectFactsProvider;
@@ -160,13 +160,13 @@ export function selectProjectFactsProvider(
 }
 
 export function enabledProjectFactsProvider(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): ProjectFactsProviderContribution | null {
   return selectProjectFactsProvider(moduleProjectFactsProviders(modules));
 }
 
 export function moduleSkillsProvider(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): ModuleSkillsPort | null {
   const providers = modules.flatMap((module) => {
     const provider = module.skillsProvider;
@@ -185,7 +185,7 @@ export function moduleSkillsProvider(
 }
 
 export function moduleSettingsContributions(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
   slot?: SettingsSlot,
 ): readonly SettingsContribution[] {
   return modules
@@ -196,7 +196,7 @@ export function moduleSettingsContributions(
 }
 
 export function moduleScheduledTasks(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): readonly ModuleScheduledTask[] {
   return modules.flatMap((module) => (module.scheduledTasks ?? []).map((task) => {
     if (task.moduleId !== module.id) {
@@ -266,12 +266,12 @@ function scheduleModuleTask(
 
 export function activateModules(
   services: ModuleHostServices,
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
   scheduler: ModuleTaskScheduler = BROWSER_TASK_SCHEDULER,
 ): () => Promise<void> {
   const activeModules = modules.flatMap((module) => {
     const scheduledTaskCancellations: Array<() => void> = [];
-    let deactivation: ReturnType<NonNullable<ShepModule["activate"]>> = undefined;
+    let deactivation: ReturnType<NonNullable<ShipctlModule["activate"]>> = undefined;
     try {
       const tasks = moduleScheduledTasks([module]);
       deactivation = module.activate?.({ panels: services.panels, services });
@@ -306,7 +306,7 @@ export function activateModules(
  */
 export async function notifyModulesBeforeShutdown(
   services: ModuleHostServices,
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): Promise<void> {
   for (const module of modules) await module.beforeShutdown?.(services);
 }
@@ -315,7 +315,7 @@ async function notifyProjectLifecycle(
   callback: "onProjectOpened" | "onProjectsChanged" | "onFilesystemChanged" | "onProjectRemoved",
   value: readonly string[] | string,
   services: ModuleHostServices,
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): Promise<void> {
   await Promise.allSettled(modules.map(async (module) => {
     const handler = module.projectLifecycle?.[callback];
@@ -333,7 +333,7 @@ async function notifyProjectLifecycle(
 export function notifyModulesProjectOpened(
   projectPath: string,
   services: ModuleHostServices,
-  modules?: readonly ShepModule[],
+  modules?: readonly ShipctlModule[],
 ): Promise<void> {
   return notifyProjectLifecycle("onProjectOpened", projectPath, services, modules);
 }
@@ -341,7 +341,7 @@ export function notifyModulesProjectOpened(
 export function notifyModulesProjectsChanged(
   projectPaths: readonly string[],
   services: ModuleHostServices,
-  modules?: readonly ShepModule[],
+  modules?: readonly ShipctlModule[],
 ): Promise<void> {
   return notifyProjectLifecycle("onProjectsChanged", projectPaths, services, modules);
 }
@@ -349,7 +349,7 @@ export function notifyModulesProjectsChanged(
 export function notifyModulesFilesystemChanged(
   projectPaths: readonly string[],
   services: ModuleHostServices,
-  modules?: readonly ShepModule[],
+  modules?: readonly ShipctlModule[],
 ): Promise<void> {
   return notifyProjectLifecycle("onFilesystemChanged", projectPaths, services, modules);
 }
@@ -357,20 +357,20 @@ export function notifyModulesFilesystemChanged(
 export function notifyModulesProjectRemoved(
   projectPath: string,
   services: ModuleHostServices,
-  modules?: readonly ShepModule[],
+  modules?: readonly ShipctlModule[],
 ): Promise<void> {
   return notifyProjectLifecycle("onProjectRemoved", projectPath, services, modules);
 }
 
 export function createEnabledPanelRegistry(
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): PanelRegistry {
   return PanelRegistry.create(modulePanelContributions(modules));
 }
 
 export function createEnabledGlobalSurfaceRegistry(
   builtinLoaders: BuiltinGlobalSurfaceLoaders,
-  modules: readonly ShepModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): GlobalSurfaceRegistry {
   return GlobalSurfaceRegistry.create({
     surfaces: [

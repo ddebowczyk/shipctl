@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { EditorSettings, PreferredEditor } from "@shep/core/platform";
-import { getEditorSettings, saveEditorSettings } from "@shep/core/platform";
+import type { EditorSettings, PreferredEditor } from "@shipctl/core/platform";
+import { getEditorSettings, saveEditorSettings } from "@shipctl/core/platform";
 
 const DEFAULT_SETTINGS: EditorSettings = {
   preferredEditor: null,

@@ -1,5 +1,5 @@
 import { Fragment, useState, useSyncExternalStore } from "react";
-import type { ModulePanelProps } from "@shep/module-api";
+import type { ModulePanelProps } from "@shipctl/module-api";
 import {
   LayoutList,
   ListTodo,
@@ -250,7 +250,7 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
   // Unknown (not yet checked) counts as present so the button doesn't flash.
   const projectSkills = activeProjectPath ? skills.byProject[activeProjectPath] : undefined;
   const skillPresent = projectSkills
-    ? projectSkills.some((skill) => skill.name === "shep-todos" && skill.installed)
+    ? projectSkills.some((skill) => skill.name === "shipctl-todos" && skill.installed)
     : true;
   const settings = useSyncExternalStore(
     services.settings.subscribe,
@@ -353,12 +353,12 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
     if (installingSkill) return;
     setInstallingSkill(true);
     try {
-      await services.skills.install(activeProjectPath, "shep-todos");
+      await services.skills.install(activeProjectPath, "shipctl-todos");
       pushNotice({
         tone: "info",
         title: "Agent skill added",
         message:
-          "Wrote .agents/skills/shep-todos and linked it from .claude/skills — Claude Code, Codex, and OpenCode will now keep TODO.md in board format.",
+          "Wrote .agents/skills/shipctl-todos and linked it from .claude/skills — Claude Code, Codex, and OpenCode will now keep TODO.md in board format.",
       });
     } catch (error) {
       pushNotice({
@@ -392,7 +392,7 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
             <button
               className="glass-button todos-panel__skill-btn"
               disabled={installingSkill}
-              title="Teach your coding agents (Claude Code, Codex, OpenCode) to keep TODO.md as a kanban board. Writes a skill to .agents/skills/shep-todos with a pointer from .claude/skills."
+              title="Teach your coding agents (Claude Code, Codex, OpenCode) to keep TODO.md as a kanban board. Writes a skill to .agents/skills/shipctl-todos with a pointer from .claude/skills."
               onClick={() => void handleInstallSkill()}
             >
               <Sparkles size={13} />
@@ -423,7 +423,7 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
       <div className="todos-panel__list">
         {!hasFile && (
           <div className="todos-panel__empty">
-            Add a to-do below and Shep will create a <code>TODO.md</code> at the
+            Add a to-do below and Shipctl will create a <code>TODO.md</code> at the
             project root
             {todoFileStyle === "kanban" ? " with Backlog / In Progress / Done columns" : ""}.
             It&apos;s a plain markdown checklist — you and your coding agents share

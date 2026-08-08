@@ -1,14 +1,10 @@
-# Shep
+# Shipctl
 
 **A native macOS workspace for developers running projects, terminals, and AI coding agents side by side.**
 
-Shep gives each repo one place for its terminals, coding assistants (Codex CLI,
+Shipctl gives each repo one place for its terminals, coding assistants (Codex CLI,
 Claude Code, Antigravity CLI), saved commands, git-aware views, and usage
 tracking — instead of a pile of shell tabs and half-remembered commands.
-
-<p align="center">
-  <img src="assets/shep.png" alt="Shep" width="200" />
-</p>
 
 ## This is a fork
 
@@ -50,15 +46,15 @@ The host and its modules are organised by *capability* — each owns its logic,
 state, and assets in one directory, never by file kind.
 
 ```text
-core/frontend/   host capabilities (package @shep/core) — read its README first
-core/backend/    host capabilities in Rust (crate shep-core)
+core/frontend/   host capabilities (package @shipctl/core) — read its README first
+core/backend/    host capabilities in Rust (crate shipctl-core)
 modules/         pluggable features, each removable from a build
 src-tauri/       the Tauri shell — no capability logic lives here
 ops/             build, check, test, modularity, and upstream tooling
 ```
 
 Two rules are enforced in CI: a module may never import the host, and the host
-reaches modules only through `@shep/module-api` and
+reaches modules only through `@shipctl/module-api` and
 `core/frontend/host/enabledModules.ts`. Verify with
 `just modularity plugout <name>`.
 

@@ -1418,7 +1418,7 @@ mod tests {
         .unwrap();
 
         let dir =
-            std::env::temp_dir().join(format!("shep-codex-ingest-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("shipctl-codex-ingest-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("rollout-test.jsonl");
         let contents = [

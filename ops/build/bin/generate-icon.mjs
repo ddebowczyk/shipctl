@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 const SIZE = 1024;
 const PADDING = 180; // breathing room around the logo
 const CORNER_RADIUS = 220;
-const LOGO_PATH = new URL("../../../assets/shep.svg", import.meta.url);
+const LOGO_PATH = new URL("../../../assets/shipctl.svg", import.meta.url);
 const OUTPUT_PATH = new URL("../../../assets/icon-1024.png", import.meta.url).pathname;
 
 function extractViewBox(svg) {
@@ -38,16 +38,34 @@ const logoSvg = await readFile(LOGO_PATH, "utf8");
 const { width: logoWidth, height: logoHeight } = extractViewBox(logoSvg);
 const logoMarkup = extractInnerSvg(logoSvg);
 
-// Scale logo to fit within the padded area
 const availableSize = SIZE - PADDING * 2;
-const scale = Math.min(availableSize / logoWidth, availableSize / logoHeight);
-const logoW = Math.round(logoWidth * scale);
-const logoH = Math.round(logoHeight * scale);
-const logoX = Math.round((SIZE - logoW) / 2);
-const logoY = Math.round((SIZE - logoH) / 2);
 
-// Glass background SVG — dark base with radial color orbs + subtle gradient overlay
-const svg = `<svg width="${SIZE}" height="${SIZE}" xmlns="http://www.w3.org/2000/svg">
+// Render the logo alone, then trim the transparent margin. A logo's artwork
+// need not fill its own viewBox — scaling by the viewBox alone leaves the mark
+// floating small and off-centre. Trimming measures the drawn pixels instead, so
+// the mark always fills the padded area regardless of how the SVG is framed.
+const logoLayer = await sharp(
+  Buffer.from(
+    `<svg width="${logoWidth}" height="${logoHeight}" viewBox="0 0 ${logoWidth} ${logoHeight}" xmlns="http://www.w3.org/2000/svg">${logoMarkup}</svg>`,
+  ),
+  { density: 72 },
+)
+  .resize(availableSize, availableSize, { fit: "inside" })
+  .trim()
+  .png()
+  .toBuffer();
+
+const logo = await sharp(logoLayer)
+  .resize(availableSize, availableSize, {
+    fit: "inside",
+    kernel: "nearest",
+    background: { r: 0, g: 0, b: 0, alpha: 0 },
+  })
+  .png()
+  .toBuffer();
+const { width: logoW, height: logoH } = await sharp(logo).metadata();
+
+const background = `<svg width="${SIZE}" height="${SIZE}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <clipPath id="rounded">
       <rect width="${SIZE}" height="${SIZE}" rx="${CORNER_RADIUS}" ry="${CORNER_RADIUS}"/>
@@ -57,15 +75,17 @@ const svg = `<svg width="${SIZE}" height="${SIZE}" xmlns="http://www.w3.org/2000
   <g clip-path="url(#rounded)">
     <rect width="${SIZE}" height="${SIZE}" fill="#181825"/>
   </g>
-
-  <!-- White logo -->
-  <g transform="translate(${logoX}, ${logoY}) scale(${scale})">
-    ${logoMarkup}
-  </g>
 </svg>`;
 
-await sharp(Buffer.from(svg), { density: 72 })
+await sharp(Buffer.from(background), { density: 72 })
   .resize(SIZE, SIZE, { kernel: "nearest" })
+  .composite([
+    {
+      input: logo,
+      left: Math.round((SIZE - logoW) / 2),
+      top: Math.round((SIZE - logoH) / 2),
+    },
+  ])
   .png()
   .toFile(OUTPUT_PATH);
 

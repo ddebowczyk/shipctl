@@ -1,14 +1,14 @@
-import type { ShepModule } from "@shep/module-api";
+import type { ShipctlModule } from "@shipctl/module-api";
 
 export const PORTS_SURFACE_ID = "ports.overview" as const;
 
 export const portsModule = {
-  id: "shep.ports",
+  id: "shipctl.ports",
   version: "0.0.0",
   globalSurfaces: [
     {
       id: PORTS_SURFACE_ID,
-      moduleId: "shep.ports",
+      moduleId: "shipctl.ports",
       unavailable: {
         title: "Ports unavailable",
         description: "The Ports module could not be loaded.",
@@ -19,14 +19,14 @@ export const portsModule = {
   globalNavigation: [
     {
       id: "ports.global-navigation",
-      moduleId: "shep.ports",
+      moduleId: "shipctl.ports",
       surfaceId: PORTS_SURFACE_ID,
       label: "Ports",
       icon: { name: "radio" },
       order: 30,
     },
   ],
-} as const satisfies ShepModule;
+} as const satisfies ShipctlModule;
 
 export { PORT_COMMANDS } from "./client";
 export type { PortInfo } from "./types";

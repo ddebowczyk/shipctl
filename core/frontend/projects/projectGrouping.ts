@@ -1,5 +1,5 @@
 import type { ProjectFactsByPath } from "./projectFacts.ts";
-import type { RepoGroup, RepoInfo } from "@shep/core/platform";
+import type { RepoGroup, RepoInfo } from "@shipctl/core/platform";
 
 export interface ProjectGroupSection {
   group: RepoGroup;

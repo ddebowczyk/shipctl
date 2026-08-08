@@ -163,7 +163,7 @@ export function nativeFeaturesExcept(root, excluded) {
 
 export function frontendDisabled(root, id) {
   const manifest = readManifest(root, id);
-  const envName = `VITE_SHEP_${id.toUpperCase().replaceAll("-", "_")}_MODULE`;
+  const envName = `VITE_SHIPCTL_${id.toUpperCase().replaceAll("-", "_")}_MODULE`;
   const composition = readFileSync(path.join(root, "core/frontend/host/enabledModules.ts"), "utf8");
   if (!composition.includes(`import.meta.env.${envName}`)) {
     throw new Error(`${id} has no frontend-disabled composition gate`);

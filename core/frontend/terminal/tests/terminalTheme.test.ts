@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { ShepTheme } from "@shep/core/appearance";
+import type { ShipctlTheme } from "@shipctl/core/appearance";
 import { blendOpaque, createTerminalTheme } from "../terminalTheme.ts";
 
-// Only the fields createTerminalTheme reads; the rest of ShepTheme drives
+// Only the fields createTerminalTheme reads; the rest of ShipctlTheme drives
 // surfaces this module never touches.
-function theme(overrides: Partial<ShepTheme> = {}): ShepTheme {
+function theme(overrides: Partial<ShipctlTheme> = {}): ShipctlTheme {
   return {
     isTransparent: false,
     appBg: "#1a1b26",
@@ -30,7 +30,7 @@ function theme(overrides: Partial<ShepTheme> = {}): ShepTheme {
     termBrightCyan: "#7dcfff",
     termBrightWhite: "#c0caf5",
     ...overrides,
-  } as ShepTheme;
+  } as ShipctlTheme;
 }
 
 test("glass themes keep a transparent background", () => {

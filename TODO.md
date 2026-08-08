@@ -9,6 +9,6 @@
   - [ ] Add Pi recovery using `--session-id` when the installed version supports it
   - [ ] Add best-effort OpenCode ID capture using `opencode session list --format json`
   - [x] Keep the saved record when a resume command launches but exits immediately
-  - [ ] Continue normally without recovery when Shep cannot obtain a reliable session ID
+  - [ ] Continue normally without recovery when Shipctl cannot obtain a reliable session ID
 
 ## ✅ Done

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useTerminalStore } from "../terminal/index.ts";
 import { useUIStore } from "../shared/index.ts";
 import { Circle, FolderInput, FolderTree, GitBranch, List, PanelsTopLeft, SquareTerminal } from "lucide-react";
-import type { PanelContribution } from "@shep/module-api";
+import type { PanelContribution } from "@shipctl/module-api";
 import { handleActionKey } from "../shared/index.ts";
 import { useRepoStore } from "../projects/index.ts";
 import {

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { ProjectNavigationContributionProps } from "@shep/module-api";
+import type { ProjectNavigationContributionProps } from "@shipctl/module-api";
 import { ListTodo } from "lucide-react";
 
 import { useTodoStore } from "./store";

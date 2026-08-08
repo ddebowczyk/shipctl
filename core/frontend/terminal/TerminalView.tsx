@@ -11,13 +11,13 @@ import {
   setTerminalRendererFactories,
 } from "./terminalRenderer.ts";
 import { browserTerminalRendererFactories } from "./terminalRendererAddons.ts";
-import { writePty, resizePty, openUrl } from "@shep/core/platform";
+import { writePty, resizePty, openUrl } from "@shipctl/core/platform";
 import {
   flushPendingOutput,
   registerTerminal,
   unregisterTerminal,
 } from "./terminalOutputQueue.ts";
-import { TERMINAL_LINE_HEIGHT, buildCSSFontFamily } from "@shep/core/appearance";
+import { TERMINAL_LINE_HEIGHT, buildCSSFontFamily } from "@shipctl/core/appearance";
 import {
   preserveTerminalViewport,
   resyncTerminalViewport,
@@ -29,7 +29,7 @@ import {
   type ScrollPinIntent,
 } from "./terminalScrollPin.ts";
 import { createTerminalTheme } from "./terminalTheme.ts";
-import { useThemeStore } from "@shep/core/appearance";
+import { useThemeStore } from "@shipctl/core/appearance";
 import { notifyAgent } from "./notifications.ts";
 import { KEYBINDING_PRESETS } from "./keybindingPresets.ts";
 import { useKeybindingStore } from "./useKeybindingStore.ts";

@@ -1,4 +1,4 @@
-import type { ProjectFacts, ShepModule } from "@shep/module-api";
+import type { ProjectFacts, ShipctlModule } from "@shipctl/module-api";
 
 import "./git.css";
 
@@ -25,12 +25,12 @@ function factsForStatus(status: GitStatus | undefined): ProjectFacts | null {
 }
 
 export const gitModule = {
-  id: "shep.git",
+  id: "shipctl.git",
   version: "0.0.0",
   panels: [
     {
       id: "core.git",
-      moduleId: "shep.git",
+      moduleId: "shipctl.git",
       scope: "project",
       label: "Files",
       icon: { name: "folder-tree" },
@@ -48,7 +48,7 @@ export const gitModule = {
   projectNavigation: [
     {
       id: "git.project-navigation",
-      moduleId: "shep.git",
+      moduleId: "shipctl.git",
       panelId: "core.git",
       order: 10,
       load: () => import("./GitStatusRow"),
@@ -57,7 +57,7 @@ export const gitModule = {
   projectLayout: [
     {
       id: "git.diff-summary",
-      moduleId: "shep.git",
+      moduleId: "shipctl.git",
       slot: "workspace.trailing",
       order: 10,
       load: () => import("./DiffSummaryPanel"),
@@ -66,7 +66,7 @@ export const gitModule = {
   projectActions: [
     {
       id: "git.project-actions",
-      moduleId: "shep.git",
+      moduleId: "shipctl.git",
       order: 30,
       getGroup: () => ({
         label: null,
@@ -83,7 +83,7 @@ export const gitModule = {
   ],
   projectFactsProvider: {
     id: "git.project-facts",
-    moduleId: "shep.git",
+    moduleId: "shipctl.git",
     getFacts: (project) => factsForStatus(
       useGitStore.getState().projectGitStatus[project.path],
     ),
@@ -97,7 +97,7 @@ export const gitModule = {
   },
   projectImport: {
     id: "git.related-projects",
-    moduleId: "shep.git",
+    moduleId: "shipctl.git",
     relatedPaths: async (projectPath, { expandRelated }, services) => {
       const worktrees = await client.gitListWorktrees(projectPath);
       const current = worktrees.find((worktree) => worktree.path === projectPath);
@@ -114,9 +114,9 @@ export const gitModule = {
   settings: [
     {
       id: "git.settings",
-      moduleId: "shep.git",
+      moduleId: "shipctl.git",
       order: 10,
       load: () => import("./GitSettingsSection"),
     },
   ],
-} as const satisfies ShepModule;
+} as const satisfies ShipctlModule;

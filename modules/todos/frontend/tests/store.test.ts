@@ -33,7 +33,7 @@ interface NativeMock {
 }
 
 const virtualNativeId = "\0todos-native-characterization";
-const nativeGlobal = globalThis as typeof globalThis & { __shepTodoNativeMock: NativeMock };
+const nativeGlobal = globalThis as typeof globalThis & { __shipctlTodoNativeMock: NativeMock };
 
 const nativePlugin: Plugin = {
   name: "todos-native-characterization",
@@ -47,7 +47,7 @@ const nativePlugin: Plugin = {
   load(id) {
     if (id !== virtualNativeId) return null;
     return `
-      const native = () => globalThis.__shepTodoNativeMock;
+      const native = () => globalThis.__shipctlTodoNativeMock;
       export const readTodos = (...args) => native().readTodos(...args);
       export const toggleTodo = (...args) => native().toggleTodo(...args);
       export const addTodo = (...args) => native().addTodo(...args);
@@ -93,14 +93,14 @@ before(async () => {
 
 after(async () => {
   await vite.close();
-  delete (globalThis as Partial<typeof nativeGlobal>).__shepTodoNativeMock;
+  delete (globalThis as Partial<typeof nativeGlobal>).__shipctlTodoNativeMock;
 });
 
 beforeEach(() => {
   calls = [];
   readImplementations = new Map();
   toggleError = null;
-  nativeGlobal.__shepTodoNativeMock = {
+  nativeGlobal.__shipctlTodoNativeMock = {
     async readTodos(repoPath) {
       calls.push({ operation: "readTodos", args: [repoPath] });
       return (readImplementations.get(repoPath) ?? (async () => []))();

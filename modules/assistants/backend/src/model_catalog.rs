@@ -1,10 +1,26 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
 const CLAUDE_MODEL_ALIASES: &[&str] = &["fable", "opus", "sonnet", "haiku"];
+
+static APP_VERSION: OnceLock<String> = OnceLock::new();
+
+/// Record the host application version, for the MCP `clientInfo` handshake.
+///
+/// This crate's own `CARGO_PKG_VERSION` is a `0.0.0` placeholder: the app
+/// version is declared once, in `src-tauri/tauri.conf.json`, and reaches this
+/// module through the `PackageInfo` Tauri resolves at plugin setup.
+pub fn set_app_version(version: String) {
+    let _ = APP_VERSION.set(version);
+}
+
+fn app_version() -> &'static str {
+    APP_VERSION.get().map(String::as_str).unwrap_or("unknown")
+}
 
 pub fn query(provider: &str) -> Result<Vec<String>, String> {
     match provider {
@@ -88,7 +104,7 @@ fn query_codex_models() -> Result<Vec<String>, String> {
             serde_json::json!({
                 "id": 1,
                 "method": "initialize",
-                "params": { "clientInfo": { "name": "shep", "version": env!("CARGO_PKG_VERSION") } }
+                "params": { "clientInfo": { "name": "shipctl", "version": app_version() } }
             })
         )
         .map_err(|error| format!("Could not initialize Codex model catalog: {error}"))?;

@@ -1,5 +1,5 @@
 import type { ITerminalAddon, Terminal } from "@xterm/xterm";
-import type { ShepTheme } from "@shep/core/appearance";
+import type { ShipctlTheme } from "@shipctl/core/appearance";
 
 // The terminal engine seam: which xterm renderer drives a terminal, and how the
 // app moves between renderers when the theme changes or a renderer fails.
@@ -44,9 +44,9 @@ export interface TerminalRendererState {
 /** The part of a terminal the renderer seam touches. */
 export type TerminalRendererTarget = Pick<Terminal, "element" | "loadAddon">;
 
-type RendererTheme = Pick<ShepTheme, "isTransparent">;
+type RendererTheme = Pick<ShipctlTheme, "isTransparent">;
 
-// Glass themes composite over Shep's gradient and the native window effect, so
+// Glass themes composite over Shipctl's gradient and the native window effect, so
 // their renderer must leave cell backgrounds unpainted. WebGL paints an opaque
 // rectangle instead, which is why it is absent from this chain — leaving only
 // xterm's built-in DOM renderer.

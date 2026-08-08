@@ -45,7 +45,7 @@ export interface ModuleScheduledTask {
   run(services: ModuleHostServices): void | Promise<void>;
 }
 
-export interface ShepModule {
+export interface ShipctlModule {
   readonly id: ModuleId;
   readonly version: string;
   readonly panels?: readonly PanelContribution[];

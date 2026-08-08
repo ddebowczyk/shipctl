@@ -1,5 +1,5 @@
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-pub use shep_module_api::{TerminalColorTheme as PtyColorTheme, TerminalOutput as PtyOutput};
+pub use shipctl_module_api::{TerminalColorTheme as PtyColorTheme, TerminalOutput as PtyOutput};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::Command;
@@ -524,7 +524,7 @@ impl PtySession {
         cmd.arg("-c");
         if let Some(args) = args {
             cmd.arg("exec \"$@\"");
-            cmd.arg("shep");
+            cmd.arg("shipctl");
             cmd.arg(command);
             for arg in args {
                 cmd.arg(arg);

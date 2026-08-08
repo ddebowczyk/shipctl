@@ -49,7 +49,7 @@ tell application "Finder"
     set arrangement of viewOptions to not arranged
     set icon size of viewOptions to 128
     set position of item ".VolumeIcon.icns" of container window to {800, 800}
-    set position of item "shep.app" of container window to {180, 170}
+    set position of item "shipctl.app" of container window to {180, 170}
     set position of item "Applications" of container window to {380, 170}
     close
   end tell

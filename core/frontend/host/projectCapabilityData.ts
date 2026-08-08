@@ -1,6 +1,6 @@
-import type { ModuleProjectDataPort } from "@shep/module-api";
+import type { ModuleProjectDataPort } from "@shipctl/module-api";
 
-import type { WorkspaceConfig } from "@shep/core/platform";
+import type { WorkspaceConfig } from "@shipctl/core/platform";
 
 export interface ProjectDocumentPersistence {
   load(projectPath: string): Promise<WorkspaceConfig>;

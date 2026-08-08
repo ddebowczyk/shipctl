@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { WorkspaceConfig } from "@shep/core/platform";
+import type { WorkspaceConfig } from "@shipctl/core/platform";
 import { createProjectCapabilityDataPort } from "../projectCapabilityData.ts";
 
 function workspace(overrides: Partial<WorkspaceConfig> = {}): WorkspaceConfig {

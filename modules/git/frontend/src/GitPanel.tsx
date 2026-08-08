@@ -1,7 +1,7 @@
 import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Search, X, PanelLeft, PanelLeftOpen, FileText, Diff } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import type { ModulePanelProps } from "@shep/module-api";
+import type { ModulePanelProps } from "@shipctl/module-api";
 import { useGitStore } from "./store";
 import { useGitPanelStore } from "./panelStore";
 import {

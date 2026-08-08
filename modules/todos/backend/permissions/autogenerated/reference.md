@@ -10,7 +10,7 @@
 <tr>
 <td>
 
-`shep-todos:allow-add-todo`
+`shipctl-todos:allow-add-todo`
 
 </td>
 <td>
@@ -23,7 +23,7 @@ Enables the add_todo command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-todos:deny-add-todo`
+`shipctl-todos:deny-add-todo`
 
 </td>
 <td>
@@ -36,7 +36,7 @@ Denies the add_todo command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-todos:allow-move-todo`
+`shipctl-todos:allow-move-todo`
 
 </td>
 <td>
@@ -49,7 +49,7 @@ Enables the move_todo command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-todos:deny-move-todo`
+`shipctl-todos:deny-move-todo`
 
 </td>
 <td>
@@ -62,7 +62,7 @@ Denies the move_todo command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-todos:allow-read-todos`
+`shipctl-todos:allow-read-todos`
 
 </td>
 <td>
@@ -75,7 +75,7 @@ Enables the read_todos command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-todos:deny-read-todos`
+`shipctl-todos:deny-read-todos`
 
 </td>
 <td>
@@ -88,7 +88,7 @@ Denies the read_todos command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-todos:allow-toggle-todo`
+`shipctl-todos:allow-toggle-todo`
 
 </td>
 <td>
@@ -101,7 +101,7 @@ Enables the toggle_todo command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-todos:deny-toggle-todo`
+`shipctl-todos:deny-toggle-todo`
 
 </td>
 <td>

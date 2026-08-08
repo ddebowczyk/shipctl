@@ -2,7 +2,7 @@ import type {
   ContributionId,
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
 export type GlobalSurfaceRegistrationErrorCode =
   | "duplicate-navigation-id"

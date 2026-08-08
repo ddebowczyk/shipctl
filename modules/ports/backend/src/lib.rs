@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use tauri::{plugin::TauriPlugin, Manager, Runtime, State};
 
-pub const PLUGIN_NAME: &str = "shep-ports";
-pub const LIST_LISTENING_PORTS_COMMAND: &str = "plugin:shep-ports|list_listening_ports";
-pub const KILL_PORT_COMMAND: &str = "plugin:shep-ports|kill_port";
+pub const PLUGIN_NAME: &str = "shipctl-ports";
+pub const LIST_LISTENING_PORTS_COMMAND: &str = "plugin:shipctl-ports|list_listening_ports";
+pub const KILL_PORT_COMMAND: &str = "plugin:shipctl-ports|kill_port";
 
 /// Read-only access to the host's registered project paths.
 pub trait ProjectCatalog: Send + Sync {
@@ -410,7 +410,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "shep-ports-characterization-{}-{nonce}",
+            "shipctl-ports-characterization-{}-{nonce}",
             std::process::id(),
         ));
         fs::create_dir_all(root.join("apps/web/src")).unwrap();

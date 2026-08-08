@@ -19,7 +19,7 @@ invoked by path; the name does not imply registration with any agent harness.
 
 ## Why we take control of ops
 
-Shep is developed by a large team of agents working in parallel on separate module branches.
+Shipctl is developed by a large team of agents working in parallel on separate module branches.
 That working model drove the app-side modularization — isolate changes so agents do not
 collide, and so a failure is contained to one module. The tooling that operates on the repo
 has exactly the same problem, one level up.

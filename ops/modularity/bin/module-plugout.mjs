@@ -219,14 +219,14 @@ export function verifyModulePlugout({
 
   if (!sourceAbsentOnly) {
     verifyEnabled(repositoryRoot);
-    withDisposableCopy(repositoryRoot, `shep-${moduleName}-disabled-`, (root) => {
+    withDisposableCopy(repositoryRoot, `shipctl-${moduleName}-disabled-`, (root) => {
       prepareDisabled(root);
       run("pnpm", ["install", "--frozen-lockfile", "--offline", "--ignore-scripts"], root);
       verifyDisabled(root);
     });
   }
 
-  withDisposableCopy(repositoryRoot, `shep-${moduleName}-source-absent-`, (root) => {
+  withDisposableCopy(repositoryRoot, `shipctl-${moduleName}-source-absent-`, (root) => {
     prepareSourceAbsent(root);
     assertSourceAbsent(root);
     run("pnpm", ["install", "--offline", "--ignore-scripts"], root);

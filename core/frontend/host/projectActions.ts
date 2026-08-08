@@ -4,7 +4,7 @@ import type {
   ProjectActionContribution,
   ProjectActionGroup,
   ProjectRef,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
 import { enabledProjectActionContributions } from "./moduleComposition.ts";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";

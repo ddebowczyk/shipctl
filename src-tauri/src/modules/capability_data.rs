@@ -1,6 +1,6 @@
 use tauri::State;
 
-use shep_core::workspace::manager::WorkspaceManager;
+use shipctl_core::workspace::manager::WorkspaceManager;
 
 #[tauri::command]
 pub fn get_global_capability_data(

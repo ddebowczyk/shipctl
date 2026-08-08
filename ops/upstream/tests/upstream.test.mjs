@@ -26,10 +26,10 @@ subject: "Fix terminal output flow and scroll behavior"
 authored: "2026-08-06"
 verdict: adapt
 integration: variant
-bd: [shep-123, shep-456]
+bd: [shipctl-123, shipctl-456]
 ---
 `);
-  assert.deepEqual(parsed.bd, ["shep-123", "shep-456"]);
+  assert.deepEqual(parsed.bd, ["shipctl-123", "shipctl-456"]);
   assert.equal(parsed.verdict, "adapt");
 });
 
@@ -40,12 +40,12 @@ subject: "Quoted \\"subject\\""
 authored: "2026-08-06"
 verdict: adapt
 bd:
-  - shep-123
-  - shep-456
+  - shipctl-123
+  - shipctl-456
 ---
 `);
   assert.equal(parsed.subject, 'Quoted "subject"');
-  assert.deepEqual(parsed.bd, ["shep-123", "shep-456"]);
+  assert.deepEqual(parsed.bd, ["shipctl-123", "shipctl-456"]);
 });
 
 test("stub consistency rejects metadata drift", () => {
@@ -60,6 +60,6 @@ test("close refuses a pending entry", () => {
 test("close requires tracked work for adopt and adapt", () => {
   const entries = new Map([[commit.short, entry({ verdict: "adapt", integration: "variant" })]]);
   assert.throws(() => assertClosable([commit], entries), /requires a bd issue/);
-  entries.set(commit.short, entry({ verdict: "adapt", integration: "variant", bd: ["shep-123"] }));
+  entries.set(commit.short, entry({ verdict: "adapt", integration: "variant", bd: ["shipctl-123"] }));
   assert.doesNotThrow(() => assertClosable([commit], entries));
 });

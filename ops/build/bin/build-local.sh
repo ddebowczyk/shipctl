@@ -68,7 +68,7 @@ fi
 version="$(jq -er '.version | strings | select(length > 0)' package.json)" \
   || fail 'could not read a non-empty version from package.json'
 bundle_root="target/${target}/release/bundle"
-app_source="${bundle_root}/macos/shep.app"
+app_source="${bundle_root}/macos/shipctl.app"
 
 if [ "$mode" = 'build' ]; then
   printf 'build: pnpm tauri build --target %s --bundles app,dmg --no-sign\n' "$target" >&2
@@ -77,7 +77,7 @@ fi
 
 [ -d "$app_source" ] || fail "app artifact not found: $app_source"
 shopt -s nullglob
-dmg_matches=("${bundle_root}/dmg/shep_${version}_"*.dmg)
+dmg_matches=("${bundle_root}/dmg/shipctl_${version}_"*.dmg)
 shopt -u nullglob
 [ "${#dmg_matches[@]}" -eq 1 ] \
   || fail "expected exactly one DMG artifact under ${bundle_root}/dmg for version ${version}; found ${#dmg_matches[@]}"
@@ -102,12 +102,12 @@ if [ -e "$archive_dir" ]; then
 fi
 
 mkdir -p "$archive_dir" || fail "could not create archive directory: $archive_dir"
-ditto "$app_source" "${archive_dir}/shep.app" \
+ditto "$app_source" "${archive_dir}/shipctl.app" \
   || fail 'could not copy the app bundle into the archive'
 cp -p "$dmg_source" "${archive_dir}/${dmg_name}" \
   || fail 'could not copy the DMG into the archive'
 
-app_sha256="$(shasum -a 256 "${archive_dir}/shep.app/Contents/MacOS/shep" | awk '{print $1}')" \
+app_sha256="$(shasum -a 256 "${archive_dir}/shipctl.app/Contents/MacOS/shipctl" | awk '{print $1}')" \
   || fail 'could not checksum the archived app executable'
 dmg_sha256="$(shasum -a 256 "${archive_dir}/${dmg_name}" | awk '{print $1}')" \
   || fail 'could not checksum the archived DMG'
@@ -134,7 +134,7 @@ jq -n \
     git_dirty: $git_dirty,
     build_command: $build_command,
     artifacts: {
-      app: { path: "shep.app", executable_sha256: $app_sha256 },
+      app: { path: "shipctl.app", executable_sha256: $app_sha256 },
       dmg: { path: $dmg_name, sha256: $dmg_sha256 }
     }
   }' > "${archive_dir}/build.json" \
@@ -145,7 +145,7 @@ ys -f ops/build/schema/build-manifest.schema.yaml "${archive_dir}/build.json" \
 
 printf '%s\n' \
   "archive: ${archive_dir}" \
-  "app: ${archive_dir}/shep.app" \
+  "app: ${archive_dir}/shipctl.app" \
   "dmg: ${archive_dir}/${dmg_name}" \
   "manifest: ${archive_dir}/build.json" \
   "git_commit: ${git_commit}" \

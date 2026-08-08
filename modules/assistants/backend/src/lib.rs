@@ -13,7 +13,7 @@ mod pi_config;
 pub mod providers;
 
 use serde::{Deserialize, Serialize};
-use shep_module_api::{TerminalColorTheme, TerminalOutput};
+use shipctl_module_api::{TerminalColorTheme, TerminalOutput};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,36 +31,39 @@ use manifest::AssistantSessionManifest;
 const MAX_LABEL_LENGTH: usize = 256;
 const MAX_MODEL_LENGTH: usize = 256;
 
-pub const PLUGIN_NAME: &str = "shep-assistants";
-pub const SPAWN_ASSISTANT_SESSION_COMMAND: &str = "plugin:shep-assistants|spawn_assistant_session";
+pub const PLUGIN_NAME: &str = "shipctl-assistants";
+pub const SPAWN_ASSISTANT_SESSION_COMMAND: &str =
+    "plugin:shipctl-assistants|spawn_assistant_session";
 pub const RESUME_ASSISTANT_SESSION_COMMAND: &str =
-    "plugin:shep-assistants|resume_assistant_session";
+    "plugin:shipctl-assistants|resume_assistant_session";
 pub const PREPARE_ASSISTANT_SESSION_COMMAND: &str =
-    "plugin:shep-assistants|prepare_assistant_session";
+    "plugin:shipctl-assistants|prepare_assistant_session";
 pub const CONFIRM_ASSISTANT_SESSION_CAPTURE_COMMAND: &str =
-    "plugin:shep-assistants|confirm_assistant_session_capture";
+    "plugin:shipctl-assistants|confirm_assistant_session_capture";
 pub const TRY_CAPTURE_CODEX_ASSISTANT_SESSION_COMMAND: &str =
-    "plugin:shep-assistants|try_capture_codex_assistant_session";
+    "plugin:shipctl-assistants|try_capture_codex_assistant_session";
 pub const FAIL_ASSISTANT_SESSION_CAPTURE_COMMAND: &str =
-    "plugin:shep-assistants|fail_assistant_session_capture";
+    "plugin:shipctl-assistants|fail_assistant_session_capture";
 pub const UPDATE_ASSISTANT_SESSION_PLACEMENT_COMMAND: &str =
-    "plugin:shep-assistants|update_assistant_session_placement";
+    "plugin:shipctl-assistants|update_assistant_session_placement";
 pub const UPDATE_ASSISTANT_SESSION_LABEL_COMMAND: &str =
-    "plugin:shep-assistants|update_assistant_session_label";
+    "plugin:shipctl-assistants|update_assistant_session_label";
 pub const DISCARD_ASSISTANT_SESSION_COMMAND: &str =
-    "plugin:shep-assistants|discard_assistant_session";
-pub const REARM_ASSISTANT_SESSION_COMMAND: &str = "plugin:shep-assistants|rearm_assistant_session";
+    "plugin:shipctl-assistants|discard_assistant_session";
+pub const REARM_ASSISTANT_SESSION_COMMAND: &str =
+    "plugin:shipctl-assistants|rearm_assistant_session";
 pub const LIST_RESTORABLE_ASSISTANT_SESSIONS_COMMAND: &str =
-    "plugin:shep-assistants|list_restorable_assistant_sessions";
+    "plugin:shipctl-assistants|list_restorable_assistant_sessions";
 pub const TAKE_ASSISTANT_SESSION_STARTUP_WARNING_COMMAND: &str =
-    "plugin:shep-assistants|take_assistant_session_startup_warning";
+    "plugin:shipctl-assistants|take_assistant_session_startup_warning";
 pub const BEGIN_ASSISTANT_SESSION_PRESERVING_SHUTDOWN_COMMAND: &str =
-    "plugin:shep-assistants|begin_assistant_session_preserving_shutdown";
-pub const GET_MODELS_FOR_PROVIDER_COMMAND: &str = "plugin:shep-assistants|get_models_for_provider";
-pub const GET_PI_CONFIG_COMMAND: &str = "plugin:shep-assistants|get_pi_config";
-pub const SAVE_PI_SETTINGS_COMMAND: &str = "plugin:shep-assistants|save_pi_settings";
-pub const SAVE_PI_API_KEY_COMMAND: &str = "plugin:shep-assistants|save_pi_api_key";
-pub const DELETE_PI_API_KEY_COMMAND: &str = "plugin:shep-assistants|delete_pi_api_key";
+    "plugin:shipctl-assistants|begin_assistant_session_preserving_shutdown";
+pub const GET_MODELS_FOR_PROVIDER_COMMAND: &str =
+    "plugin:shipctl-assistants|get_models_for_provider";
+pub const GET_PI_CONFIG_COMMAND: &str = "plugin:shipctl-assistants|get_pi_config";
+pub const SAVE_PI_SETTINGS_COMMAND: &str = "plugin:shipctl-assistants|save_pi_settings";
+pub const SAVE_PI_API_KEY_COMMAND: &str = "plugin:shipctl-assistants|save_pi_api_key";
+pub const DELETE_PI_API_KEY_COMMAND: &str = "plugin:shipctl-assistants|delete_pi_api_key";
 
 /// The only host authority required by the Assistant provider module.
 ///
@@ -141,7 +144,7 @@ pub struct AssistantSessionRecord {
     pub model: Option<String>,
     pub capture_state: CaptureState,
     /// A record is written as soon as it is known, but it is only eligible for
-    /// automatic restoration after Shep has completed its normal quit path.
+    /// automatic restoration after Shipctl has completed its normal quit path.
     /// This prevents a later launch from duplicating a provider process that
     /// outlived an abnormal app termination.
     #[serde(default)]
@@ -641,7 +644,7 @@ fn provider_spawn_error(provider: AssistantProvider, spawn_error: String) -> Str
             "Could not start {display_name}: {spawn_error}. Detected {version}; update {display_name} and try again."
         ),
         None => format!(
-            "Could not start {display_name}: {spawn_error}. {display_name} was not found on Shep's PATH; install it or restart Shep after updating your shell setup."
+            "Could not start {display_name}: {spawn_error}. {display_name} was not found on Shipctl's PATH; install it or restart Shipctl after updating your shell setup."
         ),
     }
 }
@@ -874,6 +877,7 @@ fn delete_pi_api_key(provider: String) -> Result<(), String> {
 pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
     tauri::plugin::Builder::new(PLUGIN_NAME)
         .setup(move |app, _api| {
+            model_catalog::set_app_version(app.package_info().version.to_string());
             app.manage(AssistantPluginState {
                 registry: AssistantSessionRegistry::new(),
                 services: services.clone(),
@@ -905,7 +909,7 @@ pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
 
 fn default_manifest_path() -> Result<PathBuf, String> {
     dirs::home_dir()
-        .map(|home| home.join(".shep/assistant-sessions.json"))
+        .map(|home| home.join(".shipctl/assistant-sessions.json"))
         .ok_or_else(|| "Could not find home directory for assistant restore state".to_string())
 }
 
@@ -948,7 +952,7 @@ fn select_codex_capture_candidate(
         0 => Ok(None),
         1 => Ok(candidates.pop()),
         count => Err(format!(
-            "Found {count} new Codex sessions for this directory; restore was not enabled so Shep will not guess which one to resume"
+            "Found {count} new Codex sessions for this directory; restore was not enabled so Shipctl will not guess which one to resume"
         )),
     }
 }
@@ -1036,7 +1040,7 @@ mod tests {
     fn fixture_dir(name: &str) -> std::path::PathBuf {
         let sequence = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
         let directory = std::env::temp_dir().join(format!(
-            "shep-assistant-session-registry-test-{}-{sequence}-{name}",
+            "shipctl-assistant-session-registry-test-{}-{sequence}-{name}",
             std::process::id()
         ));
         fs::create_dir_all(&directory).unwrap();

@@ -1,4 +1,4 @@
-//! Narrow native contracts shared by the Shep host and internal modules.
+//! Narrow native contracts shared by the Shipctl host and internal modules.
 //!
 //! Contracts are added only when an extracted module needs a stable host
 //! authority. Terminal transport DTOs live here so provider modules can launch

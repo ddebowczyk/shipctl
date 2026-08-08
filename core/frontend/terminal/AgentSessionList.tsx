@@ -1,17 +1,17 @@
 import { useCallback, useState } from "react";
-import type { TabActivity, TerminalTabData } from "@shep/core/platform";
-import { handleActionKey } from "@shep/core/shared";
-import { useTerminalStore } from "@shep/core/terminal";
-import { useRepoStore } from "@shep/core/projects";
+import type { TabActivity, TerminalTabData } from "@shipctl/core/platform";
+import { handleActionKey } from "@shipctl/core/shared";
+import { useTerminalStore } from "@shipctl/core/terminal";
+import { useRepoStore } from "@shipctl/core/projects";
 import {
   useProjectFactsMap,
-} from "@shep/core/host";
-import { SidebarSectionToggle } from "@shep/core/shared/views";
-import { ActivityIndicator, getTabActivityStatus } from "@shep/core/shared/views";
+} from "@shipctl/core/host";
+import { SidebarSectionToggle } from "@shipctl/core/shared/views";
+import { ActivityIndicator, getTabActivityStatus } from "@shipctl/core/shared/views";
 import { FolderInput, SquareTerminal } from "lucide-react";
-import { ContextMenu } from "@shep/core/shared/views";
-import type { ContextMenuItem } from "@shep/core/shared/views";
-import { buildProjectMoveMenuItems } from "@shep/core/projects/views";
+import { ContextMenu } from "@shipctl/core/shared/views";
+import type { ContextMenuItem } from "@shipctl/core/shared/views";
+import { buildProjectMoveMenuItems } from "@shipctl/core/projects/views";
 
 export interface AgentSessionItem {
   tab: TerminalTabData;

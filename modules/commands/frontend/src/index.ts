@@ -1,4 +1,4 @@
-import type { ShepModule } from "@shep/module-api";
+import type { ShipctlModule } from "@shipctl/module-api";
 
 import { loadProjectCommands } from "./runtime";
 import { useCommandsStore } from "./store";
@@ -7,12 +7,12 @@ import "./commands.css";
 export const COMMANDS_PANEL_ID = "core.commands" as const;
 
 export const commandsModule = {
-  id: "shep.commands",
+  id: "shipctl.commands",
   version: "0.0.0",
   panels: [
     {
       id: COMMANDS_PANEL_ID,
-      moduleId: "shep.commands",
+      moduleId: "shipctl.commands",
       scope: "project",
       label: "Commands",
       icon: { name: "list", label: "Commands" },
@@ -31,7 +31,7 @@ export const commandsModule = {
   projectNavigation: [
     {
       id: "commands.project-navigation",
-      moduleId: "shep.commands",
+      moduleId: "shipctl.commands",
       panelId: COMMANDS_PANEL_ID,
       order: 20,
       load: () => import("./CommandsProjectRow"),
@@ -43,7 +43,7 @@ export const commandsModule = {
       useCommandsStore.getState().removeProject(projectPath);
     },
   },
-} as const satisfies ShepModule;
+} as const satisfies ShipctlModule;
 
 export { generateCommandName } from "./CommandsPanel";
 export {

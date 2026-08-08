@@ -20,7 +20,7 @@ test("simple and host-glue module manifests satisfy the schema", () => {
 });
 
 test("the module schema rejects undeclared escape hatches", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "shep-module-schema-"));
+  const root = await mkdtemp(join(tmpdir(), "shipctl-module-schema-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const invalid = join(root, "invalid.yaml");
   const source = await readFile(join(fixtures, "todos.yaml"), "utf8");

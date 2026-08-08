@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useNoticeStore } from "@shep/core/shared";
+import { useNoticeStore } from "@shipctl/core/shared";
 
 export default function NoticeCenter() {
   const notices = useNoticeStore((s) => s.notices);

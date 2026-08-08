@@ -1,6 +1,6 @@
 [package]
-name = "shep"
-version = "0.5.0"
+name = "shipctl"
+version = "0.0.0"
 description = "Terminal workspace manager"
 authors = []
 license = ""
@@ -11,18 +11,18 @@ rust-version.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "shep_lib"
+name = "shipctl_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 default = ["todos-module", "ports-module", "skills-module", "git-module", "assistants-module", "usage-module"]
-fixture-module = ["dep:shep-module-fixture"]
-todos-module = ["dep:shep-module-todos"]
-ports-module = ["dep:shep-module-ports"]
-skills-module = ["dep:shep-module-skills"]
-git-module = ["dep:shep-module-git"]
-assistants-module = ["dep:shep-module-assistants"]
-usage-module = ["dep:shep-module-usage"]
+fixture-module = ["dep:shipctl-module-fixture"]
+todos-module = ["dep:shipctl-module-todos"]
+ports-module = ["dep:shipctl-module-ports"]
+skills-module = ["dep:shipctl-module-skills"]
+git-module = ["dep:shipctl-module-git"]
+assistants-module = ["dep:shipctl-module-assistants"]
+usage-module = ["dep:shipctl-module-usage"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
@@ -39,12 +39,12 @@ fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-shep-core = { path = "../core/backend" }
-shep-module-api = { path = "../modules/api/backend" }
-shep-module-fixture = { package = "tauri-plugin-shep-fixture", path = "../modules/fixture/backend", optional = true }
-shep-module-todos = { package = "tauri-plugin-shep-todos", path = "../modules/todos/backend", optional = true }
-shep-module-ports = { package = "tauri-plugin-shep-ports", path = "../modules/ports/backend", optional = true }
-shep-module-skills = { package = "tauri-plugin-shep-skills", path = "../modules/skills/backend", optional = true }
-shep-module-git = { package = "tauri-plugin-shep-git", path = "../modules/git/backend", optional = true }
-shep-module-assistants = { package = "tauri-plugin-shep-assistants", path = "../modules/assistants/backend", optional = true }
-shep-module-usage = { package = "tauri-plugin-shep-usage", path = "../modules/usage/backend", optional = true }
+shipctl-core = { path = "../core/backend" }
+shipctl-module-api = { path = "../modules/api/backend" }
+shipctl-module-fixture = { package = "tauri-plugin-shipctl-fixture", path = "../modules/fixture/backend", optional = true }
+shipctl-module-todos = { package = "tauri-plugin-shipctl-todos", path = "../modules/todos/backend", optional = true }
+shipctl-module-ports = { package = "tauri-plugin-shipctl-ports", path = "../modules/ports/backend", optional = true }
+shipctl-module-skills = { package = "tauri-plugin-shipctl-skills", path = "../modules/skills/backend", optional = true }
+shipctl-module-git = { package = "tauri-plugin-shipctl-git", path = "../modules/git/backend", optional = true }
+shipctl-module-assistants = { package = "tauri-plugin-shipctl-assistants", path = "../modules/assistants/backend", optional = true }
+shipctl-module-usage = { package = "tauri-plugin-shipctl-usage", path = "../modules/usage/backend", optional = true }

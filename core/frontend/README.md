@@ -1,4 +1,4 @@
-# `@shep/core` — the host's own capabilities (frontend)
+# `@shipctl/core` — the host's own capabilities (frontend)
 
 Everything the app does that is *not* a pluggable module lives here, split by
 capability rather than by file kind. A capability owns its logic, its stores,
@@ -25,11 +25,11 @@ see `../backend/README.md`.
 what it composes, but it is the one directory here that is *not* reusable and not
 a capability. Nothing may import it except `src/main.tsx`, which is now the whole
 of `src/` alongside `vite-env.d.ts`. If you find yourself importing
-`@shep/core/shell` from a capability, the thing you want has to move down into a
+`@shipctl/core/shell` from a capability, the thing you want has to move down into a
 capability instead — see rule 4 below.
 
 The host runtime imports **concrete capability files**, never capability
-barrels: `@shep/core/terminal` pulls in `@xterm/xterm`, which is CommonJS and
+barrels: `@shipctl/core/terminal` pulls in `@xterm/xterm`, which is CommonJS and
 breaks the vite-SSR test lanes.
 
 ## Where does a new file go?
@@ -58,15 +58,15 @@ fonts in `appearance/fonts/` because that is who reads them; a top-level
 ## Two mechanical rules
 
 **Every capability is a package export.** Cross-capability imports go through
-`@shep/core/<capability>`, never through a relative path into another
+`@shipctl/core/<capability>`, never through a relative path into another
 capability's files. The `exports` map in `package.json` is the public surface,
 and it resolves identically in Node, `tsc` and Vite — which is why capabilities
 are a workspace package rather than a `tsconfig` path alias.
 
 **`index.ts` is JSX-free; `views.ts` carries React.** The `node --test` lanes run
 through Node's type stripping, which handles `.ts` but not `.tsx`. A capability
-with components therefore exports two entry points: `@shep/core/terminal` for
-logic and `@shep/core/terminal/views` for components. Re-exports inside these
+with components therefore exports two entry points: `@shipctl/core/terminal` for
+logic and `@shipctl/core/terminal/views` for components. Re-exports inside these
 files carry explicit `.ts`/`.tsx` extensions, because Node's ESM resolver does
 not guess them.
 
@@ -74,7 +74,7 @@ not guess them.
 
 `just modularity boundaries` rejects cross-capability deep imports, files left
 under `src/`, app imports into `ops/`, and host/module direction violations.
-Cross-capability imports use an exported `@shep/core/<capability>` entrypoint;
+Cross-capability imports use an exported `@shipctl/core/<capability>` entrypoint;
 `platform/` and `shared/` remain leaf foundations that may be imported directly.
 
 The checker carries exact exceptions for the host-service adapter's concrete

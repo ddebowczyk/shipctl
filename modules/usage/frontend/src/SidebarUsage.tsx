@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from "react";
-import type { SidebarContributionProps } from "@shep/module-api";
+import type { SidebarContributionProps } from "@shipctl/module-api";
 import { useUsageStore, type TimeWindow } from "./usageStore";
 import { useUsageSettingsStore } from "./usageSettingsStore";
 import { usageProviderLogoSrc, getUsageProviderLogoClass } from "./branding";

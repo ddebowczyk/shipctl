@@ -1,24 +1,24 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import type { RepoInfo, RepoGroup, TerminalTabData } from "@shep/core/platform";
+import type { RepoInfo, RepoGroup, TerminalTabData } from "@shipctl/core/platform";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SquareTerminal } from "lucide-react";
-import { tabKindMeta } from "@shep/core/shared/views";
-import { useTerminalStore } from "@shep/core/terminal";
+import { tabKindMeta } from "@shipctl/core/shared/views";
+import { useTerminalStore } from "@shipctl/core/terminal";
 import { useRepoStore } from "./useRepoStore.ts";
-import { useNoticeStore } from "@shep/core/shared";
-import { getErrorMessage } from "@shep/core/platform";
+import { useNoticeStore } from "@shipctl/core/shared";
+import { getErrorMessage } from "@shipctl/core/platform";
 import ProjectItem from "./ProjectItem.tsx";
 import GroupHeader from "./GroupHeader.tsx";
-import { CollapsibleSection } from "@shep/core/shared/views";
-import { ModuleSessionList } from "@shep/core/host/views";
-import { TerminalList } from "@shep/core/terminal/views";
+import { CollapsibleSection } from "@shipctl/core/shared/views";
+import { ModuleSessionList } from "@shipctl/core/host/views";
+import { TerminalList } from "@shipctl/core/terminal/views";
 import {
   useProjectFactsMap,
-} from "@shep/core/host";
+} from "@shipctl/core/host";
 import {
   ModuleProjectNavigationSurfaces,
-} from "@shep/core/host/views";
-import { groupProjects } from "@shep/core/projects";
+} from "@shipctl/core/host/views";
+import { groupProjects } from "@shipctl/core/projects";
 
 interface ProjectListProps {
   repos: RepoInfo[];

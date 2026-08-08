@@ -1,5 +1,5 @@
 import { hexLuminance } from "./themes.ts";
-import type { ShepTheme } from "./themes.ts";
+import type { ShipctlTheme } from "./themes.ts";
 
 interface ParsedTerminalTheme {
   background: string;
@@ -114,7 +114,7 @@ export function parseTerminalThemeDefinition(source: string): ParsedTerminalThem
   };
 }
 
-export function buildCustomTheme(source: string): ShepTheme {
+export function buildCustomTheme(source: string): ShipctlTheme {
   const parsed = parseTerminalThemeDefinition(source);
   const isLight = hexLuminance(parsed.background) > 0.3;
   const accentBlue = parsed.palette[4];

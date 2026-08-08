@@ -8,7 +8,7 @@ import type {
   ModuleManagedTerminalSessionLaunchRequest,
   ModuleTerminalSessionLaunchRequest,
   ModuleTerminalSessionLifecycleEvent,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 type AssistantsModule = typeof import("../src/index.ts");
@@ -113,7 +113,7 @@ function fixtureServices() {
 }
 
 test("module identity and launcher migration metadata remain stable", () => {
-  assert.equal(assistants.assistantsModule.id, "shep.assistants");
+  assert.equal(assistants.assistantsModule.id, "shipctl.assistants");
   assert.equal(assistants.assistantsModule.panels[0].id, "assistants.launcher");
   assert.equal(assistants.assistantsModule.panels[0].migrationAlias.kind, "launcher");
   assert.equal(assistants.assistantsModule.panels[0].newSession.label, "Agent");

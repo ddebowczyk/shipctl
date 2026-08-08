@@ -1,4 +1,4 @@
-import type { ModuleHostServices, ShepModule } from "@shep/module-api";
+import type { ModuleHostServices, ShipctlModule } from "@shipctl/module-api";
 
 import { useTodoStore } from "./store";
 import "./todos.css";
@@ -10,12 +10,12 @@ function enabled(services: ModuleHostServices) {
 }
 
 export const todosModule = {
-  id: "shep.todos",
+  id: "shipctl.todos",
   version: "0.0.0",
   panels: [
     {
       id: TODOS_PANEL_ID,
-      moduleId: "shep.todos",
+      moduleId: "shipctl.todos",
       scope: "project",
       label: "To-dos",
       icon: { name: "list-todo", label: "To-dos" },
@@ -32,7 +32,7 @@ export const todosModule = {
   projectNavigation: [
     {
       id: "todos.project-navigation",
-      moduleId: "shep.todos",
+      moduleId: "shipctl.todos",
       panelId: TODOS_PANEL_ID,
       order: 40,
       load: () => import("./TodoProjectRow"),
@@ -41,7 +41,7 @@ export const todosModule = {
   settings: [
     {
       id: "todos.settings",
-      moduleId: "shep.todos",
+      moduleId: "shipctl.todos",
       order: 40,
       load: () => import("./TodoSettingsSection"),
     },
@@ -57,4 +57,4 @@ export const todosModule = {
       useTodoStore.getState().removeProject(projectPath);
     },
   },
-} as const satisfies ShepModule;
+} as const satisfies ShipctlModule;

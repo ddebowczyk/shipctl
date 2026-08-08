@@ -1,4 +1,4 @@
-import type { UnifiedTab } from "@shep/core/platform";
+import type { UnifiedTab } from "@shipctl/core/platform";
 
 export const PANEL_REFERENCE_SCHEMA_VERSION = 1 as const;
 
@@ -106,7 +106,7 @@ function recoveryFor(reason: PanelReferenceUnavailableReason, panelId: string | 
     return {
       reason,
       title: "Panel state could not be read",
-      description: "The saved entry was kept intact. Remove it, or retain it for a newer Shep version.",
+      description: "The saved entry was kept intact. Remove it, or retain it for a newer Shipctl version.",
       canRetry: false,
       canRemove: true,
     };

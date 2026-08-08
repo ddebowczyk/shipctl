@@ -3,10 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import type { TodoFile } from "./types";
 
 export const TODO_COMMANDS = {
-  read: "plugin:shep-todos|read_todos",
-  toggle: "plugin:shep-todos|toggle_todo",
-  add: "plugin:shep-todos|add_todo",
-  move: "plugin:shep-todos|move_todo",
+  read: "plugin:shipctl-todos|read_todos",
+  toggle: "plugin:shipctl-todos|toggle_todo",
+  add: "plugin:shipctl-todos|add_todo",
+  move: "plugin:shipctl-todos|move_todo",
 } as const;
 
 export function readTodos(repoPath: string): Promise<TodoFile[]> {

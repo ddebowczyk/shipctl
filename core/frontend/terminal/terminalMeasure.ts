@@ -1,6 +1,6 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { TERMINAL_LINE_HEIGHT } from "@shep/core/appearance";
+import { TERMINAL_LINE_HEIGHT } from "@shipctl/core/appearance";
 import { useTerminalSettingsStore } from "./useTerminalSettingsStore.ts";
 
 /**

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCcw, Skull, ExternalLink, Folder } from "lucide-react";
-import type { GlobalSurfaceContributionProps } from "@shep/module-api";
+import type { GlobalSurfaceContributionProps } from "@shipctl/module-api";
 
 import { listListeningPorts, killPort } from "./client";
 import type { PortInfo } from "./types";

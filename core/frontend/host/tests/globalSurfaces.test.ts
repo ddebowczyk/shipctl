@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type {
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer, type ViteDevServer } from "vite";

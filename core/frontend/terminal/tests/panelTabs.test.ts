@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type ViteDevServer } from "vite";
 
-import { contributedPanelTabId } from "@shep/core/platform";
+import { contributedPanelTabId } from "@shipctl/core/platform";
 
 type TerminalStoreModule = typeof import("../useTerminalStore.ts");
 

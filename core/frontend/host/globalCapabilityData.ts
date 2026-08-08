@@ -1,4 +1,4 @@
-import type { ModuleGlobalDataPort } from "@shep/module-api";
+import type { ModuleGlobalDataPort } from "@shipctl/module-api";
 
 export interface GlobalCapabilityPersistence {
   read(capabilityId: string): Promise<unknown>;

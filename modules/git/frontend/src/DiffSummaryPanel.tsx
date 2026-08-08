@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { ProjectLayoutContributionProps } from "@shep/module-api";
+import type { ProjectLayoutContributionProps } from "@shipctl/module-api";
 import { Diff } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import {

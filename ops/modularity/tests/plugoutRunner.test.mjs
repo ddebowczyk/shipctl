@@ -23,7 +23,7 @@ function copy(root, relativePath) {
 
 for (const id of ["todos", "ports", "skills", "git", "commands", "assistants", "usage", "fixture"]) {
   test(`manifest removes the ${id} module from every declaration site`, async (t) => {
-    const root = await mkdtemp(path.join(tmpdir(), `shep-${id}-transform-`));
+    const root = await mkdtemp(path.join(tmpdir(), `shipctl-${id}-transform-`));
     t.after(() => rm(root, { recursive: true, force: true }));
     for (const directory of [
       "core/frontend/host",

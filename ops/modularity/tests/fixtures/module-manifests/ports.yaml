@@ -2,22 +2,22 @@
 schema_version: 1
 id: ports
 frontend:
-  package: "@shep/module-ports"
+  package: "@shipctl/module-ports"
   path: modules/ports/frontend
   composition_symbol: portsModule
 backend:
-  crate: tauri-plugin-shep-ports
+  crate: tauri-plugin-shipctl-ports
   path: modules/ports/backend
   cargo_feature: ports-module
-  dependency_alias: shep-module-ports
-  plugin_init: "shep_module_ports::init(crate::modules::ports::host_services())"
+  dependency_alias: shipctl-module-ports
+  plugin_init: "shipctl_module_ports::init(crate::modules::ports::host_services())"
   host_glue:
     - src-tauri/src/modules/ports.rs
 tauri:
   capability_identifier: ports
   permissions:
-    - shep-ports:allow-list-listening-ports
-    - shep-ports:allow-kill-port
+    - shipctl-ports:allow-list-listening-ports
+    - shipctl-ports:allow-kill-port
 profile: profiles/ports-disabled/tauri.conf.json
 tests:
   frontend: modules/ports/frontend/tests

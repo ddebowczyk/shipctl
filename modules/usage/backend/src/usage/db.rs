@@ -46,7 +46,7 @@ impl UsageDb {
 
 fn db_path() -> Result<PathBuf, String> {
     dirs::home_dir()
-        .map(|home| home.join(".shep").join("usage.sqlite3"))
+        .map(|home| home.join(".shipctl").join("usage.sqlite3"))
         .ok_or_else(|| "Unable to locate home directory".to_string())
 }
 

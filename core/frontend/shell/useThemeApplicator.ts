@@ -3,11 +3,11 @@ import { getCurrentWindow, Effect, EffectState } from "@tauri-apps/api/window";
 import { useThemeStore } from "../appearance/index.ts";
 import { applyThemeToTerminals } from "../terminal/index.ts";
 import { hexLuminance } from "../appearance/index.ts";
-import type { ShepTheme } from "../appearance/index.ts";
+import type { ShipctlTheme } from "../appearance/index.ts";
 import { toPtyColorTheme } from "../terminal/index.ts";
 import { updatePtyColorTheme } from "../platform/index.ts";
 
-const CSS_VAR_MAP: [keyof ShepTheme, string][] = [
+const CSS_VAR_MAP: [keyof ShipctlTheme, string][] = [
   ["appBg", "--app-bg"],
   ["appFg", "--app-fg"],
   ["bgRadial1", "--bg-radial-1"],

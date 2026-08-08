@@ -94,7 +94,7 @@ pub fn save_terminal_settings(
 
 #[derive(serde::Serialize)]
 pub struct MemoryStats {
-    /// Shep (Rust backend) resident memory in bytes
+    /// Shipctl (Rust backend) resident memory in bytes
     pub app_rss: u64,
     /// Total resident memory of all child processes (CLI tools) in bytes
     pub children_rss: u64,

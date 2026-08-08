@@ -319,10 +319,17 @@ fn resolve_path_alias(path: PathBuf) -> Option<ProjectAliasResolution> {
     })
 }
 
+// The `--*-worktrees-` fragments below are the path-encoded form of the git
+// module's worktree root. Both names are listed: worktrees created before the
+// rename remain registered in git and on disk, so their usage history has to
+// keep resolving. These must track the git module's root directory, not the
+// product name.
 fn encoded_home_prefixes() -> Vec<String> {
     let mut prefixes = Vec::new();
     if let Some(home) = dirs::home_dir().and_then(|home| home.to_str().map(str::to_string)) {
         let encoded_home = home.replace('/', "-");
+        prefixes.push(format!("{encoded_home}-dev--shipctl-worktrees-"));
+        prefixes.push(format!("{encoded_home}--shipctl-worktrees-"));
         prefixes.push(format!("{encoded_home}-dev--shep-worktrees-"));
         prefixes.push(format!("{encoded_home}--shep-worktrees-"));
         prefixes.push(format!("{encoded_home}-dev-"));
@@ -354,7 +361,7 @@ fn resolve_project_alias(raw_label: &str) -> ProjectAliasResolution {
         if let Some(rest) = label.strip_prefix(&prefix) {
             let display = rest.trim_matches('-');
             if !display.is_empty() {
-                let reason = if prefix.contains("shep-worktrees") {
+                let reason = if prefix.contains("shipctl-worktrees") {
                     "encoded-worktree-label"
                 } else {
                     "encoded-path-basename"

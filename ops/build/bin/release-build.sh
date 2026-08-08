@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# One-shot release build for Shep.
+# One-shot release build for Shipctl.
 #
 # - Verifies .env is present and every required signing/notarization var is set
 # - Verifies the Developer ID certificate is actually installed in Keychain
 # - Verifies the updater signing key file exists and exports its contents
-# - Verifies package.json / tauri.conf.json / Cargo.toml versions match
+# - Verifies that key matches the public key compiled into the app
+# - Verifies the app version is declared only in tauri.conf.json
 # - Runs pnpm install, pnpm tauri build, post-build-dmg.sh, generate-update-json.sh
 # - Prints a summary of the resulting artifacts
 #
@@ -29,7 +30,7 @@ fail()  { printf -- "\nERROR: %s\n" "$1" >&2; exit 1; }
 step "Loading .env"
 
 if [ ! -f .env ]; then
-  fail ".env not found at repo root. See docs/RELEASING.md for required variables."
+  fail ".env not found at repo root. See ops/build/skills/releasing/SKILL.md for required variables."
 fi
 
 set -a
@@ -111,22 +112,24 @@ for tool in pnpm jq hdiutil codesign; do
   ok "$tool"
 done
 
-# ── Step 6: verify all three version files agree ────────────────────
+# ── Step 6: verify the updater key matches the compiled pubkey ──────
+#
+# The build itself never checks these agree, so a stale key path would
+# produce a release that signs and notarizes cleanly and that every
+# installed client then rejects.
 
-step "Verifying version consistency"
+bash ops/build/bin/verify-updater-key.sh
 
-PKG_VERSION=$(jq -r .version package.json)
-TAURI_VERSION=$(jq -r .version src-tauri/tauri.conf.json)
-CARGO_VERSION=$(grep -E '^version\s*=' src-tauri/Cargo.toml | head -1 | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+# ── Step 7: verify the app version is single-sourced ────────────────
 
-if [ "$PKG_VERSION" != "$TAURI_VERSION" ] || [ "$PKG_VERSION" != "$CARGO_VERSION" ]; then
-  fail "Version mismatch: package.json=$PKG_VERSION tauri.conf.json=$TAURI_VERSION Cargo.toml=$CARGO_VERSION"
-fi
+step "Verifying app version"
 
-VERSION="$PKG_VERSION"
-ok "all three files agree on v$VERSION"
+just check version || fail "app version is not single-sourced (see drift above)"
 
-# ── Step 7: warn on dirty working tree (don't block) ────────────────
+VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+ok "building v$VERSION"
+
+# ── Step 8: warn on dirty working tree (don't block) ────────────────
 
 step "Checking working tree"
 
@@ -138,7 +141,7 @@ else
   ok "working tree is clean"
 fi
 
-# ── Step 8: install deps + build + post-build + updater metadata ────
+# ── Step 9: install deps + build + post-build + updater metadata ────
 
 step "pnpm install"
 pnpm install
@@ -152,11 +155,11 @@ bash ops/build/bin/post-build-dmg.sh
 step "Generating latest.json (generate-update-json.sh)"
 bash ops/build/bin/generate-update-json.sh
 
-# ── Step 9: summary ─────────────────────────────────────────────────
+# ── Step 10: summary ─────────────────────────────────────────────────
 
-DMG_PATH="target/release/bundle/dmg/shep_${VERSION}_aarch64.dmg"
-UPDATER_TARBALL="target/release/bundle/macos/shep.app.tar.gz"
-UPDATER_SIG="target/release/bundle/macos/shep.app.tar.gz.sig"
+DMG_PATH="target/release/bundle/dmg/shipctl_${VERSION}_aarch64.dmg"
+UPDATER_TARBALL="target/release/bundle/macos/shipctl.app.tar.gz"
+UPDATER_SIG="target/release/bundle/macos/shipctl.app.tar.gz.sig"
 
 printf "\n"
 printf "── Release build complete: v%s\n" "$VERSION"

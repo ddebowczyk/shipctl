@@ -5,9 +5,9 @@ import type {
   UnifiedTab,
   PanelTabData,
   TabCycleDirection,
-} from "@shep/core/platform";
-import { contributedPanelTabId } from "@shep/core/platform";
-import { useUIStore } from "@shep/core/shared";
+} from "@shipctl/core/platform";
+import { contributedPanelTabId } from "@shipctl/core/platform";
+import { useUIStore } from "@shipctl/core/shared";
 
 interface ProjectTerminalState {
   tabs: UnifiedTab[];

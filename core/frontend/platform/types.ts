@@ -1,4 +1,4 @@
-import type { ModuleTerminalSessionPresentation } from "@shep/module-api";
+import type { ModuleTerminalSessionPresentation } from "@shipctl/module-api";
 
 // ── Config types (match Rust structs) ────────────────────────────────
 

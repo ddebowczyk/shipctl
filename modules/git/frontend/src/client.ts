@@ -9,20 +9,20 @@ import type {
 } from "./types";
 
 export const GIT_COMMANDS = {
-  isRepo: "plugin:shep-git|is_git_repo",
-  init: "plugin:shep-git|git_init",
-  currentBranch: "plugin:shep-git|git_current_branch",
-  listBranches: "plugin:shep-git|git_list_branches",
-  listWorktrees: "plugin:shep-git|git_list_worktrees",
-  createWorktree: "plugin:shep-git|git_create_worktree",
-  status: "plugin:shep-git|git_status",
-  changedFiles: "plugin:shep-git|git_changed_files",
-  fileDiff: "plugin:shep-git|git_file_diff",
-  fileContents: "plugin:shep-git|git_file_contents",
-  listFiles: "plugin:shep-git|git_list_files",
-  switchBranch: "plugin:shep-git|git_switch_branch",
-  createBranch: "plugin:shep-git|git_create_branch",
-  diffStats: "plugin:shep-git|git_diff_stats",
+  isRepo: "plugin:shipctl-git|is_git_repo",
+  init: "plugin:shipctl-git|git_init",
+  currentBranch: "plugin:shipctl-git|git_current_branch",
+  listBranches: "plugin:shipctl-git|git_list_branches",
+  listWorktrees: "plugin:shipctl-git|git_list_worktrees",
+  createWorktree: "plugin:shipctl-git|git_create_worktree",
+  status: "plugin:shipctl-git|git_status",
+  changedFiles: "plugin:shipctl-git|git_changed_files",
+  fileDiff: "plugin:shipctl-git|git_file_diff",
+  fileContents: "plugin:shipctl-git|git_file_contents",
+  listFiles: "plugin:shipctl-git|git_list_files",
+  switchBranch: "plugin:shipctl-git|git_switch_branch",
+  createBranch: "plugin:shipctl-git|git_create_branch",
+  diffStats: "plugin:shipctl-git|git_diff_stats",
 } as const;
 
 export function isGitRepo(path: string): Promise<boolean> {

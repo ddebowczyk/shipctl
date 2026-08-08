@@ -9,13 +9,13 @@ The repeatable procedure. Written to be executed by an agent without further con
 read `reference/ledger-format.md` for the entry schema it produces.
 
 `main` in this repository is the product trunk and the only authority over
-product state. The original Shep repository is not a trunk and never becomes
+product state. The original Shipctl repository is not a trunk and never becomes
 one: `upstream/main` is a read-only intake feed. Review fetches and records
 upstream changes; it never synchronizes, resets, rebases, merges, cherry-picks,
 or checks upstream content out into a product branch.
 
 This is one-way selective intake, not contribution-fork maintenance. Never open
-a pull request against the original Shep repository or push our product branches
+a pull request against the original Shipctl repository or push our product branches
 or tags to it. Selected behavior becomes local bd work and is incorporated into
 our independent codebase.
 

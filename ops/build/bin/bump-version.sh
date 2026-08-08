@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 #
-# Bump the app version across all three version files and commit the change.
+# Bump the app version and commit the change.
+#
+# src-tauri/tauri.conf.json is the single source of the app version; every other
+# manifest carries a 0.0.0 placeholder. `just check version` enforces that, and
+# this script runs it before and after so a bump cannot introduce a second copy.
 #
 # Usage: just build bump <new-version>
 # Example: just build bump 0.2.4
@@ -29,23 +33,13 @@ if ! printf "%s" "$NEW_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
   fail "Version must be semver (e.g. 0.2.4), got: $NEW_VERSION"
 fi
 
-# ── Read current versions ────────────────────────────────────────────
+# ── Read current version ─────────────────────────────────────────────
 
-step "Reading current versions"
+step "Reading current version"
 
-PKG_VERSION=$(jq -r .version package.json)
-TAURI_VERSION=$(jq -r .version src-tauri/tauri.conf.json)
-CARGO_VERSION=$(grep -E '^version\s*=' src-tauri/Cargo.toml | head -1 | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+just check version || fail "app version is not single-sourced; fix the drift above before bumping"
 
-ok "package.json:          $PKG_VERSION"
-ok "src-tauri/tauri.conf.json: $TAURI_VERSION"
-ok "src-tauri/Cargo.toml:  $CARGO_VERSION"
-
-if [ "$PKG_VERSION" != "$TAURI_VERSION" ] || [ "$PKG_VERSION" != "$CARGO_VERSION" ]; then
-  printf "\n   WARNING: version files are already out of sync. Proceeding anyway.\n"
-fi
-
-CURRENT="$PKG_VERSION"
+CURRENT=$(jq -r .version src-tauri/tauri.conf.json)
 
 if [ "$NEW_VERSION" = "$CURRENT" ]; then
   fail "New version ($NEW_VERSION) is the same as the current version."
@@ -54,7 +48,7 @@ fi
 # ── Confirm ──────────────────────────────────────────────────────────
 
 printf "\n   Bumping: %s → %s\n" "$CURRENT" "$NEW_VERSION"
-printf "   Files:   package.json, src-tauri/tauri.conf.json, src-tauri/Cargo.toml\n\n"
+printf "   File:    src-tauri/tauri.conf.json\n\n"
 if [[ "$AUTO_YES" != "-y" ]]; then
   read -r -p "   Continue? [y/N] " CONFIRM
   if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
@@ -63,39 +57,28 @@ if [[ "$AUTO_YES" != "-y" ]]; then
   fi
 fi
 
-# ── Update files ─────────────────────────────────────────────────────
-
-step "Updating package.json"
-jq --arg v "$NEW_VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
-ok "package.json → $NEW_VERSION"
+# ── Update the single source ─────────────────────────────────────────
 
 step "Updating src-tauri/tauri.conf.json"
 jq --arg v "$NEW_VERSION" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp && mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
 ok "tauri.conf.json → $NEW_VERSION"
 
-step "Updating src-tauri/Cargo.toml"
-awk -v new="$NEW_VERSION" 'done || !/^version[[:space:]]*=/ { print; next } { sub(/"[^"]+"/, "\"" new "\""); print; done=1 }' src-tauri/Cargo.toml > src-tauri/Cargo.toml.tmp && mv src-tauri/Cargo.toml.tmp src-tauri/Cargo.toml
-ok "Cargo.toml → $NEW_VERSION"
-
 # ── Verify ───────────────────────────────────────────────────────────
 
-step "Verifying all three files agree"
+step "Verifying the version is still single-sourced"
 
-PKG_VERSION=$(jq -r .version package.json)
+just check version || fail "bump introduced version drift"
+
 TAURI_VERSION=$(jq -r .version src-tauri/tauri.conf.json)
-CARGO_VERSION=$(grep -E '^version\s*=' src-tauri/Cargo.toml | head -1 | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
-
-if [ "$PKG_VERSION" != "$NEW_VERSION" ] || [ "$TAURI_VERSION" != "$NEW_VERSION" ] || [ "$CARGO_VERSION" != "$NEW_VERSION" ]; then
-  fail "Version mismatch after update: package.json=$PKG_VERSION tauri.conf.json=$TAURI_VERSION Cargo.toml=$CARGO_VERSION"
+if [ "$TAURI_VERSION" != "$NEW_VERSION" ]; then
+  fail "tauri.conf.json reads $TAURI_VERSION after the bump, expected $NEW_VERSION"
 fi
-
-ok "all three files agree on v$NEW_VERSION"
 
 # ── Commit ───────────────────────────────────────────────────────────
 
 step "Committing version bump"
 
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+git add src-tauri/tauri.conf.json
 git commit -m "Bump version to $NEW_VERSION for release"
 
 ok "committed version bump"
@@ -110,5 +93,5 @@ printf "   2. Smoke test the built app\n"
 printf "   3. Push and tag:\n"
 printf "      git push origin main\n"
 printf "      git tag v%s && git push origin v%s\n" "$NEW_VERSION" "$NEW_VERSION"
-printf "   4. Create the GitHub release (see docs/RELEASING.md)\n"
+printf "   4. Create the GitHub release (see ops/build/skills/releasing/SKILL.md)\n"
 printf "\n"

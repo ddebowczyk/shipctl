@@ -1,17 +1,17 @@
 import type {
   ModuleHostServices,
   ModuleSettingsSnapshot,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
-import type { ProjectSettings } from "@shep/core/platform";
-import { contributedPanelTabId } from "@shep/core/platform";
+import type { ProjectSettings } from "@shipctl/core/platform";
+import { contributedPanelTabId } from "@shipctl/core/platform";
 import {
   getGlobalCapabilityData,
   loadWorkspace,
   openUrl,
   replaceGlobalCapabilityData,
   saveWorkspace,
-} from "@shep/core/platform";
+} from "@shipctl/core/platform";
 import { useNoticeStore } from "../shared/useNoticeStore.ts";
 import { useProjectSettingsStore } from "../projects/useProjectSettingsStore.ts";
 import { useRepoStore } from "../projects/useRepoStore.ts";

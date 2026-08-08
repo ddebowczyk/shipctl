@@ -1,24 +1,24 @@
 import { createHighlighterCore, type HighlighterCore, type ThemedToken } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
-import type { ModuleAppearanceSnapshot } from "@shep/module-api";
+import type { ModuleAppearanceSnapshot } from "@shipctl/module-api";
 import { hexLuminance } from "./appearance.ts";
 
 /**
  * The set of languages and themes actually registered with the highlighter
  * lives in `getHighlighter()` below as explicit dynamic imports — that's the
  * source of truth for what Vite emits into `dist/`. Keep the two lists below
- * (EXT_TO_LANG, SHEP_TO_SHIKI) in sync with those imports so `langForFile`
+ * (EXT_TO_LANG, SHIPCTL_TO_SHIKI) in sync with those imports so `langForFile`
  * and `shikiThemeFor` never hand back a name the highlighter can't resolve.
  */
 
 /**
- * Shep theme → Shiki theme mapping. Each entry picks the Shiki theme whose
- * *syntax palette* feels closest to the Shep theme — same mood, similar
- * saturation, compatible background luminance. Note: Shep's theme only
+ * Shipctl theme → Shiki theme mapping. Each entry picks the Shiki theme whose
+ * *syntax palette* feels closest to the Shipctl theme — same mood, similar
+ * saturation, compatible background luminance. Note: Shipctl's theme only
  * controls the diff row backgrounds (green/red gutters); these mappings
  * control the colors of the code tokens *inside* each line.
  */
-const SHEP_TO_SHIKI: Record<string, string> = {
+const SHIPCTL_TO_SHIKI: Record<string, string> = {
   // Tokyo Night family — direct match in Shiki
   "tokyo-night": "tokyo-night",
   "tokyo-glass": "tokyo-night",
@@ -36,7 +36,7 @@ const SHEP_TO_SHIKI: Record<string, string> = {
 
   // Nightfox family — no Shiki port exists. Night Owl is the closest
   // in mood: both are muted cool-dark with soft accents. Night Owl Light
-  // is the sibling for Dayfox (Shep's "nightfox-light").
+  // is the sibling for Dayfox (Shipctl's "nightfox-light").
   "nightfox-dark": "night-owl",
   "nightfox-glass": "night-owl",
   "nightfox-light": "night-owl-light",
@@ -49,7 +49,7 @@ const SHEP_TO_SHIKI: Record<string, string> = {
   // minimal warm dark theme that captures the same understated mood.
   "jellybeans": "vesper",
 
-  // Solarized — Shep's `solarized` is actually Solarized LIGHT
+  // Solarized — Shipctl's `solarized` is actually Solarized LIGHT
   // (appBg #fdf6e3). Must map to solarized-light, not solarized-dark.
   "solarized": "solarized-light",
 
@@ -90,10 +90,10 @@ const EXT_TO_LANG: Record<string, string> = {
   zsh: "bash",
 };
 
-/** Pick a Shiki theme for a given Shep theme. Unknown Shep themes fall back
+/** Pick a Shiki theme for a given Shipctl theme. Unknown Shipctl themes fall back
  *  based on background luminance so custom themes still get readable colors. */
 export function shikiThemeFor(theme: ModuleAppearanceSnapshot): string {
-  const mapped = SHEP_TO_SHIKI[theme.themeId];
+  const mapped = SHIPCTL_TO_SHIKI[theme.themeId];
   if (mapped) return mapped;
   return hexLuminance(theme.background) > 0.3 ? "github-light" : "tokyo-night";
 }

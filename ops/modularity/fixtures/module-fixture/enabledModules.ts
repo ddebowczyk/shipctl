@@ -1,4 +1,4 @@
-import type { ShepModule } from "@shep/module-api";
-import { fixtureModule } from "@shep/module-fixture";
+import type { ShipctlModule } from "@shipctl/module-api";
+import { fixtureModule } from "@shipctl/module-fixture";
 
-export const ENABLED_MODULES = [fixtureModule] as const satisfies readonly ShepModule[];
+export const ENABLED_MODULES = [fixtureModule] as const satisfies readonly ShipctlModule[];

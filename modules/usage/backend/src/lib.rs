@@ -18,14 +18,14 @@ pub use usage::{
     get_windowed_details as query_usage_details, run_background_ingest, EnabledProviders, UsageDb,
 };
 
-pub const PLUGIN_NAME: &str = "shep-usage";
-pub const GET_ALL_USAGE_SNAPSHOTS_COMMAND: &str = "plugin:shep-usage|get_all_usage_snapshots";
-pub const GET_USAGE_SNAPSHOT_COMMAND: &str = "plugin:shep-usage|get_usage_snapshot";
-pub const GET_USAGE_DETAILS_COMMAND: &str = "plugin:shep-usage|get_usage_details";
-pub const GET_USAGE_OVERVIEW_COMMAND: &str = "plugin:shep-usage|get_usage_overview";
+pub const PLUGIN_NAME: &str = "shipctl-usage";
+pub const GET_ALL_USAGE_SNAPSHOTS_COMMAND: &str = "plugin:shipctl-usage|get_all_usage_snapshots";
+pub const GET_USAGE_SNAPSHOT_COMMAND: &str = "plugin:shipctl-usage|get_usage_snapshot";
+pub const GET_USAGE_DETAILS_COMMAND: &str = "plugin:shipctl-usage|get_usage_details";
+pub const GET_USAGE_OVERVIEW_COMMAND: &str = "plugin:shipctl-usage|get_usage_overview";
 pub const GET_PROJECT_ALIAS_REVIEW_QUEUE_COMMAND: &str =
-    "plugin:shep-usage|get_project_alias_review_queue";
-pub const REFRESH_USAGE_DATA_COMMAND: &str = "plugin:shep-usage|refresh_usage_data";
+    "plugin:shipctl-usage|get_project_alias_review_queue";
+pub const REFRESH_USAGE_DATA_COMMAND: &str = "plugin:shipctl-usage|refresh_usage_data";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderVisibility {
@@ -190,14 +190,14 @@ mod tests {
 
     #[test]
     fn exposes_namespaced_usage_contract() {
-        assert_eq!(PLUGIN_NAME, "shep-usage");
+        assert_eq!(PLUGIN_NAME, "shipctl-usage");
         assert_eq!(
             GET_ALL_USAGE_SNAPSHOTS_COMMAND,
-            "plugin:shep-usage|get_all_usage_snapshots"
+            "plugin:shipctl-usage|get_all_usage_snapshots"
         );
         assert_eq!(
             REFRESH_USAGE_DATA_COMMAND,
-            "plugin:shep-usage|refresh_usage_data"
+            "plugin:shipctl-usage|refresh_usage_data"
         );
         assert_eq!(
             ProviderVisibility::default(),

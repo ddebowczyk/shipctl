@@ -1,4 +1,4 @@
-import type { ProjectNavigationContributionProps } from "@shep/module-api";
+import type { ProjectNavigationContributionProps } from "@shipctl/module-api";
 import { List } from "lucide-react";
 
 import { useCommandsStore } from "./store";

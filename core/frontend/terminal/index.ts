@@ -5,7 +5,7 @@
 // React components are deliberately NOT exported here. The node --test lanes
 // import this entry point through Node's type stripping, which handles .ts but
 // not JSX; mixing views in would make the capability's logic untestable there.
-// The views are reachable at "@shep/core/terminal/views".
+// The views are reachable at "@shipctl/core/terminal/views".
 export * from "./terminalCache.ts";
 // Only the renderer policy is exported here; "./terminalRendererAddons.ts"
 // value-imports the xterm addon bundles and stays out of this entry point.

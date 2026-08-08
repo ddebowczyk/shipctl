@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
-import type { GlobalNavigationContribution } from "@shep/module-api";
+import type { GlobalNavigationContribution } from "@shipctl/module-api";
 import type { RepoInfo, RepoGroup } from "../platform/index.ts";
 import { useTerminalStore } from "../terminal/index.ts";
 import {

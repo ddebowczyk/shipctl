@@ -4,19 +4,19 @@ import type {
   ModuleTerminalSession,
   ModuleTerminalSessionLaunchRequest,
   ModuleTerminalSessionUpdate,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 import {
   getDefaultShell,
   killPty,
   spawnPty,
-} from "@shep/core/platform";
-import { useThemeStore } from "@shep/core/appearance";
-import { hexLuminance } from "@shep/core/appearance";
-import type { PtyOutput } from "@shep/core/platform";
+} from "@shipctl/core/platform";
+import { useThemeStore } from "@shipctl/core/appearance";
+import { hexLuminance } from "@shipctl/core/appearance";
+import type { PtyOutput } from "@shipctl/core/platform";
 import { toPtyColorTheme } from "./ptyColorTheme.ts";
 import { useTerminalStore, nextTabId } from "./useTerminalStore.ts";
-import { useNoticeStore } from "@shep/core/shared";
-import { getErrorMessage } from "@shep/core/platform";
+import { useNoticeStore } from "@shipctl/core/shared";
+import { getErrorMessage } from "@shipctl/core/platform";
 import {
   bindTerminalSessionsRuntime,
   publishTerminalSessionEvent,

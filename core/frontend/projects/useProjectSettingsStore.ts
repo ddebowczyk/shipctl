@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { ProjectSettings } from "@shep/core/platform";
-import { getProjectSettings, saveProjectSettings } from "@shep/core/platform";
+import type { ProjectSettings } from "@shipctl/core/platform";
+import { getProjectSettings, saveProjectSettings } from "@shipctl/core/platform";
 
 const DEFAULT_SETTINGS: ProjectSettings = {
   showAgentSessionsInSidebar: true,

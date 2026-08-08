@@ -17,7 +17,7 @@ const composition = readFileSync(path.join(root, "core/frontend/host/enabledModu
 for (const id of ids) {
   const manifest = readManifest(root, id);
   plugout(root, id);
-  const envName = `VITE_SHEP_${id.toUpperCase().replaceAll("-", "_")}_MODULE`;
+  const envName = `VITE_SHIPCTL_${id.toUpperCase().replaceAll("-", "_")}_MODULE`;
   if (composition.includes(`import.meta.env.${envName}`)) frontendDisabled(root, id);
   if (manifest.backend?.cargo_feature && manifest.profile?.includes("-disabled/")) {
     nativeDisabled(root, id);

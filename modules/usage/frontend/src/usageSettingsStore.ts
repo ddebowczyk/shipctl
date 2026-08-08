@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ModuleGlobalDataPort } from "@shep/module-api";
+import type { ModuleGlobalDataPort } from "@shipctl/module-api";
 import type { UsageSettings, UsageProvider, ProviderBudgetConfig } from "./types";
 
 const USAGE_SETTINGS_KEY = "usage";

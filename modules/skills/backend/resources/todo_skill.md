@@ -1,12 +1,12 @@
 ---
-name: shep-todos
+name: shipctl-todos
 description: Maintain this project's TODO.md as a markdown kanban board shared with the humans on the project. Use when starting, finishing, or planning work, and whenever the user mentions to-dos, tasks, the backlog, or the board.
 ---
 
 # Project to-dos (TODO.md)
 
 This repo tracks work in `TODO.md` at the repo root. The humans on this
-project see that file rendered as a live kanban board (in the Shep app), so
+project see that file rendered as a live kanban board (in the Shipctl app), so
 keep it accurate as you work. The file is the single source of truth — there
 is no other task database.
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import type { ModuleHostServices, ShepModule } from "@shep/module-api";
+import type { ModuleHostServices, ShipctlModule } from "@shipctl/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 import type { BuiltinGlobalSurfaceLoaders } from "../builtinGlobalSurfaceAdapters.ts";
@@ -82,13 +82,13 @@ const fixtureSkills = {
   install: async () => undefined,
 } satisfies ModuleHostServices["skills"];
 
-const fixtureModule: ShepModule = {
-  id: "shep.fixture",
+const fixtureModule: ShipctlModule = {
+  id: "shipctl.fixture",
   version: "0.0.0",
   panels: [
     {
       id: "fixture.panel",
-      moduleId: "shep.fixture",
+      moduleId: "shipctl.fixture",
       scope: "project",
       label: "Fixture",
       icon: { name: "test" },
@@ -100,14 +100,14 @@ const fixtureModule: ShepModule = {
   globalSurfaces: [
     {
       id: "fixture.global-surface",
-      moduleId: "shep.fixture",
+      moduleId: "shipctl.fixture",
       load: async () => ({ default: () => null }),
     },
   ],
   globalNavigation: [
     {
       id: "fixture.global-navigation",
-      moduleId: "shep.fixture",
+      moduleId: "shipctl.fixture",
       surfaceId: "fixture.global-surface",
       label: "Fixture",
       icon: { name: "test" },
@@ -116,7 +116,7 @@ const fixtureModule: ShepModule = {
   sidebar: [
     {
       id: "fixture.sidebar",
-      moduleId: "shep.fixture",
+      moduleId: "shipctl.fixture",
       surfaceId: "fixture.global-surface",
       order: 10,
       load: async () => ({ default: () => null }),
@@ -125,7 +125,7 @@ const fixtureModule: ShepModule = {
   projectNavigation: [
     {
       id: "fixture.project-navigation",
-      moduleId: "shep.fixture",
+      moduleId: "shipctl.fixture",
       panelId: "fixture.panel",
       load: async () => ({ default: () => null }),
     },
@@ -133,7 +133,7 @@ const fixtureModule: ShepModule = {
   projectActions: [
     {
       id: "fixture.project-actions",
-      moduleId: "shep.fixture",
+      moduleId: "shipctl.fixture",
       order: 5,
       getGroup: () => ({ label: "Fixture", actions: [] }),
     },
@@ -141,7 +141,7 @@ const fixtureModule: ShepModule = {
   projectLayout: [
     {
       id: "fixture.project-layout",
-      moduleId: "shep.fixture",
+      moduleId: "shipctl.fixture",
       slot: "workspace.trailing",
       order: 5,
       load: async () => ({ default: () => null }),
@@ -149,19 +149,19 @@ const fixtureModule: ShepModule = {
   ],
   projectFactsProvider: {
     id: "fixture.project-facts",
-    moduleId: "shep.fixture",
+    moduleId: "shipctl.fixture",
     getFacts: () => ({ revision: { label: "main", state: "clean" } }),
   },
   settings: [
     {
       id: "fixture.settings",
-      moduleId: "shep.fixture",
+      moduleId: "shipctl.fixture",
       load: async () => ({ default: () => null }),
     },
   ],
   skillsProvider: {
     id: "fixture.skills-provider",
-    moduleId: "shep.fixture",
+    moduleId: "shipctl.fixture",
     port: fixtureSkills,
   },
 };
@@ -261,7 +261,7 @@ test("default profile enables the extracted Ports surface", () => {
 
 test("default profile composes Usage only through its module contributions", () => {
   const registry = createEnabledGlobalSurfaceRegistry(builtinGlobalSurfaceLoaders);
-  assert.equal(registry.surface("core.usage")?.moduleId, "shep.usage");
+  assert.equal(registry.surface("core.usage")?.moduleId, "shipctl.usage");
   assert.equal(
     registry.navigation().find(({ id }) => id === "usage.global-navigation")?.surfaceId,
     "core.usage",
@@ -335,17 +335,17 @@ test("module surfaces compose without feature-specific host branches", () => {
 });
 
 test("sidebar contributions are ordered, module-owned, and absent when disabled", () => {
-  const earlier: ShepModule = {
-    id: "shep.earlier",
+  const earlier: ShipctlModule = {
+    id: "shipctl.earlier",
     version: "0",
     globalSurfaces: [{
       id: "earlier.global-surface",
-      moduleId: "shep.earlier",
+      moduleId: "shipctl.earlier",
       load: async () => ({ default: () => null }),
     }],
     sidebar: [{
       id: "earlier.sidebar",
-      moduleId: "shep.earlier",
+      moduleId: "shipctl.earlier",
       surfaceId: "earlier.global-surface",
       order: -10,
       load: async () => ({ default: () => null }),
@@ -360,9 +360,9 @@ test("sidebar contributions are ordered, module-owned, and absent when disabled"
   assert.throws(
     () => moduleSidebarContributions([{
       ...earlier,
-      id: "shep.other",
+      id: "shipctl.other",
     }]),
-    /belongs to shep\.earlier, not shep\.other/,
+    /belongs to shipctl\.earlier, not shipctl\.other/,
   );
   assert.throws(
     () => moduleSidebarContributions([{
@@ -400,8 +400,8 @@ test("module scheduling supports startup, delayed, and periodic work with cleanu
       intervals.delete(handle);
     },
   };
-  const scheduledModule: ShepModule = {
-    id: "shep.scheduled",
+  const scheduledModule: ShipctlModule = {
+    id: "shipctl.scheduled",
     version: "0",
     activate: () => {
       calls.push("activate");
@@ -410,19 +410,19 @@ test("module scheduling supports startup, delayed, and periodic work with cleanu
     scheduledTasks: [
       {
         id: "scheduled.startup",
-        moduleId: "shep.scheduled",
+        moduleId: "shipctl.scheduled",
         schedule: { kind: "startup" },
         run: () => { calls.push("startup"); },
       },
       {
         id: "scheduled.delay",
-        moduleId: "shep.scheduled",
+        moduleId: "shipctl.scheduled",
         schedule: { kind: "delay", delayMs: 3_000 },
         run: () => { calls.push("delay"); },
       },
       {
         id: "scheduled.interval",
-        moduleId: "shep.scheduled",
+        moduleId: "shipctl.scheduled",
         schedule: { kind: "interval", intervalMs: 60_000 },
         run: () => { calls.push("interval"); },
       },
@@ -454,16 +454,16 @@ test("disabled and invalid scheduled-task profiles fail safely", () => {
   assert.deepEqual(moduleScheduledTasks([]), []);
   assert.throws(
     () => moduleScheduledTasks([{
-      id: "shep.invalid",
+      id: "shipctl.invalid",
       version: "0",
       scheduledTasks: [{
         id: "invalid.task",
-        moduleId: "shep.owner",
+        moduleId: "shipctl.owner",
         schedule: { kind: "startup" },
         run: () => undefined,
       }],
     }]),
-    /belongs to shep\.owner, not shep\.invalid/,
+    /belongs to shipctl\.owner, not shipctl\.invalid/,
   );
 });
 
@@ -476,20 +476,20 @@ test("partial scheduler registration is rolled back with module activation", asy
     setInterval: () => { throw new Error("scheduler unavailable"); },
     clearInterval: () => undefined,
   };
-  const module: ShepModule = {
-    id: "shep.rollback",
+  const module: ShipctlModule = {
+    id: "shipctl.rollback",
     version: "0",
     activate: () => ({ deactivate: () => { calls.push("deactivate"); } }),
     scheduledTasks: [
       {
         id: "rollback.delay",
-        moduleId: "shep.rollback",
+        moduleId: "shipctl.rollback",
         schedule: { kind: "delay", delayMs: 1 },
         run: () => undefined,
       },
       {
         id: "rollback.interval",
-        moduleId: "shep.rollback",
+        moduleId: "shipctl.rollback",
         schedule: { kind: "interval", intervalMs: 1 },
         run: () => undefined,
       },
@@ -553,9 +553,9 @@ test("project facts selection is singular and module-owned", () => {
   assert.throws(
     () => moduleProjectFactsProviders([{
       ...fixtureModule,
-      id: "shep.other",
+      id: "shipctl.other",
     }]),
-    /belongs to shep.fixture, not shep.other/,
+    /belongs to shipctl.fixture, not shipctl.other/,
   );
 });
 
@@ -563,8 +563,8 @@ test("Skills provider selection is optional, singular, and module-owned", () => 
   assert.equal(moduleSkillsProvider([fixtureModule]), services.skills);
   assert.equal(moduleSkillsProvider([]), null);
   assert.throws(
-    () => moduleSkillsProvider([fixtureModule, { ...fixtureModule, id: "shep.other" }]),
-    /belongs to shep.fixture, not shep.other/,
+    () => moduleSkillsProvider([fixtureModule, { ...fixtureModule, id: "shipctl.other" }]),
+    /belongs to shipctl.fixture, not shipctl.other/,
   );
   assert.throws(
     () => moduleSkillsProvider([fixtureModule, fixtureModule]),
@@ -574,7 +574,7 @@ test("Skills provider selection is optional, singular, and module-owned", () => 
 
 test("project lifecycle dispatch isolates module failures", async () => {
   const calls: Array<readonly string[] | string> = [];
-  const modules: ShepModule[] = [
+  const modules: ShipctlModule[] = [
     {
       id: "fixture.failing",
       version: "0",
@@ -605,7 +605,7 @@ test("project lifecycle dispatch isolates module failures", async () => {
 
 test("pre-shutdown lifecycle is ordered and stops before native shutdown on failure", async () => {
   const calls: string[] = [];
-  const modules: ShepModule[] = [
+  const modules: ShipctlModule[] = [
     {
       id: "fixture.first",
       version: "0",

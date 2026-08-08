@@ -72,6 +72,6 @@ export type {
   ModuleHost,
   ModuleScheduledTask,
   ModuleTaskSchedule,
-  ShepModule,
+  ShipctlModule,
   SkillsProviderContribution,
 } from "./module";

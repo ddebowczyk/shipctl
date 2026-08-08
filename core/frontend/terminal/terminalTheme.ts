@@ -1,10 +1,10 @@
 import type { ITheme } from "@xterm/xterm";
-import { hexLuminance } from "@shep/core/appearance";
-import type { ShepTheme } from "@shep/core/appearance";
-import type { TerminalSettings } from "@shep/core/platform";
-import { resizePty } from "@shep/core/platform";
+import { hexLuminance } from "@shipctl/core/appearance";
+import type { ShipctlTheme } from "@shipctl/core/appearance";
+import type { TerminalSettings } from "@shipctl/core/platform";
+import { resizePty } from "@shipctl/core/platform";
 import { terminalCache } from "./terminalCache.ts";
-import { buildCSSFontFamily } from "@shep/core/appearance";
+import { buildCSSFontFamily } from "@shipctl/core/appearance";
 import { preserveTerminalViewport } from "./terminalViewport.ts";
 import { reconcileTerminalRenderer } from "./terminalRenderer.ts";
 
@@ -19,7 +19,7 @@ function withAlpha(hex: string, alpha: number): string {
   return hex;
 }
 
-function isLightTheme(theme: ShepTheme): boolean {
+function isLightTheme(theme: ShipctlTheme): boolean {
   return hexLuminance(theme.appBg) > 0.3;
 }
 
@@ -40,10 +40,10 @@ export function blendOpaque(base: string, foreground: string, opacity: number): 
   return `#${channels.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export function createTerminalTheme(theme: ShepTheme): ITheme {
+export function createTerminalTheme(theme: ShipctlTheme): ITheme {
   const light = isLightTheme(theme);
   return {
-    // Only glass themes expose Shep's gradient and native window effect. Opaque
+    // Only glass themes expose Shipctl's gradient and native window effect. Opaque
     // themes must hand WebGL a real RGB background: it turns "transparent"'s
     // zero RGB value into an opaque black viewport.
     background: theme.isTransparent ? "transparent" : theme.appBg,
@@ -78,7 +78,7 @@ export function createTerminalTheme(theme: ShepTheme): ITheme {
   };
 }
 
-export function applyThemeToTerminals(theme: ShepTheme): void {
+export function applyThemeToTerminals(theme: ShipctlTheme): void {
   const xtermTheme = createTerminalTheme(theme);
   for (const [, entry] of terminalCache) {
     // Skip hidden terminals entirely — setting options.theme on a

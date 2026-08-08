@@ -8,31 +8,31 @@ importers:
 
   .:
     dependencies:
-      '@shep/core':
+      '@shipctl/core':
         specifier: workspace:*
         version: link:core/frontend
-      '@shep/module-api':
+      '@shipctl/module-api':
         specifier: workspace:*
         version: link:modules/api/frontend
-      '@shep/module-assistants':
+      '@shipctl/module-assistants':
         specifier: workspace:*
         version: link:modules/assistants/frontend
-      '@shep/module-commands':
+      '@shipctl/module-commands':
         specifier: workspace:*
         version: link:modules/commands/frontend
-      '@shep/module-git':
+      '@shipctl/module-git':
         specifier: workspace:*
         version: link:modules/git/frontend
-      '@shep/module-ports':
+      '@shipctl/module-ports':
         specifier: workspace:*
         version: link:modules/ports/frontend
-      '@shep/module-skills':
+      '@shipctl/module-skills':
         specifier: workspace:*
         version: link:modules/skills/frontend
-      '@shep/module-todos':
+      '@shipctl/module-todos':
         specifier: workspace:*
         version: link:modules/todos/frontend
-      '@shep/module-usage':
+      '@shipctl/module-usage':
         specifier: workspace:*
         version: link:modules/usage/frontend
       '@tauri-apps/api':
@@ -114,7 +114,7 @@ importers:
 
   core/frontend:
     dependencies:
-      '@shep/module-api':
+      '@shipctl/module-api':
         specifier: workspace:*
         version: link:../../modules/api/frontend
       '@tauri-apps/api':
@@ -132,7 +132,7 @@ importers:
 
   modules/assistants/frontend:
     dependencies:
-      '@shep/module-api':
+      '@shipctl/module-api':
         specifier: workspace:*
         version: link:../../api/frontend
       '@tauri-apps/api':
@@ -150,7 +150,7 @@ importers:
 
   modules/commands/frontend:
     dependencies:
-      '@shep/module-api':
+      '@shipctl/module-api':
         specifier: workspace:*
         version: link:../../api/frontend
       lucide-react:
@@ -165,7 +165,7 @@ importers:
 
   modules/fixture/frontend:
     dependencies:
-      '@shep/module-api':
+      '@shipctl/module-api':
         specifier: workspace:*
         version: link:../../api/frontend
       '@tauri-apps/api':
@@ -183,12 +183,12 @@ importers:
       '@pierre/trees':
         specifier: 1.0.0-beta.3
         version: 1.0.0-beta.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@shep/module-api':
-        specifier: workspace:*
-        version: link:../../api/frontend
       '@shikijs/markdown-it':
         specifier: ^4.4.2
         version: 4.4.2
+      '@shipctl/module-api':
+        specifier: workspace:*
+        version: link:../../api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -210,7 +210,7 @@ importers:
 
   modules/ports/frontend:
     dependencies:
-      '@shep/module-api':
+      '@shipctl/module-api':
         specifier: workspace:*
         version: link:../../api/frontend
       '@tauri-apps/api':
@@ -225,7 +225,7 @@ importers:
 
   modules/skills/frontend:
     dependencies:
-      '@shep/module-api':
+      '@shipctl/module-api':
         specifier: workspace:*
         version: link:../../api/frontend
       '@tauri-apps/api':
@@ -237,7 +237,7 @@ importers:
 
   modules/todos/frontend:
     dependencies:
-      '@shep/module-api':
+      '@shipctl/module-api':
         specifier: workspace:*
         version: link:../../api/frontend
       '@tauri-apps/api':
@@ -255,7 +255,7 @@ importers:
 
   modules/usage/frontend:
     dependencies:
-      '@shep/module-api':
+      '@shipctl/module-api':
         specifier: workspace:*
         version: link:../../api/frontend
       '@tauri-apps/api':

@@ -1,13 +1,13 @@
 [package]
-name = "tauri-plugin-shep-usage"
+name = "tauri-plugin-shipctl-usage"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
-links = "tauri-plugin-shep-usage"
+links = "tauri-plugin-shipctl-usage"
 
 [lib]
-name = "shep_module_usage"
+name = "shipctl_module_usage"
 path = "src/lib.rs"
 
 [dependencies]

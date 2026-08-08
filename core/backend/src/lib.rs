@@ -1,4 +1,4 @@
-//! Shep's own capabilities, split by capability rather than by file kind — the
+//! Shipctl's own capabilities, split by capability rather than by file kind — the
 //! same layout the frontend uses in `core/frontend/`.
 //!
 //! Each capability owns its logic and the `#[tauri::command]` handlers that

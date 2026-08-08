@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { ModuleAppearanceSnapshot } from "@shep/module-api";
+import type { ModuleAppearanceSnapshot } from "@shipctl/module-api";
 import { hexLuminance } from "./appearance";
 import { shikiThemeFor } from "./shikiHighlighter";
 

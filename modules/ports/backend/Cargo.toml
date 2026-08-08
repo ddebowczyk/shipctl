@@ -1,13 +1,13 @@
 [package]
-name = "tauri-plugin-shep-ports"
+name = "tauri-plugin-shipctl-ports"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
-links = "tauri-plugin-shep-ports"
+links = "tauri-plugin-shipctl-ports"
 
 [lib]
-name = "shep_module_ports"
+name = "shipctl_module_ports"
 path = "src/lib.rs"
 
 [dependencies]

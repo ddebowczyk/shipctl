@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter, Wry};
 pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let version = app.config().version.clone();
 
-    // -- App (Shep) submenu --
+    // -- App (Shipctl) submenu --
     let about_meta = AboutMetadataBuilder::new().version(version).build();
     let check_updates = MenuItem::with_id(
         app,
@@ -15,7 +15,7 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
     )?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
 
-    let app_menu = SubmenuBuilder::new(app, "Shep")
+    let app_menu = SubmenuBuilder::new(app, "Shipctl")
         .about(Some(about_meta))
         .separator()
         .item(&check_updates)

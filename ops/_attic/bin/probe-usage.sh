@@ -22,7 +22,7 @@ Modes:
 Formats:
   jsonl     Print one JSON object per line (default)
   report    Print a human-readable report
-  normalized  Print one normalized JSON document for Shep
+  normalized  Print one normalized JSON document for Shipctl
 
 Examples:
   ops/_attic/bin/probe-usage.sh

@@ -3,7 +3,7 @@ import type {
   ModuleTerminalSessionExitReason,
   ModuleTerminalSessionLifecycleEvent,
   ModuleTerminalSessionsPort,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
 export type TerminalSessionsRuntime = Pick<
   ModuleTerminalSessionsPort,

@@ -19,7 +19,7 @@ API_URL = "https://models.dev/api.json"
 def fetch_catalog():
     request = urllib.request.Request(
         API_URL,
-        headers={"User-Agent": "shep-pricing-updater/1.0"},
+        headers={"User-Agent": "shipctl-pricing-updater/1.0"},
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)

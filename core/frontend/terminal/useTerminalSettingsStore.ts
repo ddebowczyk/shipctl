@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import type { TerminalSettings } from "@shep/core/platform";
-import { getTerminalSettings, saveTerminalSettings } from "@shep/core/platform";
+import type { TerminalSettings } from "@shipctl/core/platform";
+import { getTerminalSettings, saveTerminalSettings } from "@shipctl/core/platform";
 import { applyTerminalSettings } from "./terminalTheme.ts";
 
-import { normalizeTerminalFontFamily, TERMINAL_FONT_FAMILY, TERMINAL_FONT_SIZE } from "@shep/core/appearance";
-import { ensureFamilyLoaded } from "@shep/core/appearance";
+import { normalizeTerminalFontFamily, TERMINAL_FONT_FAMILY, TERMINAL_FONT_SIZE } from "@shipctl/core/appearance";
+import { ensureFamilyLoaded } from "@shipctl/core/appearance";
 
 const DEFAULT_SETTINGS: TerminalSettings = {
   cursorStyle: "block",

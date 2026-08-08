@@ -165,13 +165,13 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
 
   assert.doesNotMatch(host, /\.manage\(UsageDb::open\(\)/);
   assert.doesNotMatch(host, /usage::run_background_ingest\(&db\)/);
-  assert.match(installer, /shep_module_usage::init\([\s\S]*modules::usage::host_services\(\)/);
+  assert.match(installer, /shipctl_module_usage::init\([\s\S]*modules::usage::host_services\(\)/);
   assert.match(plugin, /plugin::Builder::new\(PLUGIN_NAME\)/);
   assert.match(plugin, /app\.manage\(UsagePluginState/);
   assert.match(plugin, /spawn_ingest\(db, app\.clone\(\)\)/);
-  assert.match(plugin, /"plugin:shep-usage\|get_all_usage_snapshots"/);
-  assert.match(client, /invoke\("plugin:shep-usage\|get_all_usage_snapshots"\)/);
-  assert.match(client, /invoke\("plugin:shep-usage\|refresh_usage_data"\)/);
+  assert.match(plugin, /"plugin:shipctl-usage\|get_all_usage_snapshots"/);
+  assert.match(client, /invoke\("plugin:shipctl-usage\|get_all_usage_snapshots"\)/);
+  assert.match(client, /invoke\("plugin:shipctl-usage\|refresh_usage_data"\)/);
   assert.doesNotMatch(commands, /get_all_usage_snapshots|get_usage_settings|refresh_usage_data/);
   assert.doesNotMatch(host, /commands::get_all_usage_snapshots/);
   assert.doesNotMatch(host, /commands::refresh_usage_data/);

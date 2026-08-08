@@ -9,27 +9,27 @@ use std::sync::Arc;
 
 use tauri::{plugin::TauriPlugin, Manager, Runtime, State};
 
-pub const PLUGIN_NAME: &str = "shep-git";
-pub const IS_GIT_REPO_COMMAND: &str = "plugin:shep-git|is_git_repo";
-pub const GIT_INIT_COMMAND: &str = "plugin:shep-git|git_init";
-pub const GIT_CURRENT_BRANCH_COMMAND: &str = "plugin:shep-git|git_current_branch";
-pub const GIT_LIST_BRANCHES_COMMAND: &str = "plugin:shep-git|git_list_branches";
-pub const GIT_PUSH_BRANCH_COMMAND: &str = "plugin:shep-git|git_push_branch";
-pub const GIT_LIST_WORKTREES_COMMAND: &str = "plugin:shep-git|git_list_worktrees";
-pub const GIT_CREATE_WORKTREE_COMMAND: &str = "plugin:shep-git|git_create_worktree";
-pub const GIT_STATUS_COMMAND: &str = "plugin:shep-git|git_status";
-pub const GIT_CHANGED_FILES_COMMAND: &str = "plugin:shep-git|git_changed_files";
-pub const GIT_FILE_DIFF_COMMAND: &str = "plugin:shep-git|git_file_diff";
-pub const GIT_FILE_CONTENTS_COMMAND: &str = "plugin:shep-git|git_file_contents";
-pub const GIT_LIST_FILES_COMMAND: &str = "plugin:shep-git|git_list_files";
-pub const GIT_STAGE_FILE_COMMAND: &str = "plugin:shep-git|git_stage_file";
-pub const GIT_STAGE_ALL_COMMAND: &str = "plugin:shep-git|git_stage_all";
-pub const GIT_COMMIT_COMMAND: &str = "plugin:shep-git|git_commit";
-pub const GIT_UNSTAGE_FILE_COMMAND: &str = "plugin:shep-git|git_unstage_file";
-pub const GIT_UNSTAGE_ALL_COMMAND: &str = "plugin:shep-git|git_unstage_all";
-pub const GIT_SWITCH_BRANCH_COMMAND: &str = "plugin:shep-git|git_switch_branch";
-pub const GIT_CREATE_BRANCH_COMMAND: &str = "plugin:shep-git|git_create_branch";
-pub const GIT_DIFF_STATS_COMMAND: &str = "plugin:shep-git|git_diff_stats";
+pub const PLUGIN_NAME: &str = "shipctl-git";
+pub const IS_GIT_REPO_COMMAND: &str = "plugin:shipctl-git|is_git_repo";
+pub const GIT_INIT_COMMAND: &str = "plugin:shipctl-git|git_init";
+pub const GIT_CURRENT_BRANCH_COMMAND: &str = "plugin:shipctl-git|git_current_branch";
+pub const GIT_LIST_BRANCHES_COMMAND: &str = "plugin:shipctl-git|git_list_branches";
+pub const GIT_PUSH_BRANCH_COMMAND: &str = "plugin:shipctl-git|git_push_branch";
+pub const GIT_LIST_WORKTREES_COMMAND: &str = "plugin:shipctl-git|git_list_worktrees";
+pub const GIT_CREATE_WORKTREE_COMMAND: &str = "plugin:shipctl-git|git_create_worktree";
+pub const GIT_STATUS_COMMAND: &str = "plugin:shipctl-git|git_status";
+pub const GIT_CHANGED_FILES_COMMAND: &str = "plugin:shipctl-git|git_changed_files";
+pub const GIT_FILE_DIFF_COMMAND: &str = "plugin:shipctl-git|git_file_diff";
+pub const GIT_FILE_CONTENTS_COMMAND: &str = "plugin:shipctl-git|git_file_contents";
+pub const GIT_LIST_FILES_COMMAND: &str = "plugin:shipctl-git|git_list_files";
+pub const GIT_STAGE_FILE_COMMAND: &str = "plugin:shipctl-git|git_stage_file";
+pub const GIT_STAGE_ALL_COMMAND: &str = "plugin:shipctl-git|git_stage_all";
+pub const GIT_COMMIT_COMMAND: &str = "plugin:shipctl-git|git_commit";
+pub const GIT_UNSTAGE_FILE_COMMAND: &str = "plugin:shipctl-git|git_unstage_file";
+pub const GIT_UNSTAGE_ALL_COMMAND: &str = "plugin:shipctl-git|git_unstage_all";
+pub const GIT_SWITCH_BRANCH_COMMAND: &str = "plugin:shipctl-git|git_switch_branch";
+pub const GIT_CREATE_BRANCH_COMMAND: &str = "plugin:shipctl-git|git_create_branch";
+pub const GIT_DIFF_STATS_COMMAND: &str = "plugin:shipctl-git|git_diff_stats";
 
 /// Host-owned authority for resolving an exact registered project root.
 pub trait ProjectRootAuthority: Send + Sync {
@@ -368,7 +368,7 @@ pub fn create_worktree(path: &str, branch_name: &str) -> Result<CreatedWorktree,
     }
 
     // Always derive the output path from the main repo, not the calling worktree,
-    // so all worktrees end up in the same .shep-worktrees/<repo>/ directory.
+    // so all worktrees end up in the same .shipctl-worktrees/<repo>/ directory.
     let main_repo_path = {
         let out = Command::new("git")
             .args(["-C", path, "worktree", "list", "--porcelain"])
@@ -409,7 +409,7 @@ pub fn create_worktree(path: &str, branch_name: &str) -> Result<CreatedWorktree,
         branch_slug
     };
 
-    let worktrees_root = repo_parent.join(".shep-worktrees");
+    let worktrees_root = repo_parent.join(".shipctl-worktrees");
     reject_symlink(&worktrees_root, "worktree root")?;
     std::fs::create_dir_all(&worktrees_root)
         .map_err(|error| format!("Failed to create worktree root: {error}"))?;

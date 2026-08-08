@@ -1,5 +1,5 @@
 import { Terminal, PanelsTopLeft, ExternalLink } from "lucide-react";
-import type { TabKind } from "@shep/core/platform";
+import type { TabKind } from "@shipctl/core/platform";
 
 export interface TabKindMeta {
   label: string;

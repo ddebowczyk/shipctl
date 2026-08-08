@@ -28,11 +28,11 @@ const shouldApply = process.argv.includes("--apply");
 if (process.argv.some((arg) => arg === "--help" || arg === "-h")) {
   console.log(`Usage: node ops/_attic/bin/import-live-agent-recovery.mjs [--apply]
 
-Converts the one-time live-agent snapshot captured on this Mac into Shep's
+Converts the one-time live-agent snapshot captured on this Mac into Shipctl's
 assistant restore manifest. Without --apply it only validates and previews.
 
-Run --apply only after the original /Applications/shep.app has quit, and before
-starting the newly built Shep app. The snapshot stays unchanged.`);
+Run --apply only after the original /Applications/shipctl.app has quit, and before
+starting the newly built Shipctl app. The snapshot stays unchanged.`);
   process.exit(0);
 }
 
@@ -55,7 +55,7 @@ function parseSnapshot() {
 
   if (
     snapshot.schema_version !== 1 ||
-    snapshot.kind !== "shep-live-agent-recovery-snapshot" ||
+    snapshot.kind !== "shipctl-live-agent-recovery-snapshot" ||
     snapshot.status !== "inert-manual-recovery-only" ||
     !Array.isArray(snapshot.records)
   ) {
@@ -148,9 +148,9 @@ function writeManifest(records) {
 }
 
 const snapshot = parseSnapshot();
-const originalShepIsRunning = sourceAppIsStillRunning(snapshot);
-if (shouldApply && originalShepIsRunning) {
-  fail(`the original Shep is still running (PID ${snapshot.source_application_pid}). Quit it before importing.`);
+const originalShipctlIsRunning = sourceAppIsStillRunning(snapshot);
+if (shouldApply && originalShipctlIsRunning) {
+  fail(`the original Shipctl is still running (PID ${snapshot.source_application_pid}). Quit it before importing.`);
 }
 
 const { records, skipped } = recoverableRecords(snapshot);
@@ -166,13 +166,13 @@ for (const skippedRecord of skipped) {
 }
 
 if (!shouldApply) {
-  if (originalShepIsRunning) {
-    console.log("The original Shep is still running, so this remains a validation-only preview.");
+  if (originalShipctlIsRunning) {
+    console.log("The original Shipctl is still running, so this remains a validation-only preview.");
   }
-  console.log("Dry run only. Re-run with --apply after quitting the original Shep.");
+  console.log("Dry run only. Re-run with --apply after quitting the original Shipctl.");
   process.exit(0);
 }
 
 writeManifest(records);
 console.log(`Imported ${records.length} provider sessions into ${manifestPath}`);
-console.log("Now start the newly built Shep once; it will issue the provider-specific resume commands.");
+console.log("Now start the newly built Shipctl once; it will issue the provider-specific resume commands.");

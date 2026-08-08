@@ -44,7 +44,7 @@ properties:
         required: [path, executable_sha256]
         properties:
           path:
-            const: shep.app
+            const: shipctl.app
           executable_sha256:
             type: string
             pattern: ^[0-9a-f]{64}$
@@ -55,7 +55,7 @@ properties:
         properties:
           path:
             type: string
-            pattern: ^shep_.+\.dmg$
+            pattern: ^shipctl_.+\.dmg$
           sha256:
             type: string
             pattern: ^[0-9a-f]{64}$

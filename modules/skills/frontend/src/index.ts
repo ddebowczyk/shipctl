@@ -1,4 +1,4 @@
-import type { ModuleSkillsSnapshot, ShepModule } from "@shep/module-api";
+import type { ModuleSkillsSnapshot, ShipctlModule } from "@shipctl/module-api";
 
 import { useSkillStore } from "./store";
 
@@ -30,11 +30,11 @@ function errorMessage(error: unknown): string {
 }
 
 export const skillsModule = {
-  id: "shep.skills",
+  id: "shipctl.skills",
   version: "0.0.0",
   skillsProvider: {
     id: "skills.provider",
-    moduleId: "shep.skills",
+    moduleId: "shipctl.skills",
     port: {
       getSnapshot: getSkillsSnapshot,
       subscribe: (listener) => useSkillStore.subscribe(listener),
@@ -44,7 +44,7 @@ export const skillsModule = {
   projectActions: [
     {
       id: "skills.project-actions",
-      moduleId: "shep.skills",
+      moduleId: "shipctl.skills",
       order: 20,
       subscribe: (listener) => useSkillStore.subscribe(listener),
       refresh: (project) => useSkillStore.getState().refresh(project.path),
@@ -85,7 +85,7 @@ export const skillsModule = {
     onFilesystemChanged: (projectPaths) => useSkillStore.getState().refreshAll([...projectPaths]),
     onProjectRemoved: (projectPath) => useSkillStore.getState().removeProject(projectPath),
   },
-} as const satisfies ShepModule;
+} as const satisfies ShipctlModule;
 
 export { SKILL_COMMANDS } from "./client";
 export type { SkillInfo } from "./types";

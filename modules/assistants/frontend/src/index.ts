@@ -1,4 +1,4 @@
-import type { ShepModule } from "@shep/module-api";
+import type { ShipctlModule } from "@shipctl/module-api";
 
 import { beginAssistantSessionPreservingShutdown } from "./client";
 import { activateAssistantRuntime, restoreAssistantSessions } from "./runtime";
@@ -6,12 +6,12 @@ import { activateAssistantRuntime, restoreAssistantSessions } from "./runtime";
 export const ASSISTANT_LAUNCHER_PANEL_ID = "assistants.launcher" as const;
 
 export const assistantsModule = {
-  id: "shep.assistants",
+  id: "shipctl.assistants",
   version: "0.0.0",
   panels: [
     {
       id: ASSISTANT_LAUNCHER_PANEL_ID,
-      moduleId: "shep.assistants",
+      moduleId: "shipctl.assistants",
       scope: "project",
       label: "New Agent",
       icon: { name: "square-terminal", label: "Agent" },
@@ -36,7 +36,7 @@ export const assistantsModule = {
     const deactivate = activateAssistantRuntime(services);
     return { deactivate };
   },
-} as const satisfies ShepModule;
+} as const satisfies ShipctlModule;
 
 export { launchAssistant, restoreAssistantSessions } from "./runtime";
 export { CODING_ASSISTANTS } from "./catalog";

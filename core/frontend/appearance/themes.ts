@@ -1,4 +1,4 @@
-export interface ShepTheme {
+export interface ShipctlTheme {
   id: string;
   name: string;
   isTransparent: boolean;
@@ -51,7 +51,7 @@ export interface ShepTheme {
 }
 
 /* ── Tokyo Night ───────────────────────────────────────── */
-const tokyoNight: ShepTheme = {
+const tokyoNight: ShipctlTheme = {
   id: "tokyo-night",
   name: "Tokyo Night",
   isTransparent: false,
@@ -99,7 +99,7 @@ const tokyoNight: ShepTheme = {
 };
 
 /* ── Dracula ───────────────────────────────────────────── */
-const dracula: ShepTheme = {
+const dracula: ShipctlTheme = {
   id: "dracula",
   name: "Dracula",
   isTransparent: false,
@@ -147,7 +147,7 @@ const dracula: ShepTheme = {
 };
 
 /* ── Catppuccin Mocha ──────────────────────────────────── */
-const catppuccin: ShepTheme = {
+const catppuccin: ShipctlTheme = {
   id: "catppuccin",
   name: "Catppuccin Mocha",
   isTransparent: false,
@@ -196,7 +196,7 @@ const catppuccin: ShepTheme = {
 };
 
 /* ── Catppuccin Glass (Transparent) ───────────────────── */
-const catppuccinGlass: ShepTheme = {
+const catppuccinGlass: ShipctlTheme = {
   id: "catppuccin-glass",
   name: "Catppuccin Glass",
   isTransparent: true,
@@ -244,7 +244,7 @@ const catppuccinGlass: ShepTheme = {
 };
 
 /* ── Nightfox Glass (Transparent) ────────────────────── */
-const nightfoxGlass: ShepTheme = {
+const nightfoxGlass: ShipctlTheme = {
   id: "nightfox-glass",
   name: "Nightfox Glass",
   isTransparent: true,
@@ -292,7 +292,7 @@ const nightfoxGlass: ShepTheme = {
 };
 
 /* ── Tokyo Glass (Transparent) ───────────────────────── */
-const tokyoGlass: ShepTheme = {
+const tokyoGlass: ShipctlTheme = {
   id: "tokyo-glass",
   name: "Tokyo Glass",
   isTransparent: true,
@@ -340,7 +340,7 @@ const tokyoGlass: ShepTheme = {
 };
 
 /* ── Carbonfox Dark ───────────────────────────────────── */
-const carbonfox: ShepTheme = {
+const carbonfox: ShipctlTheme = {
   id: "carbonfox",
   name: "Carbonfox",
   isTransparent: false,
@@ -389,7 +389,7 @@ const carbonfox: ShepTheme = {
 };
 
 /* ── Jellybeans Dark ──────────────────────────────────── */
-const jellybeans: ShepTheme = {
+const jellybeans: ShipctlTheme = {
   id: "jellybeans",
   name: "Jellybeans",
   isTransparent: false,
@@ -438,7 +438,7 @@ const jellybeans: ShepTheme = {
 };
 
 /* ── Kanagawa Dark ───────────────────────────────────── */
-const kanagawa: ShepTheme = {
+const kanagawa: ShipctlTheme = {
   id: "kanagawa",
   name: "Kanagawa",
   isTransparent: false,
@@ -487,7 +487,7 @@ const kanagawa: ShepTheme = {
 };
 
 /* ── Nightfox Dark ────────────────────────────────────── */
-const nightfoxDark: ShepTheme = {
+const nightfoxDark: ShipctlTheme = {
   id: "nightfox-dark",
   name: "Nightfox",
   isTransparent: false,
@@ -536,7 +536,7 @@ const nightfoxDark: ShepTheme = {
 };
 
 /* ── Solarized Light ──────────────────────────────────── */
-const solarized: ShepTheme = {
+const solarized: ShipctlTheme = {
   id: "solarized",
   name: "Solarized",
   isTransparent: false,
@@ -585,7 +585,7 @@ const solarized: ShepTheme = {
 };
 
 /* ── Tokyo Day ────────────────────────────────────────── */
-const tokyoDay: ShepTheme = {
+const tokyoDay: ShipctlTheme = {
   id: "tokyo-day",
   name: "Tokyo Day",
   isTransparent: false,
@@ -634,7 +634,7 @@ const tokyoDay: ShepTheme = {
 };
 
 /* ── GitHub Light ─────────────────────────────────────── */
-const githubLight: ShepTheme = {
+const githubLight: ShipctlTheme = {
   id: "github-light",
   name: "GitHub Light",
   isTransparent: false,
@@ -683,7 +683,7 @@ const githubLight: ShepTheme = {
 };
 
 /* ── Catppuccin Latte ─────────────────────────────────── */
-const catppuccinLatte: ShepTheme = {
+const catppuccinLatte: ShipctlTheme = {
   id: "catppuccin-latte",
   name: "Catppuccin Latte",
   isTransparent: false,
@@ -732,7 +732,7 @@ const catppuccinLatte: ShepTheme = {
 };
 
 /* ── Nightfox Light ───────────────────────────────────── */
-const nightfoxLight: ShepTheme = {
+const nightfoxLight: ShipctlTheme = {
   id: "nightfox-light",
   name: "Dayfox",
   isTransparent: false,
@@ -780,7 +780,7 @@ const nightfoxLight: ShepTheme = {
   termBrightWhite: "#f4ece6",
 };
 
-export const THEMES: Record<string, ShepTheme> = {
+export const THEMES: Record<string, ShipctlTheme> = {
   catppuccin,
   "nightfox-dark": nightfoxDark,
   "tokyo-night": tokyoNight,
@@ -798,7 +798,7 @@ export const THEMES: Record<string, ShepTheme> = {
   "github-light": githubLight,
 };
 
-export const THEME_LIST: ShepTheme[] = Object.values(THEMES);
+export const THEME_LIST: ShipctlTheme[] = Object.values(THEMES);
 
 /** Relative luminance of a hex color (0 = black, 1 = white) */
 export function hexLuminance(hex: string): number {
@@ -809,12 +809,12 @@ export function hexLuminance(hex: string): number {
   return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
 }
 
-export const DARK_THEMES: ShepTheme[] = THEME_LIST.filter((t) => !t.isTransparent && hexLuminance(t.appBg) <= 0.3);
-export const LIGHT_THEMES: ShepTheme[] = THEME_LIST.filter((t) => !t.isTransparent && hexLuminance(t.appBg) > 0.3);
-export const TRANSPARENT_THEMES: ShepTheme[] = THEME_LIST.filter((t) => t.isTransparent);
+export const DARK_THEMES: ShipctlTheme[] = THEME_LIST.filter((t) => !t.isTransparent && hexLuminance(t.appBg) <= 0.3);
+export const LIGHT_THEMES: ShipctlTheme[] = THEME_LIST.filter((t) => !t.isTransparent && hexLuminance(t.appBg) > 0.3);
+export const TRANSPARENT_THEMES: ShipctlTheme[] = THEME_LIST.filter((t) => t.isTransparent);
 
 export const DEFAULT_THEME_ID = "catppuccin";
 
-export function getThemeById(id: string): ShepTheme {
+export function getThemeById(id: string): ShipctlTheme {
   return THEMES[id] ?? THEMES[DEFAULT_THEME_ID];
 }

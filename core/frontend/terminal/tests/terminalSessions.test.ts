@@ -5,7 +5,7 @@ import type {
   ModuleTerminalSession,
   ModuleTerminalSessionLaunchRequest,
   ModuleTerminalSessionLifecycleEvent,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 import {
   bindTerminalSessionDimensions,
   bindTerminalSessionsRuntime,

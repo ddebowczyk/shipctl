@@ -1,5 +1,5 @@
 {
-  "name": "@shep/module-fixture",
+  "name": "@shipctl/module-fixture",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@shep/module-api": "workspace:*",
+    "@shipctl/module-api": "workspace:*",
     "@tauri-apps/api": "^2.11.1"
   },
   "peerDependencies": {

@@ -10,7 +10,7 @@
 <tr>
 <td>
 
-`shep-usage:allow-get-all-usage-snapshots`
+`shipctl-usage:allow-get-all-usage-snapshots`
 
 </td>
 <td>
@@ -23,7 +23,7 @@ Enables the get_all_usage_snapshots command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:deny-get-all-usage-snapshots`
+`shipctl-usage:deny-get-all-usage-snapshots`
 
 </td>
 <td>
@@ -36,7 +36,7 @@ Denies the get_all_usage_snapshots command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:allow-get-project-alias-review-queue`
+`shipctl-usage:allow-get-project-alias-review-queue`
 
 </td>
 <td>
@@ -49,7 +49,7 @@ Enables the get_project_alias_review_queue command without any pre-configured sc
 <tr>
 <td>
 
-`shep-usage:deny-get-project-alias-review-queue`
+`shipctl-usage:deny-get-project-alias-review-queue`
 
 </td>
 <td>
@@ -62,7 +62,7 @@ Denies the get_project_alias_review_queue command without any pre-configured sco
 <tr>
 <td>
 
-`shep-usage:allow-get-usage-details`
+`shipctl-usage:allow-get-usage-details`
 
 </td>
 <td>
@@ -75,7 +75,7 @@ Enables the get_usage_details command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:deny-get-usage-details`
+`shipctl-usage:deny-get-usage-details`
 
 </td>
 <td>
@@ -88,7 +88,7 @@ Denies the get_usage_details command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:allow-get-usage-overview`
+`shipctl-usage:allow-get-usage-overview`
 
 </td>
 <td>
@@ -101,7 +101,7 @@ Enables the get_usage_overview command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:deny-get-usage-overview`
+`shipctl-usage:deny-get-usage-overview`
 
 </td>
 <td>
@@ -114,7 +114,7 @@ Denies the get_usage_overview command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:allow-get-usage-snapshot`
+`shipctl-usage:allow-get-usage-snapshot`
 
 </td>
 <td>
@@ -127,7 +127,7 @@ Enables the get_usage_snapshot command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:deny-get-usage-snapshot`
+`shipctl-usage:deny-get-usage-snapshot`
 
 </td>
 <td>
@@ -140,7 +140,7 @@ Denies the get_usage_snapshot command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:allow-refresh-usage-data`
+`shipctl-usage:allow-refresh-usage-data`
 
 </td>
 <td>
@@ -153,7 +153,7 @@ Enables the refresh_usage_data command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-usage:deny-refresh-usage-data`
+`shipctl-usage:deny-refresh-usage-data`
 
 </td>
 <td>

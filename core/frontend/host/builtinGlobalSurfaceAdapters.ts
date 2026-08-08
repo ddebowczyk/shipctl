@@ -2,7 +2,7 @@ import { BUILTIN_GLOBAL_SURFACE_IDS } from "../shared/globalSurfaceIds.ts";
 import type {
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
 export type BuiltinGlobalSurfaceKind = "settings";
 export type BuiltinGlobalSurfaceLoaders = Readonly<

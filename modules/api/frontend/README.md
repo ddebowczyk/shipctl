@@ -1,14 +1,14 @@
 # Frontend module API
 
-`@shep/module-api` is the compile-time contract between the Shep host and
+`@shipctl/module-api` is the compile-time contract between the Shipctl host and
 frontend capability modules. It contains data-oriented contribution types and
 host ports, not application stores or feature implementations.
 
 Allowed dependency direction:
 
 ```text
-host composition ──> module public entrypoint ──> @shep/module-api
-host internals ─────────────────────────────────> @shep/module-api
+host composition ──> module public entrypoint ──> @shipctl/module-api
+host internals ─────────────────────────────────> @shipctl/module-api
 ```
 
 - The API package may import only platform-neutral types and React types.

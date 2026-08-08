@@ -1,5 +1,5 @@
 import { GitBranch } from "lucide-react";
-import type { ProjectNavigationContributionProps } from "@shep/module-api";
+import type { ProjectNavigationContributionProps } from "@shipctl/module-api";
 import { useGitStore } from "./store";
 
 export default function GitStatusRow({ project, active, open }: ProjectNavigationContributionProps) {

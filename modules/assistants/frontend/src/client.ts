@@ -2,7 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   ModuleManagedTerminalStartContext,
   ModuleTerminalOutputEvent,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
 import type {
   AssistantSessionRecord,
@@ -21,7 +21,7 @@ interface SpawnedAssistantSession {
   readonly record: AssistantSessionRecord;
 }
 
-const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shep-assistants|";
+const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shipctl-assistants|";
 
 function assistantCommand(name: string) {
   return `${ASSISTANTS_COMMAND_NAMESPACE}${name}`;

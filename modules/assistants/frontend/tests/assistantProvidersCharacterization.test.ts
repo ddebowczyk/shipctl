@@ -50,11 +50,11 @@ test("Codex identity capture is bounded and fails without guessing", () => {
   assert.match(runtime, /CODEX_CAPTURE_RETRY_MS = 500/);
   assert.match(runtime, /CODEX_CAPTURE_MAX_ATTEMPTS = 20/);
   assert.match(runtime, /const failed = await failSessionCapture\(record\.recordId\)/);
-  assert.match(runtime, /Shep could not identify this Codex session without guessing/);
+  assert.match(runtime, /Shipctl could not identify this Codex session without guessing/);
   assert.match(registry, /transcript must be both new since the[\s\S]*explicitly associated with this launch directory/);
   assert.match(
     registry,
-    /Found \{count\} new Codex sessions for this directory; restore was not enabled so Shep will not guess/,
+    /Found \{count\} new Codex sessions for this directory; restore was not enabled so Shipctl will not guess/,
   );
 });
 
@@ -90,7 +90,7 @@ test("startup restore and recovery are module-owned", () => {
 
   assert.match(runtime, /const records = await listRestorableSessions\(\)/);
   assert.match(runtime, /for \(const record of records\) await restoreRecord\(record, registered, services\)/);
-  assert.match(runtime, /Its placement project is no longer registered in Shep/);
+  assert.match(runtime, /Its placement project is no longer registered in Shipctl/);
   assert.match(runtime, /The saved session was kept for a future retry/);
   assert.match(runtime, /label: "Retry"/);
   assert.match(runtime, /label: "Discard saved session"/);
@@ -123,7 +123,7 @@ test("the restore manifest persists identity metadata, not transcripts or comman
   const manifest = source("../../backend/src/manifest.rs");
   const registry = source("../../backend/src/lib.rs");
 
-  assert.match(registry, /\.join\("\.shep\/assistant-sessions\.json"\)/);
+  assert.match(registry, /\.join\("\.shipctl\/assistant-sessions\.json"\)/);
   assert.match(manifest, /options\.mode\(0o600\)/);
   assert.match(manifest, /let mode = if path\.is_dir\(\) \{ 0o700 \} else \{ 0o600 \}/);
   assert.match(manifest, /atomically replace restore manifest/);
@@ -142,14 +142,14 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   const backend = source("../../backend/src/lib.rs");
   const client = source("../src/client.ts");
 
-  assert.match(moduleEntry, /id: "shep\.assistants"/);
+  assert.match(moduleEntry, /id: "shipctl\.assistants"/);
   assert.match(moduleEntry, /load: \(\) => import\("\.\/SessionLauncher"\)/);
   assert.match(moduleEntry, /activateAssistantRuntime/);
-  assert.match(composition, /import \{ assistantsModule \} from "@shep\/module-assistants"/);
+  assert.match(composition, /import \{ assistantsModule \} from "@shipctl\/module-assistants"/);
   assert.doesNotMatch(shell, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|listRestorableAssistantSessions/);
   assert.doesNotMatch(pty, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|CODEX_CAPTURE_RETRY_MS|RESTORE_PROBATION_MS/);
   assert.doesNotMatch(nativeHost, /AssistantSessionRegistry|commands::spawn_assistant_session|commands::begin_assistant_session_preserving_shutdown/);
-  assert.match(nativeComposition, /shep_module_assistants::init\(/);
+  assert.match(nativeComposition, /shipctl_module_assistants::init\(/);
   assert.match(terminalAdapter, /impl TerminalAuthority for HostTerminalAuthority/);
   // The PTY is the only thing this module cannot own. pi's own config —
   // ~/.pi/agent and its Keychain entries — is module business and stays in the
@@ -162,5 +162,5 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   assert.match(piConfig, /"add-generic-password"/);
   assert.match(backend, /app\.manage\(AssistantPluginState \{/);
   assert.match(backend, /pub fn init<R: Runtime>\(services: HostServices\) -> TauriPlugin<R>/);
-  assert.match(client, /const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shep-assistants\|"/);
+  assert.match(client, /const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shipctl-assistants\|"/);
 });

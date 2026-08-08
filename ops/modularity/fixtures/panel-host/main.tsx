@@ -1,20 +1,20 @@
 import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
-import type { ContributionId, ProjectRef } from "@shep/module-api";
-import { gitModule } from "@shep/module-git";
-import { skillsModule } from "@shep/module-skills";
+import type { ContributionId, ProjectRef } from "@shipctl/module-api";
+import { gitModule } from "@shipctl/module-git";
+import { skillsModule } from "@shipctl/module-skills";
 
-import "@shep/core/appearance/globals.css";
+import "@shipctl/core/appearance/globals.css";
 import PanelHost from "../../../../core/frontend/host/PanelHost";
 import { createEnabledPanelRegistry } from "../../../../core/frontend/host/moduleComposition";
 import { MODULE_HOST_SERVICES } from "../../../../core/frontend/host/moduleHostServices";
-import { useRepoStore } from "@shep/core/projects";
+import { useRepoStore } from "@shipctl/core/projects";
 
-const PROJECT_PATH = "/smoke/shep";
+const PROJECT_PATH = "/smoke/shipctl";
 const PROJECT: ProjectRef = {
-  id: "smoke-shep",
-  name: "Shep smoke fixture",
+  id: "smoke-shipctl",
+  name: "Shipctl smoke fixture",
   path: PROJECT_PATH,
 };
 
@@ -24,9 +24,9 @@ mockIPC(
     switch (command) {
       case "check_command_exists":
         return true;
-      case "plugin:shep-assistants|get_models_for_provider":
+      case "plugin:shipctl-assistants|get_models_for_provider":
         return ["smoke-model"];
-      case "plugin:shep-git|git_status":
+      case "plugin:shipctl-git|git_status":
         return {
           is_git_repo: true,
           branch: "smoke/panel-host",
@@ -38,7 +38,7 @@ mockIPC(
           behind: 0,
           worktree_parent: null,
         };
-      case "plugin:shep-git|git_changed_files":
+      case "plugin:shipctl-git|git_changed_files":
         return [
           {
             path: "core/frontend/shell/AppShell.tsx",
@@ -47,24 +47,24 @@ mockIPC(
             old_path: null,
           },
         ];
-      case "plugin:shep-git|git_list_files":
+      case "plugin:shipctl-git|git_list_files":
         return ["README.md", "core/frontend/shell/AppShell.tsx", "core/frontend/host/PanelHost.tsx"];
-      case "plugin:shep-git|git_file_contents":
+      case "plugin:shipctl-git|git_file_contents":
         return "Panel host smoke fixture";
-      case "plugin:shep-git|git_file_diff":
+      case "plugin:shipctl-git|git_file_diff":
         return "@@ -1 +1 @@\n-old\n+new";
-      case "plugin:shep-todos|read_todos":
+      case "plugin:shipctl-todos|read_todos":
         return [];
-      case "plugin:shep-skills|list_skills":
+      case "plugin:shipctl-skills|list_skills":
         return [
           {
-            name: "shep-todos",
-            title: "Shep to-dos",
+            name: "shipctl-todos",
+            title: "Shipctl to-dos",
             description: "Smoke fixture",
             installed: true,
           },
         ];
-      case "plugin:shep-assistants|get_pi_config":
+      case "plugin:shipctl-assistants|get_pi_config":
         return {
           settings: {
             defaultProvider: null,

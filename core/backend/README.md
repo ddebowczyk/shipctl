@@ -1,4 +1,4 @@
-# `shep-core` — the host's own capabilities (Rust)
+# `shipctl-core` — the host's own capabilities (Rust)
 
 The native half of the same split the frontend uses in `core/frontend/`: one
 directory per capability, each owning its state, its logic and the Tauri

@@ -1,10 +1,10 @@
 import { useState, useCallback, useRef } from "react";
 import { Folders, Pencil, Trash2 } from "lucide-react";
 import { createPortal } from "react-dom";
-import { ContextMenu } from "@shep/core/shared/views";
-import type { ContextMenuItem } from "@shep/core/shared/views";
-import type { RepoGroup } from "@shep/core/platform";
-import { ActivityIndicator, getAggregateActivityStatus } from "@shep/core/shared/views";
+import { ContextMenu } from "@shipctl/core/shared/views";
+import type { ContextMenuItem } from "@shipctl/core/shared/views";
+import type { RepoGroup } from "@shipctl/core/platform";
+import { ActivityIndicator, getAggregateActivityStatus } from "@shipctl/core/shared/views";
 
 interface GroupHeaderProps {
   group: RepoGroup;

@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import type { GlobalNavigationContribution } from "@shep/module-api";
+import type { GlobalNavigationContribution } from "@shipctl/module-api";
 import { ChartNoAxesCombined, Circle, Radio } from "lucide-react";
 import { useUIStore } from "../shared/index.ts";
 import { GearIcon } from "../shared/views.ts";

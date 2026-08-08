@@ -1,7 +1,7 @@
 import type {
   ModuleHostServices,
   ModuleTerminalSessionLifecycleEvent,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
 import { useCommandsStore } from "./store";
 import { readCommandConfigs, toCommandConfig } from "./types";

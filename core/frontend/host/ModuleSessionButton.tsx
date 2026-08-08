@@ -1,16 +1,16 @@
 import { useState, useCallback } from "react";
-import type { TerminalTabData, TabActivity } from "@shep/core/platform";
-import { useTerminalStore } from "@shep/core/terminal";
-import { handleActionKey } from "@shep/core/shared";
+import type { TerminalTabData, TabActivity } from "@shipctl/core/platform";
+import { useTerminalStore } from "@shipctl/core/terminal";
+import { handleActionKey } from "@shipctl/core/shared";
 import { FolderInput, X } from "lucide-react";
-import { ContextMenu } from "@shep/core/shared/views";
-import type { ContextMenuItem } from "@shep/core/shared/views";
-import { buildProjectMoveMenuItems } from "@shep/core/projects/views";
-import { useRepoStore } from "@shep/core/projects";
+import { ContextMenu } from "@shipctl/core/shared/views";
+import type { ContextMenuItem } from "@shipctl/core/shared/views";
+import { buildProjectMoveMenuItems } from "@shipctl/core/projects/views";
+import { useRepoStore } from "@shipctl/core/projects";
 import {
   useProjectFactsMap,
 } from "./index.ts";
-import { ActivityIndicator, getTabActivityStatus } from "@shep/core/shared/views";
+import { ActivityIndicator, getTabActivityStatus } from "@shipctl/core/shared/views";
 
 interface ModuleSessionButtonProps {
   tab: TerminalTabData;

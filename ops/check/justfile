@@ -17,5 +17,8 @@ schemas:
 manifests:
     node bin/check-manifests.mjs
 
+version:
+    node bin/check-version.mjs
+
 all:
     node bin/run-aggregate.mjs check

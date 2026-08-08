@@ -2,7 +2,7 @@ import type {
   ModuleHostServices,
   ModuleTerminalSession,
   ModuleTerminalSessionLifecycleEvent,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 
 import { assistantPresentation } from "./branding";
 import { CODING_ASSISTANTS, restorableProvider } from "./catalog";
@@ -107,7 +107,7 @@ function captureCodexSession(
       services.notices.push({
         tone: "info",
         title: "Codex restore was not enabled",
-        message: "Shep could not identify this Codex session without guessing. The terminal is still running normally.",
+        message: "Shipctl could not identify this Codex session without guessing. The terminal is still running normally.",
       });
     } catch (error) {
       clearTimer(captureTimers, session.id);
@@ -325,7 +325,7 @@ async function discardSavedRecord(
     services.notices.push({
       tone: "success",
       title: `Discarded ${record.label}`,
-      message: "Shep will not attempt to restore this saved session again.",
+      message: "Shipctl will not attempt to restore this saved session again.",
     });
   } catch (error) {
     showRestoreRecovery(record, error instanceof Error ? error.message : String(error), projectPaths, services);
@@ -340,7 +340,7 @@ async function restoreRecord(
   if (!projectPaths.has(record.placementProjectPath)) {
     showRestoreRecovery(
       record,
-      "Its placement project is no longer registered in Shep.",
+      "Its placement project is no longer registered in Shipctl.",
       projectPaths,
       services,
     );

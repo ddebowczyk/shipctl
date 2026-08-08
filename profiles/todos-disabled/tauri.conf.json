@@ -10,8 +10,8 @@
             "main"
           ],
           "permissions": [
-            "shep-ports:allow-list-listening-ports",
-            "shep-ports:allow-kill-port"
+            "shipctl-ports:allow-list-listening-ports",
+            "shipctl-ports:allow-kill-port"
           ]
         },
         {
@@ -21,9 +21,9 @@
             "main"
           ],
           "permissions": [
-            "shep-skills:allow-list-skills",
-            "shep-skills:allow-setup-skill",
-            "shep-skills:allow-remove-skill"
+            "shipctl-skills:allow-list-skills",
+            "shipctl-skills:allow-setup-skill",
+            "shipctl-skills:allow-remove-skill"
           ]
         },
         {
@@ -33,26 +33,26 @@
             "main"
           ],
           "permissions": [
-            "shep-git:allow-is-git-repo",
-            "shep-git:allow-git-init",
-            "shep-git:allow-git-current-branch",
-            "shep-git:allow-git-list-branches",
-            "shep-git:allow-git-push-branch",
-            "shep-git:allow-git-list-worktrees",
-            "shep-git:allow-git-create-worktree",
-            "shep-git:allow-git-status",
-            "shep-git:allow-git-changed-files",
-            "shep-git:allow-git-file-diff",
-            "shep-git:allow-git-file-contents",
-            "shep-git:allow-git-list-files",
-            "shep-git:allow-git-stage-file",
-            "shep-git:allow-git-stage-all",
-            "shep-git:allow-git-commit",
-            "shep-git:allow-git-unstage-file",
-            "shep-git:allow-git-unstage-all",
-            "shep-git:allow-git-switch-branch",
-            "shep-git:allow-git-create-branch",
-            "shep-git:allow-git-diff-stats"
+            "shipctl-git:allow-is-git-repo",
+            "shipctl-git:allow-git-init",
+            "shipctl-git:allow-git-current-branch",
+            "shipctl-git:allow-git-list-branches",
+            "shipctl-git:allow-git-push-branch",
+            "shipctl-git:allow-git-list-worktrees",
+            "shipctl-git:allow-git-create-worktree",
+            "shipctl-git:allow-git-status",
+            "shipctl-git:allow-git-changed-files",
+            "shipctl-git:allow-git-file-diff",
+            "shipctl-git:allow-git-file-contents",
+            "shipctl-git:allow-git-list-files",
+            "shipctl-git:allow-git-stage-file",
+            "shipctl-git:allow-git-stage-all",
+            "shipctl-git:allow-git-commit",
+            "shipctl-git:allow-git-unstage-file",
+            "shipctl-git:allow-git-unstage-all",
+            "shipctl-git:allow-git-switch-branch",
+            "shipctl-git:allow-git-create-branch",
+            "shipctl-git:allow-git-diff-stats"
           ]
         },
         {
@@ -62,24 +62,24 @@
             "main"
           ],
           "permissions": [
-            "shep-assistants:allow-spawn-assistant-session",
-            "shep-assistants:allow-resume-assistant-session",
-            "shep-assistants:allow-prepare-assistant-session",
-            "shep-assistants:allow-confirm-assistant-session-capture",
-            "shep-assistants:allow-try-capture-codex-assistant-session",
-            "shep-assistants:allow-fail-assistant-session-capture",
-            "shep-assistants:allow-update-assistant-session-placement",
-            "shep-assistants:allow-update-assistant-session-label",
-            "shep-assistants:allow-discard-assistant-session",
-            "shep-assistants:allow-rearm-assistant-session",
-            "shep-assistants:allow-list-restorable-assistant-sessions",
-            "shep-assistants:allow-take-assistant-session-startup-warning",
-            "shep-assistants:allow-begin-assistant-session-preserving-shutdown",
-            "shep-assistants:allow-get-models-for-provider",
-            "shep-assistants:allow-get-pi-config",
-            "shep-assistants:allow-save-pi-settings",
-            "shep-assistants:allow-save-pi-api-key",
-            "shep-assistants:allow-delete-pi-api-key"
+            "shipctl-assistants:allow-spawn-assistant-session",
+            "shipctl-assistants:allow-resume-assistant-session",
+            "shipctl-assistants:allow-prepare-assistant-session",
+            "shipctl-assistants:allow-confirm-assistant-session-capture",
+            "shipctl-assistants:allow-try-capture-codex-assistant-session",
+            "shipctl-assistants:allow-fail-assistant-session-capture",
+            "shipctl-assistants:allow-update-assistant-session-placement",
+            "shipctl-assistants:allow-update-assistant-session-label",
+            "shipctl-assistants:allow-discard-assistant-session",
+            "shipctl-assistants:allow-rearm-assistant-session",
+            "shipctl-assistants:allow-list-restorable-assistant-sessions",
+            "shipctl-assistants:allow-take-assistant-session-startup-warning",
+            "shipctl-assistants:allow-begin-assistant-session-preserving-shutdown",
+            "shipctl-assistants:allow-get-models-for-provider",
+            "shipctl-assistants:allow-get-pi-config",
+            "shipctl-assistants:allow-save-pi-settings",
+            "shipctl-assistants:allow-save-pi-api-key",
+            "shipctl-assistants:allow-delete-pi-api-key"
           ]
         },
         {
@@ -89,12 +89,12 @@
             "main"
           ],
           "permissions": [
-            "shep-usage:allow-get-all-usage-snapshots",
-            "shep-usage:allow-get-usage-snapshot",
-            "shep-usage:allow-get-usage-details",
-            "shep-usage:allow-get-usage-overview",
-            "shep-usage:allow-get-project-alias-review-queue",
-            "shep-usage:allow-refresh-usage-data"
+            "shipctl-usage:allow-get-all-usage-snapshots",
+            "shipctl-usage:allow-get-usage-snapshot",
+            "shipctl-usage:allow-get-usage-details",
+            "shipctl-usage:allow-get-usage-overview",
+            "shipctl-usage:allow-get-project-alias-review-queue",
+            "shipctl-usage:allow-refresh-usage-data"
           ]
         }
       ]

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
-import type { ModuleHostServices } from "@shep/module-api";
+import type { ModuleHostServices } from "@shipctl/module-api";
 import type {
   GitStatus,
   WorktreeEntry,
@@ -22,7 +22,7 @@ interface NativeMock {
 
 const virtualNativeId = "\0git-native-characterization";
 const nativeGlobal = globalThis as typeof globalThis & {
-  __shepGitNativeMock: NativeMock;
+  __shipctlGitNativeMock: NativeMock;
 };
 
 const nativePlugin: Plugin = {
@@ -40,7 +40,7 @@ const nativePlugin: Plugin = {
   load(id) {
     if (id !== virtualNativeId) return null;
     return `
-      const native = () => globalThis.__shepGitNativeMock;
+      const native = () => globalThis.__shipctlGitNativeMock;
       export const gitStatus = (...args) => native().gitStatus(...args);
       export const gitListWorktrees = (...args) => native().gitListWorktrees(...args);
     `;
@@ -70,7 +70,7 @@ test("frontend Git calls use the namespaced plugin command surface", () => {
   ];
 
   for (const command of commands) {
-    assert.match(gitClient, new RegExp(`plugin:shep-git\\|${command}`));
+    assert.match(gitClient, new RegExp(`plugin:shipctl-git\\|${command}`));
     assert.doesNotMatch(
       gitClient,
       new RegExp(`invoke(?:<[^>]+>)?\\(\\s*[\"']${command}[\"']`),
@@ -121,13 +121,13 @@ before(async () => {
 
 after(async () => {
   await vite.close();
-  delete (globalThis as Partial<typeof nativeGlobal>).__shepGitNativeMock;
+  delete (globalThis as Partial<typeof nativeGlobal>).__shipctlGitNativeMock;
 });
 
 beforeEach(() => {
   implementations = new Map();
   worktrees = new Map();
-  nativeGlobal.__shepGitNativeMock = {
+  nativeGlobal.__shipctlGitNativeMock = {
     gitStatus(repoPath) {
       return (implementations.get(repoPath) ?? (async () => status()))();
     },
@@ -197,7 +197,7 @@ function services(autoImportWorktrees = true): ModuleHostServices {
 }
 
 test("module entry owns every Git contribution and its stable panel shortcut", () => {
-  assert.equal(gitModule.id, "shep.git");
+  assert.equal(gitModule.id, "shipctl.git");
   assert.deepEqual(gitModule.panels.map(({ id, shortcut }) => ({ id, shortcut })), [
     { id: "core.git", shortcut: "⌘G" },
   ]);
@@ -332,7 +332,7 @@ test("generic host project chrome has no direct Git state dependency", () => {
     const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
     assert.doesNotMatch(
       source,
-      /@shep\/module-git|useGitStore|useGitPanelStore|projectGitStatus|worktree_parent|GitPanel|GitStatusRow/,
+      /@shipctl\/module-git|useGitStore|useGitPanelStore|projectGitStatus|worktree_parent|GitPanel|GitStatusRow/,
     );
   }
 });

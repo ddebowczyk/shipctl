@@ -1,7 +1,7 @@
-import type { PtyColorTheme } from "@shep/core/platform";
-import type { ShepTheme } from "@shep/core/appearance";
+import type { PtyColorTheme } from "@shipctl/core/platform";
+import type { ShipctlTheme } from "@shipctl/core/appearance";
 
-export function toPtyColorTheme(theme: ShepTheme): PtyColorTheme {
+export function toPtyColorTheme(theme: ShipctlTheme): PtyColorTheme {
   return {
     foreground: theme.termForeground,
     background: theme.appBg,

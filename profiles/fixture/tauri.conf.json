@@ -12,17 +12,17 @@
           "description": "Enables the internal TODO module commands",
           "windows": ["main"],
           "permissions": [
-            "shep-todos:allow-read-todos",
-            "shep-todos:allow-toggle-todo",
-            "shep-todos:allow-add-todo",
-            "shep-todos:allow-move-todo"
+            "shipctl-todos:allow-read-todos",
+            "shipctl-todos:allow-toggle-todo",
+            "shipctl-todos:allow-add-todo",
+            "shipctl-todos:allow-move-todo"
           ]
         },
         {
           "identifier": "fixture",
           "description": "Enables the inert internal module fixture command",
           "windows": ["main"],
-          "permissions": ["shep-fixture:allow-ping"]
+          "permissions": ["shipctl-fixture:allow-ping"]
         }
       ]
     }

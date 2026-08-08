@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { KeybindingSettings } from "@shep/core/platform";
-import { getKeybindingSettings, saveKeybindingSettings } from "@shep/core/platform";
+import type { KeybindingSettings } from "@shipctl/core/platform";
+import { getKeybindingSettings, saveKeybindingSettings } from "@shipctl/core/platform";
 
 const DEFAULT_SETTINGS: KeybindingSettings = {
   shiftEnterNewline: true,

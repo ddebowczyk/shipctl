@@ -1,7 +1,7 @@
 import { Folder } from "lucide-react";
 import type { ContextMenuItem } from "../shared/ContextMenu.tsx";
 import type { ProjectFactsByPath } from "./projectFacts.ts";
-import type { RepoGroup, RepoInfo } from "@shep/core/platform";
+import type { RepoGroup, RepoInfo } from "@shipctl/core/platform";
 import { groupProjects } from "./projectGrouping.ts";
 
 interface ProjectMoveMenuOptions {

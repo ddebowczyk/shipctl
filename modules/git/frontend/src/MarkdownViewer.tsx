@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAppearance } from "./useAppearance";
-import type { ModuleAppearancePort } from "@shep/module-api";
+import type { ModuleAppearancePort } from "@shipctl/module-api";
 import {
   getMarkdownRenderer,
   getPlainMarkdownRenderer,

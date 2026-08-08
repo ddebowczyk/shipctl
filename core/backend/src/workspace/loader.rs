@@ -14,27 +14,50 @@ static CONFIG_CACHE: Mutex<Option<(GlobalConfig, SystemTime)>> = Mutex::new(None
 type ConfigCache = Option<(GlobalConfig, SystemTime)>;
 
 // ── Paths ───────────────────────────────────────────────────────────
+//
+// State lives in `~/.shipctl` and `<repo>/.shipctl`. Pre-rename state in the
+// matching `.shep` directories is *copied* across once on startup by
+// `workspace::migration`, never moved, so an installed `shep` build keeps its
+// own state and keeps working. Reads fall back to the legacy path so a repo
+// that has not been migrated yet still opens.
 
-fn shep_home() -> Result<PathBuf, String> {
+fn shipctl_home() -> Result<PathBuf, String> {
     Ok(dirs::home_dir()
         .ok_or_else(|| "Could not find home directory".to_string())?
-        .join(".shep"))
+        .join(super::migration::HOME_DIR_NAME))
 }
 
 fn global_config_path() -> Result<PathBuf, String> {
-    Ok(shep_home()?.join("config.yml"))
+    Ok(shipctl_home()?.join("config.yml"))
 }
 
 fn old_projects_dir() -> Result<PathBuf, String> {
-    Ok(shep_home()?.join("projects"))
+    Ok(shipctl_home()?.join("projects"))
 }
 
-fn repo_shep_dir(repo_path: &str) -> PathBuf {
-    Path::new(repo_path).join(".shep")
+fn repo_shipctl_dir(repo_path: &str) -> PathBuf {
+    Path::new(repo_path).join(super::migration::HOME_DIR_NAME)
 }
 
 fn repo_workspace_file(repo_path: &str) -> PathBuf {
-    repo_shep_dir(repo_path).join("workspace.yml")
+    repo_shipctl_dir(repo_path).join("workspace.yml")
+}
+
+/// Where to *read* a repo's workspace from: the current path if it exists,
+/// otherwise the pre-rename one. Writes always go to the current path, which
+/// leaves the legacy file intact for an installed `shep` build to keep using.
+fn repo_workspace_read_path(repo_path: &str) -> PathBuf {
+    let current = repo_workspace_file(repo_path);
+    if current.exists() {
+        return current;
+    }
+    let legacy = Path::new(repo_path)
+        .join(super::migration::LEGACY_DIR_NAME)
+        .join("workspace.yml");
+    if legacy.exists() {
+        return legacy;
+    }
+    current
 }
 
 // ── Global config ───────────────────────────────────────────────────
@@ -88,7 +111,7 @@ fn save_global_config_at(
     let dir = path
         .parent()
         .ok_or_else(|| "Global config path has no parent directory".to_string())?;
-    fs::create_dir_all(dir).map_err(|e| format!("Failed to create .shep dir: {e}"))?;
+    fs::create_dir_all(dir).map_err(|e| format!("Failed to create .shipctl dir: {e}"))?;
 
     let yaml =
         serde_yaml::to_string(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
@@ -256,7 +279,7 @@ pub fn register_repo(repo_path: &str) -> Result<RegisteredRepo, String> {
     })?;
 
     // Load existing workspace config or return an in-memory default. We create
-    // `.shep` lazily only when the user actually saves project config.
+    // `.shipctl` lazily only when the user actually saves project config.
     let workspace = load_or_default_workspace(&canonical_str)?;
     Ok(RegisteredRepo {
         path: canonical_str,
@@ -278,7 +301,7 @@ pub fn load_repo_workspace(repo_path: &str) -> Result<WorkspaceConfig, String> {
 }
 
 pub fn save_repo_workspace(repo_path: &str, config: &WorkspaceConfig) -> Result<(), String> {
-    ensure_repo_shep_dir(repo_path)?;
+    ensure_repo_shipctl_dir(repo_path)?;
 
     let path = repo_workspace_file(repo_path);
     let yaml =
@@ -366,8 +389,8 @@ pub fn migrate_old_projects() -> Result<(), String> {
             capability_data: Default::default(),
         };
 
-        // Write to repo's .shep/workspace.yml
-        if ensure_repo_shep_dir(&cwd).is_ok() {
+        // Write to repo's .shipctl/workspace.yml
+        if ensure_repo_shipctl_dir(&cwd).is_ok() {
             let _ = save_repo_workspace(&cwd, &workspace);
         }
 
@@ -488,12 +511,17 @@ fn slug_from_name(name: &str) -> String {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-fn ensure_repo_shep_dir(repo_path: &str) -> Result<(), String> {
-    let shep_dir = repo_shep_dir(repo_path);
-    fs::create_dir_all(&shep_dir).map_err(|e| format!("Failed to create .shep dir: {e}"))?;
+fn ensure_repo_shipctl_dir(repo_path: &str) -> Result<(), String> {
+    // Copy a pre-rename `<repo>/.shep` across first, so the new directory
+    // starts from the project's existing state rather than a blank default.
+    // The legacy directory is left in place for an installed `shep` build.
+    let _ = super::migration::migrate_repo_state(repo_path);
 
-    // Create .gitignore in .shep/ to ignore everything
-    let gitignore = shep_dir.join(".gitignore");
+    let shipctl_dir = repo_shipctl_dir(repo_path);
+    fs::create_dir_all(&shipctl_dir).map_err(|e| format!("Failed to create .shipctl dir: {e}"))?;
+
+    // Create .gitignore in .shipctl/ to ignore everything
+    let gitignore = shipctl_dir.join(".gitignore");
     if !gitignore.exists() {
         fs::write(&gitignore, "*\n").map_err(|e| format!("Failed to write .gitignore: {e}"))?;
     }
@@ -502,7 +530,7 @@ fn ensure_repo_shep_dir(repo_path: &str) -> Result<(), String> {
 }
 
 fn load_or_default_workspace(repo_path: &str) -> Result<WorkspaceConfig, String> {
-    let path = repo_workspace_file(repo_path);
+    let path = repo_workspace_read_path(repo_path);
     if path.exists() {
         let content =
             fs::read_to_string(&path).map_err(|e| format!("Failed to read workspace file: {e}"))?;
@@ -543,7 +571,7 @@ mod tests {
             .unwrap_or_default()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "shep-global-config-atomic-{}-{unique}.yml",
+            "shipctl-global-config-atomic-{}-{unique}.yml",
             std::process::id()
         ));
         let cache: Arc<Mutex<ConfigCache>> = Arc::new(Mutex::new(None));

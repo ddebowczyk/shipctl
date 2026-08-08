@@ -10,7 +10,7 @@ import { validateYaml } from "../bin/check-schemas.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 test("a malformed capability manifest fails schema validation", async () => {
-  const temporary = await mkdtemp(path.join(tmpdir(), "shep-malformed-manifest-"));
+  const temporary = await mkdtemp(path.join(tmpdir(), "shipctl-malformed-manifest-"));
   try {
     const manifest = path.join(temporary, "capability.yaml");
     await writeFile(manifest, `---

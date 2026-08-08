@@ -30,7 +30,7 @@ function capability(id, extra = {}) {
 }
 
 async function fixture({ mutate, files = {} } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "shep-ops-validate-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "shipctl-ops-validate-"));
   const manifests = {
     check: capability("check"),
     modularity: capability("modularity", {
@@ -42,9 +42,9 @@ async function fixture({ mutate, files = {} } = {}) {
 
   await put(root, "package.json", JSON.stringify({ scripts: {} }));
   await put(root, "Cargo.toml", '[workspace]\nmembers = ["modules/*/backend"]\n');
-  await put(root, "core/frontend/package.json", JSON.stringify({ name: "@shep/core", exports: {} }));
+  await put(root, "core/frontend/package.json", JSON.stringify({ name: "@shipctl/core", exports: {} }));
   await put(root, "core/frontend/host/index.ts", "export const host = true;");
-  await put(root, "modules/api/frontend/package.json", JSON.stringify({ name: "@shep/module-api" }));
+  await put(root, "modules/api/frontend/package.json", JSON.stringify({ name: "@shipctl/module-api" }));
   await put(root, "modules/api/frontend/src/index.ts", "export const api = true;");
   await put(root, "src/main.tsx", "export {};");
   await put(root, "src/vite-env.d.ts", "/// <reference types='vite/client' />");

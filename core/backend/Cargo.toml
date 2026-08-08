@@ -1,12 +1,12 @@
 [package]
-name = "shep-core"
-version = "0.5.0"
-description = "Shep's own capabilities: workspace storage, terminals, projects, appearance, settings"
+name = "shipctl-core"
+version = "0.0.0"
+description = "Shipctl's own capabilities: workspace storage, terminals, projects, appearance, settings"
 edition = "2021"
 rust-version.workspace = true
 
 [lib]
-name = "shep_core"
+name = "shipctl_core"
 
 [dependencies]
 serde_json = "1.0"
@@ -21,4 +21,4 @@ core-text = "22"
 core-foundation = "0.10"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
-shep-module-api = { path = "../../modules/api/backend" }
+shipctl-module-api = { path = "../../modules/api/backend" }

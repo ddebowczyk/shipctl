@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ModuleHostServices, ModulePanelProps } from "@shep/module-api";
+import type { ModuleHostServices, ModulePanelProps } from "@shipctl/module-api";
 import { CircleHelp, List, Play, Plus, Save, Square, Trash2, X } from "lucide-react";
 
 import {
@@ -157,7 +157,7 @@ function CommandRow({
             <button
               type="button"
               className="commands-panel__auto-help"
-              title="Auto starts this command when you open the project in Shep."
+              title="Auto starts this command when you open the project in Shipctl."
             >
               <CircleHelp size={12} />
             </button>

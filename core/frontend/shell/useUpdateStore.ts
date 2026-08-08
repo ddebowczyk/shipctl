@@ -41,7 +41,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
         set({
           status: "available",
           availableVersion: update.version,
-          releaseNotesUrl: `https://github.com/stumptowndoug/shep/releases/tag/v${update.version}`,
+          releaseNotesUrl: `https://github.com/ddebowczyk/shipctl/releases/tag/v${update.version}`,
           _update: update,
           hasChecked: true,
         });

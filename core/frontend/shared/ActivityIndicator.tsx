@@ -1,4 +1,4 @@
-import type { TabActivity } from "@shep/core/platform";
+import type { TabActivity } from "@shipctl/core/platform";
 
 export type ActivityIndicatorStatus = "idle" | "running" | "active" | "attention" | "failed";
 

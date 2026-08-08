@@ -1,8 +1,8 @@
 import { useState, useCallback, useMemo } from "react";
-import type { ProjectAction, ProjectSurfaceAction } from "@shep/module-api";
-import type { RepoInfo, RepoGroup } from "@shep/core/platform";
-import { getEditorLabel } from "@shep/core/settings";
-import { useEditorStore } from "@shep/core/settings";
+import type { ProjectAction, ProjectSurfaceAction } from "@shipctl/module-api";
+import type { RepoInfo, RepoGroup } from "@shipctl/core/platform";
+import { getEditorLabel } from "@shipctl/core/settings";
+import { useEditorStore } from "@shipctl/core/settings";
 import {
   Folder,
   FolderOpen,
@@ -16,19 +16,19 @@ import {
   Check,
 } from "lucide-react";
 import { createPortal } from "react-dom";
-import { ContextMenu } from "@shep/core/shared/views";
-import type { ContextMenuItem } from "@shep/core/shared/views";
-import { useNoticeStore } from "@shep/core/shared";
-import { getErrorMessage } from "@shep/core/platform";
-import { handleActionKey } from "@shep/core/shared";
-import { revealInFinder } from "@shep/core/platform";
+import { ContextMenu } from "@shipctl/core/shared/views";
+import type { ContextMenuItem } from "@shipctl/core/shared/views";
+import { useNoticeStore } from "@shipctl/core/shared";
+import { getErrorMessage } from "@shipctl/core/platform";
+import { handleActionKey } from "@shipctl/core/shared";
+import { revealInFinder } from "@shipctl/core/platform";
 import {
   useModuleProjectActions,
-} from "@shep/core/host";
+} from "@shipctl/core/host";
 import {
   ModuleProjectActionSurface,
-} from "@shep/core/host/views";
-import { ActivityIndicator, getAggregateActivityStatus } from "@shep/core/shared/views";
+} from "@shipctl/core/host/views";
+import { ActivityIndicator, getAggregateActivityStatus } from "@shipctl/core/shared/views";
 
 interface ProjectItemProps {
   repo: RepoInfo;

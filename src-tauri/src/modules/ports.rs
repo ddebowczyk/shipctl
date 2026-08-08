@@ -3,9 +3,9 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use shep_module_ports::{HostServices, ProcessAuthority, ProjectCatalog};
+use shipctl_module_ports::{HostServices, ProcessAuthority, ProjectCatalog};
 
-use shep_core::workspace::manager::WorkspaceManager;
+use shipctl_core::workspace::manager::WorkspaceManager;
 
 const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(5);
 

@@ -6,7 +6,7 @@ import type {
   ModuleHostServices,
   ProjectFactsProviderContribution,
   ProjectRef,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 type ProjectFactsModule = typeof import("../projectFacts.ts");
@@ -181,7 +181,7 @@ test("the Git module maps revision and lineage into stable generic facts", () =>
         untracked: 3,
         ahead: 0,
         behind: 0,
-        worktree_parent: "shep",
+        worktree_parent: "shipctl",
       },
     },
   });
@@ -191,7 +191,7 @@ test("the Git module maps revision and lineage into stable generic facts", () =>
 
   assert.deepEqual(first, {
     revision: { label: "feature/rails", state: "changed" },
-    lineage: { parentLabel: "shep" },
+    lineage: { parentLabel: "shipctl" },
   });
   assert.equal(second, first);
 });

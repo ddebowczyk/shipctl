@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 
 use tauri::{plugin::TauriPlugin, Runtime};
 
-pub const PLUGIN_NAME: &str = "shep-todos";
-pub const READ_TODOS_COMMAND: &str = "plugin:shep-todos|read_todos";
-pub const TOGGLE_TODO_COMMAND: &str = "plugin:shep-todos|toggle_todo";
-pub const ADD_TODO_COMMAND: &str = "plugin:shep-todos|add_todo";
-pub const MOVE_TODO_COMMAND: &str = "plugin:shep-todos|move_todo";
+pub const PLUGIN_NAME: &str = "shipctl-todos";
+pub const READ_TODOS_COMMAND: &str = "plugin:shipctl-todos|read_todos";
+pub const TOGGLE_TODO_COMMAND: &str = "plugin:shipctl-todos|toggle_todo";
+pub const ADD_TODO_COMMAND: &str = "plugin:shipctl-todos|add_todo";
+pub const MOVE_TODO_COMMAND: &str = "plugin:shipctl-todos|move_todo";
 
 /// Directories never scanned for todo files — build artifacts, deps, VCS internals.
 const IGNORED_DIRS: &[&str] = &[
@@ -22,6 +22,9 @@ const IGNORED_DIRS: &[&str] = &[
     "build",
     "__pycache__",
     "vendor",
+    ".shipctl-worktrees",
+    // Worktrees created before the rename are still registered in git and
+    // still on disk, so they stay ignored too.
     ".shep-worktrees",
 ];
 
@@ -498,11 +501,11 @@ mod tests {
 
     #[test]
     fn exposes_namespaced_command_contract() {
-        assert_eq!(PLUGIN_NAME, "shep-todos");
-        assert_eq!(READ_TODOS_COMMAND, "plugin:shep-todos|read_todos");
-        assert_eq!(TOGGLE_TODO_COMMAND, "plugin:shep-todos|toggle_todo");
-        assert_eq!(ADD_TODO_COMMAND, "plugin:shep-todos|add_todo");
-        assert_eq!(MOVE_TODO_COMMAND, "plugin:shep-todos|move_todo");
+        assert_eq!(PLUGIN_NAME, "shipctl-todos");
+        assert_eq!(READ_TODOS_COMMAND, "plugin:shipctl-todos|read_todos");
+        assert_eq!(TOGGLE_TODO_COMMAND, "plugin:shipctl-todos|toggle_todo");
+        assert_eq!(ADD_TODO_COMMAND, "plugin:shipctl-todos|add_todo");
+        assert_eq!(MOVE_TODO_COMMAND, "plugin:shipctl-todos|move_todo");
     }
 
     fn parse_items(content: &str) -> Vec<TodoItem> {
@@ -566,7 +569,7 @@ mod tests {
 
     fn temp_repo(name: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("shep-todos-test-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("shipctl-todos-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

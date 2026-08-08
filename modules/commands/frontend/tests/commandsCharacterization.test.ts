@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type {
   ModuleHostServices,
   ModuleTerminalSessionLifecycleEvent,
-} from "@shep/module-api";
+} from "@shipctl/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 import type { CommandConfig, CommandState } from "../src/types.ts";
@@ -130,7 +130,7 @@ function fixtureServices(options: {
 }
 
 test("module identity, panel identity, navigation, and migration metadata are stable", () => {
-  assert.equal(commands.commandsModule.id, "shep.commands");
+  assert.equal(commands.commandsModule.id, "shipctl.commands");
   assert.equal(commands.commandsModule.panels[0].id, "core.commands");
   assert.equal(commands.commandsModule.panels[0].shortcut, "⇧⌘C");
   assert.equal(commands.commandsModule.panels[0].migrationAlias.kind, "commands");

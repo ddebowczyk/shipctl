@@ -67,7 +67,7 @@ export async function checkSchemas(root = defaultRoot) {
   ];
   if (yamlFiles.length) await exec("yamllint", yamlFiles);
 
-  const temporary = await mkdtemp(path.join(tmpdir(), "shep-ledger-schema-"));
+  const temporary = await mkdtemp(path.join(tmpdir(), "shipctl-ledger-schema-"));
   try {
     const entrySchema = path.join(root, "ops/upstream/schema/entry.schema.yaml");
     const entries = await filesUnder(path.join(root, "ops/upstream/log"), (file) => file.endsWith(".md"));

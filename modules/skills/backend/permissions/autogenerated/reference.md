@@ -10,7 +10,7 @@
 <tr>
 <td>
 
-`shep-skills:allow-list-skills`
+`shipctl-skills:allow-list-skills`
 
 </td>
 <td>
@@ -23,7 +23,7 @@ Enables the list_skills command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-skills:deny-list-skills`
+`shipctl-skills:deny-list-skills`
 
 </td>
 <td>
@@ -36,7 +36,7 @@ Denies the list_skills command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-skills:allow-remove-skill`
+`shipctl-skills:allow-remove-skill`
 
 </td>
 <td>
@@ -49,7 +49,7 @@ Enables the remove_skill command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-skills:deny-remove-skill`
+`shipctl-skills:deny-remove-skill`
 
 </td>
 <td>
@@ -62,7 +62,7 @@ Denies the remove_skill command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-skills:allow-setup-skill`
+`shipctl-skills:allow-setup-skill`
 
 </td>
 <td>
@@ -75,7 +75,7 @@ Enables the setup_skill command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-skills:deny-setup-skill`
+`shipctl-skills:deny-setup-skill`
 
 </td>
 <td>

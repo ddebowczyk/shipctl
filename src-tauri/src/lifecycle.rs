@@ -2,8 +2,8 @@
 //! the projects watcher and the Tauri app handle at once, so it belongs to the
 //! shell that composes them rather than to any one capability.
 
-use shep_core::projects::watcher::GitWatcher;
-use shep_core::terminal::manager::PtyManager;
+use shipctl_core::projects::watcher::GitWatcher;
+use shipctl_core::terminal::manager::PtyManager;
 use tauri::State;
 
 #[tauri::command]

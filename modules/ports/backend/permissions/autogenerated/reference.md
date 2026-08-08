@@ -10,7 +10,7 @@
 <tr>
 <td>
 
-`shep-ports:allow-kill-port`
+`shipctl-ports:allow-kill-port`
 
 </td>
 <td>
@@ -23,7 +23,7 @@ Enables the kill_port command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-ports:deny-kill-port`
+`shipctl-ports:deny-kill-port`
 
 </td>
 <td>
@@ -36,7 +36,7 @@ Denies the kill_port command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-ports:allow-list-listening-ports`
+`shipctl-ports:allow-list-listening-ports`
 
 </td>
 <td>
@@ -49,7 +49,7 @@ Enables the list_listening_ports command without any pre-configured scope.
 <tr>
 <td>
 
-`shep-ports:deny-list-listening-ports`
+`shipctl-ports:deny-list-listening-ports`
 
 </td>
 <td>

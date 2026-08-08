@@ -7,12 +7,12 @@ import test from "node:test";
 import { checkModuleBoundaries, formatDiagnostics } from "../bin/check-module-boundaries.mjs";
 
 async function fixture(files) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "shep-module-boundaries-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "shipctl-module-boundaries-"));
   await mkdir(path.join(root, "core/frontend/host"), { recursive: true });
   await writeFile(
     path.join(root, "core/frontend/package.json"),
     JSON.stringify({
-      name: "@shep/core",
+      name: "@shipctl/core",
       exports: {
         "./platform": "./platform/index.ts",
         "./shared": "./shared/index.ts",
@@ -23,7 +23,7 @@ async function fixture(files) {
   for (const moduleName of ["api", "alpha", "beta"]) {
     const frontend = path.join(root, "modules", moduleName, "frontend");
     await mkdir(path.join(frontend, "src"), { recursive: true });
-    const packageName = moduleName === "api" ? "@shep/module-api" : `@shep/${moduleName}`;
+    const packageName = moduleName === "api" ? "@shipctl/module-api" : `@shipctl/${moduleName}`;
     await writeFile(path.join(frontend, "package.json"), JSON.stringify({ name: packageName }));
   }
   for (const [relative, contents] of Object.entries(files)) {
@@ -36,9 +36,9 @@ async function fixture(files) {
 
 test("accepts public composition and inward API imports", async (t) => {
   const root = await fixture({
-    "core/frontend/host/enabledModules.ts": "import alpha from '@shep/alpha'; export default alpha;",
-    "src/main.tsx": "import type { ShepModule } from '@shep/module-api'; export type T = ShepModule;",
-    "modules/alpha/frontend/src/index.ts": "import type { ShepModule } from '@shep/module-api'; export const value: ShepModule | null = null;",
+    "core/frontend/host/enabledModules.ts": "import alpha from '@shipctl/alpha'; export default alpha;",
+    "src/main.tsx": "import type { ShipctlModule } from '@shipctl/module-api'; export type T = ShipctlModule;",
+    "modules/alpha/frontend/src/index.ts": "import type { ShipctlModule } from '@shipctl/module-api'; export const value: ShipctlModule | null = null;",
   });
   t.after(() => rm(root, { recursive: true, force: true }));
   assert.deepEqual(await checkModuleBoundaries(root), []);
@@ -46,9 +46,9 @@ test("accepts public composition and inward API imports", async (t) => {
 
 test("reports deterministic host and sibling violations", async (t) => {
   const root = await fixture({
-    "src/main.tsx": "import alpha from '@shep/alpha'; export default alpha;",
-    "core/frontend/host/enabledModules.ts": "import x from '@shep/alpha/src/internal'; export default x;",
-    "modules/alpha/frontend/src/index.ts": "import beta from '@shep/beta'; export default beta;",
+    "src/main.tsx": "import alpha from '@shipctl/alpha'; export default alpha;",
+    "core/frontend/host/enabledModules.ts": "import x from '@shipctl/alpha/src/internal'; export default x;",
+    "modules/alpha/frontend/src/index.ts": "import beta from '@shipctl/beta'; export default beta;",
     "modules/beta/frontend/src/index.ts": "import host from '../../../../src/main'; export default host;",
   });
   t.after(() => rm(root, { recursive: true, force: true }));

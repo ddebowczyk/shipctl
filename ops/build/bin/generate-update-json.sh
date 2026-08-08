@@ -15,7 +15,7 @@ VERSION=$(jq -r .version src-tauri/tauri.conf.json)
 
 # Locate the signed update artifact
 BUNDLE_DIR="target/release/bundle/macos"
-SIG_FILE="${BUNDLE_DIR}/shep.app.tar.gz.sig"
+SIG_FILE="${BUNDLE_DIR}/shipctl.app.tar.gz.sig"
 
 if [ ! -f "$SIG_FILE" ]; then
   echo "Error: Signature file not found at ${SIG_FILE}"
@@ -25,7 +25,7 @@ fi
 
 SIGNATURE=$(cat "$SIG_FILE")
 PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-DOWNLOAD_URL="https://github.com/stumptowndoug/shep/releases/download/v${VERSION}/shep.app.tar.gz"
+DOWNLOAD_URL="https://github.com/ddebowczyk/shipctl/releases/download/v${VERSION}/shipctl.app.tar.gz"
 
 cat > latest.json <<EOF
 {

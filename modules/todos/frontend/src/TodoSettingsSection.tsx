@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
-import type { SettingsContributionProps } from "@shep/module-api";
+import type { SettingsContributionProps } from "@shipctl/module-api";
 
 import { useTodoStore } from "./store";
 
@@ -55,7 +55,7 @@ export default function TodoSettingsSection({
       <div className="settings-row !mb-0">
         <span className="settings-row__label flex items-center gap-2">
           <span>New File Style</span>
-          <InfoTip text="The shape Shep gives a TODO.md it creates for you (when you add your first to-do in a project). Kanban board starts with Backlog / In Progress / Done columns and renders as a board; Simple list is a flat checklist. Existing files are never reformatted." />
+          <InfoTip text="The shape Shipctl gives a TODO.md it creates for you (when you add your first to-do in a project). Kanban board starts with Backlog / In Progress / Done columns and renders as a board; Simple list is a flat checklist. Existing files are never reformatted." />
         </span>
         <div className="flex flex-wrap gap-2">
           <button

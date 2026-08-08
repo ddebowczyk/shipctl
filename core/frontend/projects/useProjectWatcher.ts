@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { watchRepo, unwatchRepo } from "@shep/core/platform";
+import { watchRepo, unwatchRepo } from "@shipctl/core/platform";
 import {
   MODULE_HOST_SERVICES,
   notifyModulesFilesystemChanged,
   notifyModulesProjectsChanged,
-} from "@shep/core/host";
+} from "@shipctl/core/host";
 
 interface FsChangedPayload {
   paths: string[];

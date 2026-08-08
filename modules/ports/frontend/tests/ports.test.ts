@@ -56,8 +56,8 @@ test("Ports owns a global surface and navigation contribution", () => {
 
 test("Ports frontend uses the namespaced plugin command contract", () => {
   assert.deepEqual(PORT_COMMANDS, {
-    list: "plugin:shep-ports|list_listening_ports",
-    kill: "plugin:shep-ports|kill_port",
+    list: "plugin:shipctl-ports|list_listening_ports",
+    kill: "plugin:shipctl-ports|kill_port",
   });
 });
 

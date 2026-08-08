@@ -4,7 +4,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use shep_module_git as git;
+use shipctl_module_git as git;
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
@@ -28,7 +28,7 @@ impl TempRoot {
     fn new(tag: &str) -> Self {
         let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "shep-git-characterization-{tag}-{}-{sequence}",
+            "shipctl-git-characterization-{tag}-{}-{sequence}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&path);
@@ -74,13 +74,13 @@ fn git_ok(path: &Path, args: &[&str]) {
 
 fn initialize(path: &Path) {
     git::init_repo(path.to_str().unwrap()).unwrap();
-    git_ok(path, &["config", "user.name", "Shep Characterization"]);
+    git_ok(path, &["config", "user.name", "Shipctl Characterization"]);
     git_ok(
         path,
         &[
             "config",
             "user.email",
-            "shep-characterization@example.invalid",
+            "shipctl-characterization@example.invalid",
         ],
     );
 }
@@ -235,7 +235,7 @@ fn file_listing_and_preview_sources_follow_git_visibility_and_preview_limits() {
 }
 
 #[test]
-fn worktree_creation_uses_the_shep_sibling_directory_and_reports_parent_metadata() {
+fn worktree_creation_uses_the_shipctl_sibling_directory_and_reports_parent_metadata() {
     let fixture = TempRoot::new("worktree");
     let repo = fixture.directory("repo");
     let path = repo.to_str().unwrap();
@@ -251,7 +251,7 @@ fn worktree_creation_uses_the_shep_sibling_directory_and_reports_parent_metadata
             .path()
             .canonicalize()
             .unwrap()
-            .join(".shep-worktrees/repo/feature-characterized")
+            .join(".shipctl-worktrees/repo/feature-characterized")
     );
 
     let entries = git::list_worktrees(path).unwrap();

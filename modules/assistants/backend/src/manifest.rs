@@ -161,7 +161,7 @@ mod tests {
     fn fixture_dir(name: &str) -> std::path::PathBuf {
         let sequence = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
         let directory = std::env::temp_dir().join(format!(
-            "shep-assistant-session-manifest-test-{}-{sequence}-{name}",
+            "shipctl-assistant-session-manifest-test-{}-{sequence}-{name}",
             std::process::id()
         ));
         fs::create_dir_all(&directory).unwrap();

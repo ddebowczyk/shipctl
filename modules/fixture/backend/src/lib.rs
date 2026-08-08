@@ -1,11 +1,11 @@
-//! Disposable internal plugin used to verify Shep's native module rail.
+//! Disposable internal plugin used to verify Shipctl's native module rail.
 
 #![forbid(unsafe_code)]
 
 use tauri::{plugin::TauriPlugin, Runtime};
 
-pub const PLUGIN_NAME: &str = "shep-fixture";
-pub const PING_COMMAND: &str = "plugin:shep-fixture|ping";
+pub const PLUGIN_NAME: &str = "shipctl-fixture";
+pub const PING_COMMAND: &str = "plugin:shipctl-fixture|ping";
 
 #[tauri::command]
 fn ping() -> &'static str {
@@ -24,8 +24,8 @@ mod tests {
 
     #[test]
     fn exposes_an_inert_namespaced_ping_contract() {
-        assert_eq!(PLUGIN_NAME, "shep-fixture");
-        assert_eq!(PING_COMMAND, "plugin:shep-fixture|ping");
+        assert_eq!(PLUGIN_NAME, "shipctl-fixture");
+        assert_eq!(PING_COMMAND, "plugin:shipctl-fixture|ping");
         assert_eq!(ping(), "fixture:pong");
     }
 }

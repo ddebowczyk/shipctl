@@ -1,12 +1,12 @@
 import { create } from "zustand";
 import { buildCustomTheme } from "./customThemes.ts";
 import { DEFAULT_THEME_ID, THEMES } from "./themes.ts";
-import type { ShepTheme } from "./themes.ts";
+import type { ShipctlTheme } from "./themes.ts";
 
-const THEME_ID_STORAGE_KEY = "shep:theme";
-const CUSTOM_THEME_STORAGE_KEY = "shep:custom-theme";
+const THEME_ID_STORAGE_KEY = "shipctl:theme";
+const CUSTOM_THEME_STORAGE_KEY = "shipctl:custom-theme";
 
-function isThemeRecord(value: unknown): value is ShepTheme {
+function isThemeRecord(value: unknown): value is ShipctlTheme {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
   return typeof candidate.id === "string"
@@ -24,7 +24,7 @@ function loadThemeId(): string {
   }
 }
 
-function loadCustomTheme(): ShepTheme | null {
+function loadCustomTheme(): ShipctlTheme | null {
   try {
     const raw = window.localStorage.getItem(CUSTOM_THEME_STORAGE_KEY);
     if (!raw) return null;
@@ -41,23 +41,23 @@ function saveThemeId(id: string): void {
   } catch { /* ignore */ }
 }
 
-function saveCustomTheme(theme: ShepTheme): void {
+function saveCustomTheme(theme: ShipctlTheme): void {
   try {
     window.localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, JSON.stringify(theme));
   } catch { /* ignore */ }
 }
 
-function resolveTheme(id: string, customTheme: ShepTheme | null): ShepTheme {
+function resolveTheme(id: string, customTheme: ShipctlTheme | null): ShipctlTheme {
   if (id === customTheme?.id) return customTheme;
   return THEMES[id] ?? THEMES[DEFAULT_THEME_ID];
 }
 
 interface ThemeStore {
   themeId: string;
-  theme: ShepTheme;
-  customTheme: ShepTheme | null;
+  theme: ShipctlTheme;
+  customTheme: ShipctlTheme | null;
   setTheme: (id: string) => void;
-  importTheme: (source: string) => ShepTheme;
+  importTheme: (source: string) => ShipctlTheme;
 }
 
 const initialCustomTheme = loadCustomTheme();
