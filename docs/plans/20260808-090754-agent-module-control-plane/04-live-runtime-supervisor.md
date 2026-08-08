@@ -21,21 +21,24 @@ Add a stable `ModuleSupervisor` under `core/frontend/host/`. It:
 The supervisor's observable state is exposed through `useSyncExternalStore`.
 Do not synchronize derived registry state with React effects.
 
-## Work package 4.2 — activation scope and ownership
+## Work package 4.2 — declarative module instances and host ownership
 
-Every activation receives a host-created identity such as
-`fixture@<digest>#<activation-id>` and a fresh `ActivationScope`. The scope owns:
+Every artifact exports a declarative module descriptor: contribution ids and
+kinds, component references, requested capabilities, configuration schema, and
+resource intents. The host validates that descriptor, creates an identity such
+as `fixture@<digest>#<activation-id>`, and owns:
 
 - staged and published contributions;
 - loaded styles;
-- event and store subscriptions;
-- scheduled tasks and timers;
-- native channel/listener handles; and
+- React mounting and unmounting;
+- subscriptions, tasks, and timers created through host ports;
+- native channel and listener handles; and
 - leases for host-owned long-lived resources.
 
-Handle registration is immediate, disposal is reverse-order and idempotent,
-and cleanup failures are secondary diagnostics. They may not mask the original
-activation failure.
+Modules do not return a catch-all live runtime object. React owns component
+cleanup, while the host tracks only handles created through its mediated ports
+and resource adapters. Handle disposal is idempotent, and cleanup failures are
+secondary diagnostics that may not mask the original load failure.
 
 ## Work package 4.3 — atomic catalog snapshot
 
@@ -46,7 +49,7 @@ providers, schedules, and active-instance routing.
 Activation follows one transaction:
 
 1. validate and import B from its digest-qualified URL;
-2. activate B into private staging registries;
+2. validate B's descriptor into a private host-owned catalog;
 3. build and validate the complete next snapshot;
 4. publish that snapshot once;
 5. route new work to B; and
@@ -58,9 +61,9 @@ snapshot untouched.
 ## Work package 4.4 — fixture runtime proof
 
 Make `modules/fixture` the first real runtime-loaded module. Its artifacts
-export deterministic version and activation markers, contribute more than one
-catalog kind, acquire disposable handles, and support an injected activation
-failure.
+export deterministic version and evaluation markers plus a declarative
+descriptor, contribute more than one catalog kind, request disposable handles
+through host ports, and support an injected descriptor failure.
 
 Add the public declarative primitive:
 
@@ -107,8 +110,8 @@ Integration tests assert through `shipctl modules inspect`, `diagnose`, and
 
 ## Primary implementation areas
 
-- `core/frontend/host/` for supervisor, snapshot, scope, and reporting;
+- `core/frontend/host/` for supervisor, snapshots, mounting, ownership, and reporting;
 - `core/frontend/shell/AppShell.tsx` for reactive snapshot consumption;
-- `modules/api/frontend/` for activation and ownership contracts;
+- `modules/api/frontend/` for declarative contribution and host-port contracts;
 - `modules/fixture/` for deterministic runtime artifacts; and
 - `ops/module-control/` for live-host integration tests.

@@ -3,10 +3,9 @@ use std::path::Path;
 
 use super::{ModuleRegistry, RegistryError, REGISTRY_SCHEMA_VERSION};
 use crate::module_control::{
-    Diagnostic, DiagnosticSeverity, RedactedEvidence, MODULE_CONTROL_SCHEMA_VERSION,
+    codes::REGISTRY_HEALTHY, Diagnostic, DiagnosticSeverity, RedactedEvidence,
+    MODULE_CONTROL_SCHEMA_VERSION,
 };
-
-pub const REGISTRY_HEALTHY: &str = "module.registry.health.ok";
 
 /// Inspect an existing registry without creating, migrating, or mutating it.
 pub fn diagnose_registry(path: &Path) -> Vec<Diagnostic> {

@@ -41,6 +41,17 @@ export {
 
 export { ENABLED_MODULES } from "./enabledModules.ts";
 export {
+  buildFrontendRuntimeSnapshot,
+  MODULE_CONTROL_SCHEMA_VERSION,
+  publishFrontendRuntimeSnapshot,
+} from "./moduleRuntimeSnapshot.ts";
+export type {
+  FrontendContributionSnapshot,
+  FrontendModuleRuntimeSnapshot,
+  FrontendRuntimeSnapshot,
+  RuntimeSnapshotReceipt,
+} from "./moduleRuntimeSnapshot.ts";
+export {
   activateModules,
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,

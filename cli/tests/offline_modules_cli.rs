@@ -3,10 +3,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
+use shipctl_core::module_control::registry::{
+    ArtifactAcquisition, BuildModuleMembership, ModuleRegistry, RegistryMutation,
+    StaticBuildInventory,
+};
 use shipctl_core::module_control::{
-    BuildModuleMembership, DesiredModuleState, ModuleIdentity, ModuleLifecycleState,
-    ModuleOperationKind, ModuleRegistry, ModuleRuntimeKind, ModuleSource, ObservedModuleState,
-    RegistryMutation, StaticBuildInventory, VerificationExpectation, MODULE_CONTROL_SCHEMA_VERSION,
+    DesiredModuleState, ModuleIdentity, ModuleLifecycleState, ModuleOperationKind,
+    ModuleRuntimeKind, ModuleSource, ObservedModuleState, VerificationExpectation,
+    MODULE_CONTROL_SCHEMA_VERSION,
 };
 use shipctl_core::state::paths::ShipctlPaths;
 use uuid::Uuid;
@@ -125,11 +129,13 @@ fn seed_registry(paths: &ShipctlPaths, instance_id: Uuid, artifact: &ModuleIdent
             module_id: MODULE_ID.to_string(),
             instance_id,
             kind: ModuleOperationKind::Enable,
-            artifacts: vec![artifact.clone()],
+            artifacts: vec![ArtifactAcquisition {
+                identity: artifact.clone(),
+                source: ModuleSource::User,
+            }],
             desired: Some(DesiredModuleState {
                 schema_version: MODULE_CONTROL_SCHEMA_VERSION,
                 module_id: MODULE_ID.to_string(),
-                instance_id,
                 selected_artifact: Some(artifact.clone()),
                 enabled: true,
                 configuration_revision: 1,
@@ -164,7 +170,6 @@ fn artifact() -> ModuleIdentity {
         id: MODULE_ID.to_string(),
         version: "1.0.0".to_string(),
         content_digest: "a".repeat(64),
-        source: ModuleSource::User,
         runtime_kind: ModuleRuntimeKind::FrontendEsm,
     }
 }

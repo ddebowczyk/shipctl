@@ -1,5 +1,7 @@
 use shipctl_core::build_info::CONTROL_PROTOCOL_VERSION;
-use shipctl_core::module_control::{BuildModuleMembership, ModuleRegistry, StaticBuildInventory};
+use shipctl_core::module_control::registry::{
+    BuildModuleMembership, ModuleRegistry, StaticBuildInventory,
+};
 use shipctl_core::state::paths::ShipctlPaths;
 
 use crate::build_info::APP_VERSION;
@@ -100,7 +102,7 @@ mod tests {
             vec!["shipctl.enabled", "shipctl.frontend"]
         );
         assert!(inventory.modules.iter().all(|record| {
-            record.identity.source == ModuleSource::Bundled
+            record.source == ModuleSource::Bundled
                 && record.identity.runtime_kind == ModuleRuntimeKind::StaticBuiltin
                 && record.lifecycle == ModuleLifecycleState::RestartRequired
                 && !record.live_loadable

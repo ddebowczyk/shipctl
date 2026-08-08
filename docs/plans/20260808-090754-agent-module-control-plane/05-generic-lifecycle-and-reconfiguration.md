@@ -38,21 +38,22 @@ Apply these generic rules:
 | Operation | Durable commit | Runtime behavior |
 | --- | --- | --- |
 | Add | Record validated disabled artifact | None |
-| Enable | Select installed digest | Prepare and publish instance |
-| Update | Select B while A remains observed | Prepare B, swap, drain A |
-| Disable | Select no active digest | Unpublish, route no new work, drain |
+| Enable | Select installed digest | Validate declaration and publish host-owned catalog entries |
+| Update | Select B while A remains observed | Validate B, swap catalog, retain leased resources |
+| Disable | Select no active digest | Unpublish catalog entries and route no new work |
 | Remove | Drop desired/install reference | Disable semantics, then collect artifact |
-| Rollback | Select retained digest A | Same prepare-and-swap path |
+| Rollback | Select retained digest A | Same validate-and-swap path |
 | Reconfigure | Commit validated config revision | Apply live or reject before commit |
 
 <!-- markdownlint-enable MD013 -->
 
 Logical removal completes when public behavior and new-work routing disappear.
-Physical removal completes after old instance leases release and no registry or
-operation references require the artifact. Both states are visible.
+Physical removal completes after host-owned leases attributed to the old
+instance release and no registry or operation references require the artifact.
+Both states are visible.
 
-Do not add a generic force-close shortcut. A runtime kind or resource lacking a
-safe drain or transfer contract is restart-required before desired state
+Do not add a generic force-close shortcut. A host resource adapter lacking safe
+retention or transfer semantics is restart-required before desired state
 changes.
 
 ## Work package 5.3 — configuration contract
@@ -84,10 +85,11 @@ Define a host resource adapter contract:
 - release on natural completion; and
 - report identity and drain state without exposing secrets.
 
-Convert terminal-session action delivery from global broadcast to exact owner
-routing. A terminal started by A remains leased to A while B handles new work.
-PTY output continues through the unchanged host transport; lifecycle operations
-must not kill it to complete quickly.
+Convert terminal-session action delivery from global broadcast to exact host
+resource routing. A terminal requested by A is owned by the host and remains
+attributed to A while B handles new work. PTY output continues through the
+unchanged host transport; lifecycle operations must not kill it to complete
+quickly.
 
 Apply the same contract to jobs, watchers, streams, and background tasks as each
 kind enters a module manifest.

@@ -12,6 +12,10 @@ use clap::Parser;
 use serde::Serialize;
 use shipctl_core::build_info::BuildIdentity;
 use shipctl_core::instance::ControlError;
+use shipctl_core::module_control::codes::{
+    OPERATION_ACCEPTED, OPERATION_INSPECTED, REGISTRY_INSPECTED, REGISTRY_LISTED,
+    RUNTIME_DIAGNOSED, RUNTIME_INSPECTED,
+};
 use shipctl_core::module_control::ModuleOperationKind;
 use shipctl_core::state::archive::inspect_archive;
 
@@ -113,27 +117,19 @@ fn run_modules(command: ModulesCommand, output: OutputFormat) -> ExitCode {
         ModulesCommand::List(args) => {
             debug_assert!(args.offline);
             match offline_modules::list(args.state_root.as_deref()) {
-                Ok(data) => emit_success(
-                    output,
-                    "modules.list",
-                    "module.registry.listed",
-                    false,
-                    data,
-                )
-                .unwrap_or_else(|message| emit_render_failure(output, "modules.list", message)),
+                Ok(data) => emit_success(output, "modules.list", REGISTRY_LISTED, false, data)
+                    .unwrap_or_else(|message| emit_render_failure(output, "modules.list", message)),
                 Err(error) => emit_failure(output, "modules.list", &error, false),
             }
         }
         ModulesCommand::Inspect(args) if args.offline => {
             match offline_modules::inspect(args.state_root.as_deref(), &args.module_id) {
-                Ok(data) => emit_success(
-                    output,
-                    "modules.inspect",
-                    "module.registry.inspected",
-                    false,
-                    data,
-                )
-                .unwrap_or_else(|message| emit_render_failure(output, "modules.inspect", message)),
+                Ok(data) => {
+                    emit_success(output, "modules.inspect", REGISTRY_INSPECTED, false, data)
+                        .unwrap_or_else(|message| {
+                            emit_render_failure(output, "modules.inspect", message)
+                        })
+                }
                 Err(error) => emit_failure(output, "modules.inspect", &error, false),
             }
         }
@@ -142,14 +138,8 @@ fn run_modules(command: ModulesCommand, output: OutputFormat) -> ExitCode {
             args.online.instance.as_deref(),
             args.module_id,
         ) {
-            Ok(data) => emit_success(
-                output,
-                "modules.inspect",
-                "module.inspection.fixture",
-                false,
-                data,
-            )
-            .unwrap_or_else(|message| emit_render_failure(output, "modules.inspect", message)),
+            Ok(data) => emit_success(output, "modules.inspect", RUNTIME_INSPECTED, false, data)
+                .unwrap_or_else(|message| emit_render_failure(output, "modules.inspect", message)),
             Err(error) => emit_failure(output, "modules.inspect", &error, false),
         },
         ModulesCommand::Diagnose(args) if args.offline => {
@@ -170,14 +160,8 @@ fn run_modules(command: ModulesCommand, output: OutputFormat) -> ExitCode {
             args.module_id
                 .expect("clap requires a module id for online diagnosis"),
         ) {
-            Ok(data) => emit_success(
-                output,
-                "modules.diagnose",
-                "module.diagnostics.fixture",
-                false,
-                data,
-            )
-            .unwrap_or_else(|message| emit_render_failure(output, "modules.diagnose", message)),
+            Ok(data) => emit_success(output, "modules.diagnose", RUNTIME_DIAGNOSED, false, data)
+                .unwrap_or_else(|message| emit_render_failure(output, "modules.diagnose", message)),
             Err(error) => emit_failure(output, "modules.diagnose", &error, false),
         },
         ModulesCommand::Verify(args) => {
@@ -223,7 +207,7 @@ fn run_module_transition(
         },
         args.target_revision,
     ) {
-        Ok(data) => emit_success(output, operation, "module.operation.fixture", false, data)
+        Ok(data) => emit_success(output, operation, OPERATION_ACCEPTED, false, data)
             .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
         Err(error) => emit_failure(output, operation, &error, false),
     }
@@ -239,7 +223,7 @@ fn run_operations(command: OperationsCommand, output: OutputFormat) -> ExitCode 
             Ok(data) => emit_success(
                 output,
                 "operations.inspect",
-                "module.operation.fixture",
+                OPERATION_INSPECTED,
                 false,
                 data,
             )
@@ -376,6 +360,28 @@ fn run_instances(command: InstancesCommand, output: OutputFormat) -> ExitCode {
                 .map_err(render_error)
             }),
         ),
+        InstancesCommand::Diagnose(args) => {
+            let rendered = instances::diagnose(
+                args.runtime.runtime_root.as_deref(),
+                args.selector.as_deref(),
+            )
+            .and_then(|data| {
+                let healthy = data.healthy;
+                emit_outcome(
+                    output,
+                    "instances.diagnose",
+                    if healthy {
+                        "control.instance.diagnostics_ok"
+                    } else {
+                        "control.instance.diagnostics_failed"
+                    },
+                    healthy,
+                    data,
+                )
+                .map_err(render_error)
+            });
+            ("instances.diagnose", rendered)
+        }
         InstancesCommand::Stop(args) => {
             let selector = args.selector;
             let rendered = match instances::stop(
@@ -481,6 +487,7 @@ fn operation_hint(args: &[OsString]) -> &str {
             ("ui", "start") => "ui.start",
             ("instances", "list") => "instances.list",
             ("instances", "inspect") => "instances.inspect",
+            ("instances", "diagnose") => "instances.diagnose",
             ("instances", "stop") => "instances.stop",
             ("modules", "list") => "modules.list",
             ("modules", "inspect") => "modules.inspect",

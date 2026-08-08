@@ -110,6 +110,7 @@ fn render(format: OutputFormat, response: &ResponseEnvelope<'_>) -> Result<Strin
 mod tests {
     use super::*;
     use serde_json::json;
+    use shipctl_core::module_control::codes::{OPERATION_ACCEPTED, VERIFICATION_MISMATCH};
 
     #[test]
     fn toon_and_json_preserve_the_same_response_data() {
@@ -165,7 +166,7 @@ mod tests {
         let json_text = success(
             OutputFormat::Json,
             "modules.enable",
-            "module.operation.fixture",
+            OPERATION_ACCEPTED,
             false,
             &operation,
         )
@@ -173,7 +174,7 @@ mod tests {
         let toon_text = success(
             OutputFormat::Toon,
             "modules.enable",
-            "module.operation.fixture",
+            OPERATION_ACCEPTED,
             false,
             &operation,
         )
@@ -190,7 +191,7 @@ mod tests {
         let rendered = outcome(
             OutputFormat::Json,
             "modules.verify",
-            "module.verification.expectation_mismatch",
+            VERIFICATION_MISMATCH,
             false,
             json!({"matched": false}),
         )

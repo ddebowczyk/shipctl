@@ -6,3 +6,6 @@ loader-tripwire *args:
 
 offline-cli:
     cd ../.. && cargo test -p shipctl-cli --test offline_modules_cli
+
+integration *args:
+    node bin/integration.mjs {{args}}

@@ -5,13 +5,11 @@
     "id": "shipctl.fixture",
     "version": "1.2.3",
     "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "source": "bundled",
     "runtimeKind": "frontend_esm"
   },
   "desired": {
     "schemaVersion": 1,
     "moduleId": "shipctl.fixture",
-    "instanceId": "00000000-0000-0000-0000-000000000001",
     "selectedArtifact": null,
     "enabled": false,
     "configurationRevision": 0

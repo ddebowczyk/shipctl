@@ -5,16 +5,13 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use super::codes::{
+    INVALID_DESIRED_STATE, INVALID_DIAGNOSTIC, INVALID_IDENTITY, INVALID_JSON,
+    SCHEMA_VERSION_UNSUPPORTED, SECRET_LEAKAGE, UNKNOWN_FIELD,
+};
+
 /// The first stable JSON schema for module control facts and requests.
 pub const MODULE_CONTROL_SCHEMA_VERSION: u32 = 1;
-
-pub const SCHEMA_VERSION_UNSUPPORTED: &str = "module.contract.schema_version_unsupported";
-pub const UNKNOWN_FIELD: &str = "module.contract.unknown_field";
-pub const INVALID_JSON: &str = "module.contract.invalid_json";
-pub const INVALID_IDENTITY: &str = "module.contract.identity.invalid";
-pub const INVALID_DESIRED_STATE: &str = "module.contract.desired_state.invalid";
-pub const INVALID_DIAGNOSTIC: &str = "module.contract.diagnostic.invalid";
-pub const SECRET_LEAKAGE: &str = "module.contract.evidence.secret_leakage";
 
 /// A stable failure for contract parsing or semantic validation.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -25,10 +22,10 @@ pub struct ModuleContractError {
 }
 
 impl ModuleContractError {
-    fn new(code: &'static str, message: String) -> Self {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_string(),
-            message,
+            message: message.into(),
         }
     }
 }
@@ -125,7 +122,6 @@ pub struct ModuleIdentity {
     pub id: String,
     pub version: String,
     pub content_digest: String,
-    pub source: ModuleSource,
     pub runtime_kind: ModuleRuntimeKind,
 }
 
@@ -150,18 +146,18 @@ impl ModuleContract for ModuleIdentity {
     }
 }
 
-/// Desired selection for exactly one named running Shipctl instance.
+/// Durable desired selection for one Shipctl state root.
 ///
 /// It references an immutable precompiled artifact. Disabling retains a selected
 /// artifact when one exists, so re-enabling is a data-only transition. `None`
 /// means no artifact is selected; neither state means that Rust source or Cargo
-/// features were removed.
+/// features were removed. Process incarnation belongs to observations and
+/// operations, not desired state.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DesiredModuleState {
     pub schema_version: u32,
     pub module_id: String,
-    pub instance_id: Uuid,
     pub selected_artifact: Option<ModuleIdentity>,
     pub enabled: bool,
     pub configuration_revision: u64,
@@ -603,13 +599,10 @@ impl ModuleContract for VerificationResult {
         }
         if let Some(inspection) = &self.observed.inspection {
             inspection.validate()?;
-            if inspection.manifest.id != self.expected.module_id
-                || inspection.desired.instance_id != self.expected.instance_id
-            {
+            if inspection.manifest.id != self.expected.module_id {
                 return Err(ModuleContractError::new(
                     INVALID_DESIRED_STATE,
-                    "Verification observation must match the requested module and instance"
-                        .to_string(),
+                    "Verification observation must match the requested module".to_string(),
                 ));
             }
         }
@@ -769,7 +762,6 @@ mod tests {
         let desired = DesiredModuleState {
             schema_version: MODULE_CONTROL_SCHEMA_VERSION,
             module_id: "shipctl.fixture".to_string(),
-            instance_id: Uuid::nil(),
             selected_artifact: None,
             enabled: true,
             configuration_revision: 4,

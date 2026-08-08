@@ -9,10 +9,36 @@ use crate::state::archive::StateArchiveInspection;
 
 /// The JSON-line envelope version for the authenticated local endpoint.
 ///
-/// Version two adds explicit request, response, event, and completion frame
-/// kinds. The build control-protocol version remains the compatibility check
-/// between executable roles; this version only describes the wire envelope.
-pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 2;
+/// Version three adds the hello handshake, caller metadata, and structured
+/// instance/module diagnostics to the explicit request, response, event, and
+/// completion frames. The build control-protocol version remains the
+/// compatibility check between executable roles; this version only describes
+/// the wire envelope.
+pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 3;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ControlCaller {
+    pub process_id: u32,
+    pub executable_role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub injected_instance_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModuleControlStatus {
+    pub registry_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_revision: Option<u64>,
+    pub runtime_snapshot_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_snapshot_published_at_unix_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_registry_revision: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision_lag: Option<u64>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +62,26 @@ pub struct InstanceRecord {
     pub lifecycle: InstanceLifecycle,
     pub active_work: Vec<ActiveWorkBlocker>,
     pub state_fingerprint: Option<String>,
+    #[serde(default)]
+    pub workspace_identities: Vec<String>,
+    #[serde(default)]
+    pub module_control: ModuleControlStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ControlHello {
+    pub negotiated_control_protocol_version: u32,
+    pub frame_schema_version: u32,
+    pub instance: InstanceRecord,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InstanceDiagnosticReport {
+    pub instance: InstanceRecord,
+    pub healthy: bool,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -164,6 +210,7 @@ pub struct ControlRequest {
     pub control_protocol_version: u32,
     pub request_id: Uuid,
     pub auth_token: String,
+    pub caller: ControlCaller,
     pub operation: ControlOperation,
 }
 
@@ -174,8 +221,9 @@ pub struct ControlRequest {
     tag = "type"
 )]
 pub enum ControlOperation {
-    Ping,
+    Hello,
     Inspect,
+    Diagnose,
     SaveState { destination: PathBuf },
     Shutdown { force: bool },
     Modules { command: ModuleCommand },
@@ -228,7 +276,9 @@ pub struct ControlResponse {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum ControlResponseResult {
+    Hello(ControlHello),
     Instance(InstanceRecord),
+    InstanceDiagnostics(InstanceDiagnosticReport),
     StateArchive(StateArchiveInspection),
     Stop(StopOutcome),
     ModuleInspection(ModuleInspection),

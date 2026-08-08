@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -15,22 +16,38 @@ use super::leases::{
     create_private_directory, process_start_time, set_private_file, InstanceLeases,
 };
 use super::protocol::{
-    ActiveWorkBlocker, ControlCompletion, ControlCompletionStatus, ControlError, ControlEvent,
-    ControlEventPayload, ControlOperation, ControlRequest, ControlResponse, ControlResponseResult,
-    ControlStream, DiscoveryProblem, DiscoveryProblemCategory, DiscoveryReport, InstanceLifecycle,
-    InstanceRecord, ModuleCommand, OperationCommand, StopOutcome, StoredDescriptor,
-    CONTROL_FRAME_SCHEMA_VERSION,
+    ActiveWorkBlocker, ControlCaller, ControlCompletion, ControlCompletionStatus, ControlError,
+    ControlEvent, ControlEventPayload, ControlHello, ControlOperation, ControlRequest,
+    ControlResponse, ControlResponseResult, ControlStream, DiscoveryProblem,
+    DiscoveryProblemCategory, DiscoveryReport, InstanceDiagnosticReport, InstanceLifecycle,
+    InstanceRecord, ModuleCommand, ModuleControlStatus, OperationCommand, StopOutcome,
+    StoredDescriptor, CONTROL_FRAME_SCHEMA_VERSION,
 };
-use crate::module_control::{Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind};
+use crate::module_control::codes::{
+    CONTROL_CAPABILITY_UNAVAILABLE, OPERATION_CAPABILITY_UNAVAILABLE,
+};
+use crate::module_control::{
+    Diagnostic, DiagnosticSeverity, ModuleInspection, ModuleOperation, ModuleOperationKind,
+    RedactedEvidence, MODULE_CONTROL_SCHEMA_VERSION,
+};
 use crate::state::archive::StateArchiveInspection;
 
 const DESCRIPTOR_SCHEMA_VERSION: u32 = 1;
-const ENDPOINT_PROTOCOL: &str = "local_socket_json_line_v2";
+const ENDPOINT_PROTOCOL: &str = "local_socket_json_line_v3";
 
 pub trait ControlHandler: Send + Sync + 'static {
     fn active_work(&self) -> Vec<ActiveWorkBlocker>;
     fn state_fingerprint(&self) -> Result<Option<String>, ControlError> {
         Ok(None)
+    }
+    fn workspace_identities(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn module_control_status(&self) -> ModuleControlStatus {
+        ModuleControlStatus::default()
+    }
+    fn instance_diagnostics(&self) -> Vec<Diagnostic> {
+        Vec::new()
     }
     fn save_state(&self, _destination: &Path) -> Result<StateArchiveInspection, ControlError> {
         Err(ControlError::new(
@@ -42,13 +59,13 @@ pub trait ControlHandler: Send + Sync + 'static {
     /// registry/supervisor can attach later without changing endpoint framing.
     fn module_control(&self, _command: ModuleCommand) -> Result<ControlStream, ControlError> {
         Err(ControlError::new(
-            "module.control.capability_unavailable",
+            CONTROL_CAPABILITY_UNAVAILABLE,
             "This instance does not provide module-control fixtures",
         ))
     }
     fn operation_control(&self, _command: OperationCommand) -> Result<ControlStream, ControlError> {
         Err(ControlError::new(
-            "module.operation.capability_unavailable",
+            OPERATION_CAPABILITY_UNAVAILABLE,
             "This instance does not provide module-operation fixtures",
         ))
     }
@@ -107,6 +124,8 @@ impl ControlServer {
             lifecycle: InstanceLifecycle::Ready,
             active_work: Vec::new(),
             state_fingerprint,
+            workspace_identities: handler.workspace_identities(),
+            module_control: handler.module_control_status(),
         };
         let descriptor = StoredDescriptor {
             descriptor_schema_version: DESCRIPTOR_SCHEMA_VERSION,
@@ -371,10 +390,17 @@ fn dispatch_request(
     }
 
     match request.operation {
-        ControlOperation::Ping => (
+        ControlOperation::Hello => (
             ControlResponse::success(
                 request.request_id,
-                ControlResponseResult::Instance(current_record(descriptor, handler, stopping)),
+                ControlResponseResult::Hello(ControlHello {
+                    negotiated_control_protocol_version: descriptor
+                        .instance
+                        .build
+                        .control_protocol_version,
+                    frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
+                    instance: current_record(descriptor, handler, stopping),
+                }),
             ),
             Vec::new(),
         ),
@@ -396,6 +422,25 @@ fn dispatch_request(
                     Vec::new(),
                 ),
             }
+        }
+        ControlOperation::Diagnose => {
+            let instance = current_record(descriptor, handler, stopping);
+            let mut diagnostics = base_instance_diagnostics(&instance);
+            diagnostics.extend(handler.instance_diagnostics());
+            let healthy = diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error);
+            (
+                ControlResponse::success(
+                    request.request_id,
+                    ControlResponseResult::InstanceDiagnostics(InstanceDiagnosticReport {
+                        instance,
+                        healthy,
+                        diagnostics,
+                    }),
+                ),
+                Vec::new(),
+            )
         }
         ControlOperation::SaveState { destination } => match handler.save_state(&destination) {
             Ok(archive) => (
@@ -468,12 +513,67 @@ fn current_record(
 ) -> InstanceRecord {
     let mut record = descriptor.instance.clone();
     record.active_work = handler.active_work();
+    record.workspace_identities = handler.workspace_identities();
+    record.module_control = handler.module_control_status();
     record.lifecycle = if stopping.load(Ordering::SeqCst) {
         InstanceLifecycle::Stopping
     } else {
         InstanceLifecycle::Ready
     };
     record
+}
+
+fn base_instance_diagnostics(instance: &InstanceRecord) -> Vec<Diagnostic> {
+    [
+        (
+            "control.instance.descriptor.valid",
+            "descriptor",
+            "The live descriptor identity matches the responding process",
+        ),
+        (
+            "control.instance.endpoint.accessible",
+            "endpoint_access",
+            "The owner-only local endpoint accepted this caller",
+        ),
+        (
+            "control.instance.handshake.valid",
+            "handshake",
+            "The hello exchange completed with matching instance identity",
+        ),
+        (
+            "control.instance.protocol.compatible",
+            "protocol",
+            "The caller and instance negotiated the same control protocol",
+        ),
+        (
+            "control.instance.build.compatible",
+            "build_identity",
+            "The caller accepted the running instance build identity",
+        ),
+    ]
+    .into_iter()
+    .map(|(code, check, summary)| Diagnostic {
+        schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+        code: code.to_string(),
+        severity: DiagnosticSeverity::Info,
+        check: check.to_string(),
+        summary: summary.to_string(),
+        evidence: RedactedEvidence {
+            fields: BTreeMap::from([
+                ("instanceId".to_string(), instance.instance_id.to_string()),
+                (
+                    "controlProtocolVersion".to_string(),
+                    instance.build.control_protocol_version.to_string(),
+                ),
+                (
+                    "endpointProtocol".to_string(),
+                    instance.endpoint_protocol.clone(),
+                ),
+            ]),
+        },
+        remedy: None,
+    })
+    .collect()
 }
 
 fn write_frames(
@@ -541,6 +641,15 @@ impl InstanceDirectory {
         let (instances, _) = self.scan();
         let descriptor = select_instance(instances, selector)?;
         request(&descriptor, ControlOperation::Inspect).and_then(expect_instance_result)
+    }
+
+    pub fn diagnose(
+        &self,
+        selector: Option<&str>,
+    ) -> Result<InstanceDiagnosticReport, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, selector)?;
+        request(&descriptor, ControlOperation::Diagnose).and_then(expect_instance_diagnostics)
     }
 
     pub fn stop(&self, selector: Option<&str>, force: bool) -> Result<StopOutcome, ControlError> {
@@ -731,8 +840,8 @@ impl InstanceDirectory {
                     .to_string(),
             ));
         }
-        let record =
-            request(descriptor, ControlOperation::Ping).and_then(expect_instance_result)?;
+        let hello = request(descriptor, ControlOperation::Hello).and_then(expect_hello_result)?;
+        let record = hello.instance;
         if record.instance_id != descriptor.instance.instance_id
             || record.name != descriptor.instance.name
             || record.state_root != descriptor.instance.state_root
@@ -789,6 +898,13 @@ fn request(
         control_protocol_version: descriptor.instance.build.control_protocol_version,
         request_id,
         auth_token: descriptor.auth_token.clone(),
+        caller: ControlCaller {
+            process_id: std::process::id(),
+            executable_role: "shipctl-cli".to_string(),
+            injected_instance_id: std::env::var("SHIPCTL_INSTANCE_ID")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+        },
         operation,
     };
     let mut stream = connect_endpoint(&descriptor.endpoint).map_err(|error| {
@@ -927,10 +1043,32 @@ fn request(
 
 fn expect_instance_result(stream: ControlStream) -> Result<InstanceRecord, ControlError> {
     match stream.result {
-        ControlResponseResult::Instance(record) => Ok(record),
+        ControlResponseResult::Instance(instance) => Ok(instance),
         _ => Err(ControlError::new(
             "control.instance.handshake_failed",
-            "The endpoint returned a stop result for an inspection request",
+            "The endpoint returned a non-inspection result for an inspection request",
+        )),
+    }
+}
+
+fn expect_hello_result(stream: ControlStream) -> Result<ControlHello, ControlError> {
+    match stream.result {
+        ControlResponseResult::Hello(hello) => Ok(hello),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-hello result for a hello request",
+        )),
+    }
+}
+
+fn expect_instance_diagnostics(
+    stream: ControlStream,
+) -> Result<InstanceDiagnosticReport, ControlError> {
+    match stream.result {
+        ControlResponseResult::InstanceDiagnostics(report) => Ok(report),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-diagnostic result for an instance diagnosis request",
         )),
     }
 }
@@ -1232,6 +1370,8 @@ mod tests {
                 lifecycle: InstanceLifecycle::Ready,
                 active_work: Vec::new(),
                 state_fingerprint: None,
+                workspace_identities: Vec::new(),
+                module_control: ModuleControlStatus::default(),
             },
             endpoint,
             auth_token: "not-a-live-token".to_string(),

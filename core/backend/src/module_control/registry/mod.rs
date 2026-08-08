@@ -2,6 +2,7 @@ mod diagnostics;
 mod inventory;
 mod snapshot;
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -9,33 +10,29 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::codes::{
+    REGISTRY_ABSENT, REGISTRY_ARTIFACT_IMMUTABLE, REGISTRY_ARTIFACT_REFERENCE_MISSING,
+    REGISTRY_CONTRACT_INVALID, REGISTRY_INTEGRITY_FAILED, REGISTRY_INVENTORY_ABSENT,
+    REGISTRY_INVENTORY_MISMATCH, REGISTRY_INVENTORY_STALE, REGISTRY_JOURNAL_INCONSISTENT,
+    REGISTRY_MIGRATION_FAILED, REGISTRY_REVISION_DISCONTINUOUS, REGISTRY_SCHEMA_UNSUPPORTED,
+    REGISTRY_TRANSACTION_FAILED, REGISTRY_UNREADABLE,
+};
 use super::{
     parse_contract_json, DesiredModuleState, ModuleContract, ModuleIdentity, ModuleOperation,
-    ModuleOperationKind, ModuleOperationPhase, ModuleOperationResult, ModuleTransition,
-    ObservedModuleState, MODULE_CONTROL_SCHEMA_VERSION,
+    ModuleOperationKind, ModuleOperationPhase, ModuleOperationResult, ModuleSource,
+    ModuleTransition, ObservedModuleState, MODULE_CONTROL_SCHEMA_VERSION,
 };
 use crate::state::paths::ShipctlPaths;
 
-pub use diagnostics::{diagnose_registry, REGISTRY_HEALTHY};
-pub use inventory::*;
+pub use diagnostics::diagnose_registry;
+pub use inventory::{
+    BuildModuleMembership, InventorySeedResult, StaticBuildInventory, StaticModuleRecord,
+};
 pub use snapshot::ModuleRegistrySnapshotProvider;
 
-const REGISTRY_SCHEMA_VERSION: i64 = 1;
+use inventory::load_static_inventory;
 
-pub const REGISTRY_ABSENT: &str = "module.registry.file.absent";
-pub const REGISTRY_UNREADABLE: &str = "module.registry.file.unreadable";
-pub const REGISTRY_SCHEMA_UNSUPPORTED: &str = "module.registry.schema.unsupported";
-pub const REGISTRY_MIGRATION_FAILED: &str = "module.registry.migration.failed";
-pub const REGISTRY_INTEGRITY_FAILED: &str = "module.registry.integrity.failed";
-pub const REGISTRY_REVISION_DISCONTINUOUS: &str = "module.registry.revision.discontinuous";
-pub const REGISTRY_ARTIFACT_REFERENCE_MISSING: &str = "module.registry.artifact.reference_missing";
-pub const REGISTRY_ARTIFACT_IMMUTABLE: &str = "module.registry.artifact.immutable";
-pub const REGISTRY_JOURNAL_INCONSISTENT: &str = "module.registry.journal.inconsistent";
-pub const REGISTRY_CONTRACT_INVALID: &str = "module.registry.contract.invalid";
-pub const REGISTRY_TRANSACTION_FAILED: &str = "module.registry.transaction.failed";
-pub const REGISTRY_INVENTORY_ABSENT: &str = "module.registry.inventory.absent";
-pub const REGISTRY_INVENTORY_STALE: &str = "module.registry.inventory.stale";
-pub const REGISTRY_INVENTORY_MISMATCH: &str = "module.registry.inventory.composition_mismatch";
+const REGISTRY_SCHEMA_VERSION: i64 = 1;
 
 #[derive(Debug)]
 pub struct RegistryError {
@@ -61,12 +58,25 @@ impl std::fmt::Display for RegistryError {
 impl std::error::Error for RegistryError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArtifactAcquisition {
+    pub identity: ModuleIdentity,
+    pub source: ModuleSource,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegisteredArtifact {
+    pub identity: ModuleIdentity,
+    pub sources: Vec<ModuleSource>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RegistryMutation {
     pub request_id: Uuid,
     pub module_id: String,
     pub instance_id: Uuid,
     pub kind: ModuleOperationKind,
-    pub artifacts: Vec<ModuleIdentity>,
+    pub artifacts: Vec<ArtifactAcquisition>,
     pub desired: Option<DesiredModuleState>,
     pub observations: Vec<ObservedModuleState>,
 }
@@ -76,13 +86,36 @@ pub struct RegistryMutation {
 pub struct RegistrySnapshot {
     pub registry_path: PathBuf,
     pub registry_revision: u64,
-    pub artifacts: Vec<ModuleIdentity>,
+    pub artifacts: Vec<RegisteredArtifact>,
     pub desired: Vec<DesiredModuleState>,
     pub operations: Vec<ModuleOperation>,
     pub observations: Vec<ObservedModuleState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub static_build_provenance: Option<String>,
     pub static_inventory: Vec<StaticModuleRecord>,
+}
+
+impl RegistrySnapshot {
+    /// Resolve durable intent, using current static build membership only as a
+    /// read-time default. Defaults never create journal entries or revisions.
+    pub fn effective_desired(&self, module_id: &str) -> Option<DesiredModuleState> {
+        self.desired
+            .iter()
+            .find(|state| state.module_id == module_id)
+            .cloned()
+            .or_else(|| {
+                self.static_inventory
+                    .iter()
+                    .find(|record| record.identity.id == module_id)
+                    .map(|record| DesiredModuleState {
+                        schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+                        module_id: module_id.to_string(),
+                        selected_artifact: Some(record.identity.clone()),
+                        enabled: true,
+                        configuration_revision: 0,
+                    })
+            })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -262,14 +295,10 @@ impl ModuleRegistry {
         let revision = read_revision(&self.connection)?;
         validate_revision_sequence(&self.connection, revision)?;
 
-        let artifacts = load_contracts::<ModuleIdentity>(
-            &self.connection,
-            "SELECT identity_json FROM artifacts ORDER BY module_id, content_digest",
-            REGISTRY_CONTRACT_INVALID,
-        )?;
+        let artifacts = load_artifacts(&self.connection)?;
         let desired = load_contracts::<DesiredModuleState>(
             &self.connection,
-            "SELECT state_json FROM desired_state ORDER BY instance_id, module_id",
+            "SELECT state_json FROM desired_state ORDER BY module_id",
             REGISTRY_CONTRACT_INVALID,
         )?;
         let operations = load_operations(&self.connection)?;
@@ -359,13 +388,20 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), RegistryError> {
                         PRIMARY KEY(module_id, content_digest)
                     );
 
-                    CREATE TABLE desired_state(
-                        instance_id TEXT NOT NULL,
+                    CREATE TABLE artifact_sources(
                         module_id TEXT NOT NULL,
+                        content_digest TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        PRIMARY KEY(module_id, content_digest, source),
+                        FOREIGN KEY(module_id, content_digest)
+                            REFERENCES artifacts(module_id, content_digest)
+                    );
+
+                    CREATE TABLE desired_state(
+                        module_id TEXT PRIMARY KEY,
                         selected_artifact_digest TEXT,
                         configuration_revision INTEGER NOT NULL CHECK(configuration_revision >= 0),
                         state_json TEXT NOT NULL,
-                        PRIMARY KEY(instance_id, module_id),
                         FOREIGN KEY(module_id, selected_artifact_digest)
                             REFERENCES artifacts(module_id, content_digest)
                     );
@@ -542,8 +578,8 @@ fn validate_mutation(
         ));
     }
     for artifact in &mutation.artifacts {
-        validate_contract(artifact)?;
-        if artifact.id != mutation.module_id {
+        validate_contract(&artifact.identity)?;
+        if artifact.identity.id != mutation.module_id {
             return Err(RegistryError::new(
                 REGISTRY_CONTRACT_INVALID,
                 "Mutation artifacts must match its module id",
@@ -552,16 +588,16 @@ fn validate_mutation(
     }
     if let Some(desired) = &mutation.desired {
         validate_contract(desired)?;
-        if desired.module_id != mutation.module_id || desired.instance_id != mutation.instance_id {
+        if desired.module_id != mutation.module_id {
             return Err(RegistryError::new(
                 REGISTRY_CONTRACT_INVALID,
-                "Desired state must match the mutation module and instance",
+                "Desired state must match the mutation module",
             ));
         }
         let previous: Option<i64> = transaction
             .query_row(
-                "SELECT configuration_revision FROM desired_state WHERE instance_id = ?1 AND module_id = ?2",
-                params![mutation.instance_id.to_string(), mutation.module_id],
+                "SELECT configuration_revision FROM desired_state WHERE module_id = ?1",
+                params![mutation.module_id],
                 |row| row.get(0),
             )
             .optional()
@@ -593,8 +629,9 @@ fn validate_mutation(
 
 fn insert_immutable_artifact(
     transaction: &Transaction<'_>,
-    artifact: &ModuleIdentity,
+    acquisition: &ArtifactAcquisition,
 ) -> Result<(), RegistryError> {
+    let artifact = &acquisition.identity;
     let identity_json = contract_json(artifact)?;
     let existing: Option<String> = transaction
         .query_row(
@@ -605,22 +642,35 @@ fn insert_immutable_artifact(
         .optional()
         .map_err(transaction_error)?;
     match existing {
-        Some(existing) if existing == identity_json => Ok(()),
-        Some(_) => Err(RegistryError::new(
-            REGISTRY_ARTIFACT_IMMUTABLE,
-            format!(
-                "Artifact {}@{} already has different immutable provenance",
-                artifact.id, artifact.content_digest
-            ),
-        )),
-        None => transaction
-            .execute(
+        Some(existing) => {
+            let stored: ModuleIdentity =
+                parse_stored_contract(&existing, REGISTRY_ARTIFACT_IMMUTABLE)?;
+            if stored != *artifact {
+                return Err(RegistryError::new(
+                    REGISTRY_ARTIFACT_IMMUTABLE,
+                    format!(
+                        "Artifact {}@{} already has different immutable identity",
+                        artifact.id, artifact.content_digest
+                    ),
+                ));
+            }
+        }
+        None => {
+            transaction
+                .execute(
                 "INSERT INTO artifacts(module_id, content_digest, identity_json) VALUES (?1, ?2, ?3)",
                 params![artifact.id, artifact.content_digest, identity_json],
-            )
-            .map(|_| ())
-            .map_err(transaction_error),
+                )
+                .map_err(transaction_error)?;
+        }
     }
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO artifact_sources(module_id, content_digest, source) VALUES (?1, ?2, ?3)",
+            params![artifact.id, artifact.content_digest, module_source_name(acquisition.source)],
+        )
+        .map(|_| ())
+        .map_err(transaction_error)
 }
 
 fn store_desired(
@@ -639,14 +689,13 @@ fn store_desired(
     )?;
     transaction
         .execute(
-            "INSERT INTO desired_state(instance_id, module_id, selected_artifact_digest, configuration_revision, state_json)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(instance_id, module_id) DO UPDATE SET
+            "INSERT INTO desired_state(module_id, selected_artifact_digest, configuration_revision, state_json)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(module_id) DO UPDATE SET
                 selected_artifact_digest = excluded.selected_artifact_digest,
                 configuration_revision = excluded.configuration_revision,
                 state_json = excluded.state_json",
             params![
-                desired.instance_id.to_string(),
                 desired.module_id,
                 digest,
                 configuration_revision,
@@ -708,7 +757,13 @@ fn require_artifact(
         )
         .optional()
         .map_err(transaction_error)?;
-    if stored.as_deref() != Some(contract_json(artifact)?.as_str()) {
+    let matches = stored
+        .as_deref()
+        .map(|stored| parse_stored_contract::<ModuleIdentity>(stored, REGISTRY_CONTRACT_INVALID))
+        .transpose()?
+        .as_ref()
+        == Some(artifact);
+    if !matches {
         return Err(RegistryError::new(
             REGISTRY_ARTIFACT_REFERENCE_MISSING,
             format!(
@@ -768,6 +823,73 @@ fn load_operations(connection: &Connection) -> Result<Vec<ModuleOperation>, Regi
     )
 }
 
+fn load_artifacts(connection: &Connection) -> Result<Vec<RegisteredArtifact>, RegistryError> {
+    let identities = load_contracts::<ModuleIdentity>(
+        connection,
+        "SELECT identity_json FROM artifacts ORDER BY module_id, content_digest",
+        REGISTRY_CONTRACT_INVALID,
+    )?;
+    let mut statement = connection
+        .prepare(
+            "SELECT module_id, content_digest, source FROM artifact_sources
+             ORDER BY module_id, content_digest, source",
+        )
+        .map_err(transaction_error)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(transaction_error)?;
+    let mut sources = BTreeMap::<(String, String), Vec<ModuleSource>>::new();
+    for row in rows {
+        let (module_id, digest, source) = row.map_err(transaction_error)?;
+        sources
+            .entry((module_id, digest))
+            .or_default()
+            .push(parse_module_source(&source)?);
+    }
+    identities
+        .into_iter()
+        .map(|identity| {
+            let key = (identity.id.clone(), identity.content_digest.clone());
+            let sources = sources.remove(&key).ok_or_else(|| {
+                RegistryError::new(
+                    REGISTRY_CONTRACT_INVALID,
+                    format!(
+                        "Artifact {}@{} has no acquisition provenance",
+                        identity.id, identity.content_digest
+                    ),
+                )
+            })?;
+            Ok(RegisteredArtifact { identity, sources })
+        })
+        .collect()
+}
+
+fn module_source_name(source: ModuleSource) -> &'static str {
+    match source {
+        ModuleSource::Bundled => "bundled",
+        ModuleSource::User => "user",
+        ModuleSource::Development => "development",
+    }
+}
+
+fn parse_module_source(source: &str) -> Result<ModuleSource, RegistryError> {
+    match source {
+        "bundled" => Ok(ModuleSource::Bundled),
+        "user" => Ok(ModuleSource::User),
+        "development" => Ok(ModuleSource::Development),
+        other => Err(RegistryError::new(
+            REGISTRY_CONTRACT_INVALID,
+            format!("Artifact acquisition source {other:?} is invalid"),
+        )),
+    }
+}
+
 fn load_contracts<T: ModuleContract>(
     connection: &Connection,
     sql: &str,
@@ -785,12 +907,16 @@ fn load_contracts<T: ModuleContract>(
 }
 
 fn validate_artifact_references(
-    artifacts: &[ModuleIdentity],
+    artifacts: &[RegisteredArtifact],
     desired: &[DesiredModuleState],
     observations: &[ObservedModuleState],
     static_inventory: &[StaticModuleRecord],
 ) -> Result<(), RegistryError> {
-    let contains = |candidate: &ModuleIdentity| artifacts.iter().any(|item| item == candidate);
+    let contains = |candidate: &ModuleIdentity| {
+        artifacts
+            .iter()
+            .any(|item| item.identity == *candidate && !item.sources.is_empty())
+    };
     for artifact in desired
         .iter()
         .filter_map(|state| state.selected_artifact.as_ref())

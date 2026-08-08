@@ -4,9 +4,8 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 use super::*;
-use crate::module_control::{
-    ModuleLifecycleState, ModuleRuntimeKind, ModuleSource, REGISTRY_HEALTHY,
-};
+use crate::module_control::codes::REGISTRY_HEALTHY;
+use crate::module_control::{ModuleLifecycleState, ModuleRuntimeKind, ModuleSource};
 
 fn test_paths(temporary: &TempDir) -> ShipctlPaths {
     ShipctlPaths::new(
@@ -21,7 +20,6 @@ fn artifact(module_id: &str, marker: char) -> ModuleIdentity {
         id: module_id.to_string(),
         version: "1.0.0".to_string(),
         content_digest: marker.to_string().repeat(64),
-        source: ModuleSource::User,
         runtime_kind: ModuleRuntimeKind::FrontendEsm,
     }
 }
@@ -42,11 +40,13 @@ fn mutation(
         } else {
             ModuleOperationKind::Disable
         },
-        artifacts: vec![artifact.clone()],
+        artifacts: vec![ArtifactAcquisition {
+            identity: artifact.clone(),
+            source: ModuleSource::User,
+        }],
         desired: Some(DesiredModuleState {
             schema_version: MODULE_CONTROL_SCHEMA_VERSION,
             module_id: artifact.id.clone(),
-            instance_id,
             selected_artifact: Some(artifact.clone()),
             enabled,
             configuration_revision,
@@ -76,9 +76,9 @@ fn static_inventory(provenance: &str, marker: char) -> StaticBuildInventory {
                 id: "shipctl.static".to_string(),
                 version: "1.0.0".to_string(),
                 content_digest: marker.to_string().repeat(64),
-                source: ModuleSource::Bundled,
                 runtime_kind: ModuleRuntimeKind::StaticBuiltin,
             },
+            source: ModuleSource::Bundled,
             build_provenance: provenance.to_string(),
             native_compiled: true,
             frontend_shipped: true,
@@ -108,7 +108,13 @@ fn commit_reopen_and_duplicate_request_preserve_one_complete_revision() {
     let snapshot = registry.snapshot().unwrap();
     assert_eq!(snapshot.registry_path, paths.module_registry_database);
     assert_eq!(snapshot.registry_revision, 1);
-    assert_eq!(snapshot.artifacts, vec![artifact]);
+    assert_eq!(
+        snapshot.artifacts,
+        vec![RegisteredArtifact {
+            identity: artifact,
+            sources: vec![ModuleSource::User],
+        }]
+    );
     assert_eq!(snapshot.desired, vec![mutation.desired.unwrap()]);
     assert_eq!(snapshot.operations, vec![operation]);
     assert_eq!(snapshot.observations, mutation.observations);
@@ -288,7 +294,7 @@ fn diagnostics_identify_schema_revision_artifact_and_journal_failures() {
 }
 
 #[test]
-fn immutable_artifacts_and_configuration_revisions_are_enforced() {
+fn artifact_identity_provenance_and_configuration_revisions_are_enforced() {
     let temporary = TempDir::new().unwrap();
     let paths = test_paths(&temporary);
     let instance_id = Uuid::new_v4();
@@ -298,25 +304,34 @@ fn immutable_artifacts_and_configuration_revisions_are_enforced() {
         .commit(&mutation(instance_id, Uuid::new_v4(), &artifact, true, 1))
         .unwrap();
 
-    let mut changed_provenance = artifact.clone();
-    changed_provenance.source = ModuleSource::Development;
+    let mut second_source = mutation(instance_id, Uuid::new_v4(), &artifact, false, 2);
+    second_source.artifacts[0].source = ModuleSource::Development;
+    registry.commit(&second_source).unwrap();
+    assert_eq!(registry.revision().unwrap(), 2);
+    assert_eq!(
+        registry.snapshot().unwrap().artifacts[0].sources,
+        vec![ModuleSource::Development, ModuleSource::User]
+    );
+
+    let mut changed_identity = artifact.clone();
+    changed_identity.version = "2.0.0".to_string();
     let immutable_error = registry
         .commit(&mutation(
             instance_id,
             Uuid::new_v4(),
-            &changed_provenance,
-            false,
-            2,
+            &changed_identity,
+            true,
+            3,
         ))
         .unwrap_err();
     assert_eq!(immutable_error.code, REGISTRY_ARTIFACT_IMMUTABLE);
-    assert_eq!(registry.revision().unwrap(), 1);
+    assert_eq!(registry.revision().unwrap(), 2);
 
     let revision_error = registry
-        .commit(&mutation(instance_id, Uuid::new_v4(), &artifact, false, 3))
+        .commit(&mutation(instance_id, Uuid::new_v4(), &artifact, false, 4))
         .unwrap_err();
     assert_eq!(revision_error.code, REGISTRY_REVISION_DISCONTINUOUS);
-    assert_eq!(registry.revision().unwrap(), 1);
+    assert_eq!(registry.revision().unwrap(), 2);
 }
 
 #[test]

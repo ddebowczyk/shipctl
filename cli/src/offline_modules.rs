@@ -2,23 +2,28 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use shipctl_core::instance::{resolve_state_root_read_only, ControlError, RootSource};
+use shipctl_core::module_control::codes::{
+    INVALID_OFFLINE_RESPONSE, MODULE_ABSENT, REGISTRY_DIAGNOSTICS_FAILED, REGISTRY_HEALTHY,
+    REGISTRY_INVENTORY_ABSENT, REGISTRY_STATE_ROOT_INVALID, RUNTIME_OFFLINE,
+    SCHEMA_VERSION_UNSUPPORTED, VERIFICATION_EXPECTATION_MODULE_MISMATCH,
+    VERIFICATION_EXPECTATION_UNREADABLE, VERIFICATION_MATCHED, VERIFICATION_MISMATCH,
+};
+use shipctl_core::module_control::registry::{
+    diagnose_registry, ModuleRegistry, RegisteredArtifact, RegistryError, RegistrySnapshot,
+    StaticModuleRecord,
+};
 use shipctl_core::module_control::{
-    diagnose_registry, parse_contract_json, DesiredModuleState, Diagnostic, DiagnosticSeverity,
-    ModuleContract, ModuleIdentity, ModuleInspection, ModuleRegistry, ModuleRuntimeKind,
-    ObservedModuleState, RedactedEvidence, RegistryError, RegistrySnapshot, StaticModuleRecord,
-    VerificationExpectation, VerificationObserved, VerificationResult,
-    MODULE_CONTROL_SCHEMA_VERSION, REGISTRY_HEALTHY, REGISTRY_INVENTORY_ABSENT,
+    parse_contract_json, DesiredModuleState, Diagnostic, DiagnosticSeverity, ModuleContract,
+    ModuleContractError, ModuleInspection, ModuleRuntimeKind, ObservedModuleState,
+    RedactedEvidence, VerificationExpectation, VerificationObserved, VerificationResult,
+    MODULE_CONTROL_SCHEMA_VERSION,
 };
 use shipctl_core::state::paths::ShipctlPaths;
 
-pub const RUNTIME_OFFLINE: &str = "module.runtime.offline_unavailable";
-pub const MODULE_ABSENT: &str = "module.registry.module.absent";
-pub const VERIFICATION_MISMATCH: &str = "module.verification.expectation_mismatch";
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OfflineModuleSummary {
     pub module_id: String,
     pub runtime_kinds: Vec<ModuleRuntimeKind>,
@@ -27,8 +32,8 @@ pub struct OfflineModuleSummary {
     pub last_reported_observation_count: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OfflineModuleList {
     pub schema_version: u32,
     pub registry_revision: u64,
@@ -41,8 +46,8 @@ pub struct OfflineModuleList {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OfflineModuleInspection {
     pub schema_version: u32,
     pub module_id: String,
@@ -51,7 +56,7 @@ pub struct OfflineModuleInspection {
     pub state_root_source: RootSource,
     pub registry_path: PathBuf,
     pub runtime_available: bool,
-    pub artifacts: Vec<ModuleIdentity>,
+    pub artifacts: Vec<RegisteredArtifact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub static_inventory: Option<StaticModuleRecord>,
     pub desired: Vec<DesiredModuleState>,
@@ -59,8 +64,8 @@ pub struct OfflineModuleInspection {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OfflineDiagnosticReport {
     pub schema_version: u32,
     pub state_root: PathBuf,
@@ -75,10 +80,175 @@ pub struct OfflineDiagnosticReport {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+impl ModuleContract for OfflineModuleList {
+    fn schema_version(&self) -> u32 {
+        self.schema_version
+    }
+
+    fn validate(&self) -> Result<(), ModuleContractError> {
+        validate_schema_version(self.schema_version)?;
+        require_offline(self.runtime_available)?;
+        if self.count != self.modules.len() {
+            return Err(offline_invalid(format!(
+                "Offline module count {} does not match {} module summaries",
+                self.count,
+                self.modules.len()
+            )));
+        }
+        let mut module_ids = BTreeSet::new();
+        for module in &self.modules {
+            if module.module_id.trim().is_empty() {
+                return Err(offline_invalid("Offline module id cannot be empty"));
+            }
+            if !module_ids.insert(module.module_id.as_str()) {
+                return Err(offline_invalid(format!(
+                    "Offline module {} appears more than once",
+                    module.module_id
+                )));
+            }
+            if module.desired_state_count > 1 {
+                return Err(offline_invalid(format!(
+                    "Offline module {} has more than one state-root desired state",
+                    module.module_id
+                )));
+            }
+        }
+        validate_diagnostics(&self.diagnostics)
+    }
+}
+
+impl ModuleContract for OfflineModuleInspection {
+    fn schema_version(&self) -> u32 {
+        self.schema_version
+    }
+
+    fn validate(&self) -> Result<(), ModuleContractError> {
+        validate_schema_version(self.schema_version)?;
+        require_offline(self.runtime_available)?;
+        if self.module_id.trim().is_empty() {
+            return Err(offline_invalid("Offline module id cannot be empty"));
+        }
+        if self.desired.len() > 1 {
+            return Err(offline_invalid(format!(
+                "Offline module {} has more than one state-root desired state",
+                self.module_id
+            )));
+        }
+        for artifact in &self.artifacts {
+            artifact.identity.validate()?;
+            require_matching_module(&self.module_id, &artifact.identity.id, "artifact")?;
+            if artifact.sources.is_empty() {
+                return Err(offline_invalid(format!(
+                    "Offline artifact {} has no recorded source",
+                    artifact.identity.content_digest
+                )));
+            }
+        }
+        if let Some(record) = &self.static_inventory {
+            record.identity.validate()?;
+            require_matching_module(&self.module_id, &record.identity.id, "static inventory")?;
+        }
+        for desired in &self.desired {
+            desired.validate()?;
+            require_matching_module(&self.module_id, &desired.module_id, "desired state")?;
+        }
+        for observed in &self.last_reported_observations {
+            observed.validate()?;
+            require_matching_module(&self.module_id, &observed.module_id, "observation")?;
+        }
+        validate_diagnostics(&self.diagnostics)
+    }
+}
+
+impl ModuleContract for OfflineDiagnosticReport {
+    fn schema_version(&self) -> u32 {
+        self.schema_version
+    }
+
+    fn validate(&self) -> Result<(), ModuleContractError> {
+        validate_schema_version(self.schema_version)?;
+        require_offline(self.runtime_available)?;
+        if let Some(module) = &self.module {
+            module.validate()?;
+            if self.registry_revision.is_none() {
+                return Err(offline_invalid(
+                    "Offline module inspection requires a registry revision",
+                ));
+            }
+        }
+        validate_diagnostics(&self.diagnostics)?;
+        let computed_healthy = self
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error);
+        if self.healthy != computed_healthy {
+            return Err(offline_invalid(
+                "Offline diagnostic healthy flag disagrees with diagnostic severity",
+            ));
+        }
+        Ok(())
+    }
+}
+
 struct OfflineSnapshot {
     state_root: PathBuf,
     state_root_source: RootSource,
     snapshot: RegistrySnapshot,
+}
+
+fn checked<T: ModuleContract>(value: T) -> Result<T, ControlError> {
+    value
+        .validate()
+        .map_err(|error| ControlError::new(error.code, error.message))?;
+    Ok(value)
+}
+
+fn validate_schema_version(schema_version: u32) -> Result<(), ModuleContractError> {
+    if schema_version == MODULE_CONTROL_SCHEMA_VERSION {
+        Ok(())
+    } else {
+        Err(ModuleContractError::new(
+            SCHEMA_VERSION_UNSUPPORTED,
+            format!(
+                "Offline response schemaVersion {schema_version} is unsupported; expected {MODULE_CONTROL_SCHEMA_VERSION}"
+            ),
+        ))
+    }
+}
+
+fn require_offline(runtime_available: bool) -> Result<(), ModuleContractError> {
+    if runtime_available {
+        Err(offline_invalid(
+            "Offline response cannot claim that runtime evidence is available",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_matching_module(
+    expected: &str,
+    observed: &str,
+    record_kind: &str,
+) -> Result<(), ModuleContractError> {
+    if expected == observed {
+        Ok(())
+    } else {
+        Err(offline_invalid(format!(
+            "Offline {record_kind} module {observed} does not match requested module {expected}"
+        )))
+    }
+}
+
+fn validate_diagnostics(diagnostics: &[Diagnostic]) -> Result<(), ModuleContractError> {
+    for diagnostic in diagnostics {
+        diagnostic.validate()?;
+    }
+    Ok(())
+}
+
+fn offline_invalid(message: impl Into<String>) -> ModuleContractError {
+    ModuleContractError::new(INVALID_OFFLINE_RESPONSE, message)
 }
 
 pub fn list(state_root: Option<&Path>) -> Result<OfflineModuleList, ControlError> {
@@ -88,7 +258,7 @@ pub fn list(state_root: Option<&Path>) -> Result<OfflineModuleList, ControlError
         .into_iter()
         .map(|module_id| summary(&offline.snapshot, module_id))
         .collect::<Vec<_>>();
-    Ok(OfflineModuleList {
+    checked(OfflineModuleList {
         schema_version: MODULE_CONTROL_SCHEMA_VERSION,
         registry_revision: offline.snapshot.registry_revision,
         state_root: offline.state_root.clone(),
@@ -106,14 +276,15 @@ pub fn inspect(
     module_id: &str,
 ) -> Result<OfflineModuleInspection, ControlError> {
     let offline = read_snapshot(state_root)?;
-    inspection(&offline, module_id).ok_or_else(|| {
+    let response = inspection(&offline, module_id).ok_or_else(|| {
         ControlError::new(
             MODULE_ABSENT,
             format!("Module {module_id} is absent from the selected registry"),
         )
         .with_selector(module_id)
         .with_expected_observed("installed, desired, or observed module record", "absent")
-    })
+    })?;
+    checked(response)
 }
 
 pub fn diagnose(
@@ -121,7 +292,7 @@ pub fn diagnose(
     module_id: Option<&str>,
 ) -> Result<OfflineDiagnosticReport, ControlError> {
     let (state_root, state_root_source) = resolve_state_root_read_only(state_root)
-        .map_err(|error| ControlError::new("module.registry.state_root.invalid", error))?;
+        .map_err(|error| ControlError::new(REGISTRY_STATE_ROOT_INVALID, error))?;
     let paths = ShipctlPaths::new(state_root.clone(), PathBuf::new());
     let mut diagnostics = diagnose_registry(&paths.module_registry_database);
     let snapshot = ModuleRegistry::open_read_only(&paths)
@@ -156,7 +327,7 @@ pub fn diagnose(
         .iter()
         .all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error);
 
-    Ok(OfflineDiagnosticReport {
+    checked(OfflineDiagnosticReport {
         schema_version: MODULE_CONTROL_SCHEMA_VERSION,
         state_root,
         state_root_source,
@@ -179,7 +350,7 @@ pub fn verify(
 ) -> Result<VerificationResult, ControlError> {
     let source = fs::read_to_string(expectation_path).map_err(|error| {
         ControlError::new(
-            "module.verification.expectation_unreadable",
+            VERIFICATION_EXPECTATION_UNREADABLE,
             format!(
                 "Could not read expectation {}: {error}",
                 expectation_path.display()
@@ -190,7 +361,7 @@ pub fn verify(
         .map_err(|error| ControlError::new(error.code, error.message))?;
     if expected.module_id != module_id {
         return Err(ControlError::new(
-            "module.verification.expectation_module_mismatch",
+            VERIFICATION_EXPECTATION_MODULE_MISMATCH,
             "Expectation moduleId differs from the requested module",
         )
         .with_selector(module_id)
@@ -205,11 +376,10 @@ pub fn verify(
         )
         .with_selector(module_id)
     })?;
-    let desired = record
-        .desired
-        .iter()
-        .find(|desired| desired.instance_id == expected.instance_id)
-        .cloned();
+    record
+        .validate()
+        .map_err(|error| ControlError::new(error.code, error.message))?;
+    let desired = record.desired.first().cloned();
     let manifest = desired
         .as_ref()
         .and_then(|desired| desired.selected_artifact.clone())
@@ -219,7 +389,12 @@ pub fn verify(
                 .as_ref()
                 .map(|record| record.identity.clone())
         })
-        .or_else(|| record.artifacts.first().cloned());
+        .or_else(|| {
+            record
+                .artifacts
+                .first()
+                .map(|artifact| artifact.identity.clone())
+        });
     let observed_states = record
         .last_reported_observations
         .iter()
@@ -305,7 +480,18 @@ pub fn verify(
     };
     let mut artifact_markers = BTreeMap::new();
     for artifact in &record.artifacts {
-        artifact_markers.insert(artifact.content_digest.clone(), "present".to_string());
+        artifact_markers.insert(
+            artifact.identity.content_digest.clone(),
+            format!(
+                "present:{}",
+                artifact
+                    .sources
+                    .iter()
+                    .map(|source| format!("{source:?}").to_lowercase())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        );
     }
     if let Some(static_record) = &record.static_inventory {
         artifact_markers.insert(
@@ -343,7 +529,7 @@ pub fn verify(
 
 fn read_snapshot(state_root: Option<&Path>) -> Result<OfflineSnapshot, ControlError> {
     let (state_root, state_root_source) = resolve_state_root_read_only(state_root)
-        .map_err(|error| ControlError::new("module.registry.state_root.invalid", error))?;
+        .map_err(|error| ControlError::new(REGISTRY_STATE_ROOT_INVALID, error))?;
     let paths = ShipctlPaths::new(state_root.clone(), PathBuf::new());
     let snapshot = ModuleRegistry::open_read_only(&paths)
         .and_then(|registry| registry.snapshot())
@@ -363,7 +549,7 @@ fn module_ids(snapshot: &RegistrySnapshot) -> BTreeSet<&str> {
     snapshot
         .artifacts
         .iter()
-        .map(|artifact| artifact.id.as_str())
+        .map(|artifact| artifact.identity.id.as_str())
         .chain(
             snapshot
                 .desired
@@ -389,8 +575,8 @@ fn summary(snapshot: &RegistrySnapshot, module_id: &str) -> OfflineModuleSummary
     let mut runtime_kinds = snapshot
         .artifacts
         .iter()
-        .filter(|artifact| artifact.id == module_id)
-        .map(|artifact| artifact.runtime_kind)
+        .filter(|artifact| artifact.identity.id == module_id)
+        .map(|artifact| artifact.identity.runtime_kind)
         .collect::<Vec<_>>();
     runtime_kinds.sort_by_key(|kind| format!("{kind:?}"));
     runtime_kinds.dedup();
@@ -401,11 +587,7 @@ fn summary(snapshot: &RegistrySnapshot, module_id: &str) -> OfflineModuleSummary
             .static_inventory
             .iter()
             .any(|record| record.identity.id == module_id),
-        desired_state_count: snapshot
-            .desired
-            .iter()
-            .filter(|desired| desired.module_id == module_id)
-            .count(),
+        desired_state_count: usize::from(snapshot.effective_desired(module_id).is_some()),
         last_reported_observation_count: snapshot
             .observations
             .iter()
@@ -419,7 +601,7 @@ fn inspection(offline: &OfflineSnapshot, module_id: &str) -> Option<OfflineModul
         .snapshot
         .artifacts
         .iter()
-        .filter(|artifact| artifact.id == module_id)
+        .filter(|artifact| artifact.identity.id == module_id)
         .cloned()
         .collect::<Vec<_>>();
     let static_inventory = offline
@@ -430,10 +612,8 @@ fn inspection(offline: &OfflineSnapshot, module_id: &str) -> Option<OfflineModul
         .cloned();
     let desired = offline
         .snapshot
-        .desired
-        .iter()
-        .filter(|desired| desired.module_id == module_id)
-        .cloned()
+        .effective_desired(module_id)
+        .into_iter()
         .collect::<Vec<_>>();
     let last_reported_observations = offline
         .snapshot
@@ -549,14 +729,57 @@ pub fn diagnostics_code(report: &OfflineDiagnosticReport) -> &'static str {
     if report.healthy {
         REGISTRY_HEALTHY
     } else {
-        "module.registry.diagnostics_failed"
+        REGISTRY_DIAGNOSTICS_FAILED
     }
 }
 
 pub fn verification_code(result: &VerificationResult) -> &'static str {
     if result.matched {
-        "module.verification.matched"
+        VERIFICATION_MATCHED
     } else {
         VERIFICATION_MISMATCH
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_list_json(extra: &str, count: usize) -> String {
+        format!(
+            r#"{{
+                "schemaVersion": {MODULE_CONTROL_SCHEMA_VERSION},
+                "registryRevision": 0,
+                "stateRoot": "/tmp/shipctl-state",
+                "stateRootSource": "explicit",
+                "registryPath": "/tmp/shipctl-state/module-control.sqlite3",
+                "runtimeAvailable": false,
+                "count": {count},
+                "modules": [],
+                "diagnostics": []
+                {extra}
+            }}"#
+        )
+    }
+
+    #[test]
+    fn offline_envelope_rejects_unknown_fields() {
+        let error = parse_contract_json::<OfflineModuleList>(&empty_list_json(
+            r#", "unexpected": true"#,
+            0,
+        ))
+        .unwrap_err();
+
+        assert_eq!(
+            error.code,
+            shipctl_core::module_control::codes::UNKNOWN_FIELD
+        );
+    }
+
+    #[test]
+    fn offline_envelope_validates_its_outer_shape() {
+        let error = parse_contract_json::<OfflineModuleList>(&empty_list_json("", 1)).unwrap_err();
+
+        assert_eq!(error.code, INVALID_OFFLINE_RESPONSE);
     }
 }

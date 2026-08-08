@@ -14,7 +14,7 @@ pub const DEFAULT_INSTANCE_NAME: &str = "main";
 pub const STATE_DIR_ENV: &str = "SHIPCTL_STATE_DIR";
 pub const RUNTIME_DIR_ENV: &str = "SHIPCTL_RUNTIME_DIR";
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RootSource {
     Explicit,

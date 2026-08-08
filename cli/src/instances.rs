@@ -7,7 +7,8 @@ use serde::Serialize;
 use shipctl_core::build_info::CONTROL_PROTOCOL_VERSION;
 use shipctl_core::instance::{
     resolve_runtime_root, resolve_state_root, ControlError, DiscoveryProblem,
-    InstanceBuildIdentity, InstanceDirectory, InstanceRecord, StopOutcome,
+    InstanceBuildIdentity, InstanceDiagnosticReport, InstanceDirectory, InstanceRecord,
+    StopOutcome,
 };
 use shipctl_core::module_control::{
     Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind,
@@ -224,6 +225,15 @@ pub fn inspect(
     let (runtime_root, _) = resolve_runtime_root(runtime_root)
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
     directory(runtime_root).inspect(effective_selector(selector).as_deref())
+}
+
+pub fn diagnose(
+    runtime_root: Option<&Path>,
+    selector: Option<&str>,
+) -> Result<InstanceDiagnosticReport, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).diagnose(effective_selector(selector).as_deref())
 }
 
 pub fn stop(

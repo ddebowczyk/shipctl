@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-pub const CONTROL_PROTOCOL_VERSION: u32 = 2;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BuildIdentity<'a> {

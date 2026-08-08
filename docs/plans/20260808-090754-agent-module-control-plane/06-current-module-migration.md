@@ -13,8 +13,9 @@ Each module migration is one independently mergeable task with this contract:
 1. Package its frontend as immutable ESM with a runtime manifest.
 2. Declare every contribution, capability grant, config field, and resource kind.
 3. Replace direct Tauri access with instance-bound mediated ports.
-4. Return all listeners, timers, channels, jobs, styles, and registrations to
-   its `ActivationScope`.
+4. Express UI and styles as declarative contributions; create subscriptions,
+   jobs, channels, and long-lived resources only through host-owned ports that
+   record the requesting module instance.
 5. Add module-specific diagnostic probes only for domain facts that the host
    cannot authoritatively observe.
 6. Add success, failure, disable, re-enable, update, and cleanup fixtures.
@@ -34,7 +35,8 @@ The order is derived from dependency and lifecycle risk, not feature priority:
    context through mediated ports.
 3. `usage` proves subscriptions, scheduled work, persistence, and teardown;
    `git` proves a broad invoke surface, providers, and project lifecycle.
-4. `assistants` proves channels, shutdown hooks, terminal ownership, and drain.
+4. `assistants` proves channels, shutdown hooks, host-owned terminals, and
+   retained-resource attribution across a module swap.
 
 The eight feature modules in scope are `assistants`, `commands`, `fixture`,
 `git`, `ports`, `skills`, `todos`, and `usage`. `modules/api` is the stable

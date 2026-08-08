@@ -11,6 +11,7 @@ use crate::module_control::{
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StaticModuleRecord {
     pub identity: ModuleIdentity,
+    pub source: ModuleSource,
     pub build_provenance: String,
     pub native_compiled: bool,
     pub frontend_shipped: bool,
@@ -73,9 +74,9 @@ impl StaticBuildInventory {
                             "{:x}",
                             Sha256::digest(artifact_fingerprint.as_bytes())
                         ),
-                        source: ModuleSource::Bundled,
                         runtime_kind: ModuleRuntimeKind::StaticBuiltin,
                     },
+                    source: ModuleSource::Bundled,
                     build_provenance: build_provenance.clone(),
                     native_compiled: module.native_compiled,
                     frontend_shipped: module.frontend_shipped,
@@ -118,7 +119,13 @@ impl ModuleRegistry {
         }
 
         for record in &expected.modules {
-            insert_immutable_artifact(&transaction, &record.identity)?;
+            insert_immutable_artifact(
+                &transaction,
+                &ArtifactAcquisition {
+                    identity: record.identity.clone(),
+                    source: record.source,
+                },
+            )?;
         }
         transaction
             .execute("DELETE FROM static_inventory", [])
@@ -284,7 +291,7 @@ fn normalize_inventory(
     modules.sort_by(|left, right| left.identity.id.cmp(&right.identity.id));
     for (index, record) in modules.iter().enumerate() {
         validate_contract(&record.identity)?;
-        if record.identity.source != ModuleSource::Bundled
+        if record.source != ModuleSource::Bundled
             || record.identity.runtime_kind != ModuleRuntimeKind::StaticBuiltin
             || record.build_provenance != inventory.build_provenance
             || (!record.native_compiled && !record.frontend_shipped)

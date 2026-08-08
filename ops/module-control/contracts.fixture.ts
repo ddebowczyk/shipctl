@@ -3,7 +3,6 @@
 // the supervisor-facing JSON field names and tagged values aligned.
 
 type SchemaVersion = number;
-type ModuleSource = "bundled" | "user" | "development";
 type ModuleRuntimeKind =
   | "frontend_esm"
   | "static_builtin"
@@ -46,14 +45,12 @@ interface ModuleIdentity {
   readonly id: string;
   readonly version: string;
   readonly contentDigest: string;
-  readonly source: ModuleSource;
   readonly runtimeKind: ModuleRuntimeKind;
 }
 
 interface DesiredModuleState {
   readonly schemaVersion: SchemaVersion;
   readonly moduleId: string;
-  readonly instanceId: string;
   readonly selectedArtifact: ModuleIdentity | null;
   readonly enabled: boolean;
   readonly configurationRevision: number;
@@ -180,7 +177,6 @@ function identity(value: unknown, name: string): asserts value is ModuleIdentity
   string(source.id, `${name}.id`);
   string(source.version, `${name}.version`);
   string(source.contentDigest, `${name}.contentDigest`);
-  oneOf(source.source, ["bundled", "user", "development"], `${name}.source`);
   oneOf(
     source.runtimeKind,
     ["frontend_esm", "static_builtin", "precompiled_host_adapter", "worker", "wasm", "native_registration"],
@@ -208,7 +204,6 @@ function desired(value: unknown, name: string): asserts value is DesiredModuleSt
   const source = record(value, name);
   number(source.schemaVersion, `${name}.schemaVersion`);
   string(source.moduleId, `${name}.moduleId`);
-  string(source.instanceId, `${name}.instanceId`);
   if (source.selectedArtifact !== null) identity(source.selectedArtifact, `${name}.selectedArtifact`);
   boolean(source.enabled, `${name}.enabled`);
   number(source.configurationRevision, `${name}.configurationRevision`);

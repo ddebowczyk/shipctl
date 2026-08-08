@@ -2,7 +2,12 @@
 //! the projects watcher and the Tauri app handle at once, so it belongs to the
 //! shell that composes them rather than to any one capability.
 
-use shipctl_core::instance::{ActiveWorkBlocker, ControlError, ControlHandler};
+use shipctl_core::instance::{
+    ActiveWorkBlocker, ControlError, ControlHandler, ControlResponseResult, ControlStream,
+    ModuleCommand, ModuleControlStatus, OperationCommand,
+};
+use shipctl_core::module_control::codes::{CONTROL_CAPABILITY_UNAVAILABLE, MUTATION_UNAVAILABLE};
+use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::projects::watcher::GitWatcher;
 use shipctl_core::state::archive::{StateArchiveInspection, StateArchiveService};
 use shipctl_core::terminal::manager::PtyManager;
@@ -16,6 +21,19 @@ pub struct TauriControlHandler {
 impl TauriControlHandler {
     pub fn new(app: tauri::AppHandle) -> Self {
         Self { app }
+    }
+
+    fn module_service(&self) -> Result<ModuleControlService, ControlError> {
+        self.app
+            .state::<Option<ModuleControlService>>()
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| {
+                ControlError::new(
+                    CONTROL_CAPABILITY_UNAVAILABLE,
+                    "This host mode does not provide module control",
+                )
+            })
     }
 }
 
@@ -38,6 +56,55 @@ impl ControlHandler for TauriControlHandler {
             .state::<StateArchiveService>()
             .fingerprint_current()
             .map(Some)
+    }
+
+    fn workspace_identities(&self) -> Vec<String> {
+        let mut workspaces = self
+            .app
+            .state::<shipctl_core::workspace::manager::WorkspaceManager>()
+            .list_repos()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|repo| repo.path)
+            .collect::<Vec<_>>();
+        workspaces.sort();
+        workspaces
+    }
+
+    fn module_control_status(&self) -> ModuleControlStatus {
+        self.module_service()
+            .map(|service| service.status())
+            .unwrap_or_default()
+    }
+
+    fn instance_diagnostics(&self) -> Vec<shipctl_core::module_control::Diagnostic> {
+        self.module_service()
+            .map(|service| service.diagnose_instance())
+            .unwrap_or_default()
+    }
+
+    fn module_control(&self, command: ModuleCommand) -> Result<ControlStream, ControlError> {
+        let service = self.module_service()?;
+        match command {
+            ModuleCommand::Inspect { module_id } => Ok(ControlStream::result(
+                ControlResponseResult::ModuleInspection(service.inspect(&module_id)?),
+            )),
+            ModuleCommand::Diagnose { module_id } => Ok(ControlStream::result(
+                ControlResponseResult::ModuleDiagnostics(service.diagnose_module(&module_id)?),
+            )),
+            ModuleCommand::Lifecycle { .. } => Err(ControlError::new(
+                MUTATION_UNAVAILABLE,
+                "Runtime module mutation is disabled until the reconciler is installed",
+            )),
+        }
+    }
+
+    fn operation_control(&self, command: OperationCommand) -> Result<ControlStream, ControlError> {
+        let service = self.module_service()?;
+        let OperationCommand::Inspect { operation_id } = command;
+        Ok(ControlStream::result(
+            ControlResponseResult::ModuleOperation(service.inspect_operation(operation_id)?),
+        ))
     }
 
     fn save_state(&self, destination: &Path) -> Result<StateArchiveInspection, ControlError> {

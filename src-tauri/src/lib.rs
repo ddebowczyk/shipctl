@@ -19,7 +19,8 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use shipctl_core::instance::{
     ControlServer, InstanceContext, InstanceLaunchOptions, InstanceLeases,
 };
-use shipctl_core::module_control::ModuleRegistrySnapshotProvider;
+use shipctl_core::module_control::live::ModuleControlService;
+use shipctl_core::module_control::registry::ModuleRegistrySnapshotProvider;
 use shipctl_core::projects::watcher::GitWatcher;
 use shipctl_core::state::archive::StateArchiveService;
 use shipctl_core::state::providers::{UiSnapshotProvider, WorkspaceSnapshotProvider};
@@ -88,6 +89,14 @@ pub fn run_with_options_and_loader_probe(
     if !module_loader_probe_enabled {
         modules::inventory::seed_current_build(&paths)?;
     }
+    let module_control = if module_loader_probe_enabled {
+        None
+    } else {
+        Some(
+            ModuleControlService::initialize(paths.clone(), context.instance_id)
+                .map_err(|error| error.to_string())?,
+        )
+    };
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -111,6 +120,7 @@ pub fn run_with_options_and_loader_probe(
     .manage(ui_state)
     .manage(state_archive)
     .manage(module_loader_probe)
+    .manage(module_control)
     .manage(paths)
     .manage(context)
     .setup(move |app| {
@@ -219,6 +229,7 @@ pub fn run_with_options_and_loader_probe(
         shipctl_core::state::ui::get_ui_state,
         shipctl_core::state::ui::set_last_repo_path,
         shipctl_core::state::ui::save_appearance_state,
+        shipctl_core::module_control::live::publish_module_runtime_snapshot,
         modules::capability_data::get_global_capability_data,
         modules::capability_data::replace_global_capability_data,
         lifecycle::shutdown_and_quit,

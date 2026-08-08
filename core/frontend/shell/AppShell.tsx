@@ -43,6 +43,7 @@ import {
   notifyModulesProjectRemoved,
   notifyModulesProjectsChanged,
   panelIdForTab,
+  publishFrontendRuntimeSnapshot,
 } from "../host/index.ts";
 import {
   GlobalSurfaceHost,
@@ -183,6 +184,9 @@ export default function AppShell() {
 
   useEffect(() => {
     const deactivate = activateModules(MODULE_HOST_SERVICES);
+    void publishFrontendRuntimeSnapshot().catch((error) => {
+      if (import.meta.env.DEV) console.error("Module runtime snapshot publication failed:", error);
+    });
     return () => { void deactivate(); };
   }, []);
 

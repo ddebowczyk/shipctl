@@ -89,6 +89,8 @@ pub enum InstancesCommand {
     List(RuntimeRootArgs),
     /// Inspect one instance, or the sole running instance.
     Inspect(InstanceSelectorArgs),
+    /// Diagnose instance discovery, protocol, registry, and runtime state.
+    Diagnose(InstanceSelectorArgs),
     /// Stop one instance, or the sole running instance.
     Stop(InstanceStopArgs),
 }
