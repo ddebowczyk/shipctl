@@ -5,11 +5,14 @@ use shipctl_module_skills::{HostServices, ProjectRootAuthority};
 
 use shipctl_core::workspace::manager::WorkspaceManager;
 
-struct WorkspaceProjectRootAuthority;
+struct WorkspaceProjectRootAuthority {
+    workspace: WorkspaceManager,
+}
 
 impl ProjectRootAuthority for WorkspaceProjectRootAuthority {
     fn authorize_project_root(&self, requested_path: &str) -> Result<PathBuf, String> {
-        let registered_paths = WorkspaceManager::new()
+        let registered_paths = self
+            .workspace
             .list_repos()?
             .into_iter()
             .map(|repo| repo.path)
@@ -29,8 +32,8 @@ fn select_registered_project_root(
         .ok_or_else(|| format!("Project is not registered: {requested_path}"))
 }
 
-pub fn host_services() -> HostServices {
-    HostServices::new(Arc::new(WorkspaceProjectRootAuthority))
+pub fn host_services(workspace: WorkspaceManager) -> HostServices {
+    HostServices::new(Arc::new(WorkspaceProjectRootAuthority { workspace }))
 }
 
 #[cfg(test)]

@@ -122,8 +122,11 @@ test("normal shutdown freezes ready records before PTYs receive signals", () => 
 test("the restore manifest persists identity metadata, not transcripts or commands", () => {
   const manifest = source("../../backend/src/manifest.rs");
   const registry = source("../../backend/src/lib.rs");
+  const nativeComposition = source("../../../../src-tauri/src/modules/mod.rs");
 
-  assert.match(registry, /\.join\("\.shipctl\/assistant-sessions\.json"\)/);
+  assert.match(registry, /pub fn new\(path: PathBuf\) -> Self/);
+  assert.match(registry, /manifest_path: PathBuf/);
+  assert.match(nativeComposition, /paths\.assistant_sessions\.clone\(\)/);
   assert.match(manifest, /options\.mode\(0o600\)/);
   assert.match(manifest, /let mode = if path\.is_dir\(\) \{ 0o700 \} else \{ 0o600 \}/);
   assert.match(manifest, /atomically replace restore manifest/);
@@ -161,6 +164,9 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   assert.match(piConfig, /\.join\("\.pi"\)\s*\.join\("agent"\)/);
   assert.match(piConfig, /"add-generic-password"/);
   assert.match(backend, /app\.manage\(AssistantPluginState \{/);
-  assert.match(backend, /pub fn init<R: Runtime>\(services: HostServices\) -> TauriPlugin<R>/);
+  assert.match(
+    backend,
+    /pub fn init<R: Runtime>\(\s*services: HostServices,\s*manifest_path: PathBuf,\s*durable_writes: DurableWriteBarrier,\s*\) -> TauriPlugin<R>/,
+  );
   assert.match(client, /const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shipctl-assistants\|"/);
 });

@@ -10,7 +10,7 @@ backend:
   path: modules/skills/backend
   cargo_feature: skills-module
   dependency_alias: shipctl-module-skills
-  plugin_init: "shipctl_module_skills::init(crate::modules::skills::host_services())"
+  plugin_init: "shipctl_module_skills::init(crate::modules::skills::host_services(workspace.clone()))"
   host_glue:
     - src-tauri/src/modules/skills.rs
 tauri:

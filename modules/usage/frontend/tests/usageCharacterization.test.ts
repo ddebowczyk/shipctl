@@ -165,10 +165,18 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
 
   assert.doesNotMatch(host, /\.manage\(UsageDb::open\(\)/);
   assert.doesNotMatch(host, /usage::run_background_ingest\(&db\)/);
-  assert.match(installer, /shipctl_module_usage::init\([\s\S]*modules::usage::host_services\(\)/);
+  assert.match(
+    installer,
+    /shipctl_module_usage::init\([\s\S]*modules::usage::host_services\(workspace\.clone\(\)\)[\s\S]*paths\.usage_database\.clone\(\)/,
+  );
   assert.match(plugin, /plugin::Builder::new\(PLUGIN_NAME\)/);
   assert.match(plugin, /app\.manage\(UsagePluginState/);
-  assert.match(plugin, /spawn_ingest\(db, app\.clone\(\)\)/);
+  assert.match(plugin, /spawn_ingest\(state\.db\.clone\(\), app\.clone\(\)\)/);
+  assert.match(plugin, /pub fn start_background_ingest<R: Runtime>/);
+  assert.match(
+    host,
+    /ControlServer::start[\s\S]*modules::start_background_tasks\(app\.handle\(\), reconcile_external_sources\)/,
+  );
   assert.match(plugin, /"plugin:shipctl-usage\|get_all_usage_snapshots"/);
   assert.match(client, /invoke\("plugin:shipctl-usage\|get_all_usage_snapshots"\)/);
   assert.match(client, /invoke\("plugin:shipctl-usage\|refresh_usage_data"\)/);

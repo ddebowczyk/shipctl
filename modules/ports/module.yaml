@@ -10,7 +10,7 @@ backend:
   path: modules/ports/backend
   cargo_feature: ports-module
   dependency_alias: shipctl-module-ports
-  plugin_init: "shipctl_module_ports::init(crate::modules::ports::host_services())"
+  plugin_init: "shipctl_module_ports::init(crate::modules::ports::host_services(workspace.clone()))"
   host_glue:
     - src-tauri/src/modules/ports.rs
 tauri:

@@ -51,6 +51,10 @@ commands:
     summary: Verify the app version is declared only in the Tauri config.
     lane: fast
     aggregate: check
+  - name: instance-paths
+    summary: Reject instance-owned state outside the injected path boundary.
+    lane: fast
+    aggregate: check
   - name: all
     summary: Run every declared fast check.
     lane: fast

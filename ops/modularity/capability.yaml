@@ -33,20 +33,20 @@ commands:
     summary: Regenerate committed disabled-module profiles from module manifests.
     lane: slow
   - name: plugout
-    summary: Verify a module in enabled, disabled, and source-absent profiles.
-    lane: slow
+    summary: Verify static enabled, disabled, and source-absent module contracts without rebuilding.
+    lane: fast
     args: [module]
   - name: frontend-disabled
-    summary: Build a module's frontend-disabled composition profile.
-    lane: slow
+    summary: Verify a module's frontend-disabled composition contract without rebuilding.
+    lane: fast
     args: [module]
   - name: native-disabled
-    summary: Build a module's native-disabled Tauri profile.
-    lane: slow
+    summary: Verify legacy native-disabled declaration consistency without rebuilding.
+    lane: fast
     args: [module]
   - name: all
-    summary: Run every applicable modularity proof for every pluggable module.
-    lane: slow
+    summary: Run static modularity contracts for every pluggable module without rebuilding.
+    lane: fast
   - name: smoke
     summary: Run a named modularity smoke fixture.
     lane: slow

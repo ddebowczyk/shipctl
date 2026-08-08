@@ -4,6 +4,8 @@
 //!
 //! Feature flags decide membership, so a disabled module compiles out entirely.
 
+use std::sync::Arc;
+
 #[cfg(feature = "assistants-module")]
 pub mod assistants;
 pub mod capability_data;
@@ -16,11 +18,20 @@ pub mod skills;
 #[cfg(feature = "usage-module")]
 pub mod usage;
 
-use tauri::{Builder, Runtime};
+use tauri::{AppHandle, Builder, Runtime};
 
+use shipctl_core::state::paths::ShipctlPaths;
 use shipctl_core::terminal::manager::PtyManager;
+use shipctl_core::workspace::manager::WorkspaceManager;
+use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
 
-pub fn install<R: Runtime>(builder: Builder<R>, pty_manager: PtyManager) -> Builder<R> {
+pub fn install<R: Runtime>(
+    builder: Builder<R>,
+    pty_manager: PtyManager,
+    workspace: WorkspaceManager,
+    paths: ShipctlPaths,
+    durable_writes: DurableWriteBarrier,
+) -> Builder<R> {
     #[cfg(feature = "fixture-module")]
     let builder = builder.plugin(shipctl_module_fixture::init());
 
@@ -29,31 +40,63 @@ pub fn install<R: Runtime>(builder: Builder<R>, pty_manager: PtyManager) -> Buil
 
     #[cfg(feature = "ports-module")]
     let builder = builder.plugin(shipctl_module_ports::init(
-        crate::modules::ports::host_services(),
+        crate::modules::ports::host_services(workspace.clone()),
     ));
 
     #[cfg(feature = "skills-module")]
     let builder = builder.plugin(shipctl_module_skills::init(
-        crate::modules::skills::host_services(),
+        crate::modules::skills::host_services(workspace.clone()),
     ));
 
     #[cfg(feature = "git-module")]
     let builder = builder.plugin(shipctl_module_git::init(
-        crate::modules::git::host_services(),
+        crate::modules::git::host_services(workspace.clone()),
     ));
 
     #[cfg(feature = "assistants-module")]
     let builder = builder.plugin(shipctl_module_assistants::init(
-        crate::modules::assistants::host_services(pty_manager),
+        crate::modules::assistants::host_services(pty_manager.clone()),
+        paths.assistant_sessions.clone(),
+        durable_writes.clone(),
     ));
 
     #[cfg(feature = "usage-module")]
     let builder = builder.plugin(shipctl_module_usage::init(
-        crate::modules::usage::host_services(),
+        crate::modules::usage::host_services(workspace.clone()),
+        paths.usage_database.clone(),
+        durable_writes.clone(),
     ));
 
-    #[cfg(not(feature = "assistants-module"))]
-    let _ = pty_manager;
+    let _ = (pty_manager, workspace, paths, durable_writes);
 
     builder
+}
+
+/// Add module-owned durable-state providers at the one native composition
+/// boundary that the plug-out contract can remove with the module.
+pub fn extend_snapshot_providers(
+    paths: &ShipctlPaths,
+    providers: &mut Vec<Arc<dyn SnapshotProvider>>,
+) {
+    #[cfg(feature = "assistants-module")]
+    providers.push(Arc::new(
+        shipctl_module_assistants::AssistantSnapshotProvider::new(paths.assistant_sessions.clone()),
+    ));
+
+    #[cfg(feature = "usage-module")]
+    providers.push(Arc::new(shipctl_module_usage::UsageSnapshotProvider::new(
+        paths.usage_database.clone(),
+    )));
+
+    let _ = (paths, providers);
+}
+
+/// Start module-owned work only after the host has published instance
+/// readiness. Module-specific references remain confined to this removable
+/// composition file.
+pub fn start_background_tasks<R: Runtime>(app: &AppHandle<R>, reconcile_external_sources: bool) {
+    #[cfg(feature = "usage-module")]
+    let _ = reconcile_external_sources.then(|| shipctl_module_usage::start_background_ingest(app));
+
+    let _ = (app, reconcile_external_sources);
 }

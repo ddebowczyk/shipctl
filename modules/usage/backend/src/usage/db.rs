@@ -1,17 +1,24 @@
 use rusqlite::Connection;
 use serde::Deserialize;
-use std::path::PathBuf;
+use shipctl_module_api::DurableWriteBarrier;
+use std::collections::BTreeSet;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct UsageDb {
     pub conn: Arc<Mutex<Connection>>,
+    pub(crate) durable_writes: DurableWriteBarrier,
 }
 
 impl UsageDb {
     /// Fallback: in-memory DB so the app still opens even if the disk DB fails.
     /// Usage data won't persist across restarts but nothing blocks.
     pub fn open_in_memory() -> Self {
+        Self::open_in_memory_with_barrier(DurableWriteBarrier::default())
+    }
+
+    pub fn open_in_memory_with_barrier(durable_writes: DurableWriteBarrier) -> Self {
         let conn = Connection::open_in_memory()
             .expect("Failed to open in-memory SQLite — this should never fail");
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
@@ -20,17 +27,24 @@ impl UsageDb {
         let _ = seed_pricing(&conn);
         Self {
             conn: Arc::new(Mutex::new(conn)),
+            durable_writes,
         }
     }
 
-    pub fn open() -> Result<Self, String> {
-        let db_path = db_path()?;
+    pub fn open_at(db_path: &Path) -> Result<Self, String> {
+        Self::open_at_with_barrier(db_path, DurableWriteBarrier::default())
+    }
+
+    pub fn open_at_with_barrier(
+        db_path: &Path,
+        durable_writes: DurableWriteBarrier,
+    ) -> Result<Self, String> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create usage DB directory: {e}"))?;
         }
         let conn =
-            Connection::open(&db_path).map_err(|e| format!("Failed to open usage DB: {e}"))?;
+            Connection::open(db_path).map_err(|e| format!("Failed to open usage DB: {e}"))?;
 
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|e| format!("Failed to set DB pragmas: {e}"))?;
@@ -40,14 +54,9 @@ impl UsageDb {
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            durable_writes,
         })
     }
-}
-
-fn db_path() -> Result<PathBuf, String> {
-    dirs::home_dir()
-        .map(|home| home.join(".shipctl").join("usage.sqlite3"))
-        .ok_or_else(|| "Unable to locate home directory".to_string())
 }
 
 fn migrate(conn: &Connection) -> Result<(), String> {
@@ -354,13 +363,26 @@ fn seed_pricing(conn: &Connection) -> Result<(), String> {
         .unchecked_transaction()
         .map_err(|e| format!("Failed to start pricing seed transaction: {e}"))?;
 
-    tx.execute("DELETE FROM model_pricing", [])
-        .map_err(|e| format!("Failed to clear pricing snapshot: {e}"))?;
-
+    let mut desired_keys = BTreeSet::new();
     for row in rows {
+        desired_keys.insert((row.provider.clone(), row.model_pattern.clone()));
         tx.execute(
-            "INSERT OR REPLACE INTO model_pricing (provider, model_pattern, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m, thoughts_per_m, release_date)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO model_pricing (provider, model_pattern, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m, thoughts_per_m, release_date)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(provider, model_pattern) DO UPDATE SET
+               input_per_m = excluded.input_per_m,
+               output_per_m = excluded.output_per_m,
+               cache_read_per_m = excluded.cache_read_per_m,
+               cache_write_per_m = excluded.cache_write_per_m,
+               thoughts_per_m = excluded.thoughts_per_m,
+               release_date = excluded.release_date,
+               updated_at = CURRENT_TIMESTAMP
+             WHERE model_pricing.input_per_m != excluded.input_per_m
+                OR model_pricing.output_per_m != excluded.output_per_m
+                OR model_pricing.cache_read_per_m != excluded.cache_read_per_m
+                OR model_pricing.cache_write_per_m != excluded.cache_write_per_m
+                OR model_pricing.thoughts_per_m != excluded.thoughts_per_m
+                OR model_pricing.release_date IS NOT excluded.release_date",
             rusqlite::params![
                 row.provider,
                 row.model_pattern,
@@ -372,6 +394,29 @@ fn seed_pricing(conn: &Connection) -> Result<(), String> {
                 row.release_date,
             ],
         ).map_err(|e| format!("Failed to seed pricing: {e}"))?;
+    }
+
+    let existing_keys = {
+        let mut statement = tx
+            .prepare("SELECT provider, model_pattern FROM model_pricing")
+            .map_err(|e| format!("Failed to inspect existing pricing snapshot: {e}"))?;
+        let keys = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| format!("Failed to query existing pricing snapshot: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to decode existing pricing snapshot: {e}"))?;
+        keys
+    };
+    for (provider, model_pattern) in existing_keys {
+        if !desired_keys.contains(&(provider.clone(), model_pattern.clone())) {
+            tx.execute(
+                "DELETE FROM model_pricing WHERE provider = ?1 AND model_pattern = ?2",
+                [&provider, &model_pattern],
+            )
+            .map_err(|e| format!("Failed to remove stale pricing row: {e}"))?;
+        }
     }
 
     tx.commit()
@@ -401,9 +446,12 @@ mod tests {
         let pricing_rows: i64 = conn
             .query_row("SELECT COUNT(*) FROM model_pricing", [], |row| row.get(0))
             .unwrap();
+        let changes_before_reseed = conn.total_changes();
+        seed_pricing(&conn).unwrap();
 
         assert_eq!(version, 11);
         assert!(pricing_rows > 0);
+        assert_eq!(conn.total_changes(), changes_before_reseed);
     }
 
     #[test]

@@ -5,25 +5,64 @@
 //! capabilities expose, and installs whichever module plugins this build
 //! carries. Everything it registers lives in `core/backend` or `modules/`.
 
+pub mod build_info;
+
 mod lifecycle;
 mod menu;
 mod modules;
 
+use std::sync::Arc;
+
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
+use shipctl_core::instance::{
+    ControlServer, InstanceContext, InstanceLaunchOptions, InstanceLeases,
+};
 use shipctl_core::projects::watcher::GitWatcher;
+use shipctl_core::state::archive::StateArchiveService;
+use shipctl_core::state::providers::{UiSnapshotProvider, WorkspaceSnapshotProvider};
+use shipctl_core::state::ui::UiStateStore;
 use shipctl_core::terminal::manager::PtyManager;
 use shipctl_core::workspace::manager::WorkspaceManager;
+use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    run_with_options(InstanceLaunchOptions::default()).expect("error while running Shipctl UI");
+}
+
+pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     let _ = fix_path_env::fix();
+
+    let load_state = options.load_state.clone();
+    let reconcile_external_sources = load_state.is_none();
+    let context = InstanceContext::resolve(options, build_info::APP_VERSION)?;
+    let paths = context.paths();
+    let leases = Arc::new(InstanceLeases::acquire(&context).map_err(|error| error.to_string())?);
+    let durable_writes = DurableWriteBarrier::default();
+    let snapshot_providers = snapshot_providers(&paths);
+    let state_archive = StateArchiveService::new(
+        paths.clone(),
+        &context,
+        durable_writes.clone(),
+        snapshot_providers,
+    );
 
     // Copy pre-rename state from `~/.shep` before anything opens a file under
     // `~/.shipctl`. Module plugins install below and may touch their own state
     // eagerly, so this cannot wait for `setup()`. The original is left in
     // place: an installed `shep` build keeps its own state and keeps working.
-    match shipctl_core::workspace::migration::migrate_home_state() {
+    let migration = if let Some(archive) = load_state.as_deref() {
+        state_archive
+            .restore(archive)
+            .map_err(|error| error.to_string())?;
+        Ok(shipctl_core::workspace::migration::Outcome::AlreadyPresent)
+    } else if context.uses_default_profile() {
+        shipctl_core::workspace::migration::migrate_home_state_to(&context.state_root)
+    } else {
+        Ok(shipctl_core::workspace::migration::Outcome::AlreadyPresent)
+    };
+    match migration {
         Ok(shipctl_core::workspace::migration::Outcome::Copied(n)) => {
             eprintln!("Migrated {n} file(s) from ~/.shep into ~/.shipctl");
         }
@@ -36,94 +75,121 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
-    let pty_manager = PtyManager::new();
-    let app = modules::install(builder, pty_manager.clone())
-        .manage(pty_manager)
-        .manage(WorkspaceManager::new())
-        .setup(|app| {
-            // Run migration from old project-based config
-            let workspace = app.state::<WorkspaceManager>();
-            if let Err(e) = workspace.migrate() {
-                eprintln!("Migration warning: {e}");
-            }
-            if let Err(e) = workspace.backfill_global_config_defaults() {
-                eprintln!("Config backfill warning: {e}");
-            }
+    let pty_manager = PtyManager::new(context.instance_id.to_string());
+    let workspace = WorkspaceManager::new_with_barrier(paths.clone(), durable_writes.clone());
+    let ui_state = UiStateStore::new_with_barrier(paths.ui_state.clone(), durable_writes.clone());
+    let control_context = context.clone();
+    let control_leases = leases.clone();
+    let app = modules::install(
+        builder,
+        pty_manager.clone(),
+        workspace.clone(),
+        paths.clone(),
+        durable_writes,
+    )
+    .manage(pty_manager)
+    .manage(workspace)
+    .manage(ui_state)
+    .manage(state_archive)
+    .manage(paths)
+    .manage(context)
+    .setup(move |app| {
+        // Run migration from old project-based config
+        let workspace = app.state::<WorkspaceManager>();
+        if let Err(e) = workspace.migrate() {
+            eprintln!("Migration warning: {e}");
+        }
+        if let Err(e) = workspace.backfill_global_config_defaults() {
+            eprintln!("Config backfill warning: {e}");
+        }
 
-            // Start file system watcher for git status updates
-            app.manage(GitWatcher::new(app.handle().clone()));
+        // Start file system watcher for git status updates
+        app.manage(GitWatcher::new(app.handle().clone()));
 
-            menu::setup(app.handle())?;
+        menu::setup(app.handle())?;
 
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
+        if cfg!(debug_assertions) {
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
+        }
+
+        let control = ControlServer::start(
+            control_context.clone(),
+            control_leases.clone(),
+            Arc::new(lifecycle::TauriControlHandler::new(app.handle().clone())),
+        )
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+        app.manage(control);
+        modules::start_background_tasks(app.handle(), reconcile_external_sources);
+        Ok(())
+    })
+    .on_window_event(|window, event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            let pty = window.state::<PtyManager>();
+            if pty.is_shutting_down() {
+                return;
             }
-            Ok(())
-        })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let pty = window.state::<PtyManager>();
-                if pty.is_shutting_down() {
-                    return;
-                }
-                let count = pty.session_count();
-                // Never let a window-close bypass the confirmation dialog.
-                // With no PTYs it is still easy to lose the active workspace
-                // by accidentally pressing Cmd+Q or the red window button.
-                api.prevent_close();
-                let _ = window.emit("quit-requested", count);
-            }
-        })
-        .invoke_handler(tauri::generate_handler![
-            shipctl_core::projects::commands::list_repos,
-            shipctl_core::projects::commands::register_repo,
-            shipctl_core::projects::commands::unregister_repo,
-            shipctl_core::projects::commands::load_workspace,
-            shipctl_core::projects::commands::save_workspace,
-            shipctl_core::projects::commands::list_groups,
-            shipctl_core::projects::commands::create_group,
-            shipctl_core::projects::commands::rename_group,
-            shipctl_core::projects::commands::delete_group,
-            shipctl_core::projects::commands::move_repo_to_group,
-            shipctl_core::projects::commands::watch_repo,
-            shipctl_core::projects::commands::unwatch_repo,
-            shipctl_core::settings::commands::get_editor_settings,
-            shipctl_core::settings::commands::save_editor_settings,
-            shipctl_core::settings::commands::get_project_settings,
-            shipctl_core::settings::commands::save_project_settings,
-            shipctl_core::settings::commands::get_keybinding_settings,
-            shipctl_core::settings::commands::save_keybinding_settings,
-            shipctl_core::settings::commands::get_sidebar_settings,
-            shipctl_core::settings::commands::open_in_editor,
-            shipctl_core::terminal::commands::spawn_pty,
-            shipctl_core::terminal::commands::write_pty,
-            shipctl_core::terminal::commands::acknowledge_pty_output,
-            shipctl_core::terminal::commands::update_pty_color_theme,
-            shipctl_core::terminal::commands::resize_pty,
-            shipctl_core::terminal::commands::kill_pty,
-            shipctl_core::terminal::commands::get_pty_session_count,
-            shipctl_core::terminal::commands::get_terminal_settings,
-            shipctl_core::terminal::commands::save_terminal_settings,
-            shipctl_core::terminal::commands::get_memory_stats,
-            shipctl_core::appearance::commands::list_monospace_families,
-            shipctl_core::appearance::commands::load_font_family,
-            shipctl_core::platform::commands::get_username,
-            shipctl_core::platform::commands::get_home_directory,
-            shipctl_core::platform::commands::get_default_shell,
-            shipctl_core::platform::commands::get_computer_name,
-            shipctl_core::platform::commands::check_command_exists,
-            shipctl_core::platform::commands::reveal_in_finder,
-            shipctl_core::platform::commands::open_url,
-            modules::capability_data::get_global_capability_data,
-            modules::capability_data::replace_global_capability_data,
-            lifecycle::shutdown_and_quit,
-        ])
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application");
+            let count = pty.session_count();
+            // Never let a window-close bypass the confirmation dialog.
+            // With no PTYs it is still easy to lose the active workspace
+            // by accidentally pressing Cmd+Q or the red window button.
+            api.prevent_close();
+            let _ = window.emit("quit-requested", count);
+        }
+    })
+    .invoke_handler(tauri::generate_handler![
+        shipctl_core::projects::commands::list_repos,
+        shipctl_core::projects::commands::register_repo,
+        shipctl_core::projects::commands::unregister_repo,
+        shipctl_core::projects::commands::load_workspace,
+        shipctl_core::projects::commands::save_workspace,
+        shipctl_core::projects::commands::list_groups,
+        shipctl_core::projects::commands::create_group,
+        shipctl_core::projects::commands::rename_group,
+        shipctl_core::projects::commands::delete_group,
+        shipctl_core::projects::commands::move_repo_to_group,
+        shipctl_core::projects::commands::watch_repo,
+        shipctl_core::projects::commands::unwatch_repo,
+        shipctl_core::settings::commands::get_editor_settings,
+        shipctl_core::settings::commands::save_editor_settings,
+        shipctl_core::settings::commands::get_project_settings,
+        shipctl_core::settings::commands::save_project_settings,
+        shipctl_core::settings::commands::get_keybinding_settings,
+        shipctl_core::settings::commands::save_keybinding_settings,
+        shipctl_core::settings::commands::get_sidebar_settings,
+        shipctl_core::settings::commands::open_in_editor,
+        shipctl_core::terminal::commands::spawn_pty,
+        shipctl_core::terminal::commands::write_pty,
+        shipctl_core::terminal::commands::acknowledge_pty_output,
+        shipctl_core::terminal::commands::update_pty_color_theme,
+        shipctl_core::terminal::commands::resize_pty,
+        shipctl_core::terminal::commands::kill_pty,
+        shipctl_core::terminal::commands::get_pty_session_count,
+        shipctl_core::terminal::commands::get_terminal_settings,
+        shipctl_core::terminal::commands::save_terminal_settings,
+        shipctl_core::terminal::commands::get_memory_stats,
+        shipctl_core::appearance::commands::list_monospace_families,
+        shipctl_core::appearance::commands::load_font_family,
+        shipctl_core::platform::commands::get_username,
+        shipctl_core::platform::commands::get_home_directory,
+        shipctl_core::platform::commands::get_default_shell,
+        shipctl_core::platform::commands::get_computer_name,
+        shipctl_core::platform::commands::check_command_exists,
+        shipctl_core::platform::commands::reveal_in_finder,
+        shipctl_core::platform::commands::open_url,
+        shipctl_core::instance::context::inspect_instance,
+        shipctl_core::state::ui::get_ui_state,
+        shipctl_core::state::ui::set_last_repo_path,
+        shipctl_core::state::ui::save_appearance_state,
+        modules::capability_data::get_global_capability_data,
+        modules::capability_data::replace_global_capability_data,
+        lifecycle::shutdown_and_quit,
+    ])
+    .build(tauri::generate_context!())
+    .map_err(|error| format!("error while building Tauri application: {error}"))?;
 
     app.run(|app_handle, event| {
         if let RunEvent::ExitRequested { api, .. } = &event {
@@ -138,4 +204,16 @@ pub fn run() {
             let _ = app_handle.emit("quit-requested", count);
         }
     });
+    Ok(())
+}
+
+fn snapshot_providers(
+    paths: &shipctl_core::state::paths::ShipctlPaths,
+) -> Vec<Arc<dyn SnapshotProvider>> {
+    let mut providers: Vec<Arc<dyn SnapshotProvider>> = vec![
+        Arc::new(WorkspaceSnapshotProvider::new(paths.global_config.clone())),
+        Arc::new(UiSnapshotProvider::new(paths.ui_state.clone())),
+    ];
+    modules::extend_snapshot_providers(paths, &mut providers);
+    providers
 }

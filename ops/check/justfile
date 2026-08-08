@@ -20,5 +20,8 @@ manifests:
 version:
     node bin/check-version.mjs
 
+instance-paths:
+    node bin/check-instance-paths.mjs
+
 all:
     node bin/run-aggregate.mjs check

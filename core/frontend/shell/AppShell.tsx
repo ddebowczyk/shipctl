@@ -20,9 +20,12 @@ import { BUILTIN_GLOBAL_SURFACE_LOADERS } from "./builtinGlobalSurfaceLoaders.ts
 import {
   getUsername,
   getComputerName,
+  getUiState,
   openInEditor,
+  setLastRepoPath,
   shutdownAndQuit,
 } from "../platform/index.ts";
+import { useThemeStore } from "../appearance/index.ts";
 import { useEditorStore } from "../settings/index.ts";
 import { useTerminalSettingsStore } from "../terminal/index.ts";
 import { useUpdateStore } from "./useUpdateStore.ts";
@@ -50,8 +53,7 @@ import {
   matchesPanelShortcut,
 } from "../host/index.ts";
 
-import type { TabCycleDirection, TerminalTabData, UnifiedTab } from "../platform/index.ts";
-const LAST_REPO_STORAGE_KEY = "shipctl:last-repo-path";
+import type { TabCycleDirection, TerminalTabData, UiState, UnifiedTab } from "../platform/index.ts";
 
 // Stable empty arrays to avoid infinite re-render loops with zustand v5's
 // useSyncExternalStore — selectors must return the same reference for the same state.
@@ -75,6 +77,8 @@ export default function AppShell() {
   const pushNotice = useNoticeStore((s) => s.pushNotice);
 
   const initialProjectAttemptedRef = useRef(false);
+  const durableUiStateRef = useRef<UiState | null>(null);
+  const [durableUiStateLoaded, setDurableUiStateLoaded] = useState(false);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
   const lastTabCycleAtRef = useRef(0);
@@ -87,7 +91,7 @@ export default function AppShell() {
         useUIStore.getState().closeGlobalSurface();
         await openRepo(repoPath);
         initialProjectAttemptedRef.current = true;
-        window.localStorage.setItem(LAST_REPO_STORAGE_KEY, repoPath);
+        durableUiStateRef.current = await setLastRepoPath(repoPath);
         await notifyModulesProjectOpened(repoPath, MODULE_HOST_SERVICES);
         return true;
       } catch (error) {
@@ -291,7 +295,7 @@ export default function AppShell() {
         const canonicalPath = useRepoStore.getState().activeRepoPath;
         if (!canonicalPath) return;
         initialProjectAttemptedRef.current = true;
-        window.localStorage.setItem(LAST_REPO_STORAGE_KEY, canonicalPath);
+        durableUiStateRef.current = await setLastRepoPath(canonicalPath);
         await notifyModulesProjectOpened(canonicalPath, MODULE_HOST_SERVICES);
       } catch (error) {
         pushNotice({
@@ -463,11 +467,35 @@ export default function AppShell() {
   }, [pushNotice]);
 
   useEffect(() => {
-    if (initialProjectAttemptedRef.current || activeRepoPath || repos.length === 0) return;
+    let cancelled = false;
+    void getUiState()
+      .then((state) => {
+        if (cancelled) return;
+        durableUiStateRef.current = state;
+        useThemeStore.getState().hydrate(state.themeId, state.customTheme);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        pushNotice({
+          tone: "error",
+          title: "Couldn’t load UI preferences",
+          message: getErrorMessage(error),
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setDurableUiStateLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pushNotice]);
+
+  useEffect(() => {
+    if (!durableUiStateLoaded || initialProjectAttemptedRef.current || activeRepoPath || repos.length === 0) return;
 
     initialProjectAttemptedRef.current = true;
 
-    const storedRepoPath = window.localStorage.getItem(LAST_REPO_STORAGE_KEY);
+    const storedRepoPath = durableUiStateRef.current?.lastRepoPath;
     const initialRepo =
       repos.find((repo) => repo.path === storedRepoPath) ??
       repos[0];
@@ -475,7 +503,7 @@ export default function AppShell() {
     if (initialRepo) {
       void handleSelectRepo(initialRepo.path);
     }
-  }, [repos, activeRepoPath, handleSelectRepo]);
+  }, [durableUiStateLoaded, repos, activeRepoPath, handleSelectRepo]);
 
   // All native exit routes are confirmed, including Cmd+Q with no active PTYs.
   const quitDialogOpenRef = useRef(false);

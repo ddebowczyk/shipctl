@@ -8,11 +8,55 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertSourceAbsent,
+  frontendDisabled,
+  nativeDisabled,
   prepareSourceAbsent,
+  plugout,
   readManifest,
 } from "../bin/plugout.mjs";
+import { verifyModulePlugout } from "../bin/module-plugout.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
+
+test("profile runner verifies the current root without materializing a copy", () => {
+  const calls = [];
+  const root = "/static-contract-root";
+
+  verifyModulePlugout({
+    repositoryRoot: root,
+    moduleName: "probe",
+    verifyEnabled: (actual) => calls.push(["enabled", actual]),
+    verifyDisabled: (actual) => calls.push(["disabled", actual]),
+    verifySourceAbsent: (actual) => calls.push(["source-absent", actual]),
+  });
+
+  assert.deepEqual(calls, [
+    ["enabled", root],
+    ["disabled", root],
+    ["source-absent", root],
+  ]);
+});
+
+test("profile runner can check only the source-absent contract without a copy", () => {
+  const calls = [];
+
+  verifyModulePlugout({
+    repositoryRoot,
+    moduleName: "probe",
+    verifyEnabled: () => calls.push("enabled"),
+    verifyDisabled: () => calls.push("disabled"),
+    verifySourceAbsent: () => calls.push("source-absent"),
+    sourceAbsentOnly: true,
+  });
+
+  assert.deepEqual(calls, ["source-absent"]);
+});
+
+test("public profile commands use manifest and composition contracts without builds", () => {
+  plugout(repositoryRoot, "commands");
+  frontendDisabled(repositoryRoot, "commands");
+  nativeDisabled(repositoryRoot, "todos");
+});
 
 function copy(root, relativePath) {
   const source = path.join(repositoryRoot, relativePath);
@@ -36,6 +80,8 @@ for (const id of ["todos", "ports", "skills", "git", "commands", "assistants", "
     for (const relativePath of [
       "core/frontend/host/enabledModules.ts",
       "src-tauri/Cargo.toml",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/modules/git.rs",
       "src-tauri/src/modules/mod.rs",
       "src-tauri/tauri.conf.json",
       "profiles",

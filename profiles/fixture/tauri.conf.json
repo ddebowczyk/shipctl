@@ -1,6 +1,6 @@
 {
   "build": {
-    "beforeBuildCommand": "just build module-fixture",
+    "beforeBuildCommand": "bash ops/build/bin/build-tauri-prerequisites.sh module-fixture",
     "frontendDist": "../ops/modularity/fixtures/module-fixture/dist"
   },
   "app": {

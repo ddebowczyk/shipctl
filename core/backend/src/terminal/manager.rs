@@ -30,14 +30,16 @@ impl TerminationTarget for PtySession {
 
 #[derive(Clone)]
 pub struct PtyManager {
+    instance_id: Arc<str>,
     sessions: Arc<Mutex<HashMap<u32, PtySession>>>,
     next_id: Arc<Mutex<u32>>,
     shutting_down: Arc<AtomicBool>,
 }
 
 impl PtyManager {
-    pub fn new() -> Self {
+    pub fn new(instance_id: impl Into<String>) -> Self {
         PtyManager {
+            instance_id: Arc::from(instance_id.into()),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(Mutex::new(1)),
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -62,12 +64,13 @@ impl PtyManager {
         command: &str,
         args: Option<Vec<String>>,
         cwd: &str,
-        env: HashMap<String, String>,
+        mut env: HashMap<String, String>,
         cols: u16,
         rows: u16,
         color_theme: PtyColorTheme,
         channel: Channel<PtyOutput>,
     ) -> Result<u32, String> {
+        self.inject_instance_environment(&mut env);
         let session = PtySession::spawn(command, args, cwd, env, cols, rows, color_theme, channel)?;
 
         let mut next_id = self.next_id.lock().unwrap();
@@ -76,6 +79,13 @@ impl PtyManager {
 
         self.sessions.lock().unwrap().insert(id, session);
         Ok(id)
+    }
+
+    pub fn inject_instance_environment(&self, environment: &mut HashMap<String, String>) {
+        environment.insert(
+            "SHIPCTL_INSTANCE_ID".to_string(),
+            self.instance_id.to_string(),
+        );
     }
 
     pub fn write(&self, pty_id: u32, data: &[u8]) -> Result<(), String> {
@@ -159,13 +169,31 @@ fn terminate_all_before_deadline<T: TerminationTarget>(sessions: &mut [T], deadl
 
 #[cfg(test)]
 mod tests {
-    use super::{terminate_all_before_deadline, TerminationTarget};
+    use super::{terminate_all_before_deadline, PtyManager, TerminationTarget};
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
 
     struct FakeSession {
         name: &'static str,
         events: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[test]
+    fn exact_instance_id_overrides_untrusted_spawn_environment() {
+        let manager = PtyManager::new("runtime-id");
+        let mut environment = HashMap::from([
+            ("PATH".to_string(), "/bin".to_string()),
+            ("SHIPCTL_INSTANCE_ID".to_string(), "spoofed".to_string()),
+        ]);
+
+        manager.inject_instance_environment(&mut environment);
+
+        assert_eq!(environment.get("PATH").map(String::as_str), Some("/bin"));
+        assert_eq!(
+            environment.get("SHIPCTL_INSTANCE_ID").map(String::as_str),
+            Some("runtime-id")
+        );
     }
 
     impl TerminationTarget for FakeSession {

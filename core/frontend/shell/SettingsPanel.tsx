@@ -217,7 +217,7 @@ export default function SettingsPanel() {
 
     try {
       const source = await file.text();
-      importTheme(source);
+      await importTheme(source);
       setThemeError(null);
     } catch (error) {
       setThemeError(getErrorMessage(error));
@@ -236,7 +236,12 @@ export default function SettingsPanel() {
             return (
               <button
                 key={t.id}
-                onClick={() => setTheme(t.id)}
+                onClick={() => {
+                  void setTheme(t.id).then(
+                    () => setThemeError(null),
+                    (error) => setThemeError(getErrorMessage(error)),
+                  );
+                }}
                 className={`${optionClass} ${active ? "selected" : ""}`}
               >
                 <div
@@ -261,7 +266,12 @@ export default function SettingsPanel() {
           <div className="flex flex-wrap gap-2">
             {customTheme && (
               <button
-                onClick={() => setTheme(customTheme.id)}
+                onClick={() => {
+                  void setTheme(customTheme.id).then(
+                    () => setThemeError(null),
+                    (error) => setThemeError(getErrorMessage(error)),
+                  );
+                }}
                 className={`option-card option-card--compact ${themeId === customTheme.id ? "selected" : ""}`}
               >
                 <div

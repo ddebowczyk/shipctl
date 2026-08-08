@@ -20,5 +20,13 @@ notify = { version = "8", features = ["macos_fsevent"] }
 core-text = "22"
 core-foundation = "0.10"
 url = "2"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+interprocess = "2.4.3"
+fs4 = "1.1.0"
+sha2 = "0.10"
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
 shipctl-module-api = { path = "../../modules/api/backend" }
+tar = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+widestring = "1"

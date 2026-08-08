@@ -110,8 +110,10 @@ ditto "$app_source" "${archive_dir}/shipctl.app" \
 cp -p "$dmg_source" "${archive_dir}/${dmg_name}" \
   || fail 'could not copy the DMG into the archive'
 
-app_sha256="$(shasum -a 256 "${archive_dir}/shipctl.app/Contents/MacOS/shipctl" | awk '{print $1}')" \
-  || fail 'could not checksum the archived app executable'
+ui_sha256="$(shasum -a 256 "${archive_dir}/shipctl.app/Contents/MacOS/shipctl-ui" | awk '{print $1}')" \
+  || fail 'could not checksum the archived UI executable'
+cli_sha256="$(shasum -a 256 "${archive_dir}/shipctl.app/Contents/MacOS/shipctl" | awk '{print $1}')" \
+  || fail 'could not checksum the archived CLI executable'
 dmg_sha256="$(shasum -a 256 "${archive_dir}/${dmg_name}" | awk '{print $1}')" \
   || fail 'could not checksum the archived DMG'
 created_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -123,7 +125,8 @@ jq -n \
   --arg target "$target" \
   --arg git_commit "$git_commit" \
   --argjson git_dirty "$git_dirty" \
-  --arg app_sha256 "$app_sha256" \
+  --arg ui_sha256 "$ui_sha256" \
+  --arg cli_sha256 "$cli_sha256" \
   --arg dmg_name "$dmg_name" \
   --arg dmg_sha256 "$dmg_sha256" \
   --arg build_command "pnpm tauri build --target ${target} --bundles app,dmg --no-sign" \
@@ -137,7 +140,13 @@ jq -n \
     git_dirty: $git_dirty,
     build_command: $build_command,
     artifacts: {
-      app: { path: "shipctl.app", executable_sha256: $app_sha256 },
+      app: {
+        path: "shipctl.app",
+        ui_executable: "Contents/MacOS/shipctl-ui",
+        ui_executable_sha256: $ui_sha256,
+        cli_executable: "Contents/MacOS/shipctl",
+        cli_executable_sha256: $cli_sha256
+      },
       dmg: { path: $dmg_name, sha256: $dmg_sha256 }
     }
   }' > "${archive_dir}/build.json" \

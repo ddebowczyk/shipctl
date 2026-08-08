@@ -10,8 +10,11 @@
 //! on-disk config schema that projects, settings and terminal all read.
 
 pub mod appearance;
+pub mod build_info;
+pub mod instance;
 pub mod platform;
 pub mod projects;
 pub mod settings;
+pub mod state;
 pub mod terminal;
 pub mod workspace;

@@ -2,12 +2,16 @@
 
 #![forbid(unsafe_code)]
 
+mod snapshot;
 mod usage;
 
+use shipctl_module_api::DurableWriteBarrier;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tauri::{plugin::TauriPlugin, Emitter, Manager, Runtime, State};
 
+pub use snapshot::UsageSnapshotProvider;
 pub use usage::types::{
     LocalUsageDetails, ProviderUsageSnapshot, UsageOverview, UsageProjectAliasReviewItem,
 };
@@ -156,18 +160,22 @@ fn spawn_ingest<R: Runtime>(db: UsageDb, app: tauri::AppHandle<R>) {
     });
 }
 
-pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
+pub fn init<R: Runtime>(
+    services: HostServices,
+    database_path: PathBuf,
+    durable_writes: DurableWriteBarrier,
+) -> TauriPlugin<R> {
     tauri::plugin::Builder::new(PLUGIN_NAME)
         .setup(move |app, _api| {
-            let db = UsageDb::open().unwrap_or_else(|error| {
-                eprintln!("Usage database failed to open ({error}), using in-memory fallback");
-                UsageDb::open_in_memory()
-            });
+            let db = UsageDb::open_at_with_barrier(&database_path, durable_writes.clone())
+                .unwrap_or_else(|error| {
+                    eprintln!("Usage database failed to open ({error}), using in-memory fallback");
+                    UsageDb::open_in_memory_with_barrier(durable_writes.clone())
+                });
             app.manage(UsagePluginState {
                 db: db.clone(),
                 services: services.clone(),
             });
-            spawn_ingest(db, app.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -179,6 +187,14 @@ pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
             refresh_usage_data,
         ])
         .build()
+}
+
+/// Start external-source ingestion only after the host has published instance
+/// readiness. This preserves the restored-state fingerprint at the readiness
+/// boundary while allowing normal background reconciliation immediately after.
+pub fn start_background_ingest<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let state = app.state::<UsagePluginState>();
+    spawn_ingest(state.db.clone(), app.clone());
 }
 
 #[cfg(test)]

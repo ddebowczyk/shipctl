@@ -11,9 +11,10 @@ mod manifest;
 mod model_catalog;
 mod pi_config;
 pub mod providers;
+mod snapshot;
 
 use serde::{Deserialize, Serialize};
-use shipctl_module_api::{TerminalColorTheme, TerminalOutput};
+use shipctl_module_api::{DurableWriteBarrier, TerminalColorTheme, TerminalOutput};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,6 +26,7 @@ use uuid::Uuid;
 
 pub use capture::{parse_claude_session_metadata, parse_codex_session_metadata};
 pub use providers::{AssistantProvider, SessionMode};
+pub use snapshot::AssistantSnapshotProvider;
 
 use manifest::AssistantSessionManifest;
 
@@ -183,18 +185,23 @@ struct RegistryState {
 pub struct AssistantSessionRegistry {
     path: PathBuf,
     state: Mutex<RegistryState>,
+    durable_writes: DurableWriteBarrier,
 }
 
 impl AssistantSessionRegistry {
-    pub fn new() -> Self {
-        let path = default_manifest_path().unwrap_or_else(|error| {
-            eprintln!("Assistant session registry path warning: {error}");
-            PathBuf::from("assistant-sessions.json")
-        });
+    pub fn new(path: PathBuf) -> Self {
         Self::new_at(path)
     }
 
+    pub fn new_with_barrier(path: PathBuf, durable_writes: DurableWriteBarrier) -> Self {
+        Self::new_at_with_barrier(path, durable_writes)
+    }
+
     fn new_at(path: PathBuf) -> Self {
+        Self::new_at_with_barrier(path, DurableWriteBarrier::default())
+    }
+
+    fn new_at_with_barrier(path: PathBuf, durable_writes: DurableWriteBarrier) -> Self {
         let mut startup_warning = None;
         let manifest = if path.exists() {
             match manifest::read(&path) {
@@ -228,6 +235,7 @@ impl AssistantSessionRegistry {
 
         Self {
             path,
+            durable_writes,
             state: Mutex::new(RegistryState {
                 manifest,
                 pending_codex_transcripts: HashMap::new(),
@@ -379,6 +387,7 @@ impl AssistantSessionRegistry {
         &self,
         record_id: &str,
     ) -> Result<Option<AssistantSessionRecord>, String> {
+        let _durable_update = self.durable_writes.enter_update()?;
         let mut state = self
             .state
             .lock()
@@ -493,6 +502,7 @@ impl AssistantSessionRegistry {
     /// spawning means a crash during the resumed provider's lifetime cannot
     /// make a subsequent launch automatically duplicate that provider process.
     pub fn claim_for_restore(&self, record_id: &str) -> Result<AssistantSessionRecord, String> {
+        let _durable_update = self.durable_writes.enter_update()?;
         let mut state = self
             .state
             .lock()
@@ -538,6 +548,7 @@ impl AssistantSessionRegistry {
     }
 
     pub fn begin_preserving_shutdown(&self) -> Result<(), String> {
+        let _durable_update = self.durable_writes.enter_update()?;
         let mut state = self
             .state
             .lock()
@@ -571,6 +582,7 @@ impl AssistantSessionRegistry {
         &self,
         mutation: impl FnOnce(&mut RegistryState) -> Result<T, String>,
     ) -> Result<T, String> {
+        let _durable_update = self.durable_writes.enter_update()?;
         let mut state = self
             .state
             .lock()
@@ -874,12 +886,19 @@ fn delete_pi_api_key(provider: String) -> Result<(), String> {
     pi_config::delete_pi_api_key(&provider)
 }
 
-pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
+pub fn init<R: Runtime>(
+    services: HostServices,
+    manifest_path: PathBuf,
+    durable_writes: DurableWriteBarrier,
+) -> TauriPlugin<R> {
     tauri::plugin::Builder::new(PLUGIN_NAME)
         .setup(move |app, _api| {
             model_catalog::set_app_version(app.package_info().version.to_string());
             app.manage(AssistantPluginState {
-                registry: AssistantSessionRegistry::new(),
+                registry: AssistantSessionRegistry::new_with_barrier(
+                    manifest_path.clone(),
+                    durable_writes.clone(),
+                ),
                 services: services.clone(),
             });
             Ok(())
@@ -905,12 +924,6 @@ pub fn init<R: Runtime>(services: HostServices) -> TauriPlugin<R> {
             delete_pi_api_key,
         ])
         .build()
-}
-
-fn default_manifest_path() -> Result<PathBuf, String> {
-    dirs::home_dir()
-        .map(|home| home.join(".shipctl/assistant-sessions.json"))
-        .ok_or_else(|| "Could not find home directory for assistant restore state".to_string())
 }
 
 fn codex_transcript_paths() -> Result<HashSet<PathBuf>, String> {

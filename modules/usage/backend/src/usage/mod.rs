@@ -172,6 +172,9 @@ pub fn get_usage_overview(db: &UsageDb, window: &str) -> Result<UsageOverview, S
 }
 
 pub fn get_project_alias_review_queue(db: &UsageDb) -> Vec<UsageProjectAliasReviewItem> {
+    let Ok(_durable_update) = db.durable_writes.enter_update() else {
+        return Vec::new();
+    };
     let conn = db.conn.lock().unwrap();
     queries::project_alias_review_queue(&conn)
 }
@@ -182,6 +185,9 @@ pub fn get_project_alias_review_queue(db: &UsageDb) -> Vec<UsageProjectAliasRevi
 pub fn run_background_ingest(db: &UsageDb) {
     loop {
         let done = {
+            let Ok(_durable_update) = db.durable_writes.enter_update() else {
+                return;
+            };
             let conn = db.conn.lock().unwrap();
             ingest::ingest_all(&conn)
         };

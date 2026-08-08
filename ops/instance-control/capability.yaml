@@ -1,0 +1,17 @@
+---
+schema_version: 1
+id: instance-control
+provides: instance-control
+description: Verify the public named-instance and portable-state control contract.
+status: supported
+requires:
+  tools: [cargo, just, node]
+  capabilities: []
+owns: [ops/instance-control/**]
+reads: [Cargo.toml, Cargo.lock, cli/**, core/**, modules/**, src-tauri/**]
+generates: [target/**]
+commands:
+  - name: integration
+    summary: Exercise named instances and portable state through built public binaries.
+    lane: slow
+skills: []

@@ -40,6 +40,16 @@ pub fn migrate_home_state() -> Result<Outcome, String> {
     copy_tree_once(&home.join(LEGACY_DIR_NAME), &home.join(HOME_DIR_NAME))
 }
 
+/// Copy the legacy profile into an already-resolved default state root.
+///
+/// Instance resolution creates and canonicalizes its root before any migration.
+/// An empty directory is therefore still a clean migration target; a populated
+/// directory remains the once-only marker and is never overwritten.
+pub fn migrate_home_state_to(target: &Path) -> Result<Outcome, String> {
+    let home = home()?;
+    copy_tree_into_empty(&home.join(LEGACY_DIR_NAME), target)
+}
+
 /// Copy `<repo>/.shep` to `<repo>/.shipctl` under the same once-only rule.
 ///
 /// Per-repo state is local — the app writes a `.gitignore` of `*` into the
@@ -78,6 +88,44 @@ fn copy_tree_once(from: &Path, to: &Path) -> Result<Outcome, String> {
         format!("Failed to move migrated state into {}: {e}", to.display())
     })?;
 
+    Ok(Outcome::Copied(copied))
+}
+
+fn copy_tree_into_empty(from: &Path, to: &Path) -> Result<Outcome, String> {
+    if !to.is_dir() {
+        return copy_tree_once(from, to);
+    }
+    if fs::read_dir(to)
+        .map_err(|error| format!("Failed to inspect {}: {error}", to.display()))?
+        .next()
+        .is_some()
+    {
+        return Ok(Outcome::AlreadyPresent);
+    }
+    if !from.is_dir() {
+        return Ok(Outcome::NoLegacyState);
+    }
+
+    let staging = staging_path(to);
+    if staging.exists() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    let copied = match copy_dir(from, &staging) {
+        Ok(copied) => copied,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+    };
+    fs::remove_dir(to)
+        .map_err(|error| format!("Failed to replace empty {}: {error}", to.display()))?;
+    fs::rename(&staging, to).map_err(|error| {
+        let _ = fs::remove_dir_all(&staging);
+        format!(
+            "Failed to move migrated state into {}: {error}",
+            to.display()
+        )
+    })?;
     Ok(Outcome::Copied(copied))
 }
 
@@ -223,5 +271,24 @@ mod tests {
         let target = root.join(".shipctl");
         copy_tree_once(&legacy, &target).unwrap();
         assert!(!staging_path(&target).exists());
+    }
+
+    #[test]
+    fn resolved_empty_target_can_receive_legacy_state() {
+        let root = temp_dir("resolved");
+        let legacy = root.join(".shep");
+        let target = root.join(".shipctl");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(legacy.join("config.yml"), "old").unwrap();
+
+        assert_eq!(
+            copy_tree_into_empty(&legacy, &target).unwrap(),
+            Outcome::Copied(1)
+        );
+        assert_eq!(
+            fs::read_to_string(target.join("config.yml")).unwrap(),
+            "old"
+        );
     }
 }

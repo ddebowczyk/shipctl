@@ -69,6 +69,12 @@ export interface SidebarSettings {
   width: number;
 }
 
+export interface UiState {
+  lastRepoPath: string | null;
+  themeId: string | null;
+  customTheme: unknown | null;
+}
+
 export interface FontFamily {
   family: string;
   faceCount: number;

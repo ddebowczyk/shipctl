@@ -14,6 +14,7 @@ import type {
   FontFamily,
   FontFaceData,
   PreferredEditor,
+  UiState,
 } from "./types";
 
 // ── Workspace commands ──────────────────────────────────────────────
@@ -108,6 +109,21 @@ export function saveTerminalSettings(settings: TerminalSettings): Promise<void> 
 
 export function getSidebarSettings(): Promise<SidebarSettings> {
   return invoke("get_sidebar_settings");
+}
+
+export function getUiState(): Promise<UiState> {
+  return invoke("get_ui_state");
+}
+
+export function setLastRepoPath(path: string | null): Promise<UiState> {
+  return invoke("set_last_repo_path", { path });
+}
+
+export function saveAppearanceState(
+  themeId: string,
+  customTheme: unknown | null,
+): Promise<UiState> {
+  return invoke("save_appearance_state", { themeId, customTheme });
 }
 
 export function listMonospaceFamilies(): Promise<FontFamily[]> {

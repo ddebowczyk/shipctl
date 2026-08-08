@@ -1,0 +1,5 @@
+contract *args:
+    node bin/integration.mjs {{args}}
+
+integration *args:
+    node bin/integration.mjs {{args}}

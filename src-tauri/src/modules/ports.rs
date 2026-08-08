@@ -9,11 +9,13 @@ use shipctl_core::workspace::manager::WorkspaceManager;
 
 const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(5);
 
-struct WorkspaceProjectCatalog;
+struct WorkspaceProjectCatalog {
+    workspace: WorkspaceManager,
+}
 
 impl ProjectCatalog for WorkspaceProjectCatalog {
     fn registered_project_paths(&self) -> Result<Vec<String>, String> {
-        WorkspaceManager::new()
+        self.workspace
             .list_repos()
             .map(|repos| repos.into_iter().map(|repo| repo.path).collect())
     }
@@ -68,9 +70,9 @@ impl ProcessAuthority for SystemProcessAuthority {
     }
 }
 
-pub fn host_services() -> HostServices {
+pub fn host_services(workspace: WorkspaceManager) -> HostServices {
     HostServices::new(
-        Arc::new(WorkspaceProjectCatalog),
+        Arc::new(WorkspaceProjectCatalog { workspace }),
         Arc::new(SystemProcessAuthority),
     )
 }

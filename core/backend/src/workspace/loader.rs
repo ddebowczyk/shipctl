@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8,10 +8,30 @@ use super::config::{
     GlobalConfig, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo, RepoEntry,
     RepoInfo, SidebarSettings, TerminalSettings, WorkspaceConfig,
 };
-
-static CONFIG_CACHE: Mutex<Option<(GlobalConfig, SystemTime)>> = Mutex::new(None);
+use crate::state::paths::ShipctlPaths;
+use shipctl_module_api::DurableWriteBarrier;
 
 type ConfigCache = Option<(GlobalConfig, SystemTime)>;
+
+pub struct GlobalStore {
+    paths: ShipctlPaths,
+    cache: Mutex<ConfigCache>,
+    durable_writes: DurableWriteBarrier,
+}
+
+impl GlobalStore {
+    pub fn new(paths: ShipctlPaths) -> Self {
+        Self::new_with_barrier(paths, DurableWriteBarrier::default())
+    }
+
+    pub fn new_with_barrier(paths: ShipctlPaths, durable_writes: DurableWriteBarrier) -> Self {
+        Self {
+            paths,
+            cache: Mutex::new(None),
+            durable_writes,
+        }
+    }
+}
 
 // ── Paths ───────────────────────────────────────────────────────────
 //
@@ -21,32 +41,18 @@ type ConfigCache = Option<(GlobalConfig, SystemTime)>;
 // own state and keeps working. Reads fall back to the legacy path so a repo
 // that has not been migrated yet still opens.
 
-fn shipctl_home() -> Result<PathBuf, String> {
-    Ok(dirs::home_dir()
-        .ok_or_else(|| "Could not find home directory".to_string())?
-        .join(super::migration::HOME_DIR_NAME))
-}
-
-fn global_config_path() -> Result<PathBuf, String> {
-    Ok(shipctl_home()?.join("config.yml"))
-}
-
-fn old_projects_dir() -> Result<PathBuf, String> {
-    Ok(shipctl_home()?.join("projects"))
-}
-
-fn repo_shipctl_dir(repo_path: &str) -> PathBuf {
+fn repo_shipctl_dir(repo_path: &str) -> std::path::PathBuf {
     Path::new(repo_path).join(super::migration::HOME_DIR_NAME)
 }
 
-fn repo_workspace_file(repo_path: &str) -> PathBuf {
+fn repo_workspace_file(repo_path: &str) -> std::path::PathBuf {
     repo_shipctl_dir(repo_path).join("workspace.yml")
 }
 
 /// Where to *read* a repo's workspace from: the current path if it exists,
 /// otherwise the pre-rename one. Writes always go to the current path, which
 /// leaves the legacy file intact for an installed `shep` build to keep using.
-fn repo_workspace_read_path(repo_path: &str) -> PathBuf {
+fn repo_workspace_read_path(repo_path: &str) -> std::path::PathBuf {
     let current = repo_workspace_file(repo_path);
     if current.exists() {
         return current;
@@ -62,12 +68,12 @@ fn repo_workspace_read_path(repo_path: &str) -> PathBuf {
 
 // ── Global config ───────────────────────────────────────────────────
 
-pub fn load_global_config() -> Result<GlobalConfig, String> {
-    let path = global_config_path()?;
-    let mut cache = CONFIG_CACHE
+pub fn load_global_config(store: &GlobalStore) -> Result<GlobalConfig, String> {
+    let mut cache = store
+        .cache
         .lock()
         .map_err(|_| "Global config lock is poisoned".to_string())?;
-    load_global_config_at(&path, &mut cache)
+    load_global_config_at(&store.paths.global_config, &mut cache)
 }
 
 fn load_global_config_at(path: &Path, cache: &mut ConfigCache) -> Result<GlobalConfig, String> {
@@ -95,12 +101,13 @@ fn load_global_config_at(path: &Path, cache: &mut ConfigCache) -> Result<GlobalC
     Ok(config)
 }
 
-pub fn save_global_config(config: &GlobalConfig) -> Result<(), String> {
-    let path = global_config_path()?;
-    let mut cache = CONFIG_CACHE
+pub fn save_global_config(store: &GlobalStore, config: &GlobalConfig) -> Result<(), String> {
+    let _durable_update = store.durable_writes.enter_update()?;
+    let mut cache = store
+        .cache
         .lock()
         .map_err(|_| "Global config lock is poisoned".to_string())?;
-    save_global_config_at(&path, config, &mut cache)
+    save_global_config_at(&store.paths.global_config, config, &mut cache)
 }
 
 fn save_global_config_at(
@@ -126,10 +133,11 @@ fn save_global_config_at(
 }
 
 fn mutate_global_config<T>(
+    store: &GlobalStore,
     mutation: impl FnOnce(&mut GlobalConfig) -> Result<T, String>,
 ) -> Result<T, String> {
-    let path = global_config_path()?;
-    mutate_global_config_at(&path, &CONFIG_CACHE, mutation)
+    let _durable_update = store.durable_writes.enter_update()?;
+    mutate_global_config_at(&store.paths.global_config, &store.cache, mutation)
 }
 
 fn mutate_global_config_at<T>(
@@ -146,10 +154,10 @@ fn mutate_global_config_at<T>(
     Ok(result)
 }
 
-pub fn backfill_global_config_defaults() -> Result<(), String> {
-    let path = global_config_path()?;
+pub fn backfill_global_config_defaults(store: &GlobalStore) -> Result<(), String> {
+    let path = &store.paths.global_config;
     if !path.exists() {
-        return save_global_config(&GlobalConfig::default());
+        return save_global_config(store, &GlobalConfig::default());
     }
 
     let content =
@@ -161,80 +169,93 @@ pub fn backfill_global_config_defaults() -> Result<(), String> {
         return Ok(());
     }
 
-    mutate_global_config(|config| {
+    mutate_global_config(store, |config| {
         normalize_terminal_settings(&mut config.terminal);
         normalize_sidebar_settings(&mut config.sidebar);
         Ok(())
     })
 }
 
-pub fn load_editor_settings() -> Result<EditorSettings, String> {
-    Ok(load_global_config()?.editor)
+pub fn load_editor_settings(store: &GlobalStore) -> Result<EditorSettings, String> {
+    Ok(load_global_config(store)?.editor)
 }
 
-pub fn load_project_settings() -> Result<ProjectSettings, String> {
-    Ok(load_global_config()?.projects)
+pub fn load_project_settings(store: &GlobalStore) -> Result<ProjectSettings, String> {
+    Ok(load_global_config(store)?.projects)
 }
 
-pub fn save_editor_settings(settings: &EditorSettings) -> Result<(), String> {
-    mutate_global_config(|config| {
+pub fn save_editor_settings(store: &GlobalStore, settings: &EditorSettings) -> Result<(), String> {
+    mutate_global_config(store, |config| {
         config.editor = settings.clone();
         Ok(())
     })
 }
 
-pub fn save_project_settings(settings: &ProjectSettings) -> Result<(), String> {
-    mutate_global_config(|config| {
+pub fn save_project_settings(
+    store: &GlobalStore,
+    settings: &ProjectSettings,
+) -> Result<(), String> {
+    mutate_global_config(store, |config| {
         config.projects = settings.clone();
         Ok(())
     })
 }
 
-pub fn load_keybinding_settings() -> Result<KeybindingSettings, String> {
-    Ok(load_global_config()?.keybindings)
+pub fn load_keybinding_settings(store: &GlobalStore) -> Result<KeybindingSettings, String> {
+    Ok(load_global_config(store)?.keybindings)
 }
 
-pub fn save_keybinding_settings(settings: &KeybindingSettings) -> Result<(), String> {
-    mutate_global_config(|config| {
+pub fn save_keybinding_settings(
+    store: &GlobalStore,
+    settings: &KeybindingSettings,
+) -> Result<(), String> {
+    mutate_global_config(store, |config| {
         config.keybindings = settings.clone();
         Ok(())
     })
 }
 
-pub fn load_terminal_settings() -> Result<TerminalSettings, String> {
-    Ok(load_global_config()?.terminal)
+pub fn load_terminal_settings(store: &GlobalStore) -> Result<TerminalSettings, String> {
+    Ok(load_global_config(store)?.terminal)
 }
 
-pub fn save_terminal_settings(settings: &TerminalSettings) -> Result<(), String> {
-    mutate_global_config(|config| {
+pub fn save_terminal_settings(
+    store: &GlobalStore,
+    settings: &TerminalSettings,
+) -> Result<(), String> {
+    mutate_global_config(store, |config| {
         config.terminal = settings.clone();
         Ok(())
     })
 }
 
-pub fn load_sidebar_settings() -> Result<SidebarSettings, String> {
-    let mut settings = load_global_config()?.sidebar;
+pub fn load_sidebar_settings(store: &GlobalStore) -> Result<SidebarSettings, String> {
+    let mut settings = load_global_config(store)?.sidebar;
     normalize_sidebar_settings(&mut settings);
     Ok(settings)
 }
 
 pub fn load_global_capability_data(
+    store: &GlobalStore,
     capability_id: &str,
 ) -> Result<Option<serde_json::Value>, String> {
-    load_global_config()?.capability_value(capability_id)
+    load_global_config(store)?.capability_value(capability_id)
 }
 
 pub fn replace_global_capability_data(
+    store: &GlobalStore,
     capability_id: &str,
     value: serde_json::Value,
 ) -> Result<(), String> {
-    mutate_global_config(|config| config.replace_capability_value(capability_id, value))
+    mutate_global_config(store, |config| {
+        config.replace_capability_value(capability_id, value)
+    })
 }
 
 // ── Repo operations ─────────────────────────────────────────────────
 
-pub fn list_repos() -> Result<Vec<RepoInfo>, String> {
-    let config = load_global_config()?;
+pub fn list_repos(store: &GlobalStore) -> Result<Vec<RepoInfo>, String> {
+    let config = load_global_config(store)?;
 
     let repos = config
         .repos
@@ -256,7 +277,7 @@ pub fn list_repos() -> Result<Vec<RepoInfo>, String> {
     Ok(repos)
 }
 
-pub fn register_repo(repo_path: &str) -> Result<RegisteredRepo, String> {
+pub fn register_repo(store: &GlobalStore, repo_path: &str) -> Result<RegisteredRepo, String> {
     let path = Path::new(repo_path);
     if !path.is_dir() {
         return Err(format!("Directory does not exist: {repo_path}"));
@@ -268,7 +289,7 @@ pub fn register_repo(repo_path: &str) -> Result<RegisteredRepo, String> {
     let canonical_str = canonical.to_string_lossy().to_string();
 
     // Add to global config if not already there.
-    mutate_global_config(|config| {
+    mutate_global_config(store, |config| {
         if !config.repos.iter().any(|r| r.path == canonical_str) {
             config.repos.push(RepoEntry {
                 path: canonical_str.clone(),
@@ -287,8 +308,8 @@ pub fn register_repo(repo_path: &str) -> Result<RegisteredRepo, String> {
     })
 }
 
-pub fn unregister_repo(repo_path: &str) -> Result<(), String> {
-    mutate_global_config(|config| {
+pub fn unregister_repo(store: &GlobalStore, repo_path: &str) -> Result<(), String> {
+    mutate_global_config(store, |config| {
         config.repos.retain(|r| r.path != repo_path);
         Ok(())
     })
@@ -311,14 +332,14 @@ pub fn save_repo_workspace(repo_path: &str, config: &WorkspaceConfig) -> Result<
 
 // ── Migration ───────────────────────────────────────────────────────
 
-pub fn migrate_old_projects() -> Result<(), String> {
-    let old_dir = old_projects_dir()?;
+pub fn migrate_old_projects(store: &GlobalStore) -> Result<(), String> {
+    let old_dir = &store.paths.old_projects;
     if !old_dir.exists() {
         return Ok(());
     }
 
     // Check if we already have a global config (migration already done)
-    let global_path = global_config_path()?;
+    let global_path = &store.paths.global_config;
     if global_path.exists() {
         return Ok(());
     }
@@ -402,7 +423,7 @@ pub fn migrate_old_projects() -> Result<(), String> {
     }
 
     if !global_config.repos.is_empty() {
-        save_global_config(&global_config)?;
+        save_global_config(store, &global_config)?;
     }
 
     Ok(())
@@ -410,14 +431,14 @@ pub fn migrate_old_projects() -> Result<(), String> {
 
 // ── Group operations ───────────────────────────────────────────────
 
-pub fn list_groups() -> Result<Vec<GroupEntry>, String> {
-    let config = load_global_config()?;
+pub fn list_groups(store: &GlobalStore) -> Result<Vec<GroupEntry>, String> {
+    let config = load_global_config(store)?;
     let mut groups = config.groups;
     groups.sort_by_key(|g| g.order);
     Ok(groups)
 }
 
-pub fn create_group(name: &str) -> Result<GroupEntry, String> {
+pub fn create_group(store: &GlobalStore, name: &str) -> Result<GroupEntry, String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err("Group name cannot be empty".to_string());
@@ -432,7 +453,7 @@ pub fn create_group(name: &str) -> Result<GroupEntry, String> {
             .as_millis()
     );
 
-    mutate_global_config(|config| {
+    mutate_global_config(store, |config| {
         let next_order = config.groups.iter().map(|g| g.order).max().unwrap_or(0) + 1;
         let entry = GroupEntry {
             id,
@@ -444,13 +465,13 @@ pub fn create_group(name: &str) -> Result<GroupEntry, String> {
     })
 }
 
-pub fn rename_group(group_id: &str, new_name: &str) -> Result<(), String> {
+pub fn rename_group(store: &GlobalStore, group_id: &str, new_name: &str) -> Result<(), String> {
     let trimmed = new_name.trim();
     if trimmed.is_empty() {
         return Err("Group name cannot be empty".to_string());
     }
 
-    mutate_global_config(|config| {
+    mutate_global_config(store, |config| {
         let group = config
             .groups
             .iter_mut()
@@ -461,8 +482,8 @@ pub fn rename_group(group_id: &str, new_name: &str) -> Result<(), String> {
     })
 }
 
-pub fn delete_group(group_id: &str) -> Result<(), String> {
-    mutate_global_config(|config| {
+pub fn delete_group(store: &GlobalStore, group_id: &str) -> Result<(), String> {
+    mutate_global_config(store, |config| {
         config.groups.retain(|g| g.id != group_id);
         // Ungroup any repos that belonged to this group
         for repo in &mut config.repos {
@@ -474,8 +495,12 @@ pub fn delete_group(group_id: &str) -> Result<(), String> {
     })
 }
 
-pub fn move_repo_to_group(repo_path: &str, group_id: Option<&str>) -> Result<(), String> {
-    mutate_global_config(|config| {
+pub fn move_repo_to_group(
+    store: &GlobalStore,
+    repo_path: &str,
+    group_id: Option<&str>,
+) -> Result<(), String> {
+    mutate_global_config(store, |config| {
         // Validate group exists (if setting, not clearing)
         if let Some(gid) = group_id {
             if !config.groups.iter().any(|g| g.id == gid) {

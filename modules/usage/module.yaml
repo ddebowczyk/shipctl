@@ -10,7 +10,7 @@ backend:
   path: modules/usage/backend
   cargo_feature: usage-module
   dependency_alias: shipctl-module-usage
-  plugin_init: "shipctl_module_usage::init(crate::modules::usage::host_services())"
+  plugin_init: "shipctl_module_usage::init(crate::modules::usage::host_services(workspace.clone()), paths.usage_database.clone(), durable_writes.clone())"
   host_glue:
     - src-tauri/src/modules/usage.rs
 tauri:

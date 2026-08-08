@@ -41,11 +41,23 @@ properties:
       app:
         type: object
         additionalProperties: false
-        required: [path, executable_sha256]
+        required:
+          - path
+          - ui_executable
+          - ui_executable_sha256
+          - cli_executable
+          - cli_executable_sha256
         properties:
           path:
             const: shipctl.app
-          executable_sha256:
+          ui_executable:
+            const: Contents/MacOS/shipctl-ui
+          ui_executable_sha256:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+          cli_executable:
+            const: Contents/MacOS/shipctl
+          cli_executable_sha256:
             type: string
             pattern: ^[0-9a-f]{64}$
       dmg:
