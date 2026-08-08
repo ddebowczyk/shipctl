@@ -80,9 +80,12 @@ State-root resolution is deterministic:
 2. `SHIPCTL_STATE_DIR` for controlled automation environments;
 3. the production default `~/.shipctl`.
 
-Every path is canonicalized into one immutable `InstanceContext` before any
-manager, migration, plugin, database, or webview initializes. Direct calls to
-`dirs::home_dir().join(".shipctl")` are forbidden after this boundary.
+The launcher creates a requested state root before deriving its filesystem
+identity, then canonicalizes it into one immutable `InstanceContext` before any
+manager, migration, plugin, database, or webview initializes. This makes an
+existing path, a new path, and a symlink alias converge on one lease identity.
+Direct calls to `dirs::home_dir().join(".shipctl")` are forbidden after this
+boundary.
 
 Only one writable UI instance may hold a state-root lease at a time in Step 0.
 This prevents the existing YAML and file-backed stores from suffering
@@ -93,7 +96,26 @@ introduce their own explicitly shared root without weakening this invariant.
 Runtime discovery is separate from durable state. A per-user runtime root holds
 name leases, descriptors, and local endpoints for instances across all state
 roots. Tests may set `SHIPCTL_RUNTIME_DIR` when they require a completely
-isolated discovery namespace.
+isolated discovery namespace. Otherwise the root resolves beneath the
+platform's per-user runtime directory, with the platform's per-user cache
+directory as the fallback when no runtime directory exists. The resolver adds
+a Shipctl-owned directory and creates it for the current user before discovery
+or lease operations.
+
+## Live baseline carried into implementation
+
+The current application is one Tauri binary named `shipctl`; there is no
+control-only executable or instance discovery boundary. `src-tauri` constructs
+unparameterized managers, and the core workspace loader, assistant session
+registry, and usage database still derive writable state from the home
+directory. The global configuration cache is process-global and unkeyed.
+
+Step 0C must therefore split the executable before exposing control commands,
+construct `InstanceContext` before the existing pre-rename migration, and pass
+instance paths through module installation as well as host managers. Repo-local
+`<repo>/.shipctl/workspace.yml`, assistant-provider configuration outside the
+Shipctl profile, and user home discovery for display or external-tool lookup
+are not instance state merely because they use the home directory.
 
 ## Discovery and shutdown contract
 
