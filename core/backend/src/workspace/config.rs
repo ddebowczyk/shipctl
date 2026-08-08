@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-// ── Global config (~/.shep/config.yml) ──────────────────────────────
+// ── Global config (~/.shipctl/config.yml) ───────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
@@ -302,7 +302,7 @@ pub struct RegisteredRepo {
     pub workspace: WorkspaceConfig,
 }
 
-// ── Per-repo workspace config (<repo>/.shep/workspace.yml) ──────────
+// ── Per-repo workspace config (<repo>/.shipctl/workspace.yml) ───────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandConfig {

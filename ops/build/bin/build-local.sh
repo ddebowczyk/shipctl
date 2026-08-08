@@ -65,8 +65,11 @@ if [ "$mode" = 'build' ]; then
   require_command pnpm
 fi
 
-version="$(jq -er '.version | strings | select(length > 0)' package.json)" \
-  || fail 'could not read a non-empty version from package.json'
+# src-tauri/tauri.conf.json is the single source of the app version, and it is
+# what Tauri names the bundle from. Every other manifest carries a 0.0.0
+# placeholder, so reading one of those finds no matching artifact.
+version="$(jq -er '.version | strings | select(length > 0)' src-tauri/tauri.conf.json)" \
+  || fail 'could not read a non-empty version from src-tauri/tauri.conf.json'
 bundle_root="target/${target}/release/bundle"
 app_source="${bundle_root}/macos/shipctl.app"
 

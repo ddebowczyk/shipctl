@@ -34,9 +34,24 @@ function extractInnerSvg(svg) {
   return match[1];
 }
 
+// The contents are re-wrapped in a fresh <svg> below, so any namespace the
+// source declared has to come along. Editor exports (Inkscape) carry
+// `sodipodi:`/`inkscape:` markup, and an undeclared prefix is a hard XML parse
+// error in librsvg — not something it skips.
+function extractNamespaceDeclarations(svg) {
+  const match = svg.match(/<svg([^>]*)>/i);
+  if (!match) {
+    throw new Error("Failed to read the SVG root element");
+  }
+
+  const declarations = match[1].match(/xmlns:[\w.-]+="[^"]*"/g) ?? [];
+  return declarations.length > 0 ? ` ${declarations.join(" ")}` : "";
+}
+
 const logoSvg = await readFile(LOGO_PATH, "utf8");
 const { width: logoWidth, height: logoHeight } = extractViewBox(logoSvg);
 const logoMarkup = extractInnerSvg(logoSvg);
+const logoNamespaces = extractNamespaceDeclarations(logoSvg);
 
 const availableSize = SIZE - PADDING * 2;
 
@@ -46,7 +61,7 @@ const availableSize = SIZE - PADDING * 2;
 // the mark always fills the padded area regardless of how the SVG is framed.
 const logoLayer = await sharp(
   Buffer.from(
-    `<svg width="${logoWidth}" height="${logoHeight}" viewBox="0 0 ${logoWidth} ${logoHeight}" xmlns="http://www.w3.org/2000/svg">${logoMarkup}</svg>`,
+    `<svg width="${logoWidth}" height="${logoHeight}" viewBox="0 0 ${logoWidth} ${logoHeight}" xmlns="http://www.w3.org/2000/svg"${logoNamespaces}>${logoMarkup}</svg>`,
   ),
   { density: 72 },
 )

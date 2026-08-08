@@ -105,7 +105,7 @@ export default function UsageSettingsSection() {
       {usageError && <div className="mt-2 text-sm text-red-300">{usageError}</div>}
 
       <p className="text-xs text-[var(--text-muted)] mt-4">
-        Settings are saved to ~/.shep/config.yml
+        Settings are saved to ~/.shipctl/config.yml
       </p>
     </section>
   );

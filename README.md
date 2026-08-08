@@ -6,6 +6,10 @@ Shipctl gives each repo one place for its terminals, coding assistants (Codex CL
 Claude Code, Antigravity CLI), saved commands, git-aware views, and usage
 tracking — instead of a pile of shell tabs and half-remembered commands.
 
+<p align="center">
+  <img src="assets/shipctl.svg" alt="Shipctl" width="200" height="200" />
+</p>
+
 ## This is a fork
 
 This repository is a fork of [stumptowndoug/shep](https://github.com/stumptowndoug/shep).

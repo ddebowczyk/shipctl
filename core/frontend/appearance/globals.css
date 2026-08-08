@@ -378,7 +378,7 @@ select {
   border-style: solid;
 }
 
-/* The app sidebar shadows these shared typography tokens from ~/.shep/config.yml.
+/* The app sidebar shadows these shared typography tokens from ~/.shipctl/config.yml.
  * Keeping the scope on the sidebar prevents manual sidebar tuning from changing
  * the workspace, tabs, settings panel, or terminal renderer. */
 .app-sidebar {
