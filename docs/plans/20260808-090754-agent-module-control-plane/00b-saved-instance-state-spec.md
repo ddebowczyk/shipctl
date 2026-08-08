@@ -26,11 +26,13 @@ A saved state is a versioned `.shipctl-state` archive with a canonical
 `manifest.json` and provider-owned payloads. It creates a new instance profile;
 it does not preserve a runtime UUID or reconnect live resources.
 
-Every durable state owner registers a snapshot provider and classifies its
-payload as portable, reference-only, secret, or live-only. Save fails if a
-durable source under the state root is unclassified. The manifest records every
-included and excluded provider, schema version, payload digest, source build,
-source state fingerprint, and redaction decision.
+Every durable state owner registers a snapshot provider and classifies each
+owned entry as portable, reference-only, secret, or live-only. One provider may
+emit more than one classification; for example, host configuration can contain
+portable preferences and repository-path references. Save fails if a durable
+source under the state root is unclassified. The manifest records every
+included and excluded provider, schema version, entry classification, payload
+digest, source build, source state fingerprint, and redaction decision.
 
 Step 0 must round-trip all current portable instance-owned sources, including:
 
@@ -43,6 +45,23 @@ Repository contents, repo-local workspace files, credentials, caches, process
 ids, sockets, webview channels, and live PTYs are not copied. References and
 live-resource exclusions are recorded so `state inspect` cannot imply a more
 complete restore than occurred.
+
+## Snapshot consistency and fingerprint
+
+The running instance coordinates save across all providers. It enters a
+durable-write barrier, asks every provider to prepare and capture its coherent
+view, builds and verifies the archive, and releases the barrier. A provider
+failure aborts the archive; an earlier provider result never becomes an
+independently valid partial snapshot. Live resources may continue running, but
+their durable metadata cannot advance through the barrier unnoticed.
+
+The restorable-state fingerprint is computed from a canonically ordered set of
+provider id, provider schema, entry classification, and verified payload
+digest. It excludes runtime UUID, instance name, roots, endpoints, capture time,
+source build provenance, and live-only or secret exclusions. Restore recomputes
+the same fingerprint from the promoted provider state, which is why a new
+instance can prove equivalent restorable state while retaining new runtime
+identity and provenance.
 
 ## Restore safety
 
@@ -70,6 +89,17 @@ state.restore.provider_failed
 `state inspect` reports source provenance, state fingerprint, included and
 excluded providers, payload digests, redaction decisions, and restorable versus
 reference-only state. It never renders secret payload values.
+
+## Live baseline carried into implementation
+
+Current durable instance-owned state is split across `config.yml`, origin-wide
+frontend local storage, `assistant-sessions.json`, and `usage.sqlite3`. The host
+configuration mixes portable settings with registered-repository references;
+the assistant manifest already uses atomic replacement; the usage store is a
+live SQLite connection and therefore requires its backup API rather than file
+copying. Provider credentials and assistant tool configuration under external
+home directories are not Shipctl profile state and remain excluded as secrets
+or external dependencies.
 
 ## Acceptance scenarios
 
