@@ -1,0 +1,32 @@
+---
+schema_version: 1
+id: module-control
+provides: module-control
+description: Verify module-control contracts and loader boundaries.
+status: experimental
+requires:
+  tools: [bash, cargo, just, node, pnpm]
+  capabilities: []
+owns: [ops/module-control/**]
+reads:
+  - Cargo.toml
+  - Cargo.lock
+  - cli/**
+  - core/**
+  - modules/**
+  - ops/build/**
+  - package.json
+  - pnpm-lock.yaml
+  - src/**
+  - src-tauri/**
+generates:
+  - target/**
+commands:
+  - name: build-loader-probe-host
+    summary: Build the host required by the packaged loader probe.
+    lane: slow
+  - name: loader-tripwire
+    summary: Verify frontend artifact swaps and failed-import retention.
+    lane: slow
+    args: [args]
+skills: []

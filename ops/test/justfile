@@ -1,9 +1,11 @@
 fast:
     cd ../.. && pnpm exec node --test ops/modularity/tests/moduleBoundaries.test.mjs
     cd ../.. && pnpm exec node --test ops/modularity/tests/*.test.mjs
+    cd ../.. && pnpm exec node --test ops/module-control/tests/*.test.mjs
     cd ../.. && pnpm exec node --test ops/check/tests/*.test.mjs
     cd ../.. && pnpm exec node --test ops/upstream/tests/*.test.mjs
     cd ../.. && pnpm exec node --test core/frontend/host/tests/moduleComposition.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/host/tests/moduleArtifactLoader.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/assistants/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/commands/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/globalSurfaces.test.ts

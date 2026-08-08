@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "schemaVersion": 1,
+    "id": "shipctl.fixture",
+    "version": "1.2.3",
+    "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source": "bundled",
+    "runtimeKind": "frontend_esm"
+  },
+  "desired": {
+    "schemaVersion": 1,
+    "moduleId": "shipctl.fixture",
+    "instanceId": "00000000-0000-0000-0000-000000000001",
+    "selectedArtifact": {
+      "schemaVersion": 1,
+      "id": "shipctl.fixture",
+      "version": "1.2.3",
+      "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "bundled",
+      "runtimeKind": "frontend_esm"
+    },
+    "enabled": true,
+    "configurationRevision": 4
+  },
+  "observed": [
+    {
+      "schemaVersion": 1,
+      "moduleId": "shipctl.fixture",
+      "instanceId": "00000000-0000-0000-0000-000000000001",
+      "artifact": {
+        "schemaVersion": 1,
+        "id": "shipctl.fixture",
+        "version": "1.2.3",
+        "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source": "bundled",
+        "runtimeKind": "frontend_esm"
+      },
+      "appliedRegistryRevision": 9,
+      "lifecycle": "active",
+      "moduleInstanceId": "shipctl.fixture@aaaaaaaa#activation-1"
+    }
+  ],
+  "grants": [
+    {
+      "id": "host.panels.register",
+      "effective": true
+    }
+  ],
+  "contributions": [
+    {
+      "id": "shipctl.fixture.panel",
+      "kind": "panel",
+      "ownerInstanceId": "shipctl.fixture@aaaaaaaa#activation-1"
+    }
+  ],
+  "leases": [
+    {
+      "schemaVersion": 1,
+      "ownerInstanceId": "shipctl.fixture@aaaaaaaa#activation-1",
+      "ownerShipctlInstanceId": "00000000-0000-0000-0000-000000000001",
+      "resourceKind": "terminal_session",
+      "resourceId": "term-42",
+      "drainState": "active"
+    }
+  ],
+  "diagnostics": [
+    {
+      "schemaVersion": 1,
+      "code": "module.runtime.revision_not_observed",
+      "severity": "info",
+      "check": "revision_lag",
+      "summary": "Observed revision matches the requested revision",
+      "evidence": {
+        "fields": {
+          "artifactDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    }
+  ]
+}

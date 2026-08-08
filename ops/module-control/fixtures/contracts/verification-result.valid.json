@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "module-contract-happy-path",
+  "expected": {
+    "schemaVersion": 1,
+    "fixtureId": "module-contract-happy-path",
+    "moduleId": "shipctl.fixture",
+    "instanceId": "00000000-0000-0000-0000-000000000001",
+    "expectedEnabled": true,
+    "expectedArtifactDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expectedConfigurationRevision": 4,
+    "expectedAppliedRegistryRevision": 9,
+    "expectedLifecycle": "active",
+    "expectedDiagnosticCodes": [
+      "module.runtime.revision_not_observed"
+    ]
+  },
+  "observed": {
+    "inspection": {
+      "schemaVersion": 1,
+      "manifest": {
+        "schemaVersion": 1,
+        "id": "shipctl.fixture",
+        "version": "1.2.3",
+        "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source": "bundled",
+        "runtimeKind": "frontend_esm"
+      },
+      "desired": {
+        "schemaVersion": 1,
+        "moduleId": "shipctl.fixture",
+        "instanceId": "00000000-0000-0000-0000-000000000001",
+        "selectedArtifact": {
+          "schemaVersion": 1,
+          "id": "shipctl.fixture",
+          "version": "1.2.3",
+          "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source": "bundled",
+          "runtimeKind": "frontend_esm"
+        },
+        "enabled": true,
+        "configurationRevision": 4
+      },
+      "observed": [],
+      "grants": [],
+      "contributions": [],
+      "leases": [],
+      "diagnostics": []
+    },
+    "diagnosticCodes": [
+      "module.runtime.revision_not_observed"
+    ]
+  },
+  "matched": true,
+  "diagnostics": [],
+  "resolvedPaths": {
+    "stateRoot": "/isolated/state"
+  },
+  "artifactMarkers": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "fixture-A"
+  }
+}

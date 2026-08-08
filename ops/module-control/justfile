@@ -1,0 +1,5 @@
+build-loader-probe-host:
+    cd ../.. && pnpm tauri build --debug --no-bundle
+
+loader-tripwire *args:
+    node bin/loader-tripwire.mjs {{args}}

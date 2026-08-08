@@ -8,14 +8,16 @@ use std::process::{Command, ExitCode};
 use serde::Serialize;
 use shipctl_core::build_info::BuildIdentity;
 use shipctl_core::instance::ControlError;
+use shipctl_core::module_control::ModuleOperationKind;
 use shipctl_core::state::archive::inspect_archive;
+use uuid::Uuid;
 
 use instances::{StartDisposition, StartRequest};
 use output::OutputFormat;
 
 pub const APP_VERSION: &str = env!("SHIPCTL_APP_VERSION");
 
-const USAGE: &str = "shipctl [--version [--output json]] | shipctl ui [UI_ARGS...] | shipctl ui start --name <name> [--state-root <path>] [--runtime-root <path>] [--load-state <file>] [--output toon|json] | shipctl instances list [--runtime-root <path>] [--output toon|json] | shipctl instances inspect [<name-or-id>] [--runtime-root <path>] [--output toon|json] | shipctl instances stop [<name-or-id>] [--force] [--runtime-root <path>] [--output toon|json] | shipctl state save --instance <name-or-id> --to <file> [--runtime-root <path>] [--output toon|json] | shipctl state inspect <file> [--output toon|json] | shipctl state verify <file> [--output toon|json]";
+const USAGE: &str = "shipctl [--version [--output json]] | shipctl ui [UI_ARGS...] | shipctl ui start --name <name> [--state-root <path>] [--runtime-root <path>] [--load-state <file>] [--output toon|json] | shipctl instances list [--runtime-root <path>] [--output toon|json] | shipctl instances inspect [<name-or-id>] [--runtime-root <path>] [--output toon|json] | shipctl instances stop [<name-or-id>] [--force] [--runtime-root <path>] [--output toon|json] | shipctl modules inspect|diagnose <module-id> [--instance <name-or-id>] [--runtime-root <path>] [--output toon|json] | shipctl modules enable|disable <module-id> --target-revision <revision> [--instance <name-or-id>] [--runtime-root <path>] [--output toon|json] | shipctl operations inspect <operation-id> [--instance <name-or-id>] [--runtime-root <path>] [--output toon|json] | shipctl state save --instance <name-or-id> --to <file> [--runtime-root <path>] [--output toon|json] | shipctl state inspect <file> [--output toon|json] | shipctl state verify <file> [--output toon|json]";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,8 +54,117 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
     match remaining[0].to_str() {
         Some("ui") => run_ui(&remaining[1..]),
         Some("instances") => run_instances(&remaining[1..]),
+        Some("modules") => run_modules(&remaining[1..]),
+        Some("operations") => run_operations(&remaining[1..]),
         Some("state") => run_state(&remaining[1..]),
         _ => emit_usage("cli", "Unknown Shipctl command", &remaining),
+    }
+}
+
+fn run_modules(args: &[OsString]) -> ExitCode {
+    let Some(command) = args.first().and_then(|value| value.to_str()) else {
+        return emit_usage("modules", "A modules subcommand is required", args);
+    };
+    let operation = match command {
+        "inspect" => "modules.inspect",
+        "diagnose" => "modules.diagnose",
+        "enable" => "modules.enable",
+        "disable" => "modules.disable",
+        _ => return emit_usage("modules", "Unknown modules subcommand", args),
+    };
+    let parsed = match parse_modules(command, &args[1..]) {
+        Ok(parsed) => parsed,
+        Err(message) => return emit_usage(operation, &message, args),
+    };
+    let rendered = match command {
+        "inspect" => instances::inspect_module(
+            parsed.runtime_root.as_deref(),
+            parsed.selector.as_deref(),
+            parsed.module_id,
+        )
+        .and_then(|data| {
+            emit_success(
+                parsed.output,
+                operation,
+                "module.inspection.fixture",
+                false,
+                data,
+            )
+            .map_err(render_error)
+        }),
+        "diagnose" => instances::diagnose_module(
+            parsed.runtime_root.as_deref(),
+            parsed.selector.as_deref(),
+            parsed.module_id,
+        )
+        .and_then(|data| {
+            emit_success(
+                parsed.output,
+                operation,
+                "module.diagnostics.fixture",
+                false,
+                data,
+            )
+            .map_err(render_error)
+        }),
+        "enable" | "disable" => instances::transition_module(
+            parsed.runtime_root.as_deref(),
+            parsed.selector.as_deref(),
+            parsed.module_id,
+            if command == "enable" {
+                ModuleOperationKind::Enable
+            } else {
+                ModuleOperationKind::Disable
+            },
+            parsed
+                .target_registry_revision
+                .expect("lifecycle parsing requires a revision"),
+        )
+        .and_then(|data| {
+            emit_success(
+                parsed.output,
+                operation,
+                "module.operation.fixture",
+                false,
+                data,
+            )
+            .map_err(render_error)
+        }),
+        _ => unreachable!(),
+    };
+    match rendered {
+        Ok(code) => code,
+        Err(error) => emit_failure(parsed.output, operation, &error, false),
+    }
+}
+
+fn run_operations(args: &[OsString]) -> ExitCode {
+    let Some(command) = args.first().and_then(|value| value.to_str()) else {
+        return emit_usage("operations", "An operations subcommand is required", args);
+    };
+    if command != "inspect" {
+        return emit_usage("operations", "Unknown operations subcommand", args);
+    }
+    let parsed = match parse_operations(&args[1..]) {
+        Ok(parsed) => parsed,
+        Err(message) => return emit_usage("operations.inspect", &message, args),
+    };
+    match instances::inspect_operation(
+        parsed.runtime_root.as_deref(),
+        parsed.selector.as_deref(),
+        parsed.operation_id,
+    ) {
+        Ok(data) => emit_success(
+            parsed.output,
+            "operations.inspect",
+            "module.operation.fixture",
+            false,
+            data,
+        )
+        .unwrap_or_else(|message| {
+            emit_render_failure(parsed.output, "operations.inspect", message)
+        }),
+        Err(error) => emit_failure(parsed.output, "operations.inspect", &error, false),
     }
 }
 
@@ -275,6 +386,21 @@ struct InstancesArgs {
     force: bool,
 }
 
+struct ModuleArgs {
+    module_id: String,
+    selector: Option<String>,
+    runtime_root: Option<PathBuf>,
+    output: OutputFormat,
+    target_registry_revision: Option<u64>,
+}
+
+struct OperationArgs {
+    operation_id: Uuid,
+    selector: Option<String>,
+    runtime_root: Option<PathBuf>,
+    output: OutputFormat,
+}
+
 fn parse_ui_start(args: &[OsString]) -> Result<UiStartArgs, String> {
     let mut name = None;
     let mut state_root = None;
@@ -414,6 +540,87 @@ fn parse_instances(command: &str, args: &[OsString]) -> Result<InstancesArgs, St
         runtime_root,
         output,
         force,
+    })
+}
+
+fn parse_modules(command: &str, args: &[OsString]) -> Result<ModuleArgs, String> {
+    let mut module_id = None;
+    let mut selector = None;
+    let mut runtime_root = None;
+    let mut output = OutputFormat::Toon;
+    let mut target_registry_revision = None;
+    let mut index = 0;
+    while index < args.len() {
+        let argument = unicode(&args[index])?;
+        if let Some((flag, inline)) = split_flag(argument) {
+            match flag {
+                "--instance" => selector = Some(value(args, &mut index, flag, inline)?),
+                "--runtime-root" => {
+                    runtime_root = Some(PathBuf::from(value(args, &mut index, flag, inline)?))
+                }
+                "--output" => output = parse_output(&value(args, &mut index, flag, inline)?)?,
+                "--target-revision" if matches!(command, "enable" | "disable") => {
+                    let value = value(args, &mut index, flag, inline)?;
+                    target_registry_revision = Some(value.parse::<u64>().map_err(|_| {
+                        "--target-revision must be an unsigned integer".to_string()
+                    })?);
+                }
+                _ => return Err(format!("Unknown modules {command} option: {argument}")),
+            }
+        } else if module_id.replace(argument.to_string()).is_some() {
+            return Err(format!("modules {command} accepts exactly one module id"));
+        }
+        index += 1;
+    }
+    let module_id = module_id.ok_or_else(|| format!("modules {command} requires a module id"))?;
+    if matches!(command, "enable" | "disable") && target_registry_revision.is_none() {
+        return Err(format!(
+            "modules {command} requires --target-revision <revision>"
+        ));
+    }
+    Ok(ModuleArgs {
+        module_id,
+        selector,
+        runtime_root,
+        output,
+        target_registry_revision,
+    })
+}
+
+fn parse_operations(args: &[OsString]) -> Result<OperationArgs, String> {
+    let mut operation_id = None;
+    let mut selector = None;
+    let mut runtime_root = None;
+    let mut output = OutputFormat::Toon;
+    let mut index = 0;
+    while index < args.len() {
+        let argument = unicode(&args[index])?;
+        if let Some((flag, inline)) = split_flag(argument) {
+            match flag {
+                "--instance" => selector = Some(value(args, &mut index, flag, inline)?),
+                "--runtime-root" => {
+                    runtime_root = Some(PathBuf::from(value(args, &mut index, flag, inline)?))
+                }
+                "--output" => output = parse_output(&value(args, &mut index, flag, inline)?)?,
+                _ => return Err(format!("Unknown operations inspect option: {argument}")),
+            }
+        } else if operation_id
+            .replace(
+                Uuid::parse_str(argument)
+                    .map_err(|_| "operations inspect requires a UUID operation id".to_string())?,
+            )
+            .is_some()
+        {
+            return Err("operations inspect accepts exactly one operation id".to_string());
+        }
+        index += 1;
+    }
+    Ok(OperationArgs {
+        operation_id: operation_id
+            .ok_or_else(|| "operations inspect requires an operation id".to_string())?,
+        selector,
+        runtime_root,
+        output,
     })
 }
 
@@ -629,6 +836,29 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(start.load_state, Some(archive.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn parses_module_and_operation_transport_commands() {
+        let module = parse_modules(
+            "enable",
+            &[
+                "shipctl.fixture".into(),
+                "--target-revision=12".into(),
+                "--instance".into(),
+                "fixture".into(),
+                "--output=json".into(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(module.module_id, "shipctl.fixture");
+        assert_eq!(module.target_registry_revision, Some(12));
+        assert_eq!(module.selector.as_deref(), Some("fixture"));
+        assert_eq!(module.output, OutputFormat::Json);
+
+        let operation_id = Uuid::new_v4();
+        let operation = parse_operations(&[operation_id.to_string().into()]).unwrap();
+        assert_eq!(operation.operation_id, operation_id);
     }
 
     #[test]

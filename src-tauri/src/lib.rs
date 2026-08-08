@@ -9,6 +9,7 @@ pub mod build_info;
 
 mod lifecycle;
 mod menu;
+mod module_loader_probe;
 mod modules;
 
 use std::sync::Arc;
@@ -32,12 +33,25 @@ pub fn run() {
 }
 
 pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
+    run_with_options_and_loader_probe(options, None)
+}
+
+pub fn run_with_options_and_loader_probe(
+    options: InstanceLaunchOptions,
+    module_loader_probe_request: Option<std::path::PathBuf>,
+) -> Result<(), String> {
     let _ = fix_path_env::fix();
 
     let load_state = options.load_state.clone();
     let reconcile_external_sources = load_state.is_none();
     let context = InstanceContext::resolve(options, build_info::APP_VERSION)?;
     let paths = context.paths();
+    let module_artifact_root = paths.module_artifact_root.clone();
+    let module_loader_probe = module_loader_probe::ModuleLoaderProbe::from_request(
+        module_loader_probe_request.as_deref(),
+        &paths,
+    )?;
+    let module_loader_probe_enabled = module_loader_probe.is_enabled();
     let leases = Arc::new(InstanceLeases::acquire(&context).map_err(|error| error.to_string())?);
     let durable_writes = DurableWriteBarrier::default();
     let snapshot_providers = snapshot_providers(&paths);
@@ -91,9 +105,25 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     .manage(workspace)
     .manage(ui_state)
     .manage(state_archive)
+    .manage(module_loader_probe)
     .manage(paths)
     .manage(context)
     .setup(move |app| {
+        // The static config intentionally grants no filesystem location. This
+        // per-instance scope is the sole directory the asset protocol may
+        // serve, so runtime module artifacts can change without widening the
+        // webview's access to the rest of the state profile.
+        app.state::<tauri::scope::Scopes>()
+            .allow_directory(&module_artifact_root, true)?;
+
+        // A probe is a disposable host-only verification run. It deliberately
+        // does not acquire a control socket, watcher, or background work that
+        // could touch ordinary user/PTY state while the packaged webview loads
+        // the immutable artifacts.
+        if module_loader_probe_enabled {
+            return Ok(());
+        }
+
         // Run migration from old project-based config
         let workspace = app.state::<WorkspaceManager>();
         if let Err(e) = workspace.migrate() {
@@ -187,12 +217,20 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         modules::capability_data::get_global_capability_data,
         modules::capability_data::replace_global_capability_data,
         lifecycle::shutdown_and_quit,
+        module_loader_probe::take_module_loader_probe,
+        module_loader_probe::complete_module_loader_probe,
     ])
     .build(tauri::generate_context!())
     .map_err(|error| format!("error while building Tauri application: {error}"))?;
 
     app.run(|app_handle, event| {
         if let RunEvent::ExitRequested { api, .. } = &event {
+            if app_handle
+                .state::<module_loader_probe::ModuleLoaderProbe>()
+                .is_enabled()
+            {
+                return;
+            }
             let pty = app_handle.state::<PtyManager>();
             if pty.is_shutting_down() {
                 return;

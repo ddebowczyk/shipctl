@@ -11,6 +11,7 @@ name = "shipctl_core"
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+semver = "1.0"
 serde_yaml = "0.9"
 tauri = { version = "2.11.5", features = ["macos-private-api"] }
 portable-pty = "0.9"

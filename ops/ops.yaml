@@ -7,4 +7,5 @@ active:
   modularity: modularity
   execution: execution
   instance-control: instance-control
+  module-control: module-control
   upstream: upstream

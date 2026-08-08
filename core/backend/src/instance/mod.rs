@@ -12,5 +12,8 @@ pub use context::{
 pub use control::{ControlHandler, ControlServer, InstanceDirectory};
 pub use leases::InstanceLeases;
 pub use protocol::{
-    ActiveWorkBlocker, ControlError, DiscoveryProblem, DiscoveryReport, InstanceRecord, StopOutcome,
+    ActiveWorkBlocker, ControlCompletion, ControlCompletionStatus, ControlError, ControlEvent,
+    ControlEventPayload, ControlOperation, ControlRequest, ControlResponse, ControlResponseResult,
+    ControlStream, DiscoveryProblem, DiscoveryReport, InstanceRecord, ModuleCommand,
+    OperationCommand, StopOutcome, CONTROL_FRAME_SCHEMA_VERSION,
 };

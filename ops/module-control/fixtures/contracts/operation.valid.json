@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "requestId": "00000000-0000-0000-0000-000000000002",
+  "moduleId": "shipctl.fixture",
+  "instanceId": "00000000-0000-0000-0000-000000000001",
+  "kind": "enable",
+  "targetRegistryRevision": 9,
+  "transitions": [
+    {
+      "phase": "committed",
+      "registryRevision": 9
+    }
+  ],
+  "result": "succeeded"
+}

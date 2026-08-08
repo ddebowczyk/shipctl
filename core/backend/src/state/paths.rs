@@ -11,6 +11,12 @@ pub struct ShipctlPaths {
     pub ui_state: PathBuf,
     pub assistant_sessions: PathBuf,
     pub usage_database: PathBuf,
+    /// Immutable, content-addressed module artifacts owned by this instance.
+    pub module_artifact_root: PathBuf,
+    /// Durable desired-state registry and operation journal for this instance.
+    pub module_registry_database: PathBuf,
+    /// Redacted module-control evidence emitted for this instance.
+    pub module_control_evidence_root: PathBuf,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -28,6 +34,9 @@ impl ShipctlPaths {
             ui_state: state_root.join("ui-state.json"),
             assistant_sessions: state_root.join("assistant-sessions.json"),
             usage_database: state_root.join("usage.sqlite3"),
+            module_artifact_root: state_root.join("modules"),
+            module_registry_database: state_root.join("module-registry.sqlite3"),
+            module_control_evidence_root: state_root.join("module-control").join("evidence"),
             state_root,
             runtime_root,
         }
@@ -55,6 +64,21 @@ impl ShipctlPaths {
                 classification: "instance_owned",
                 path: self.usage_database.clone(),
             },
+            DurableSource {
+                owner: "modules.artifacts",
+                classification: "instance_owned",
+                path: self.module_artifact_root.clone(),
+            },
+            DurableSource {
+                owner: "modules.registry",
+                classification: "instance_owned",
+                path: self.module_registry_database.clone(),
+            },
+            DurableSource {
+                owner: "module-control.evidence",
+                classification: "instance_owned",
+                path: self.module_control_evidence_root.clone(),
+            },
         ]
     }
 }
@@ -70,5 +94,91 @@ mod tests {
             .durable_sources()
             .iter()
             .all(|source| source.path.starts_with(&paths.state_root)));
+    }
+
+    #[test]
+    fn module_control_paths_are_derived_from_the_selected_state_root() {
+        let paths = ShipctlPaths::new(PathBuf::from("/profiles/test"), PathBuf::from("/run/test"));
+
+        assert_eq!(paths.module_artifact_root, paths.state_root.join("modules"));
+        assert_eq!(
+            paths.module_registry_database,
+            paths.state_root.join("module-registry.sqlite3")
+        );
+        assert_eq!(
+            paths.module_control_evidence_root,
+            paths.state_root.join("module-control/evidence")
+        );
+        assert!(paths.module_artifact_root.starts_with(&paths.state_root));
+        assert!(paths
+            .module_registry_database
+            .starts_with(&paths.state_root));
+        assert!(paths
+            .module_control_evidence_root
+            .starts_with(&paths.state_root));
+        assert!(paths
+            .durable_sources()
+            .iter()
+            .any(|source| source.owner == "modules.artifacts"
+                && source.path == paths.module_artifact_root));
+        assert!(paths
+            .durable_sources()
+            .iter()
+            .any(|source| source.owner == "modules.registry"
+                && source.path == paths.module_registry_database));
+        assert!(paths
+            .durable_sources()
+            .iter()
+            .any(|source| source.owner == "module-control.evidence"
+                && source.path == paths.module_control_evidence_root));
+    }
+
+    #[test]
+    fn two_instances_have_disjoint_module_control_paths_without_touching_other_roots() {
+        let root = std::env::temp_dir().join(format!(
+            "shipctl-paths-isolation-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let production_root = root.join("production-default");
+        let first_root = root.join("first");
+        let second_root = root.join("second");
+        std::fs::create_dir_all(&production_root).unwrap();
+        let sentinel = production_root.join("untouched");
+        std::fs::write(&sentinel, b"sentinel").unwrap();
+
+        let first = ShipctlPaths::new(first_root.clone(), root.join("first-runtime"));
+        let second = ShipctlPaths::new(second_root.clone(), root.join("second-runtime"));
+
+        assert_ne!(first.module_artifact_root, second.module_artifact_root);
+        assert_ne!(
+            first.module_registry_database,
+            second.module_registry_database
+        );
+        assert_ne!(
+            first.module_control_evidence_root,
+            second.module_control_evidence_root
+        );
+        for path in [
+            &first.module_artifact_root,
+            &first.module_registry_database,
+            &first.module_control_evidence_root,
+        ] {
+            assert!(path.starts_with(&first_root));
+            assert!(!path.starts_with(&production_root));
+        }
+        for path in [
+            &second.module_artifact_root,
+            &second.module_registry_database,
+            &second.module_control_evidence_root,
+        ] {
+            assert!(path.starts_with(&second_root));
+            assert!(!path.starts_with(&production_root));
+        }
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"sentinel");
+        assert!(!first_root.exists());
+        assert!(!second_root.exists());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

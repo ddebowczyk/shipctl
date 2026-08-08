@@ -69,6 +69,21 @@ export {
   selectProjectFactsProvider,
 } from "./moduleComposition.ts";
 export { bindTerminalSessionDimensions } from "../terminal/terminalSessions.ts";
+export {
+  MODULE_ARTIFACT_LOADER_SCHEMA_VERSION,
+  ModuleArtifactLoadError,
+  assertDigestQualifiedArtifactUrl,
+  loadModuleArtifact,
+  moduleArtifactUrl,
+} from "./moduleArtifactLoader.ts";
+export type {
+  LoadModuleArtifactRequest,
+  LoadedModuleArtifact,
+  ModuleArtifactHost,
+  ModuleArtifactLoadPhase,
+  ModuleArtifactRuntime,
+} from "./moduleArtifactLoader.ts";
+export { runModuleLoaderProbeIfRequested } from "./moduleLoaderProbe.ts";
 export type {
   HydratedPanelReference,
   HydratePanelReferenceOptions,

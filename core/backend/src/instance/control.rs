@@ -15,14 +15,17 @@ use super::leases::{
     create_private_directory, process_start_time, set_private_file, InstanceLeases,
 };
 use super::protocol::{
-    ActiveWorkBlocker, ControlError, ControlOperation, ControlRequest, ControlResponse,
-    ControlResponseResult, DiscoveryProblem, DiscoveryProblemCategory, DiscoveryReport,
-    InstanceLifecycle, InstanceRecord, StopOutcome, StoredDescriptor, CONTROL_FRAME_SCHEMA_VERSION,
+    ActiveWorkBlocker, ControlCompletion, ControlCompletionStatus, ControlError, ControlEvent,
+    ControlEventPayload, ControlOperation, ControlRequest, ControlResponse, ControlResponseResult,
+    ControlStream, DiscoveryProblem, DiscoveryProblemCategory, DiscoveryReport, InstanceLifecycle,
+    InstanceRecord, ModuleCommand, OperationCommand, StopOutcome, StoredDescriptor,
+    CONTROL_FRAME_SCHEMA_VERSION,
 };
+use crate::module_control::{Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind};
 use crate::state::archive::StateArchiveInspection;
 
 const DESCRIPTOR_SCHEMA_VERSION: u32 = 1;
-const ENDPOINT_PROTOCOL: &str = "local_socket_json_line_v1";
+const ENDPOINT_PROTOCOL: &str = "local_socket_json_line_v2";
 
 pub trait ControlHandler: Send + Sync + 'static {
     fn active_work(&self) -> Vec<ActiveWorkBlocker>;
@@ -33,6 +36,20 @@ pub trait ControlHandler: Send + Sync + 'static {
         Err(ControlError::new(
             "state.snapshot.provider_failed",
             "This instance does not provide state snapshots",
+        ))
+    }
+    /// Module commands are deliberately data-only at this boundary. A live
+    /// registry/supervisor can attach later without changing endpoint framing.
+    fn module_control(&self, _command: ModuleCommand) -> Result<ControlStream, ControlError> {
+        Err(ControlError::new(
+            "module.control.capability_unavailable",
+            "This instance does not provide module-control fixtures",
+        ))
+    }
+    fn operation_control(&self, _command: OperationCommand) -> Result<ControlStream, ControlError> {
+        Err(ControlError::new(
+            "module.operation.capability_unavailable",
+            "This instance does not provide module-operation fixtures",
         ))
     }
     fn shutdown(&self, force: bool) -> Result<(), ControlError>;
@@ -209,7 +226,7 @@ fn handle_connection(
     stopping: &AtomicBool,
 ) -> std::io::Result<Option<bool>> {
     if !peer_is_current_user(&stream)? {
-        return write_response(
+        return write_frames(
             stream,
             &ControlResponse::failure(
                 Uuid::nil(),
@@ -218,6 +235,7 @@ fn handle_connection(
                     "The local control peer is not the current user",
                 ),
             ),
+            &[],
         )
         .map(|()| None);
     }
@@ -230,7 +248,7 @@ fn handle_connection(
     let request = match serde_json::from_str::<ControlRequest>(&frame) {
         Ok(request) => request,
         Err(error) => {
-            return write_response(
+            return write_frames(
                 reader.into_inner(),
                 &ControlResponse::failure(
                     Uuid::nil(),
@@ -239,6 +257,7 @@ fn handle_connection(
                         format!("The control request is not valid JSON: {error}"),
                     ),
                 ),
+                &[],
             )
             .map(|()| None);
         }
@@ -247,7 +266,7 @@ fn handle_connection(
         ControlOperation::Shutdown { force } => Some(*force),
         _ => None,
     };
-    let mut response = dispatch_request(request, descriptor, handler, stopping);
+    let (mut response, events) = dispatch_request(request, descriptor, handler, stopping);
     let mut commit_shutdown = requested_shutdown.filter(|_| {
         matches!(
             response.result,
@@ -274,7 +293,7 @@ fn handle_connection(
             commit_shutdown = None;
         }
     }
-    let write_result = write_response(reader.into_inner(), &response);
+    let write_result = write_frames(reader.into_inner(), &response, &events);
     if let Some(force) = commit_shutdown {
         // The descriptor is already withdrawn, so commit shutdown even if the caller
         // disconnects before receiving its acknowledgement.
@@ -289,76 +308,112 @@ fn dispatch_request(
     descriptor: &StoredDescriptor,
     handler: &dyn ControlHandler,
     stopping: &AtomicBool,
-) -> ControlResponse {
-    if request.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION {
-        return ControlResponse::failure(
-            request.request_id,
-            ControlError::new(
-                "control.instance.protocol_incompatible",
-                "The control frame schema is incompatible",
-            )
-            .with_expected_observed(
-                CONTROL_FRAME_SCHEMA_VERSION.to_string(),
-                request.frame_schema_version.to_string(),
+) -> (ControlResponse, Vec<ControlEventPayload>) {
+    if request.frame_type != "request" {
+        return (
+            ControlResponse::failure(
+                request.request_id,
+                ControlError::new(
+                    "control.instance.invalid_frame",
+                    "The local control frame must declare frameType request",
+                ),
             ),
+            Vec::new(),
+        );
+    }
+    if request.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION {
+        return (
+            ControlResponse::failure(
+                request.request_id,
+                ControlError::new(
+                    "control.instance.protocol_incompatible",
+                    "The control frame schema is incompatible",
+                )
+                .with_expected_observed(
+                    CONTROL_FRAME_SCHEMA_VERSION.to_string(),
+                    request.frame_schema_version.to_string(),
+                ),
+            ),
+            Vec::new(),
         );
     }
     if request.control_protocol_version != descriptor.instance.build.control_protocol_version {
-        return ControlResponse::failure(
-            request.request_id,
-            ControlError::new(
-                "control.instance.protocol_incompatible",
-                "The control protocol version is incompatible",
-            )
-            .with_expected_observed(
-                descriptor
-                    .instance
-                    .build
-                    .control_protocol_version
-                    .to_string(),
-                request.control_protocol_version.to_string(),
+        return (
+            ControlResponse::failure(
+                request.request_id,
+                ControlError::new(
+                    "control.instance.protocol_incompatible",
+                    "The control protocol version is incompatible",
+                )
+                .with_expected_observed(
+                    descriptor
+                        .instance
+                        .build
+                        .control_protocol_version
+                        .to_string(),
+                    request.control_protocol_version.to_string(),
+                ),
             ),
+            Vec::new(),
         );
     }
     if request.auth_token != descriptor.auth_token {
-        return ControlResponse::failure(
-            request.request_id,
-            ControlError::new(
-                "control.instance.unauthorized",
-                "The local control authentication token is invalid",
+        return (
+            ControlResponse::failure(
+                request.request_id,
+                ControlError::new(
+                    "control.instance.unauthorized",
+                    "The local control authentication token is invalid",
+                ),
             ),
+            Vec::new(),
         );
     }
 
     match request.operation {
-        ControlOperation::Ping => ControlResponse::success(
-            request.request_id,
-            ControlResponseResult::Instance(current_record(descriptor, handler, stopping)),
+        ControlOperation::Ping => (
+            ControlResponse::success(
+                request.request_id,
+                ControlResponseResult::Instance(current_record(descriptor, handler, stopping)),
+            ),
+            Vec::new(),
         ),
         ControlOperation::Inspect => {
             let mut record = current_record(descriptor, handler, stopping);
             match handler.state_fingerprint() {
                 Ok(fingerprint) => {
                     record.state_fingerprint = fingerprint;
-                    ControlResponse::success(
-                        request.request_id,
-                        ControlResponseResult::Instance(record),
+                    (
+                        ControlResponse::success(
+                            request.request_id,
+                            ControlResponseResult::Instance(record),
+                        ),
+                        Vec::new(),
                     )
                 }
-                Err(error) => ControlResponse::failure(request.request_id, error),
+                Err(error) => (
+                    ControlResponse::failure(request.request_id, error),
+                    Vec::new(),
+                ),
             }
         }
         ControlOperation::SaveState { destination } => match handler.save_state(&destination) {
-            Ok(archive) => ControlResponse::success(
-                request.request_id,
-                ControlResponseResult::StateArchive(archive),
+            Ok(archive) => (
+                ControlResponse::success(
+                    request.request_id,
+                    ControlResponseResult::StateArchive(archive),
+                ),
+                Vec::new(),
             ),
-            Err(error) => ControlResponse::failure(request.request_id, error),
+            Err(error) => (
+                ControlResponse::failure(request.request_id, error),
+                Vec::new(),
+            ),
         },
         ControlOperation::Shutdown { force } => {
             let blockers = handler.active_work();
             if !force && !blockers.is_empty() {
-                return ControlResponse::failure(
+                return (ControlResponse::failure(
                     request.request_id,
                     ControlError::new(
                         "control.instance.shutdown_blocked",
@@ -369,17 +424,40 @@ fn dispatch_request(
                         descriptor.instance.state_root.clone(),
                     )
                     .with_blockers(blockers),
-                );
+                ), Vec::new());
             }
             stopping.store(true, Ordering::SeqCst);
-            ControlResponse::success(
-                request.request_id,
-                ControlResponseResult::Stop(StopOutcome {
-                    instance: current_record(descriptor, handler, stopping),
-                    accepted: true,
-                }),
+            (
+                ControlResponse::success(
+                    request.request_id,
+                    ControlResponseResult::Stop(StopOutcome {
+                        instance: current_record(descriptor, handler, stopping),
+                        accepted: true,
+                    }),
+                ),
+                Vec::new(),
             )
         }
+        ControlOperation::Modules { command } => match handler.module_control(command) {
+            Ok(stream) => (
+                ControlResponse::success(request.request_id, stream.result),
+                stream.events,
+            ),
+            Err(error) => (
+                ControlResponse::failure(request.request_id, error),
+                Vec::new(),
+            ),
+        },
+        ControlOperation::Operations { command } => match handler.operation_control(command) {
+            Ok(stream) => (
+                ControlResponse::success(request.request_id, stream.result),
+                stream.events,
+            ),
+            Err(error) => (
+                ControlResponse::failure(request.request_id, error),
+                Vec::new(),
+            ),
+        },
     }
 }
 
@@ -398,8 +476,42 @@ fn current_record(
     record
 }
 
-fn write_response(mut stream: Stream, response: &ControlResponse) -> std::io::Result<()> {
+fn write_frames(
+    mut stream: Stream,
+    response: &ControlResponse,
+    events: &[ControlEventPayload],
+) -> std::io::Result<()> {
     serde_json::to_writer(&mut stream, response).map_err(std::io::Error::other)?;
+    stream.write_all(b"\n")?;
+    for (index, event) in events.iter().enumerate() {
+        serde_json::to_writer(
+            &mut stream,
+            &ControlEvent {
+                frame_type: "event".to_string(),
+                frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
+                request_id: response.request_id,
+                sequence: index as u64 + 1,
+                event: event.clone(),
+            },
+        )
+        .map_err(std::io::Error::other)?;
+        stream.write_all(b"\n")?;
+    }
+    serde_json::to_writer(
+        &mut stream,
+        &ControlCompletion {
+            frame_type: "completion".to_string(),
+            frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
+            request_id: response.request_id,
+            status: if response.error.is_some() {
+                ControlCompletionStatus::Failed
+            } else {
+                ControlCompletionStatus::Succeeded
+            },
+            event_count: events.len() as u64,
+        },
+    )
+    .map_err(std::io::Error::other)?;
     stream.write_all(b"\n")?;
     stream.flush()
 }
@@ -446,6 +558,86 @@ impl InstanceDirectory {
         let descriptor = select_instance(instances, selector)?;
         request(&descriptor, ControlOperation::SaveState { destination })
             .and_then(expect_state_archive_result)
+    }
+
+    pub fn inspect_module(
+        &self,
+        selector: Option<&str>,
+        module_id: String,
+    ) -> Result<ModuleInspection, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, selector)?;
+        request(
+            &descriptor,
+            ControlOperation::Modules {
+                command: ModuleCommand::Inspect { module_id },
+            },
+        )
+        .and_then(expect_module_inspection_result)
+    }
+
+    pub fn diagnose_module(
+        &self,
+        selector: Option<&str>,
+        module_id: String,
+    ) -> Result<Vec<Diagnostic>, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, selector)?;
+        request(
+            &descriptor,
+            ControlOperation::Modules {
+                command: ModuleCommand::Diagnose { module_id },
+            },
+        )
+        .and_then(expect_module_diagnostics_result)
+    }
+
+    pub fn transition_module(
+        &self,
+        selector: Option<&str>,
+        module_id: String,
+        kind: ModuleOperationKind,
+        target_registry_revision: u64,
+    ) -> Result<ModuleOperation, ControlError> {
+        self.transition_module_stream(selector, module_id, kind, target_registry_revision)
+            .and_then(expect_module_operation_result)
+    }
+
+    pub fn transition_module_stream(
+        &self,
+        selector: Option<&str>,
+        module_id: String,
+        kind: ModuleOperationKind,
+        target_registry_revision: u64,
+    ) -> Result<ControlStream, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, selector)?;
+        request(
+            &descriptor,
+            ControlOperation::Modules {
+                command: ModuleCommand::Lifecycle {
+                    module_id,
+                    kind,
+                    target_registry_revision,
+                },
+            },
+        )
+    }
+
+    pub fn inspect_operation(
+        &self,
+        selector: Option<&str>,
+        operation_id: Uuid,
+    ) -> Result<ModuleOperation, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, selector)?;
+        request(
+            &descriptor,
+            ControlOperation::Operations {
+                command: OperationCommand::Inspect { operation_id },
+            },
+        )
+        .and_then(expect_module_operation_result)
     }
 
     fn scan(
@@ -589,9 +781,10 @@ fn select_instance(
 fn request(
     descriptor: &StoredDescriptor,
     operation: ControlOperation,
-) -> Result<ControlResponseResult, ControlError> {
+) -> Result<ControlStream, ControlError> {
     let request_id = Uuid::new_v4();
     let frame = ControlRequest {
+        frame_type: "request".to_string(),
         frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
         control_protocol_version: descriptor.instance.build.control_protocol_version,
         request_id,
@@ -624,22 +817,22 @@ fn request(
             )
         })?;
 
+    let mut reader = BufReader::new(stream);
     let mut response_frame = String::new();
-    BufReader::new(stream)
-        .read_line(&mut response_frame)
-        .map_err(|error| {
-            ControlError::new(
-                "control.instance.handshake_failed",
-                format!("Could not read the local control response: {error}"),
-            )
-        })?;
+    reader.read_line(&mut response_frame).map_err(|error| {
+        ControlError::new(
+            "control.instance.handshake_failed",
+            format!("Could not read the local control response: {error}"),
+        )
+    })?;
     let response: ControlResponse = serde_json::from_str(&response_frame).map_err(|error| {
         ControlError::new(
             "control.instance.handshake_failed",
             format!("The local control response is invalid: {error}"),
         )
     })?;
-    if response.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION
+    if response.frame_type != "response"
+        || response.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION
         || response.request_id != request_id
     {
         return Err(ControlError::new(
@@ -647,51 +840,154 @@ fn request(
             "The local control response did not match the request identity or schema",
         ));
     }
-    match (response.result, response.error) {
+    let outcome = match (response.result, response.error) {
         (Some(result), None) => Ok(result),
         (None, Some(error)) => Err(error),
         _ => Err(ControlError::new(
             "control.instance.handshake_failed",
             "The local control response has an invalid result/error shape",
         )),
+    };
+    let mut events = Vec::new();
+    loop {
+        let mut frame = String::new();
+        let read = reader.read_line(&mut frame).map_err(|error| {
+            ControlError::new(
+                "control.instance.handshake_failed",
+                format!("Could not read the local control stream frame: {error}"),
+            )
+        })?;
+        if read == 0 {
+            return Err(ControlError::new(
+                "control.instance.handshake_failed",
+                "The local control stream ended before its completion frame",
+            ));
+        }
+        let value: serde_json::Value = serde_json::from_str(&frame).map_err(|error| {
+            ControlError::new(
+                "control.instance.handshake_failed",
+                format!("The local control stream frame is invalid JSON: {error}"),
+            )
+        })?;
+        match value.get("frameType").and_then(serde_json::Value::as_str) {
+            Some("event") => {
+                let event: ControlEvent = serde_json::from_value(value).map_err(|error| {
+                    ControlError::new(
+                        "control.instance.handshake_failed",
+                        format!("The local control event frame is invalid: {error}"),
+                    )
+                })?;
+                if event.frame_type != "event"
+                    || event.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION
+                    || event.request_id != request_id
+                    || event.sequence != events.len() as u64 + 1
+                {
+                    return Err(ControlError::new(
+                        "control.instance.handshake_failed",
+                        "The local control event did not match the request, schema, or ordering",
+                    ));
+                }
+                events.push(event.event);
+            }
+            Some("completion") => {
+                let completion: ControlCompletion =
+                    serde_json::from_value(value).map_err(|error| {
+                        ControlError::new(
+                            "control.instance.handshake_failed",
+                            format!("The local control completion frame is invalid: {error}"),
+                        )
+                    })?;
+                let expected_status = if outcome.is_ok() {
+                    ControlCompletionStatus::Succeeded
+                } else {
+                    ControlCompletionStatus::Failed
+                };
+                if completion.frame_type != "completion"
+                    || completion.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION
+                    || completion.request_id != request_id
+                    || completion.event_count != events.len() as u64
+                    || completion.status != expected_status
+                {
+                    return Err(ControlError::new(
+                        "control.instance.handshake_failed",
+                        "The local control completion did not match the response stream",
+                    ));
+                }
+                return outcome.map(|result| ControlStream { result, events });
+            }
+            _ => {
+                return Err(ControlError::new(
+                    "control.instance.handshake_failed",
+                    "The local control stream contains an unknown frame type",
+                ));
+            }
+        }
     }
 }
 
-fn expect_instance_result(result: ControlResponseResult) -> Result<InstanceRecord, ControlError> {
-    match result {
+fn expect_instance_result(stream: ControlStream) -> Result<InstanceRecord, ControlError> {
+    match stream.result {
         ControlResponseResult::Instance(record) => Ok(record),
-        ControlResponseResult::StateArchive(_) | ControlResponseResult::Stop(_) => {
-            Err(ControlError::new(
-                "control.instance.handshake_failed",
-                "The endpoint returned a stop result for an inspection request",
-            ))
-        }
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a stop result for an inspection request",
+        )),
     }
 }
 
-fn expect_stop_result(result: ControlResponseResult) -> Result<StopOutcome, ControlError> {
-    match result {
+fn expect_stop_result(stream: ControlStream) -> Result<StopOutcome, ControlError> {
+    match stream.result {
         ControlResponseResult::Stop(outcome) => Ok(outcome),
-        ControlResponseResult::Instance(_) | ControlResponseResult::StateArchive(_) => {
-            Err(ControlError::new(
-                "control.instance.handshake_failed",
-                "The endpoint returned an inspection result for a stop request",
-            ))
-        }
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned an inspection result for a stop request",
+        )),
     }
 }
 
 fn expect_state_archive_result(
-    result: ControlResponseResult,
+    stream: ControlStream,
 ) -> Result<StateArchiveInspection, ControlError> {
-    match result {
+    match stream.result {
         ControlResponseResult::StateArchive(archive) => Ok(archive),
-        ControlResponseResult::Instance(_) | ControlResponseResult::Stop(_) => {
-            Err(ControlError::new(
-                "control.instance.handshake_failed",
-                "The endpoint returned a non-archive result for a state save request",
-            ))
-        }
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-archive result for a state save request",
+        )),
+    }
+}
+
+fn expect_module_inspection_result(
+    stream: ControlStream,
+) -> Result<ModuleInspection, ControlError> {
+    match stream.result {
+        ControlResponseResult::ModuleInspection(inspection) => Ok(inspection),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-inspection result for a module inspection request",
+        )),
+    }
+}
+
+fn expect_module_diagnostics_result(
+    stream: ControlStream,
+) -> Result<Vec<Diagnostic>, ControlError> {
+    match stream.result {
+        ControlResponseResult::ModuleDiagnostics(diagnostics) => Ok(diagnostics),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-diagnostic result for a module diagnostic request",
+        )),
+    }
+}
+
+fn expect_module_operation_result(stream: ControlStream) -> Result<ModuleOperation, ControlError> {
+    match stream.result {
+        ControlResponseResult::ModuleOperation(operation) => Ok(operation),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-operation result for a module operation request",
+        )),
     }
 }
 

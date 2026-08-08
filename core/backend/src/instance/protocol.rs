@@ -4,9 +4,15 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::context::InstanceBuildIdentity;
+use crate::module_control::{Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind};
 use crate::state::archive::StateArchiveInspection;
 
-pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 1;
+/// The JSON-line envelope version for the authenticated local endpoint.
+///
+/// Version two adds explicit request, response, event, and completion frame
+/// kinds. The build control-protocol version remains the compatibility check
+/// between executable roles; this version only describes the wire envelope.
+pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -150,8 +156,10 @@ pub(crate) struct StoredDescriptor {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ControlRequest {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ControlRequest {
+    #[serde(rename = "frameType")]
+    pub frame_type: String,
     pub frame_schema_version: u32,
     pub control_protocol_version: u32,
     pub request_id: Uuid,
@@ -160,34 +168,123 @@ pub(crate) struct ControlRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "type")]
-pub(crate) enum ControlOperation {
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum ControlOperation {
     Ping,
     Inspect,
     SaveState { destination: PathBuf },
     Shutdown { force: bool },
+    Modules { command: ModuleCommand },
+    Operations { command: OperationCommand },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ControlResponse {
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum ModuleCommand {
+    Inspect {
+        module_id: String,
+    },
+    Diagnose {
+        module_id: String,
+    },
+    Lifecycle {
+        module_id: String,
+        kind: ModuleOperationKind,
+        target_registry_revision: u64,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum OperationCommand {
+    Inspect { operation_id: Uuid },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ControlResponse {
+    #[serde(rename = "frameType")]
+    pub frame_type: String,
     pub frame_schema_version: u32,
     pub request_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<ControlResponseResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ControlError>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub(crate) enum ControlResponseResult {
+pub enum ControlResponseResult {
     Instance(InstanceRecord),
     StateArchive(StateArchiveInspection),
     Stop(StopOutcome),
+    ModuleInspection(ModuleInspection),
+    ModuleDiagnostics(Vec<Diagnostic>),
+    ModuleOperation(ModuleOperation),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ControlEvent {
+    #[serde(rename = "frameType")]
+    pub frame_type: String,
+    pub frame_schema_version: u32,
+    pub request_id: Uuid,
+    pub sequence: u64,
+    pub event: ControlEventPayload,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum ControlEventPayload {
+    ModuleOperation(ModuleOperation),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlCompletionStatus {
+    Succeeded,
+    Failed,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ControlCompletion {
+    #[serde(rename = "frameType")]
+    pub frame_type: String,
+    pub frame_schema_version: u32,
+    pub request_id: Uuid,
+    pub status: ControlCompletionStatus,
+    pub event_count: u64,
+}
+
+/// One complete response stream from the existing authenticated endpoint.
+///
+/// The handler supplies data only. It cannot reconcile a registry, load Rust,
+/// or mutate Cargo/Tauri composition through this transport layer.
+#[derive(Clone, Debug)]
+pub struct ControlStream {
+    pub result: ControlResponseResult,
+    pub events: Vec<ControlEventPayload>,
 }
 
 impl ControlResponse {
     pub fn success(request_id: Uuid, result: ControlResponseResult) -> Self {
         Self {
+            frame_type: "response".to_string(),
             frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
             request_id,
             result: Some(result),
@@ -197,10 +294,20 @@ impl ControlResponse {
 
     pub fn failure(request_id: Uuid, error: ControlError) -> Self {
         Self {
+            frame_type: "response".to_string(),
             frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
             request_id,
             result: None,
             error: Some(error),
+        }
+    }
+}
+
+impl ControlStream {
+    pub fn result(result: ControlResponseResult) -> Self {
+        Self {
+            result,
+            events: Vec::new(),
         }
     }
 }

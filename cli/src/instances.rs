@@ -9,6 +9,9 @@ use shipctl_core::instance::{
     resolve_runtime_root, resolve_state_root, ControlError, DiscoveryProblem,
     InstanceBuildIdentity, InstanceDirectory, InstanceRecord, StopOutcome,
 };
+use shipctl_core::module_control::{
+    Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind,
+};
 use shipctl_core::state::archive::inspect_archive;
 use shipctl_core::state::archive::StateArchiveInspection;
 
@@ -280,6 +283,53 @@ pub fn save(
         effective_selector(selector).as_deref(),
         destination.to_path_buf(),
     )
+}
+
+pub fn inspect_module(
+    runtime_root: Option<&Path>,
+    selector: Option<&str>,
+    module_id: String,
+) -> Result<ModuleInspection, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).inspect_module(effective_selector(selector).as_deref(), module_id)
+}
+
+pub fn diagnose_module(
+    runtime_root: Option<&Path>,
+    selector: Option<&str>,
+    module_id: String,
+) -> Result<Vec<Diagnostic>, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).diagnose_module(effective_selector(selector).as_deref(), module_id)
+}
+
+pub fn transition_module(
+    runtime_root: Option<&Path>,
+    selector: Option<&str>,
+    module_id: String,
+    kind: ModuleOperationKind,
+    target_registry_revision: u64,
+) -> Result<ModuleOperation, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).transition_module(
+        effective_selector(selector).as_deref(),
+        module_id,
+        kind,
+        target_registry_revision,
+    )
+}
+
+pub fn inspect_operation(
+    runtime_root: Option<&Path>,
+    selector: Option<&str>,
+    operation_id: uuid::Uuid,
+) -> Result<ModuleOperation, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).inspect_operation(effective_selector(selector).as_deref(), operation_id)
 }
 
 fn existing_disposition(

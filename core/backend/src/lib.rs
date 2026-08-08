@@ -12,6 +12,7 @@
 pub mod appearance;
 pub mod build_info;
 pub mod instance;
+pub mod module_control;
 pub mod platform;
 pub mod projects;
 pub mod settings;

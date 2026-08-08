@@ -129,4 +129,33 @@ mod tests {
             "schemaVersion: 1\noperation: instances.list\nstatus: success\ncode: control.instances.listed\ndata:\n  count: 0\n  instances[0]:"
         );
     }
+
+    #[test]
+    fn canonical_module_operation_fixture_renders_identically_as_json_and_toon() {
+        let operation: Value = serde_json::from_str(include_str!(
+            "../../ops/module-control/fixtures/contracts/operation.valid.json"
+        ))
+        .unwrap();
+        let json_text = success(
+            OutputFormat::Json,
+            "modules.enable",
+            "module.operation.fixture",
+            false,
+            &operation,
+        )
+        .unwrap();
+        let toon_text = success(
+            OutputFormat::Toon,
+            "modules.enable",
+            "module.operation.fixture",
+            false,
+            &operation,
+        )
+        .unwrap();
+
+        let json_value: Value = serde_json::from_str(&json_text).unwrap();
+        let toon_value: Value = toon_format::decode_default(&toon_text).unwrap();
+        assert_eq!(toon_value, json_value);
+        assert_eq!(json_value["data"], operation);
+    }
 }
