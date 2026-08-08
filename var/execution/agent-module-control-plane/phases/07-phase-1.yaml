@@ -1,0 +1,9 @@
+---
+schema_version: 1
+sequence: 7
+key: phase-1
+phase_label: Phase 1
+title: Durable registry and offline inspection
+role: phase
+document: 01-durable-registry-and-offline-inspection.md
+action_plan_dir: 07-phase-1

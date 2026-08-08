@@ -5,4 +5,5 @@ active:
   check: check
   build: build
   modularity: modularity
+  execution: execution
   upstream: upstream

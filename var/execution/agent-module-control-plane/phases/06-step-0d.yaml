@@ -1,0 +1,9 @@
+---
+schema_version: 1
+sequence: 6
+key: step-0d
+phase_label: Step 0D
+title: Module contracts and loader test kernel
+role: phase
+document: 00-foundation-contracts-and-test-kernel.md
+action_plan_dir: 06-step-0d

@@ -1,0 +1,9 @@
+---
+schema_version: 1
+sequence: 11
+key: phase-5
+phase_label: Phase 5
+title: Generic lifecycle and reconfiguration
+role: phase
+document: 05-generic-lifecycle-and-reconfiguration.md
+action_plan_dir: 11-phase-5

@@ -1,5 +1,6 @@
 mod build 'ops/build/justfile'
 mod check 'ops/check/justfile'
+mod execution 'ops/execution/justfile'
 mod modularity 'ops/modularity/justfile'
 mod ops 'ops/justfile'
 mod test 'ops/test/justfile'

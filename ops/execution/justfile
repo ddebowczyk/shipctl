@@ -1,0 +1,2 @@
+create-plan-subepics *args:
+    python3 bin/create-plan-subepics.py {{args}}

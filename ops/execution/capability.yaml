@@ -1,0 +1,24 @@
+---
+schema_version: 1
+id: execution
+provides: execution
+description: >-
+  Materialize reviewed plans into verifiable Beads execution hierarchies.
+status: experimental
+requires:
+  tools: [bd, python3]
+  capabilities: []
+owns:
+  - ops/execution/**
+  - var/execution/**
+reads:
+  - docs/plans/**
+generates:
+  - var/execution/**/rendered/**
+  - var/execution/**/bd-state.yaml
+commands:
+  - name: create-plan-subepics
+    summary: Render, create, or verify a plan-backed Beads epic hierarchy.
+    lane: fast
+    args: [args]
+skills: []

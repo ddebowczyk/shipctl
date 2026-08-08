@@ -1,0 +1,9 @@
+---
+schema_version: 1
+sequence: 14
+key: phase-8
+phase_label: Phase 8
+title: Full-application verification
+role: phase
+document: 08-full-application-verification.md
+action_plan_dir: 14-phase-8

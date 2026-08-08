@@ -1,0 +1,9 @@
+---
+schema_version: 1
+sequence: 8
+key: phase-2
+phase_label: Phase 2
+title: Running-instance control plane
+role: phase
+document: 02-running-instance-control-plane.md
+action_plan_dir: 08-phase-2

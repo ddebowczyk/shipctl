@@ -1,0 +1,9 @@
+---
+schema_version: 1
+sequence: 4
+key: step-0b
+phase_label: Step 0B
+title: Saved instance state specification
+role: phase
+document: 00b-saved-instance-state-spec.md
+action_plan_dir: 04-step-0b

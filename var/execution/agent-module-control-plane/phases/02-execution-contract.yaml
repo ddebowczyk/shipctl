@@ -1,0 +1,9 @@
+---
+schema_version: 1
+sequence: 2
+key: execution-contract
+phase_label: Execution contract
+title: Execution order and task contract
+role: governance
+document: 09-execution-order-and-task-contract.md
+action_plan_dir: 02-execution-contract
