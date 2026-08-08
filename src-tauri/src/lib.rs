@@ -19,6 +19,7 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use shipctl_core::instance::{
     ControlServer, InstanceContext, InstanceLaunchOptions, InstanceLeases,
 };
+use shipctl_core::module_control::ModuleRegistrySnapshotProvider;
 use shipctl_core::projects::watcher::GitWatcher;
 use shipctl_core::state::archive::StateArchiveService;
 use shipctl_core::state::providers::{UiSnapshotProvider, WorkspaceSnapshotProvider};
@@ -82,6 +83,10 @@ pub fn run_with_options_and_loader_probe(
         }
         Ok(_) => {}
         Err(e) => eprintln!("State migration warning: {e}"),
+    }
+
+    if !module_loader_probe_enabled {
+        modules::inventory::seed_current_build(&paths)?;
     }
 
     let builder = tauri::Builder::default()
@@ -251,6 +256,9 @@ fn snapshot_providers(
     let mut providers: Vec<Arc<dyn SnapshotProvider>> = vec![
         Arc::new(WorkspaceSnapshotProvider::new(paths.global_config.clone())),
         Arc::new(UiSnapshotProvider::new(paths.ui_state.clone())),
+        Arc::new(ModuleRegistrySnapshotProvider::new(
+            paths.module_registry_database.clone(),
+        )),
     ];
     modules::extend_snapshot_providers(paths, &mut providers);
     providers

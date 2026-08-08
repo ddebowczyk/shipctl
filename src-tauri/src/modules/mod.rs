@@ -11,6 +11,7 @@ pub mod assistants;
 pub mod capability_data;
 #[cfg(feature = "git-module")]
 pub mod git;
+pub mod inventory;
 #[cfg(feature = "ports-module")]
 pub mod ports;
 #[cfg(feature = "skills-module")]

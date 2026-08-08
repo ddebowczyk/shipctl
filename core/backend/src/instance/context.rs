@@ -194,6 +194,35 @@ pub fn resolve_state_root(explicit: Option<&Path>) -> Result<(PathBuf, RootSourc
     canonical_directory(path, source, "state root")
 }
 
+/// Resolve the established explicit/environment/default state-root precedence
+/// without creating or otherwise mutating the selected directory.
+pub fn resolve_state_root_read_only(
+    explicit: Option<&Path>,
+) -> Result<(PathBuf, RootSource), String> {
+    let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+    let environment = nonempty_path_env(STATE_DIR_ENV)?;
+    let platform_default = home.join(crate::workspace::migration::HOME_DIR_NAME);
+    let (path, source) = select_state_root(explicit, environment.as_deref(), &platform_default);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()
+            .map_err(|error| format!("Could not resolve current directory: {error}"))?
+            .join(path)
+    };
+    let resolved = if absolute.exists() {
+        absolute.canonicalize().map_err(|error| {
+            format!(
+                "Failed to canonicalize state root {}: {error}",
+                absolute.display()
+            )
+        })?
+    } else {
+        absolute
+    };
+    Ok((resolved, source))
+}
+
 fn select_state_root<'a>(
     explicit: Option<&'a Path>,
     environment: Option<&'a Path>,
@@ -330,6 +359,17 @@ mod tests {
             select_state_root(None, None, default),
             (default, RootSource::PlatformDefault)
         );
+    }
+
+    #[test]
+    fn read_only_state_root_resolution_does_not_create_the_selected_path() {
+        let (state_root, _) = roots("offline-read");
+
+        let (resolved, source) = resolve_state_root_read_only(Some(&state_root)).unwrap();
+
+        assert_eq!(resolved, state_root);
+        assert_eq!(source, RootSource::Explicit);
+        assert!(!resolved.exists());
     }
 
     #[test]

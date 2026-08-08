@@ -5,5 +5,7 @@
 //! instance; they never model Cargo feature selection or a source rebuild.
 
 pub mod contracts;
+pub mod registry;
 
 pub use contracts::*;
+pub use registry::*;

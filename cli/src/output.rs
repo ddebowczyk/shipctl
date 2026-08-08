@@ -1,9 +1,11 @@
+use clap::ValueEnum;
 use serde::Serialize;
 use serde_json::Value;
 use shipctl_core::instance::ControlError;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum OutputFormat {
+    #[default]
     Toon,
     Json,
 }
@@ -67,6 +69,30 @@ pub fn failure(
             code: &error.code,
             data: None,
             error: Some(error),
+        },
+    )
+}
+
+pub fn outcome(
+    format: OutputFormat,
+    operation: &str,
+    code: &str,
+    succeeded: bool,
+    data: impl Serialize,
+) -> Result<String, String> {
+    render(
+        format,
+        &ResponseEnvelope {
+            schema_version: 1,
+            operation,
+            status: if succeeded {
+                ResponseStatus::Success
+            } else {
+                ResponseStatus::Error
+            },
+            code,
+            data: Some(serde_json::to_value(data).map_err(|error| error.to_string())?),
+            error: None,
         },
     )
 }
@@ -157,5 +183,22 @@ mod tests {
         let toon_value: Value = toon_format::decode_default(&toon_text).unwrap();
         assert_eq!(toon_value, json_value);
         assert_eq!(json_value["data"], operation);
+    }
+
+    #[test]
+    fn failed_verification_keeps_machine_readable_data_on_stdout() {
+        let rendered = outcome(
+            OutputFormat::Json,
+            "modules.verify",
+            "module.verification.expectation_mismatch",
+            false,
+            json!({"matched": false}),
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&rendered).unwrap();
+
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["data"]["matched"], false);
+        assert!(value.get("error").is_none());
     }
 }

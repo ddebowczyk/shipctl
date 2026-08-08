@@ -28,6 +28,8 @@ sha2 = "0.10"
 sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
 shipctl-module-api = { path = "../../modules/api/backend" }
 tar = "0.4"
+rusqlite = { version = "0.40", features = ["backup", "bundled"] }
+tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 widestring = "1"

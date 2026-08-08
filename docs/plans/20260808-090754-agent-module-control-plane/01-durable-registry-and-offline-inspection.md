@@ -100,6 +100,17 @@ through the compiled CLI's JSON output.
 ## Primary implementation areas
 
 - `core/backend/src/module_control/` for service, repository, and read model;
-- `src-tauri/src/main.rs` for thin app-versus-CLI dispatch;
-- `src-tauri/src/` for CLI adapter and rendering; and
+- `src-tauri/src/modules/` only for the thin, build-composition adapter that
+  supplies the current static-builtin inventory to the generic registry;
+- `cli/` for the `shipctl modules … --offline` parser, read-only adapter, and
+  TOON/JSON rendering; and
 - `ops/module-control/` for isolated registry and compiled-binary tests.
+
+`shipctl` is already its own workspace CLI crate and `shipctl-ui` is the Tauri
+binary. Phase 1 must not reintroduce app-versus-CLI dispatch in `src-tauri`.
+The registry remains generic Rust infrastructure: the Tauri shell may project
+build composition into static inventory, but it must not acquire module
+behavior. TypeScript module artifacts continue to own behavior,
+contributions, configuration, and diagnostics through stable contracts;
+enabling or disabling an installed module is desired-state data, never a
+Cargo-feature change or Rust rebuild.

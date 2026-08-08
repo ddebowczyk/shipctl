@@ -1,23 +1,28 @@
+mod args;
 mod instances;
+mod offline_modules;
 mod output;
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use clap::error::ErrorKind as ClapErrorKind;
+use clap::Parser;
 use serde::Serialize;
 use shipctl_core::build_info::BuildIdentity;
 use shipctl_core::instance::ControlError;
 use shipctl_core::module_control::ModuleOperationKind;
 use shipctl_core::state::archive::inspect_archive;
-use uuid::Uuid;
 
+use args::{
+    Cli, Command as CliCommand, InstancesCommand, ModulesCommand, OperationsCommand, StateCommand,
+    UiCommand,
+};
 use instances::{StartDisposition, StartRequest};
 use output::OutputFormat;
 
 pub const APP_VERSION: &str = env!("SHIPCTL_APP_VERSION");
-
-const USAGE: &str = "shipctl [--version [--output json]] | shipctl ui [UI_ARGS...] | shipctl ui start --name <name> [--state-root <path>] [--runtime-root <path>] [--load-state <file>] [--output toon|json] | shipctl instances list [--runtime-root <path>] [--output toon|json] | shipctl instances inspect [<name-or-id>] [--runtime-root <path>] [--output toon|json] | shipctl instances stop [<name-or-id>] [--force] [--runtime-root <path>] [--output toon|json] | shipctl modules inspect|diagnose <module-id> [--instance <name-or-id>] [--runtime-root <path>] [--output toon|json] | shipctl modules enable|disable <module-id> --target-revision <revision> [--instance <name-or-id>] [--runtime-root <path>] [--output toon|json] | shipctl operations inspect <operation-id> [--instance <name-or-id>] [--runtime-root <path>] [--output toon|json] | shipctl state save --instance <name-or-id> --to <file> [--runtime-root <path>] [--output toon|json] | shipctl state inspect <file> [--output toon|json] | shipctl state verify <file> [--output toon|json]";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,290 +44,375 @@ pub fn paired_ui_path(cli_executable: &Path) -> PathBuf {
 }
 
 pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
-    let mut args = args.into_iter();
-    let _program = args.next();
-    let remaining: Vec<OsString> = args.collect();
-
-    if is_version_request(&remaining) {
-        print_version(wants_json(&remaining));
-        return ExitCode::SUCCESS;
-    }
+    let raw = args.into_iter().collect::<Vec<_>>();
+    let remaining = raw.get(1..).unwrap_or_default();
     if remaining.is_empty() {
         return launch_ui_foreground(&[]);
     }
+    if should_forward_ui(remaining) {
+        return launch_ui_foreground(&remaining[1..]);
+    }
 
-    match remaining[0].to_str() {
-        Some("ui") => run_ui(&remaining[1..]),
-        Some("instances") => run_instances(&remaining[1..]),
-        Some("modules") => run_modules(&remaining[1..]),
-        Some("operations") => run_operations(&remaining[1..]),
-        Some("state") => run_state(&remaining[1..]),
-        _ => emit_usage("cli", "Unknown Shipctl command", &remaining),
+    let format_hint = detect_output(remaining);
+    let cli = match Cli::try_parse_from(&raw) {
+        Ok(cli) => cli,
+        Err(error)
+            if matches!(
+                error.kind(),
+                ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion
+            ) =>
+        {
+            print!("{error}");
+            return ExitCode::SUCCESS;
+        }
+        Err(error) => {
+            return emit_usage(
+                format_hint,
+                operation_hint(remaining),
+                error.to_string().trim(),
+                remaining,
+            );
+        }
+    };
+    if cli.version {
+        if cli.command.is_some() {
+            return emit_usage(
+                cli.output,
+                "cli.version",
+                "--version cannot be combined with a subcommand",
+                remaining,
+            );
+        }
+        print_version(cli.output);
+        return ExitCode::SUCCESS;
+    }
+
+    match cli.command {
+        Some(CliCommand::Ui { command }) => match command {
+            UiCommand::Start(args) => run_ui_start(args, cli.output),
+        },
+        Some(CliCommand::Instances { command }) => run_instances(command, cli.output),
+        Some(CliCommand::Modules { command }) => run_modules(command, cli.output),
+        Some(CliCommand::Operations { command }) => run_operations(command, cli.output),
+        Some(CliCommand::State { command }) => run_state(command, cli.output),
+        Some(CliCommand::Version) => {
+            print_version(cli.output);
+            ExitCode::SUCCESS
+        }
+        None => emit_usage(
+            cli.output,
+            "cli",
+            "A command is required unless launching the UI with no arguments",
+            remaining,
+        ),
     }
 }
 
-fn run_modules(args: &[OsString]) -> ExitCode {
-    let Some(command) = args.first().and_then(|value| value.to_str()) else {
-        return emit_usage("modules", "A modules subcommand is required", args);
-    };
-    let operation = match command {
-        "inspect" => "modules.inspect",
-        "diagnose" => "modules.diagnose",
-        "enable" => "modules.enable",
-        "disable" => "modules.disable",
-        _ => return emit_usage("modules", "Unknown modules subcommand", args),
-    };
-    let parsed = match parse_modules(command, &args[1..]) {
-        Ok(parsed) => parsed,
-        Err(message) => return emit_usage(operation, &message, args),
-    };
-    let rendered = match command {
-        "inspect" => instances::inspect_module(
-            parsed.runtime_root.as_deref(),
-            parsed.selector.as_deref(),
-            parsed.module_id,
-        )
-        .and_then(|data| {
-            emit_success(
-                parsed.output,
-                operation,
+fn run_modules(command: ModulesCommand, output: OutputFormat) -> ExitCode {
+    match command {
+        ModulesCommand::List(args) => {
+            debug_assert!(args.offline);
+            match offline_modules::list(args.state_root.as_deref()) {
+                Ok(data) => emit_success(
+                    output,
+                    "modules.list",
+                    "module.registry.listed",
+                    false,
+                    data,
+                )
+                .unwrap_or_else(|message| emit_render_failure(output, "modules.list", message)),
+                Err(error) => emit_failure(output, "modules.list", &error, false),
+            }
+        }
+        ModulesCommand::Inspect(args) if args.offline => {
+            match offline_modules::inspect(args.state_root.as_deref(), &args.module_id) {
+                Ok(data) => emit_success(
+                    output,
+                    "modules.inspect",
+                    "module.registry.inspected",
+                    false,
+                    data,
+                )
+                .unwrap_or_else(|message| emit_render_failure(output, "modules.inspect", message)),
+                Err(error) => emit_failure(output, "modules.inspect", &error, false),
+            }
+        }
+        ModulesCommand::Inspect(args) => match instances::inspect_module(
+            args.online.runtime_root.as_deref(),
+            args.online.instance.as_deref(),
+            args.module_id,
+        ) {
+            Ok(data) => emit_success(
+                output,
+                "modules.inspect",
                 "module.inspection.fixture",
                 false,
                 data,
             )
-            .map_err(render_error)
-        }),
-        "diagnose" => instances::diagnose_module(
-            parsed.runtime_root.as_deref(),
-            parsed.selector.as_deref(),
-            parsed.module_id,
-        )
-        .and_then(|data| {
-            emit_success(
-                parsed.output,
-                operation,
+            .unwrap_or_else(|message| emit_render_failure(output, "modules.inspect", message)),
+            Err(error) => emit_failure(output, "modules.inspect", &error, false),
+        },
+        ModulesCommand::Diagnose(args) if args.offline => {
+            match offline_modules::diagnose(args.state_root.as_deref(), args.module_id.as_deref()) {
+                Ok(data) => {
+                    let succeeded = data.healthy;
+                    let code = offline_modules::diagnostics_code(&data);
+                    emit_outcome(output, "modules.diagnose", code, succeeded, data).unwrap_or_else(
+                        |message| emit_render_failure(output, "modules.diagnose", message),
+                    )
+                }
+                Err(error) => emit_failure(output, "modules.diagnose", &error, false),
+            }
+        }
+        ModulesCommand::Diagnose(args) => match instances::diagnose_module(
+            args.online.runtime_root.as_deref(),
+            args.online.instance.as_deref(),
+            args.module_id
+                .expect("clap requires a module id for online diagnosis"),
+        ) {
+            Ok(data) => emit_success(
+                output,
+                "modules.diagnose",
                 "module.diagnostics.fixture",
                 false,
                 data,
             )
-            .map_err(render_error)
-        }),
-        "enable" | "disable" => instances::transition_module(
-            parsed.runtime_root.as_deref(),
-            parsed.selector.as_deref(),
-            parsed.module_id,
-            if command == "enable" {
-                ModuleOperationKind::Enable
-            } else {
-                ModuleOperationKind::Disable
-            },
-            parsed
-                .target_registry_revision
-                .expect("lifecycle parsing requires a revision"),
-        )
-        .and_then(|data| {
-            emit_success(
-                parsed.output,
-                operation,
+            .unwrap_or_else(|message| emit_render_failure(output, "modules.diagnose", message)),
+            Err(error) => emit_failure(output, "modules.diagnose", &error, false),
+        },
+        ModulesCommand::Verify(args) => {
+            debug_assert!(args.offline);
+            match offline_modules::verify(
+                args.state_root.as_deref(),
+                &args.module_id,
+                &args.expectation,
+            ) {
+                Ok(data) => {
+                    let succeeded = data.matched;
+                    let code = offline_modules::verification_code(&data);
+                    emit_outcome(output, "modules.verify", code, succeeded, data).unwrap_or_else(
+                        |message| emit_render_failure(output, "modules.verify", message),
+                    )
+                }
+                Err(error) => emit_failure(output, "modules.verify", &error, false),
+            }
+        }
+        ModulesCommand::Enable(args) => run_module_transition(args, output, true),
+        ModulesCommand::Disable(args) => run_module_transition(args, output, false),
+    }
+}
+
+fn run_module_transition(
+    args: args::ModuleTransitionArgs,
+    output: OutputFormat,
+    enable: bool,
+) -> ExitCode {
+    let operation = if enable {
+        "modules.enable"
+    } else {
+        "modules.disable"
+    };
+    match instances::transition_module(
+        args.runtime_root.as_deref(),
+        args.instance.as_deref(),
+        args.module_id,
+        if enable {
+            ModuleOperationKind::Enable
+        } else {
+            ModuleOperationKind::Disable
+        },
+        args.target_revision,
+    ) {
+        Ok(data) => emit_success(output, operation, "module.operation.fixture", false, data)
+            .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
+        Err(error) => emit_failure(output, operation, &error, false),
+    }
+}
+
+fn run_operations(command: OperationsCommand, output: OutputFormat) -> ExitCode {
+    match command {
+        OperationsCommand::Inspect(args) => match instances::inspect_operation(
+            args.runtime_root.as_deref(),
+            args.instance.as_deref(),
+            args.operation_id,
+        ) {
+            Ok(data) => emit_success(
+                output,
+                "operations.inspect",
                 "module.operation.fixture",
                 false,
                 data,
             )
-            .map_err(render_error)
-        }),
-        _ => unreachable!(),
-    };
-    match rendered {
-        Ok(code) => code,
-        Err(error) => emit_failure(parsed.output, operation, &error, false),
+            .unwrap_or_else(|message| emit_render_failure(output, "operations.inspect", message)),
+            Err(error) => emit_failure(output, "operations.inspect", &error, false),
+        },
     }
 }
 
-fn run_operations(args: &[OsString]) -> ExitCode {
-    let Some(command) = args.first().and_then(|value| value.to_str()) else {
-        return emit_usage("operations", "An operations subcommand is required", args);
-    };
-    if command != "inspect" {
-        return emit_usage("operations", "Unknown operations subcommand", args);
-    }
-    let parsed = match parse_operations(&args[1..]) {
-        Ok(parsed) => parsed,
-        Err(message) => return emit_usage("operations.inspect", &message, args),
-    };
-    match instances::inspect_operation(
-        parsed.runtime_root.as_deref(),
-        parsed.selector.as_deref(),
-        parsed.operation_id,
-    ) {
-        Ok(data) => emit_success(
-            parsed.output,
-            "operations.inspect",
-            "module.operation.fixture",
-            false,
-            data,
-        )
-        .unwrap_or_else(|message| {
-            emit_render_failure(parsed.output, "operations.inspect", message)
-        }),
-        Err(error) => emit_failure(parsed.output, "operations.inspect", &error, false),
-    }
-}
-
-fn run_ui(args: &[OsString]) -> ExitCode {
-    if args.first().and_then(|value| value.to_str()) != Some("start") {
-        return launch_ui_foreground(args);
-    }
-    let format = detect_output(args);
-    let parsed = match parse_ui_start(&args[1..]) {
-        Ok(parsed) => parsed,
-        Err(message) => return emit_usage("ui.start", &message, args),
+fn run_ui_start(args: args::UiStartArgs, output: OutputFormat) -> ExitCode {
+    let load_state = match args.load_state {
+        Some(path) => match path.canonicalize() {
+            Ok(path) => Some(path),
+            Err(error) => {
+                return emit_failure(
+                    output,
+                    "ui.start",
+                    &ControlError::new(
+                        "state.snapshot.unreadable",
+                        format!(
+                            "Could not resolve state archive {}: {error}",
+                            path.display()
+                        ),
+                    ),
+                    false,
+                );
+            }
+        },
+        None => None,
     };
     let ui_path = match resolve_ui_path() {
         Ok(path) => path,
-        Err(error) => return emit_failure(parsed.output, "ui.start", &error, false),
+        Err(error) => return emit_failure(output, "ui.start", &error, false),
     };
     match instances::start(
         &ui_path,
         StartRequest {
-            name: parsed.name,
-            state_root: parsed.state_root,
-            runtime_root: parsed.runtime_root,
-            load_state: parsed.load_state,
+            name: args.name,
+            state_root: args.state_root,
+            runtime_root: args.runtime_root,
+            load_state,
         },
     ) {
         Ok(StartDisposition::Started(instance)) => emit_success(
-            parsed.output,
+            output,
             "ui.start",
             "control.instance.ready",
             false,
             instance,
         ),
         Ok(StartDisposition::AlreadyReady(instance)) => emit_success(
-            parsed.output,
+            output,
             "ui.start",
             "control.instance.already_ready",
             true,
             instance,
         ),
-        Err(error) => Ok(emit_failure(parsed.output, "ui.start", &error, false)),
+        Err(error) => Ok(emit_failure(output, "ui.start", &error, false)),
     }
-    .unwrap_or_else(|message| emit_render_failure(format, "ui.start", message))
+    .unwrap_or_else(|message| emit_render_failure(output, "ui.start", message))
 }
 
-fn run_state(args: &[OsString]) -> ExitCode {
-    let Some(command) = args.first().and_then(|value| value.to_str()) else {
-        return emit_usage("state", "A state subcommand is required", args);
-    };
-    let operation = match command {
-        "save" => "state.save",
-        "inspect" => "state.inspect",
-        "verify" => "state.verify",
-        _ => return emit_usage("state", "Unknown state subcommand", args),
-    };
-    let parsed = match parse_state(command, &args[1..]) {
-        Ok(parsed) => parsed,
-        Err(message) => return emit_usage(operation, &message, args),
-    };
-    let result = match command {
-        "save" => instances::save(
-            parsed.runtime_root.as_deref(),
-            parsed.selector.as_deref(),
-            &parsed.path,
+fn run_state(command: StateCommand, output: OutputFormat) -> ExitCode {
+    let (operation, code, result) = match command {
+        StateCommand::Save(args) => {
+            let destination = match absolute_path(&args.destination) {
+                Ok(path) => path,
+                Err(message) => {
+                    return emit_failure(
+                        output,
+                        "state.save",
+                        &ControlError::new("state.snapshot.path_invalid", message),
+                        false,
+                    );
+                }
+            };
+            (
+                "state.save",
+                "state.snapshot.saved",
+                instances::save(
+                    args.runtime_root.as_deref(),
+                    Some(&args.instance),
+                    &destination,
+                ),
+            )
+        }
+        StateCommand::Inspect(args) => (
+            "state.inspect",
+            "state.snapshot.inspected",
+            inspect_archive(&args.path),
         ),
-        "inspect" | "verify" => inspect_archive(&parsed.path),
-        _ => unreachable!(),
+        StateCommand::Verify(args) => (
+            "state.verify",
+            "state.snapshot.verified",
+            inspect_archive(&args.path),
+        ),
     };
     match result {
-        Ok(data) => emit_success(
-            parsed.output,
-            operation,
-            if command == "save" {
-                "state.snapshot.saved"
-            } else if command == "verify" {
-                "state.snapshot.verified"
-            } else {
-                "state.snapshot.inspected"
-            },
-            false,
-            data,
-        )
-        .unwrap_or_else(|message| emit_render_failure(parsed.output, operation, message)),
-        Err(error) => emit_failure(parsed.output, operation, &error, false),
+        Ok(data) => emit_success(output, operation, code, false, data)
+            .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
+        Err(error) => emit_failure(output, operation, &error, false),
     }
 }
 
-fn run_instances(args: &[OsString]) -> ExitCode {
-    let Some(command) = args.first().and_then(|value| value.to_str()) else {
-        return emit_usage("instances", "An instances subcommand is required", args);
-    };
-    let operation = match command {
-        "list" => "instances.list",
-        "inspect" => "instances.inspect",
-        "stop" => "instances.stop",
-        _ => return emit_usage("instances", "Unknown instances subcommand", args),
-    };
-    let parsed = match parse_instances(command, &args[1..]) {
-        Ok(parsed) => parsed,
-        Err(message) => return emit_usage(operation, &message, args),
-    };
-
-    let rendered = match command {
-        "list" => instances::list(parsed.runtime_root.as_deref()).and_then(|data| {
-            emit_success(
-                parsed.output,
-                operation,
-                "control.instances.listed",
-                false,
-                data,
+fn run_instances(command: InstancesCommand, output: OutputFormat) -> ExitCode {
+    let (operation, rendered) = match command {
+        InstancesCommand::List(args) => (
+            "instances.list",
+            instances::list(args.runtime_root.as_deref()).and_then(|data| {
+                emit_success(
+                    output,
+                    "instances.list",
+                    "control.instances.listed",
+                    false,
+                    data,
+                )
+                .map_err(render_error)
+            }),
+        ),
+        InstancesCommand::Inspect(args) => (
+            "instances.inspect",
+            instances::inspect(
+                args.runtime.runtime_root.as_deref(),
+                args.selector.as_deref(),
             )
-            .map_err(render_error)
-        }),
-        "inspect" => instances::inspect(parsed.runtime_root.as_deref(), parsed.selector.as_deref())
             .and_then(|data| {
                 emit_success(
-                    parsed.output,
-                    operation,
+                    output,
+                    "instances.inspect",
                     "control.instance.inspected",
                     false,
                     data,
                 )
                 .map_err(render_error)
             }),
-        "stop" => match instances::stop(
-            parsed.runtime_root.as_deref(),
-            parsed.selector.as_deref(),
-            parsed.force,
-        ) {
-            Ok(data) => emit_success(
-                parsed.output,
-                operation,
-                "control.instance.stopped",
-                false,
-                data,
-            )
-            .map_err(render_error),
-            Err(error) if error.code.as_str() == "control.instance.absent" => emit_success(
-                parsed.output,
-                operation,
-                "control.instance.already_stopped",
-                true,
-                StoppedNoOp {
-                    selector: parsed
-                        .selector
-                        .or_else(|| std::env::var("SHIPCTL_INSTANCE_ID").ok())
-                        .unwrap_or_else(|| "<sole-live-instance>".to_string()),
-                    stopped: false,
-                },
-            )
-            .map_err(render_error),
-            Err(error) => Err(error),
-        },
-        _ => unreachable!(),
+        ),
+        InstancesCommand::Stop(args) => {
+            let selector = args.selector;
+            let rendered = match instances::stop(
+                args.runtime.runtime_root.as_deref(),
+                selector.as_deref(),
+                args.force,
+            ) {
+                Ok(data) => emit_success(
+                    output,
+                    "instances.stop",
+                    "control.instance.stopped",
+                    false,
+                    data,
+                )
+                .map_err(render_error),
+                Err(error) if error.code.as_str() == "control.instance.absent" => emit_success(
+                    output,
+                    "instances.stop",
+                    "control.instance.already_stopped",
+                    true,
+                    StoppedNoOp {
+                        selector: selector
+                            .or_else(|| std::env::var("SHIPCTL_INSTANCE_ID").ok())
+                            .unwrap_or_else(|| "<sole-live-instance>".to_string()),
+                        stopped: false,
+                    },
+                )
+                .map_err(render_error),
+                Err(error) => Err(error),
+            };
+            ("instances.stop", rendered)
+        }
     };
 
     match rendered {
         Ok(code) => code,
-        Err(error) => emit_failure(parsed.output, operation, &error, false),
+        Err(error) => emit_failure(output, operation, &error, false),
     }
 }
 
@@ -364,143 +454,6 @@ fn resolve_ui_path() -> Result<PathBuf, ControlError> {
     }
 }
 
-struct UiStartArgs {
-    name: String,
-    state_root: Option<PathBuf>,
-    runtime_root: Option<PathBuf>,
-    load_state: Option<PathBuf>,
-    output: OutputFormat,
-}
-
-struct StateArgs {
-    selector: Option<String>,
-    path: PathBuf,
-    runtime_root: Option<PathBuf>,
-    output: OutputFormat,
-}
-
-struct InstancesArgs {
-    selector: Option<String>,
-    runtime_root: Option<PathBuf>,
-    output: OutputFormat,
-    force: bool,
-}
-
-struct ModuleArgs {
-    module_id: String,
-    selector: Option<String>,
-    runtime_root: Option<PathBuf>,
-    output: OutputFormat,
-    target_registry_revision: Option<u64>,
-}
-
-struct OperationArgs {
-    operation_id: Uuid,
-    selector: Option<String>,
-    runtime_root: Option<PathBuf>,
-    output: OutputFormat,
-}
-
-fn parse_ui_start(args: &[OsString]) -> Result<UiStartArgs, String> {
-    let mut name = None;
-    let mut state_root = None;
-    let mut runtime_root = None;
-    let mut load_state = None;
-    let mut output = OutputFormat::Toon;
-    let mut index = 0;
-    while index < args.len() {
-        let argument = unicode(&args[index])?;
-        if let Some((flag, inline)) = split_flag(argument) {
-            match flag {
-                "--name" => name = Some(value(args, &mut index, flag, inline)?),
-                "--state-root" => {
-                    state_root = Some(PathBuf::from(value(args, &mut index, flag, inline)?))
-                }
-                "--runtime-root" => {
-                    runtime_root = Some(PathBuf::from(value(args, &mut index, flag, inline)?))
-                }
-                "--load-state" => {
-                    let path = PathBuf::from(value(args, &mut index, flag, inline)?);
-                    load_state = Some(path.canonicalize().map_err(|error| {
-                        format!(
-                            "Could not resolve state archive {}: {error}",
-                            path.display()
-                        )
-                    })?);
-                }
-                "--output" => output = parse_output(&value(args, &mut index, flag, inline)?)?,
-                _ => return Err(format!("Unknown ui start option: {argument}")),
-            }
-        } else {
-            return Err(format!("Unexpected ui start argument: {argument}"));
-        }
-        index += 1;
-    }
-    Ok(UiStartArgs {
-        name: name.ok_or_else(|| "ui start requires --name <name>".to_string())?,
-        state_root,
-        runtime_root,
-        load_state,
-        output,
-    })
-}
-
-fn parse_state(command: &str, args: &[OsString]) -> Result<StateArgs, String> {
-    let mut selector = None;
-    let mut path = None;
-    let mut runtime_root = None;
-    let mut output = OutputFormat::Toon;
-    let mut index = 0;
-    while index < args.len() {
-        let argument = unicode(&args[index])?;
-        if let Some((flag, inline)) = split_flag(argument) {
-            match flag {
-                "--instance" if command == "save" => {
-                    selector = Some(value(args, &mut index, flag, inline)?)
-                }
-                "--to" if command == "save" => {
-                    path = Some(absolute_path(Path::new(&value(
-                        args, &mut index, flag, inline,
-                    )?))?)
-                }
-                "--runtime-root" if command == "save" => {
-                    runtime_root = Some(PathBuf::from(value(args, &mut index, flag, inline)?))
-                }
-                "--output" => output = parse_output(&value(args, &mut index, flag, inline)?)?,
-                _ => return Err(format!("Unknown state {command} option: {argument}")),
-            }
-        } else if command == "save" {
-            return Err(format!("Unexpected state save argument: {argument}"));
-        } else if path.replace(PathBuf::from(argument)).is_some() {
-            return Err(format!("state {command} accepts exactly one archive path"));
-        }
-        index += 1;
-    }
-    let path = path.ok_or_else(|| match command {
-        "save" => "state save requires --to <file>".to_string(),
-        _ => format!("state {command} requires an archive path"),
-    })?;
-    if command == "save" && selector.is_none() {
-        return Err("state save requires --instance <name-or-id>".to_string());
-    }
-    let path = if command == "save" {
-        path
-    } else {
-        path.canonicalize().map_err(|error| {
-            format!(
-                "Could not resolve state archive {}: {error}",
-                path.display()
-            )
-        })?
-    };
-    Ok(StateArgs {
-        selector,
-        path,
-        runtime_root,
-        output,
-    })
-}
-
 fn absolute_path(path: &Path) -> Result<PathBuf, String> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
@@ -511,159 +464,38 @@ fn absolute_path(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn parse_instances(command: &str, args: &[OsString]) -> Result<InstancesArgs, String> {
-    let mut selector = None;
-    let mut runtime_root = None;
-    let mut output = OutputFormat::Toon;
-    let mut force = false;
-    let mut index = 0;
-    while index < args.len() {
-        let argument = unicode(&args[index])?;
-        if let Some((flag, inline)) = split_flag(argument) {
-            match flag {
-                "--runtime-root" => {
-                    runtime_root = Some(PathBuf::from(value(args, &mut index, flag, inline)?))
-                }
-                "--output" => output = parse_output(&value(args, &mut index, flag, inline)?)?,
-                "--force" if command == "stop" && inline.is_none() => force = true,
-                _ => return Err(format!("Unknown {command} option: {argument}")),
-            }
-        } else if command == "list" {
-            return Err(format!("Unexpected list argument: {argument}"));
-        } else if selector.replace(argument.to_string()).is_some() {
-            return Err(format!("{command} accepts at most one instance selector"));
-        }
-        index += 1;
-    }
-    Ok(InstancesArgs {
-        selector,
-        runtime_root,
-        output,
-        force,
-    })
+fn should_forward_ui(args: &[OsString]) -> bool {
+    args.first().is_some_and(|argument| argument == "ui")
+        && !matches!(
+            args.get(1).and_then(|argument| argument.to_str()),
+            Some("start" | "--help" | "-h")
+        )
 }
 
-fn parse_modules(command: &str, args: &[OsString]) -> Result<ModuleArgs, String> {
-    let mut module_id = None;
-    let mut selector = None;
-    let mut runtime_root = None;
-    let mut output = OutputFormat::Toon;
-    let mut target_registry_revision = None;
-    let mut index = 0;
-    while index < args.len() {
-        let argument = unicode(&args[index])?;
-        if let Some((flag, inline)) = split_flag(argument) {
-            match flag {
-                "--instance" => selector = Some(value(args, &mut index, flag, inline)?),
-                "--runtime-root" => {
-                    runtime_root = Some(PathBuf::from(value(args, &mut index, flag, inline)?))
-                }
-                "--output" => output = parse_output(&value(args, &mut index, flag, inline)?)?,
-                "--target-revision" if matches!(command, "enable" | "disable") => {
-                    let value = value(args, &mut index, flag, inline)?;
-                    target_registry_revision = Some(value.parse::<u64>().map_err(|_| {
-                        "--target-revision must be an unsigned integer".to_string()
-                    })?);
-                }
-                _ => return Err(format!("Unknown modules {command} option: {argument}")),
-            }
-        } else if module_id.replace(argument.to_string()).is_some() {
-            return Err(format!("modules {command} accepts exactly one module id"));
-        }
-        index += 1;
-    }
-    let module_id = module_id.ok_or_else(|| format!("modules {command} requires a module id"))?;
-    if matches!(command, "enable" | "disable") && target_registry_revision.is_none() {
-        return Err(format!(
-            "modules {command} requires --target-revision <revision>"
-        ));
-    }
-    Ok(ModuleArgs {
-        module_id,
-        selector,
-        runtime_root,
-        output,
-        target_registry_revision,
-    })
-}
-
-fn parse_operations(args: &[OsString]) -> Result<OperationArgs, String> {
-    let mut operation_id = None;
-    let mut selector = None;
-    let mut runtime_root = None;
-    let mut output = OutputFormat::Toon;
-    let mut index = 0;
-    while index < args.len() {
-        let argument = unicode(&args[index])?;
-        if let Some((flag, inline)) = split_flag(argument) {
-            match flag {
-                "--instance" => selector = Some(value(args, &mut index, flag, inline)?),
-                "--runtime-root" => {
-                    runtime_root = Some(PathBuf::from(value(args, &mut index, flag, inline)?))
-                }
-                "--output" => output = parse_output(&value(args, &mut index, flag, inline)?)?,
-                _ => return Err(format!("Unknown operations inspect option: {argument}")),
-            }
-        } else if operation_id
-            .replace(
-                Uuid::parse_str(argument)
-                    .map_err(|_| "operations inspect requires a UUID operation id".to_string())?,
-            )
-            .is_some()
-        {
-            return Err("operations inspect accepts exactly one operation id".to_string());
-        }
-        index += 1;
-    }
-    Ok(OperationArgs {
-        operation_id: operation_id
-            .ok_or_else(|| "operations inspect requires an operation id".to_string())?,
-        selector,
-        runtime_root,
-        output,
-    })
-}
-
-fn split_flag(argument: &str) -> Option<(&str, Option<&str>)> {
-    if !argument.starts_with('-') {
-        return None;
-    }
-    Some(
-        argument
-            .split_once('=')
-            .map_or((argument, None), |(flag, value)| (flag, Some(value))),
-    )
-}
-
-fn value(
-    args: &[OsString],
-    index: &mut usize,
-    flag: &str,
-    inline: Option<&str>,
-) -> Result<String, String> {
-    match inline {
-        Some(value) if !value.is_empty() => Ok(value.to_string()),
-        Some(_) => Err(format!("{flag} requires a value")),
-        None => {
-            *index += 1;
-            args.get(*index)
-                .ok_or_else(|| format!("{flag} requires a value"))
-                .and_then(|value| unicode(value).map(str::to_string))
-        }
-    }
-}
-
-fn unicode(value: &OsString) -> Result<&str, String> {
-    value
-        .to_str()
-        .ok_or_else(|| "Shipctl command arguments must be valid Unicode".to_string())
-}
-
-fn parse_output(value: &str) -> Result<OutputFormat, String> {
-    match value {
-        "toon" => Ok(OutputFormat::Toon),
-        "json" => Ok(OutputFormat::Json),
-        _ => Err("--output must be toon or json".to_string()),
+fn operation_hint(args: &[OsString]) -> &str {
+    match (
+        args.first().and_then(|value| value.to_str()),
+        args.get(1).and_then(|value| value.to_str()),
+    ) {
+        (Some(group), Some(command)) if !command.starts_with('-') => match (group, command) {
+            ("ui", "start") => "ui.start",
+            ("instances", "list") => "instances.list",
+            ("instances", "inspect") => "instances.inspect",
+            ("instances", "stop") => "instances.stop",
+            ("modules", "list") => "modules.list",
+            ("modules", "inspect") => "modules.inspect",
+            ("modules", "diagnose") => "modules.diagnose",
+            ("modules", "verify") => "modules.verify",
+            ("modules", "enable") => "modules.enable",
+            ("modules", "disable") => "modules.disable",
+            ("operations", "inspect") => "operations.inspect",
+            ("state", "save") => "state.save",
+            ("state", "inspect") => "state.inspect",
+            ("state", "verify") => "state.verify",
+            _ => "cli",
+        },
+        (Some("version"), _) | (Some("--version"), _) | (Some("-V"), _) => "cli.version",
+        _ => "cli",
     }
 }
 
@@ -692,6 +524,24 @@ fn emit_success(
     Ok(ExitCode::SUCCESS)
 }
 
+fn emit_outcome(
+    format: OutputFormat,
+    operation: &str,
+    code: &str,
+    succeeded: bool,
+    data: impl Serialize,
+) -> Result<ExitCode, String> {
+    println!(
+        "{}",
+        output::outcome(format, operation, code, succeeded, data)?
+    );
+    Ok(if succeeded {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
+}
+
 fn emit_failure(
     format: OutputFormat,
     operation: &str,
@@ -712,10 +562,12 @@ fn emit_failure(
     }
 }
 
-fn emit_usage(operation: &str, message: &str, args: &[OsString]) -> ExitCode {
-    let error = ControlError::new("cli.usage", message)
-        .with_expected_observed(USAGE, format!("{:?}", args));
-    emit_failure(detect_output(args), operation, &error, true)
+fn emit_usage(format: OutputFormat, operation: &str, message: &str, args: &[OsString]) -> ExitCode {
+    let error = ControlError::new("cli.usage", message).with_expected_observed(
+        "valid arguments; run the command with --help for generated usage",
+        format!("{args:?}"),
+    );
+    emit_failure(format, operation, &error, true)
 }
 
 fn emit_render_failure(format: OutputFormat, operation: &str, message: String) -> ExitCode {
@@ -731,21 +583,9 @@ fn render_error(message: String) -> ControlError {
     ControlError::new("cli.render_failed", message)
 }
 
-fn is_version_request(args: &[OsString]) -> bool {
-    matches!(
-        args.first().and_then(|arg| arg.to_str()),
-        Some("--version" | "version")
-    )
-}
-
-fn wants_json(args: &[OsString]) -> bool {
-    args.windows(2)
-        .any(|pair| pair[0] == OsStr::new("--output") && pair[1] == OsStr::new("json"))
-}
-
-fn print_version(json: bool) {
+fn print_version(format: OutputFormat) {
     let identity = BuildIdentity::new("cli", APP_VERSION);
-    if json {
+    if format == OutputFormat::Json {
         println!(
             "{}",
             serde_json::to_string(&identity).expect("build identity is serializable")
@@ -784,81 +624,134 @@ mod tests {
     }
 
     #[test]
-    fn parses_agent_instance_commands_without_prompts() {
-        let parsed = parse_ui_start(&[
-            "--name".into(),
-            "alpha".into(),
-            "--state-root=/tmp/alpha".into(),
-            "--runtime-root".into(),
-            "/tmp/runtime".into(),
-            "--output".into(),
-            "json".into(),
+    fn clap_parses_agent_instance_commands_without_prompts() {
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "ui",
+            "start",
+            "--name",
+            "alpha",
+            "--state-root=/tmp/alpha",
+            "--runtime-root",
+            "/tmp/runtime",
+            "--output",
+            "json",
         ])
         .unwrap();
-        assert_eq!(parsed.name, "alpha");
         assert_eq!(parsed.output, OutputFormat::Json);
+        let Some(CliCommand::Ui {
+            command: UiCommand::Start(start),
+        }) = parsed.command
+        else {
+            panic!("expected ui start")
+        };
+        assert_eq!(start.name, "alpha");
 
-        let parsed = parse_instances(
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "instances",
             "stop",
-            &["alpha".into(), "--force".into(), "--output=toon".into()],
-        )
-        .unwrap();
-        assert_eq!(parsed.selector.as_deref(), Some("alpha"));
-        assert!(parsed.force);
-    }
-
-    #[test]
-    fn parses_state_archive_commands_and_restore_start() {
-        let archive = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-        let archive_text = archive.to_string_lossy().into_owned();
-
-        let save = parse_state(
-            "save",
-            &[
-                "--instance=alpha".into(),
-                "--to".into(),
-                "/tmp/alpha.shipctl-state".into(),
-                "--runtime-root=/tmp/runtime".into(),
-                "--output=json".into(),
-            ],
-        )
-        .unwrap();
-        assert_eq!(save.selector.as_deref(), Some("alpha"));
-        assert_eq!(save.path, Path::new("/tmp/alpha.shipctl-state"));
-        assert_eq!(save.output, OutputFormat::Json);
-
-        let inspect = parse_state("inspect", &[archive_text.clone().into()]).unwrap();
-        assert_eq!(inspect.path, archive.canonicalize().unwrap());
-
-        let start = parse_ui_start(&[
-            "--name=restored".into(),
-            format!("--load-state={archive_text}").into(),
+            "alpha",
+            "--force",
+            "--output=toon",
         ])
         .unwrap();
-        assert_eq!(start.load_state, Some(archive.canonicalize().unwrap()));
+        let Some(CliCommand::Instances {
+            command: InstancesCommand::Stop(stop),
+        }) = parsed.command
+        else {
+            panic!("expected instances stop")
+        };
+        assert_eq!(stop.selector.as_deref(), Some("alpha"));
+        assert!(stop.force);
     }
 
     #[test]
-    fn parses_module_and_operation_transport_commands() {
-        let module = parse_modules(
-            "enable",
-            &[
-                "shipctl.fixture".into(),
-                "--target-revision=12".into(),
-                "--instance".into(),
-                "fixture".into(),
-                "--output=json".into(),
-            ],
-        )
+    fn clap_parses_state_archive_commands() {
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "state",
+            "save",
+            "--instance=alpha",
+            "--to",
+            "/tmp/alpha.shipctl-state",
+            "--runtime-root=/tmp/runtime",
+            "--output=json",
+        ])
         .unwrap();
-        assert_eq!(module.module_id, "shipctl.fixture");
-        assert_eq!(module.target_registry_revision, Some(12));
-        assert_eq!(module.selector.as_deref(), Some("fixture"));
-        assert_eq!(module.output, OutputFormat::Json);
+        assert_eq!(parsed.output, OutputFormat::Json);
+        let Some(CliCommand::State {
+            command: StateCommand::Save(save),
+        }) = parsed.command
+        else {
+            panic!("expected state save")
+        };
+        assert_eq!(save.instance, "alpha");
+        assert_eq!(save.destination, Path::new("/tmp/alpha.shipctl-state"));
+    }
 
-        let operation_id = Uuid::new_v4();
-        let operation = parse_operations(&[operation_id.to_string().into()]).unwrap();
-        assert_eq!(operation.operation_id, operation_id);
+    #[test]
+    fn clap_parses_online_and_offline_module_commands() {
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "modules",
+            "enable",
+            "shipctl.fixture",
+            "--target-revision=12",
+            "--instance",
+            "fixture",
+            "--output=json",
+        ])
+        .unwrap();
+        assert_eq!(parsed.output, OutputFormat::Json);
+        let Some(CliCommand::Modules {
+            command: ModulesCommand::Enable(module),
+        }) = parsed.command
+        else {
+            panic!("expected modules enable")
+        };
+        assert_eq!(module.module_id, "shipctl.fixture");
+        assert_eq!(module.target_revision, 12);
+        assert_eq!(module.instance.as_deref(), Some("fixture"));
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "modules",
+            "diagnose",
+            "--offline",
+            "--state-root",
+            "/tmp/state",
+        ])
+        .unwrap();
+        let Some(CliCommand::Modules {
+            command: ModulesCommand::Diagnose(diagnose),
+        }) = parsed.command
+        else {
+            panic!("expected offline modules diagnose")
+        };
+        assert!(diagnose.offline);
+        assert!(diagnose.module_id.is_none());
+    }
+
+    #[test]
+    fn clap_rejects_conflicting_module_targets_and_emits_plain_help() {
+        let error = Cli::try_parse_from([
+            "shipctl",
+            "modules",
+            "inspect",
+            "shipctl.fixture",
+            "--offline",
+            "--instance",
+            "alpha",
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), ClapErrorKind::ArgumentConflict);
+
+        let help = Cli::try_parse_from(["shipctl", "modules", "--help"])
+            .unwrap_err()
+            .to_string();
+        assert!(!help.contains('\u{1b}'));
+        assert!(help.contains("Usage: shipctl modules"));
     }
 
     #[test]
