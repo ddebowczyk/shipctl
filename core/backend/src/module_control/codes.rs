@@ -56,6 +56,13 @@ pub const RUNTIME_DIAGNOSED: &str = "module.runtime.diagnosed";
 pub const OPERATION_ACCEPTED: &str = "module.operation.accepted";
 pub const OPERATION_INSPECTED: &str = "module.operation.inspected";
 
+/// Offline runtime-artifact outcomes. These report admission metadata only;
+/// none imply a loaded module, callable capability, or active route.
+pub const ARTIFACT_PREFLIGHTED: &str = "module.artifact.preflighted";
+pub const ARTIFACT_ADDED: &str = "module.artifact.added";
+pub const ARTIFACT_DISABLED_INSPECTED: &str = "module.artifact.disabled_inspected";
+pub const CAPABILITY_INSPECTED: &str = "module.capability.inspected";
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -113,6 +120,10 @@ mod tests {
             super::RUNTIME_DIAGNOSED,
             super::OPERATION_ACCEPTED,
             super::OPERATION_INSPECTED,
+            super::ARTIFACT_PREFLIGHTED,
+            super::ARTIFACT_ADDED,
+            super::ARTIFACT_DISABLED_INSPECTED,
+            super::CAPABILITY_INSPECTED,
         ];
         let unique = codes.iter().copied().collect::<BTreeSet<_>>();
         assert_eq!(unique.len(), codes.len());

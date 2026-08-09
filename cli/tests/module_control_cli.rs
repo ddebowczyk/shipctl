@@ -195,8 +195,8 @@ fn cli_renders_complete_native_restart_fixture_stream_as_json_and_toon() {
     drop(server);
     let unavailable = run_message_cli(&context, "inspect", "json");
     assert!(!unavailable.status.success());
-    assert!(unavailable.stdout.is_empty());
-    let unavailable: Value = serde_json::from_slice(&unavailable.stderr).unwrap();
+    assert!(unavailable.stderr.is_empty());
+    let unavailable: Value = serde_json::from_slice(&unavailable.stdout).unwrap();
     assert_eq!(unavailable["code"], "message.runtime.unavailable");
     let _ = std::fs::remove_dir_all(root);
 }

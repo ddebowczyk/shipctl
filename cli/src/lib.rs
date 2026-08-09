@@ -17,8 +17,8 @@ use shipctl_core::message_bus::{
     RUNTIME_DIAGNOSTICS_FAILED, RUNTIME_HEALTHY, RUNTIME_INSPECTED as MESSAGE_RUNTIME_INSPECTED,
 };
 use shipctl_core::module_control::codes::{
-    OPERATION_ACCEPTED, OPERATION_INSPECTED, REGISTRY_INSPECTED, REGISTRY_LISTED,
-    RUNTIME_DIAGNOSED, RUNTIME_INSPECTED,
+    ARTIFACT_ADDED, ARTIFACT_PREFLIGHTED, CAPABILITY_INSPECTED, OPERATION_ACCEPTED,
+    OPERATION_INSPECTED, REGISTRY_LISTED, RUNTIME_DIAGNOSED, RUNTIME_INSPECTED,
 };
 use shipctl_core::module_control::ModuleOperationKind;
 use shipctl_core::scheduler::contracts::ScheduleDeliveryOutcome;
@@ -305,6 +305,34 @@ fn run_schedules(command: ScheduleCommand, output: OutputFormat, full: bool) -> 
 
 fn run_modules(command: ModulesCommand, output: OutputFormat) -> ExitCode {
     match command {
+        ModulesCommand::Preflight(args) => {
+            debug_assert!(args.offline);
+            match offline_modules::preflight(args.state_root.as_deref(), &args.archive) {
+                Ok(data) => emit_success(
+                    output,
+                    "modules.preflight",
+                    ARTIFACT_PREFLIGHTED,
+                    false,
+                    data,
+                )
+                .unwrap_or_else(|message| {
+                    emit_render_failure(output, "modules.preflight", message)
+                }),
+                Err(error) => emit_failure(output, "modules.preflight", &error, false),
+            }
+        }
+        ModulesCommand::Add(args) => {
+            debug_assert!(args.offline);
+            match offline_modules::add(args.state_root.as_deref(), &args.archive) {
+                Ok(data) => {
+                    let no_op = !data.receipt.changed;
+                    emit_success(output, "modules.add", ARTIFACT_ADDED, no_op, data).unwrap_or_else(
+                        |message| emit_render_failure(output, "modules.add", message),
+                    )
+                }
+                Err(error) => emit_failure(output, "modules.add", &error, false),
+            }
+        }
         ModulesCommand::List(args) => {
             debug_assert!(args.offline);
             match offline_modules::list(args.state_root.as_deref()) {
@@ -316,10 +344,10 @@ fn run_modules(command: ModulesCommand, output: OutputFormat) -> ExitCode {
         ModulesCommand::Inspect(args) if args.offline => {
             match offline_modules::inspect(args.state_root.as_deref(), &args.module_id) {
                 Ok(data) => {
-                    emit_success(output, "modules.inspect", REGISTRY_INSPECTED, false, data)
-                        .unwrap_or_else(|message| {
-                            emit_render_failure(output, "modules.inspect", message)
-                        })
+                    let code = offline_modules::inspection_code(&data);
+                    emit_success(output, "modules.inspect", code, false, data).unwrap_or_else(
+                        |message| emit_render_failure(output, "modules.inspect", message),
+                    )
                 }
                 Err(error) => emit_failure(output, "modules.inspect", &error, false),
             }
@@ -333,6 +361,25 @@ fn run_modules(command: ModulesCommand, output: OutputFormat) -> ExitCode {
                 .unwrap_or_else(|message| emit_render_failure(output, "modules.inspect", message)),
             Err(error) => emit_failure(output, "modules.inspect", &error, false),
         },
+        ModulesCommand::InspectCapability(args) => {
+            debug_assert!(args.offline);
+            match offline_modules::inspect_capability(
+                args.state_root.as_deref(),
+                &args.capability_id,
+            ) {
+                Ok(data) => emit_success(
+                    output,
+                    "modules.inspect_capability",
+                    CAPABILITY_INSPECTED,
+                    false,
+                    data,
+                )
+                .unwrap_or_else(|message| {
+                    emit_render_failure(output, "modules.inspect_capability", message)
+                }),
+                Err(error) => emit_failure(output, "modules.inspect_capability", &error, false),
+            }
+        }
         ModulesCommand::Diagnose(args) if args.offline => {
             match offline_modules::diagnose(args.state_root.as_deref(), args.module_id.as_deref()) {
                 Ok(data) => {
@@ -680,8 +727,11 @@ fn operation_hint(args: &[OsString]) -> &str {
             ("instances", "inspect") => "instances.inspect",
             ("instances", "diagnose") => "instances.diagnose",
             ("instances", "stop") => "instances.stop",
+            ("modules", "preflight") => "modules.preflight",
+            ("modules", "add") => "modules.add",
             ("modules", "list") => "modules.list",
             ("modules", "inspect") => "modules.inspect",
+            ("modules", "inspect-capability") => "modules.inspect_capability",
             ("modules", "diagnose") => "modules.diagnose",
             ("modules", "verify") => "modules.verify",
             ("modules", "enable") => "modules.enable",
@@ -823,7 +873,7 @@ fn emit_failure(
     usage: bool,
 ) -> ExitCode {
     match output::failure(format, operation, error) {
-        Ok(rendered) => eprintln!("{rendered}"),
+        Ok(rendered) => println!("{rendered}"),
         Err(render_error) => eprintln!(
             "{{\"schemaVersion\":1,\"operation\":\"{operation}\",\"status\":\"error\",\"code\":\"cli.render_failed\",\"error\":{{\"message\":{}}}}}",
             serde_json::to_string(&render_error).unwrap()
@@ -1005,6 +1055,75 @@ mod tests {
         };
         assert!(diagnose.offline);
         assert!(diagnose.module_id.is_none());
+    }
+
+    #[test]
+    fn clap_requires_explicit_offline_artifact_operations() {
+        let archive = Path::new("/tmp/fixture.shipctl-module");
+        let state_root = Path::new("/tmp/state");
+
+        let preflight = Cli::try_parse_from([
+            "shipctl",
+            "modules",
+            "preflight",
+            archive.to_str().unwrap(),
+            "--offline",
+            "--state-root",
+            state_root.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Some(CliCommand::Modules {
+            command: ModulesCommand::Preflight(args),
+        }) = preflight.command
+        else {
+            panic!("expected offline artifact preflight")
+        };
+        assert!(args.offline);
+        assert_eq!(args.archive, archive);
+        assert_eq!(args.state_root.as_deref(), Some(state_root));
+
+        let add = Cli::try_parse_from([
+            "shipctl",
+            "modules",
+            "add",
+            archive.to_str().unwrap(),
+            "--offline",
+        ])
+        .unwrap();
+        assert!(matches!(
+            add.command,
+            Some(CliCommand::Modules {
+                command: ModulesCommand::Add(args),
+            }) if args.offline && args.archive == archive
+        ));
+
+        let capability = Cli::try_parse_from([
+            "shipctl",
+            "modules",
+            "inspect-capability",
+            "acme.work-review",
+            "--offline",
+        ])
+        .unwrap();
+        assert!(matches!(
+            capability.command,
+            Some(CliCommand::Modules {
+                command: ModulesCommand::InspectCapability(args),
+            }) if args.offline && args.capability_id == "acme.work-review"
+        ));
+
+        for command in [
+            vec!["shipctl", "modules", "preflight", archive.to_str().unwrap()],
+            vec!["shipctl", "modules", "add", archive.to_str().unwrap()],
+            vec![
+                "shipctl",
+                "modules",
+                "inspect-capability",
+                "acme.work-review",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(command).is_err());
+        }
     }
 
     #[test]

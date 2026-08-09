@@ -290,7 +290,7 @@ fn built_cli_proves_named_scheduler_control_and_independent_fanout() {
         .output()
         .unwrap();
     assert_eq!(missing_selector.status.code(), Some(2));
-    let missing_selector_error = parse_stderr(&missing_selector);
+    let missing_selector_error = parse_stdout(&missing_selector);
     assert_eq!(missing_selector_error["operation"], "schedule.list");
     assert_eq!(missing_selector_error["code"], "cli.usage");
 
@@ -757,9 +757,9 @@ fn expect_stdout_toon(output: &Output, succeeds: bool) -> Value {
     toon_format::decode_default(std::str::from_utf8(&output.stdout).unwrap()).unwrap()
 }
 
-fn parse_stderr(output: &Output) -> Value {
-    assert!(output.stdout.is_empty());
-    serde_json::from_slice(&output.stderr).unwrap()
+fn parse_stdout(output: &Output) -> Value {
+    assert!(output.stderr.is_empty());
+    serde_json::from_slice(&output.stdout).unwrap()
 }
 
 fn assert_no_payload_leak(output: &Output) {

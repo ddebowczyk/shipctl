@@ -1,3 +1,4 @@
+mod catalog;
 mod diagnostics;
 mod inventory;
 mod snapshot;
@@ -24,15 +25,25 @@ use super::{
 };
 use crate::state::paths::ShipctlPaths;
 
+pub use catalog::{
+    ArtifactInstallReceipt, CapabilityBindingRole, CapabilityCatalogSnapshot,
+    PendingArtifactInstall, PendingArtifactInstallResolution, RegisteredCapabilityBinding,
+    RuntimeArtifactCatalogEntry, RuntimeArtifactRegistration,
+    RUNTIME_ARTIFACT_CATALOG_SCHEMA_VERSION,
+};
 pub use diagnostics::diagnose_registry;
 pub use inventory::{
     BuildModuleMembership, InventorySeedResult, StaticBuildInventory, StaticModuleRecord,
 };
 pub use snapshot::ModuleRegistrySnapshotProvider;
 
+use catalog::{
+    load_capability_catalog, load_runtime_artifact_catalog, migrate_v1_to_v2,
+    validate_catalog_snapshot,
+};
 use inventory::load_static_inventory;
 
-const REGISTRY_SCHEMA_VERSION: i64 = 1;
+const REGISTRY_SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug)]
 pub struct RegistryError {
@@ -81,7 +92,7 @@ pub struct RegistryMutation {
     pub observations: Vec<ObservedModuleState>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrySnapshot {
     pub registry_path: PathBuf,
@@ -90,6 +101,15 @@ pub struct RegistrySnapshot {
     pub desired: Vec<DesiredModuleState>,
     pub operations: Vec<ModuleOperation>,
     pub observations: Vec<ObservedModuleState>,
+    /// Validated runtime artifact metadata. Entries are catalog declarations
+    /// only; Phase 3 never makes their ports or providers callable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_artifacts: Vec<RuntimeArtifactCatalogEntry>,
+    /// Dynamic capability definitions declared by installed runtime artifacts.
+    /// Built-in definitions remain host-owned and may be referenced by bindings
+    /// without appearing here.
+    #[serde(default, skip_serializing_if = "CapabilityCatalogSnapshot::is_empty")]
+    pub capability_catalog: CapabilityCatalogSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub static_build_provenance: Option<String>,
     pub static_inventory: Vec<StaticModuleRecord>,
@@ -308,8 +328,11 @@ impl ModuleRegistry {
             REGISTRY_CONTRACT_INVALID,
         )?;
         let (static_build_provenance, static_inventory) = load_static_inventory(&self.connection)?;
+        let runtime_artifacts = load_runtime_artifact_catalog(&self.connection, &artifacts)?;
+        let capability_catalog = load_capability_catalog(&self.connection)?;
 
         validate_artifact_references(&artifacts, &desired, &observations, &static_inventory)?;
+        validate_catalog_snapshot(&artifacts, &runtime_artifacts, &capability_catalog)?;
         validate_operation_journal(&self.connection, &operations)?;
 
         Ok(RegistrySnapshot {
@@ -319,6 +342,8 @@ impl ModuleRegistry {
             desired,
             operations,
             observations,
+            runtime_artifacts,
+            capability_catalog,
             static_build_provenance,
             static_inventory,
         })
@@ -440,6 +465,13 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), RegistryError> {
                     ",
                 )
                 .map_err(migration_error)?;
+            migrate_v1_to_v2(&transaction)?;
+            transaction
+                .pragma_update(None, "user_version", REGISTRY_SCHEMA_VERSION)
+                .map_err(migration_error)?;
+        }
+        1 => {
+            migrate_v1_to_v2(&transaction)?;
             transaction
                 .pragma_update(None, "user_version", REGISTRY_SCHEMA_VERSION)
                 .map_err(migration_error)?;
@@ -632,6 +664,7 @@ fn insert_immutable_artifact(
     acquisition: &ArtifactAcquisition,
 ) -> Result<(), RegistryError> {
     let artifact = &acquisition.identity;
+    catalog::validate_runtime_identity_conflict(transaction, artifact)?;
     let identity_json = contract_json(artifact)?;
     let existing: Option<String> = transaction
         .query_row(

@@ -16,11 +16,13 @@ use shipctl_core::state::paths::ShipctlPaths;
 use uuid::Uuid;
 
 const MODULE_ID: &str = "example.module";
+const STATIC_MODULE_ID: &str = "shipctl.static";
 const INSTANCE_ID: &str = "00000000-0000-0000-0000-000000000101";
 const REQUEST_ID: &str = "00000000-0000-0000-0000-000000000102";
 
 #[test]
-fn compiled_cli_inspects_and_verifies_registry_without_writes_or_runtime_discovery() {
+fn compiled_cli_inspects_static_inventory_and_verifies_registry_without_writes_or_runtime_discovery(
+) {
     let root = unique_root("offline-modules");
     let state_root = root.join("state");
     let runtime_sentinel = root.join("runtime-must-not-exist");
@@ -57,7 +59,7 @@ fn compiled_cli_inspects_and_verifies_registry_without_writes_or_runtime_discove
         toon_format::decode_default(std::str::from_utf8(&list_toon.stdout).unwrap()).unwrap();
     assert_eq!(toon_value, list_value);
 
-    let inspection = run(
+    let legacy_dynamic = run(
         &state_root,
         &runtime_sentinel,
         &[
@@ -69,13 +71,33 @@ fn compiled_cli_inspects_and_verifies_registry_without_writes_or_runtime_discove
             "json",
         ],
     );
+    assert!(!legacy_dynamic.status.success());
+    assert!(legacy_dynamic.stderr.is_empty());
+    let legacy_dynamic: Value = serde_json::from_slice(&legacy_dynamic.stdout).unwrap();
+    assert_eq!(legacy_dynamic["code"], "module.artifact.repository.missing");
+
+    let inspection = run(
+        &state_root,
+        &runtime_sentinel,
+        &[
+            "modules",
+            "inspect",
+            STATIC_MODULE_ID,
+            "--offline",
+            "--output",
+            "json",
+        ],
+    );
     assert_success(&inspection);
     let inspection: Value = serde_json::from_slice(&inspection.stdout).unwrap();
-    assert_eq!(inspection["data"]["desired"][0]["enabled"], true);
+    assert_eq!(inspection["code"], "module.registry.inspected");
+    assert_eq!(inspection["data"]["runtimeAvailable"], false);
     assert_eq!(
-        inspection["data"]["lastReportedObservations"][0]["lifecycle"],
-        "active"
+        inspection["data"]["staticInventory"]["identity"]["id"],
+        STATIC_MODULE_ID
     );
+    assert_eq!(inspection["data"]["artifacts"], serde_json::json!([]));
+    assert_eq!(inspection["data"]["desired"][0]["enabled"], true);
 
     let diagnosis = run(
         &state_root,
@@ -155,7 +177,7 @@ fn seed_registry(paths: &ShipctlPaths, instance_id: Uuid, artifact: &ModuleIdent
         "shipctl-ui:fixture",
         "1.0.0",
         vec![BuildModuleMembership {
-            module_id: "shipctl.static".to_string(),
+            module_id: STATIC_MODULE_ID.to_string(),
             native_compiled: true,
             frontend_shipped: true,
         }],

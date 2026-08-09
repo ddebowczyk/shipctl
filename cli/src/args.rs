@@ -140,10 +140,16 @@ pub struct InstanceStopArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum ModulesCommand {
+    /// Validate an immutable module archive without installing or activating it.
+    Preflight(OfflineArtifactArgs),
+    /// Install a validated immutable module archive in disabled state.
+    Add(OfflineArtifactArgs),
     /// List module records without contacting a running instance.
     List(OfflineListArgs),
     /// Inspect desired and observed state for one module.
     Inspect(ModuleInspectArgs),
+    /// Inspect one declared capability from installed disabled artifacts.
+    InspectCapability(OfflineCapabilityInspectArgs),
     /// Run registry and module diagnostics.
     Diagnose(ModuleDiagnoseArgs),
     /// Verify offline registry state against an expectation file.
@@ -244,6 +250,34 @@ pub struct MessageTargetArgs {
 
 #[derive(Debug, Args)]
 pub struct OfflineListArgs {
+    /// Read durable state without contacting or starting a runtime.
+    #[arg(long, required = true)]
+    pub offline: bool,
+
+    /// Override the state root selected by environment or platform defaults.
+    #[arg(long, value_name = "PATH")]
+    pub state_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct OfflineArtifactArgs {
+    /// Immutable Shipctl module archive to validate or install.
+    pub archive: PathBuf,
+
+    /// Operate on durable state without contacting or starting a runtime.
+    #[arg(long, required = true)]
+    pub offline: bool,
+
+    /// Override the state root selected by environment or platform defaults.
+    #[arg(long, value_name = "PATH")]
+    pub state_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct OfflineCapabilityInspectArgs {
+    /// Stable capability identifier declared by an installed artifact.
+    pub capability_id: String,
+
     /// Read durable state without contacting or starting a runtime.
     #[arg(long, required = true)]
     pub offline: bool,

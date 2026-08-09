@@ -3,7 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use shipctl_core::instance::{resolve_state_root_read_only, ControlError, RootSource};
+use shipctl_core::instance::{
+    resolve_state_root, resolve_state_root_read_only, ControlError, RootSource,
+};
 use shipctl_core::module_control::codes::{
     INVALID_OFFLINE_RESPONSE, MODULE_ABSENT, REGISTRY_DIAGNOSTICS_FAILED, REGISTRY_HEALTHY,
     REGISTRY_INVENTORY_ABSENT, REGISTRY_STATE_ROOT_INVALID, RUNTIME_OFFLINE,
@@ -13,6 +15,10 @@ use shipctl_core::module_control::codes::{
 use shipctl_core::module_control::registry::{
     diagnose_registry, ModuleRegistry, RegisteredArtifact, RegistryError, RegistrySnapshot,
     StaticModuleRecord,
+};
+use shipctl_core::module_control::repository::{
+    ArtifactRepository, OfflineArtifactAddReport, OfflineArtifactPreflightReport,
+    OfflineCapabilityInspection, OfflineDisabledModuleInspection, ARTIFACT_REPOSITORY_MISSING,
 };
 use shipctl_core::module_control::{
     parse_contract_json, DesiredModuleState, Diagnostic, DiagnosticSeverity, ModuleContract,
@@ -62,6 +68,16 @@ pub struct OfflineModuleInspection {
     pub desired: Vec<DesiredModuleState>,
     pub last_reported_observations: Vec<ObservedModuleState>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Offline module inspection is either a provenance-safe Phase 3 artifact
+/// report or the legacy static-build inventory projection. Dynamic artifacts
+/// never fall back to the registry's legacy artifact records.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum OfflineModuleInspectReport {
+    DisabledArtifact(OfflineDisabledModuleInspection),
+    StaticBuiltin(OfflineModuleInspection),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -271,20 +287,120 @@ pub fn list(state_root: Option<&Path>) -> Result<OfflineModuleList, ControlError
     })
 }
 
+/// Validate an archive through the disabled-artifact repository without
+/// creating the selected state root or making any durable change.
+pub fn preflight(
+    state_root: Option<&Path>,
+    archive: &Path,
+) -> Result<OfflineArtifactPreflightReport, ControlError> {
+    read_only_artifact_repository(state_root)?
+        .preflight_report(archive)
+        .map_err(|error| error.into_control_error())
+}
+
+/// Publish a validated archive and register it disabled through the sole
+/// artifact repository write path.
+pub fn add(
+    state_root: Option<&Path>,
+    archive: &Path,
+) -> Result<OfflineArtifactAddReport, ControlError> {
+    writable_artifact_repository(state_root)?
+        .add_archive(archive)
+        .map_err(|error| error.into_control_error())
+}
+
 pub fn inspect(
     state_root: Option<&Path>,
     module_id: &str,
-) -> Result<OfflineModuleInspection, ControlError> {
-    let offline = read_snapshot(state_root)?;
-    let response = inspection(&offline, module_id).ok_or_else(|| {
-        ControlError::new(
-            MODULE_ABSENT,
-            format!("Module {module_id} is absent from the selected registry"),
-        )
-        .with_selector(module_id)
-        .with_expected_observed("installed, desired, or observed module record", "absent")
-    })?;
-    checked(response)
+) -> Result<OfflineModuleInspectReport, ControlError> {
+    let repository = read_only_artifact_repository(state_root)?;
+    match repository.inspect_disabled_module(module_id) {
+        Ok(report) => Ok(OfflineModuleInspectReport::DisabledArtifact(report)),
+        Err(error) if error.code == ARTIFACT_REPOSITORY_MISSING => {
+            let offline = read_snapshot(state_root)?;
+            let static_builtin = static_builtin_inspection(&offline, module_id)
+                .map(checked)
+                .transpose()?
+                .map(OfflineModuleInspectReport::StaticBuiltin);
+            static_builtin.ok_or_else(|| error.into_control_error())
+        }
+        Err(error) => Err(error.into_control_error()),
+    }
+}
+
+/// Inspect one declared dynamic capability without selecting or activating a
+/// provider.
+pub fn inspect_capability(
+    state_root: Option<&Path>,
+    capability_id: &str,
+) -> Result<OfflineCapabilityInspection, ControlError> {
+    read_only_artifact_repository(state_root)?
+        .inspect_capability(capability_id)
+        .map_err(|error| error.into_control_error())
+}
+
+fn read_only_artifact_repository(
+    state_root: Option<&Path>,
+) -> Result<ArtifactRepository, ControlError> {
+    let (state_root, _) = resolve_state_root_read_only(state_root)
+        .map_err(|error| ControlError::new(REGISTRY_STATE_ROOT_INVALID, error))?;
+    Ok(artifact_repository(state_root))
+}
+
+fn writable_artifact_repository(
+    state_root: Option<&Path>,
+) -> Result<ArtifactRepository, ControlError> {
+    let (state_root, _) = resolve_state_root(state_root)
+        .map_err(|error| ControlError::new(REGISTRY_STATE_ROOT_INVALID, error))?;
+    Ok(artifact_repository(state_root))
+}
+
+fn artifact_repository(state_root: PathBuf) -> ArtifactRepository {
+    ArtifactRepository::for_offline(
+        ShipctlPaths::new(state_root, PathBuf::new()),
+        crate::APP_VERSION,
+    )
+}
+
+fn static_builtin_inspection(
+    offline: &OfflineSnapshot,
+    module_id: &str,
+) -> Option<OfflineModuleInspection> {
+    let static_inventory = offline
+        .snapshot
+        .static_inventory
+        .iter()
+        .find(|record| record.identity.id == module_id)
+        .cloned()?;
+    Some(OfflineModuleInspection {
+        schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+        module_id: module_id.to_string(),
+        registry_revision: offline.snapshot.registry_revision,
+        state_root: offline.state_root.clone(),
+        state_root_source: offline.state_root_source.clone(),
+        registry_path: offline.snapshot.registry_path.clone(),
+        runtime_available: false,
+        artifacts: Vec::new(),
+        static_inventory: Some(static_inventory),
+        desired: offline
+            .snapshot
+            .effective_desired(module_id)
+            .into_iter()
+            .collect(),
+        last_reported_observations: Vec::new(),
+        diagnostics: vec![runtime_unavailable(&offline.state_root)],
+    })
+}
+
+pub fn inspection_code(report: &OfflineModuleInspectReport) -> &'static str {
+    match report {
+        OfflineModuleInspectReport::DisabledArtifact(_) => {
+            shipctl_core::module_control::ARTIFACT_DISABLED_INSPECTED
+        }
+        OfflineModuleInspectReport::StaticBuiltin(_) => {
+            shipctl_core::module_control::REGISTRY_INSPECTED
+        }
+    }
 }
 
 pub fn diagnose(

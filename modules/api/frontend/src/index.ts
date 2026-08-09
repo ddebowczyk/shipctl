@@ -134,3 +134,28 @@ export type {
   ScheduleTargetAvailability,
   ScheduleTargetKind,
 } from "./schedules";
+export {
+  CAPABILITY_CONTRACT_SCHEMA_VERSION,
+  CAPABILITY_DIAGNOSTIC_CODES,
+  CapabilityContractParseError,
+  parseCapabilityManifest,
+} from "./capabilities";
+export type {
+  CapabilityAgentAccess,
+  CapabilityAgentWatchAccess,
+  CapabilityConsumerBinding,
+  CapabilityDefinition,
+  CapabilityDiagnosticCode,
+  CapabilityEventDefinition,
+  CapabilityManifest,
+  CapabilityPortDefinition,
+  CapabilityPortKind,
+  CapabilityProviderBinding,
+  CapabilityProviderCardinality,
+  CapabilityProviderSelection,
+  CapabilityReference,
+  CapabilityScope,
+  CapabilityStreamDefinition,
+  CapabilitySurfaceBinding,
+  CapabilityTopicDefinition,
+} from "./capabilities";
