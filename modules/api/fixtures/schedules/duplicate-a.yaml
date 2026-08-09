@@ -1,0 +1,11 @@
+schema_version: 1
+id: agents.duplicate
+enabled: true
+cron: "*/5 * * * * Europe/Warsaw"
+target:
+  kind: channel
+  id: agents.duplicate-a
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload: {}

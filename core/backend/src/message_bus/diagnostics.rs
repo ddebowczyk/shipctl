@@ -20,6 +20,7 @@ pub const HANDLER_FAILED: &str = "message.handler.failed";
 pub const ROUTE_GENERATION_CHANGED: &str = "message.route.generation_changed";
 pub const BRIDGE_CLOSED: &str = "message.bridge.closed";
 pub const SECRET_LEAKAGE: &str = "message.diagnostic.secret_leakage";
+pub const SCHEDULER_SECRET_PAYLOAD_FORBIDDEN: &str = "message.scheduler.secret_payload_forbidden";
 pub const DRAIN_BLOCKED: &str = "message.activation.drain_blocked";
 pub const MODULE_JOIN_UNAVAILABLE: &str = "message.runtime.module_join_unavailable";
 pub const RUNTIME_INSPECTED: &str = "message.runtime.inspected";

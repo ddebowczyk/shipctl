@@ -1,0 +1,12 @@
+schema_version: 1
+id: agents.oversized
+enabled: true
+cron: "*/5 * * * * Europe/Warsaw"
+target:
+  kind: channel
+  id: agents.oversized
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload:
+    reason: this-schedule-payload-is-deliberately-larger-than-the-small-fixture-bound

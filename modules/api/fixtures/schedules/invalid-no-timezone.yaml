@@ -1,0 +1,11 @@
+schema_version: 1
+id: agents.timezone
+enabled: true
+cron: "*/5 * * * *"
+target:
+  kind: channel
+  id: agents.timezone
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload: {}

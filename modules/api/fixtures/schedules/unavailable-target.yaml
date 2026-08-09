@@ -1,0 +1,12 @@
+schema_version: 1
+id: agents.unavailable
+enabled: true
+cron: "*/5 * * * * Europe/Warsaw"
+target:
+  kind: channel
+  id: agents.unavailable
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload:
+    reason: unavailable

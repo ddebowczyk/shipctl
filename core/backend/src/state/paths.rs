@@ -11,6 +11,8 @@ pub struct ShipctlPaths {
     pub ui_state: PathBuf,
     pub assistant_sessions: PathBuf,
     pub usage_database: PathBuf,
+    /// User-authored schedule definitions owned by this instance.
+    pub schedule_root: PathBuf,
     /// Immutable, content-addressed module artifacts owned by this instance.
     pub module_artifact_root: PathBuf,
     /// Durable desired-state registry and operation journal for this instance.
@@ -34,6 +36,7 @@ impl ShipctlPaths {
             ui_state: state_root.join("ui-state.json"),
             assistant_sessions: state_root.join("assistant-sessions.json"),
             usage_database: state_root.join("usage.sqlite3"),
+            schedule_root: state_root.join("schedules"),
             module_artifact_root: state_root.join("modules"),
             module_registry_database: state_root.join("module-registry.sqlite3"),
             module_control_evidence_root: state_root.join("module-control").join("evidence"),
@@ -63,6 +66,11 @@ impl ShipctlPaths {
                 owner: "usage.database",
                 classification: "instance_owned",
                 path: self.usage_database.clone(),
+            },
+            DurableSource {
+                owner: "scheduler.configuration",
+                classification: "instance_owned",
+                path: self.schedule_root.clone(),
             },
             DurableSource {
                 owner: "modules.artifacts",
@@ -131,6 +139,27 @@ mod tests {
             .iter()
             .any(|source| source.owner == "module-control.evidence"
                 && source.path == paths.module_control_evidence_root));
+    }
+
+    #[test]
+    fn schedule_root_is_instance_local_and_registered_as_durable_configuration() {
+        let first = ShipctlPaths::new(
+            PathBuf::from("/profiles/first"),
+            PathBuf::from("/run/first"),
+        );
+        let second = ShipctlPaths::new(
+            PathBuf::from("/profiles/second"),
+            PathBuf::from("/run/second"),
+        );
+
+        assert_eq!(first.schedule_root, first.state_root.join("schedules"));
+        assert_eq!(second.schedule_root, second.state_root.join("schedules"));
+        assert_ne!(first.schedule_root, second.schedule_root);
+        assert!(first.durable_sources().iter().any(|source| {
+            source.owner == "scheduler.configuration"
+                && source.classification == "instance_owned"
+                && source.path == first.schedule_root
+        }));
     }
 
     #[test]

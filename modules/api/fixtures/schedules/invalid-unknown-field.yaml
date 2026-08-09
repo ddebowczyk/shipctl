@@ -1,0 +1,12 @@
+schema_version: 1
+id: agents.unsafe
+enabled: true
+cron: "*/5 * * * * Europe/Warsaw"
+target:
+  kind: channel
+  id: agents.unsafe
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload: {}
+command: whoami

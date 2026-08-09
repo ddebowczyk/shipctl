@@ -1,0 +1,12 @@
+schema_version: 1
+id: agents.invalid-payload
+enabled: true
+cron: "*/5 * * * * Europe/Warsaw"
+target:
+  kind: channel
+  id: agents.invalid-payload
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload:
+    unexpected: true

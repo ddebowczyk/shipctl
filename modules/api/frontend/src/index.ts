@@ -115,3 +115,22 @@ export type {
   WireCapabilityPortDeclaration,
   WireDirectedChannelDeclaration,
 } from "./messages";
+export {
+  SCHEDULE_DIAGNOSTIC_CODES,
+  SCHEDULE_INSPECTION_SCHEMA_VERSION,
+  SCHEDULE_SCHEMA_VERSION,
+  ScheduleInspectionParseError,
+  parseScheduleInspection,
+} from "./schedules";
+export type {
+  ScheduleDefinitionInspection,
+  ScheduleDeliveryOutcome,
+  ScheduleDeliverySummary,
+  ScheduleDiagnostic,
+  ScheduleDiagnosticCode,
+  ScheduleDiagnosticSeverity,
+  ScheduleInspection,
+  ScheduleTarget,
+  ScheduleTargetAvailability,
+  ScheduleTargetKind,
+} from "./schedules";

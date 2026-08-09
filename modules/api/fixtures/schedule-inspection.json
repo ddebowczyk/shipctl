@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "valid": {
+    "schemaVersion": 1,
+    "instanceId": "fixture-instance",
+    "incarnation": "00000000-0000-4000-8000-000000000001",
+    "scheduleGeneration": 7,
+    "snapshotDigestSha256": "b0eeb815b745eee99968a74900085cbe023960b56da368b6487348dd06f7b27f",
+    "busRouteGeneration": 11,
+    "schedules": [
+      {
+        "id": "agents.disabled",
+        "enabled": false,
+        "schemaVersion": 1,
+        "definitionDigestSha256": "1372113a9559dbec54ca6a92e5073427a5899aa8c08a78a6689287ad18b0a469",
+        "sourcePath": "disabled.yaml",
+        "cron": "30 2 * * * Europe/Warsaw",
+        "timezone": "Europe/Warsaw",
+        "target": {
+          "kind": "channel",
+          "id": "agents.disabled"
+        },
+        "message": {
+          "id": "fixture.agent-wakeup",
+          "version": 1
+        },
+        "scheduleGeneration": 7,
+        "busRouteGeneration": 11,
+        "targetAvailability": "unknown"
+      },
+      {
+        "id": "agents.dst-sydney",
+        "enabled": true,
+        "schemaVersion": 1,
+        "definitionDigestSha256": "1f70f2d54f639a563f9d7db906560e03f3e7a86d9e4d23c0e0be7d5c45f8b7d4",
+        "sourcePath": "dst-australia.yaml",
+        "cron": "30 2 * * * Australia/Sydney",
+        "timezone": "Australia/Sydney",
+        "target": {
+          "kind": "channel",
+          "id": "agents.dst-sydney"
+        },
+        "message": {
+          "id": "fixture.agent-wakeup",
+          "version": 1
+        },
+        "scheduleGeneration": 7,
+        "busRouteGeneration": 11,
+        "targetAvailability": "unknown"
+      },
+      {
+        "id": "agents.status",
+        "enabled": true,
+        "schemaVersion": 1,
+        "definitionDigestSha256": "31648e9a7417ef5b4c3bb6fe7d48fa4f9cf80807c6d27e3d4dd34ef7e7e6cb52",
+        "sourcePath": "valid-topic.yaml",
+        "cron": "0 * * * * America/New_York",
+        "timezone": "America/New_York",
+        "target": {
+          "kind": "topic",
+          "id": "agents.status"
+        },
+        "message": {
+          "id": "fixture.agent-wakeup",
+          "version": 1
+        },
+        "scheduleGeneration": 7,
+        "busRouteGeneration": 11,
+        "targetAvailability": "unknown"
+      },
+      {
+        "id": "agents.wakeup",
+        "enabled": true,
+        "schemaVersion": 1,
+        "definitionDigestSha256": "e360ce53a2488897f39c08cc2193c2719a0dd6871fc17197f3326b1804c09e85",
+        "sourcePath": "valid-channel.yaml",
+        "cron": "*/5 * * * * Europe/Warsaw",
+        "timezone": "Europe/Warsaw",
+        "target": {
+          "kind": "channel",
+          "id": "agents.wakeup"
+        },
+        "message": {
+          "id": "fixture.agent-wakeup",
+          "version": 1
+        },
+        "scheduleGeneration": 7,
+        "busRouteGeneration": 11,
+        "targetAvailability": "unknown"
+      }
+    ],
+    "diagnostics": []
+  }
+}

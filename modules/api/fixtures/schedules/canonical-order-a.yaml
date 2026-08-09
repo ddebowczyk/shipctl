@@ -1,0 +1,17 @@
+schema_version: 1
+id: agents.canonical
+enabled: true
+cron: "*/5 * * * * Europe/Warsaw"
+target:
+  kind: channel
+  id: agents.canonical
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload:
+    reason: canonical
+    metadata:
+      alpha: first
+      beta:
+        cat: 1
+        dog: 2

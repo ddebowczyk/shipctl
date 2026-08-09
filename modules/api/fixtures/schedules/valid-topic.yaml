@@ -1,0 +1,12 @@
+schema_version: 1
+id: agents.status
+enabled: true
+cron: "0 * * * * America/New_York"
+target:
+  kind: topic
+  id: agents.status
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload:
+    reason: status

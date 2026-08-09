@@ -451,17 +451,18 @@ fn ensure_classification_complete(
     state_root: &Path,
     providers: &[Arc<dyn SnapshotProvider>],
 ) -> Result<(), ControlError> {
-    let mut classified = BTreeSet::new();
     for provider in providers {
         for declaration in provider.entries() {
             for path in declaration.source_paths {
                 validate_relative_path(&path)?;
-                classified.insert(path);
             }
         }
     }
     for path in files_below(state_root)? {
-        if !classified.contains(&path) {
+        if !providers
+            .iter()
+            .any(|provider| provider.owns_source_path(&path))
+        {
             return Err(error(
                 "state.snapshot.unclassified_source",
                 format!("Durable source is not classified: {}", path.display()),
@@ -890,6 +891,7 @@ fn error(code: &str, message: impl Into<String>) -> ControlError {
 mod tests {
     use super::*;
     use crate::instance::{InstanceLaunchOptions, LaunchProvenance};
+    use crate::scheduler::SchedulerSnapshotProvider;
     use shipctl_module_api::{CapturedSnapshotEntry, SnapshotEntryDeclaration};
 
     struct FixtureProvider {
@@ -995,6 +997,18 @@ mod tests {
         )
     }
 
+    fn scheduler_service(context: &InstanceContext) -> StateArchiveService {
+        let paths = context.paths();
+        StateArchiveService::new(
+            paths.clone(),
+            context,
+            DurableWriteBarrier::default(),
+            vec![Arc::new(SchedulerSnapshotProvider::new(
+                paths.schedule_root.clone(),
+            ))],
+        )
+    }
+
     #[test]
     fn round_trip_preserves_portable_fingerprint_but_not_runtime_identity() {
         let root = fixture_root("round-trip");
@@ -1045,6 +1059,40 @@ mod tests {
             .unwrap_err();
         assert_eq!(failure.code.as_str(), "state.snapshot.provider_failed");
         assert!(!failed_archive.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn scheduler_sources_are_portable_but_other_schedule_root_files_fail_closed() {
+        let root = fixture_root("scheduler-sources");
+        let source = fixture_context(&root, "source");
+        let source_paths = source.paths();
+        fs::create_dir(&source_paths.schedule_root).unwrap();
+        fs::write(
+            source_paths.schedule_root.join("wakeup.yaml"),
+            b"schema_version: 1\nid: agents.wakeup\n",
+        )
+        .unwrap();
+        let archive = root.join("scheduler.shipctl-state");
+        let saved = scheduler_service(&source).save(&archive).unwrap();
+        assert!(saved.manifest.providers[0].entries[0].included);
+
+        let target = fixture_context(&root, "target");
+        scheduler_service(&target).restore(&archive).unwrap();
+        assert_eq!(
+            fs::read(target.paths().schedule_root.join("wakeup.yaml")).unwrap(),
+            b"schema_version: 1\nid: agents.wakeup\n"
+        );
+
+        fs::write(
+            source_paths.schedule_root.join("notes.txt"),
+            b"not a schedule",
+        )
+        .unwrap();
+        let rejected = scheduler_service(&source)
+            .save(&root.join("scheduler-invalid.shipctl-state"))
+            .unwrap_err();
+        assert_eq!(rejected.code.as_str(), "state.snapshot.unclassified_source");
         let _ = fs::remove_dir_all(root);
     }
 

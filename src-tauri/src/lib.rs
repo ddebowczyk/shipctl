@@ -23,6 +23,7 @@ use shipctl_core::message_bus::{MessageBusBridgeService, RuntimeMessageBus};
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::module_control::registry::ModuleRegistrySnapshotProvider;
 use shipctl_core::projects::watcher::GitWatcher;
+use shipctl_core::scheduler::{SchedulerService, SchedulerSnapshotProvider};
 use shipctl_core::state::archive::StateArchiveService;
 use shipctl_core::state::providers::{UiSnapshotProvider, WorkspaceSnapshotProvider};
 use shipctl_core::state::ui::UiStateStore;
@@ -109,6 +110,13 @@ pub fn run_with_options_and_loader_probe(
     let ui_state = UiStateStore::new_with_barrier(paths.ui_state.clone(), durable_writes.clone());
     let message_bus = RuntimeMessageBus::new(context.clone());
     let message_bridges = MessageBusBridgeService::new(message_bus.clone());
+    let scheduler = SchedulerService::new(
+        context.clone(),
+        paths.schedule_root.clone(),
+        message_bus.clone(),
+    )
+    .map_err(|error| error.to_string())?;
+    let scheduler_startup = scheduler.clone();
     let control_context = context.clone();
     let control_leases = leases.clone();
     let app = modules::install(
@@ -127,6 +135,7 @@ pub fn run_with_options_and_loader_probe(
     .manage(module_control)
     .manage(message_bus)
     .manage(message_bridges)
+    .manage(scheduler)
     .manage(paths)
     .manage(context)
     .setup(move |app| {
@@ -144,6 +153,11 @@ pub fn run_with_options_and_loader_probe(
         if module_loader_probe_enabled {
             return Ok(());
         }
+
+        // The frontend opens its bridge after setup. The scheduler retains its
+        // initial candidate until that first route publication so it never
+        // accepts schedules against generation zero.
+        scheduler_startup.start_initial_route_refresh();
 
         // Run migration from old project-based config
         let workspace = app.state::<WorkspaceManager>();
@@ -285,6 +299,7 @@ fn snapshot_providers(
         Arc::new(ModuleRegistrySnapshotProvider::new(
             paths.module_registry_database.clone(),
         )),
+        Arc::new(SchedulerSnapshotProvider::new(paths.schedule_root.clone())),
     ];
     modules::extend_snapshot_providers(paths, &mut providers);
     providers

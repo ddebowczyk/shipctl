@@ -16,6 +16,7 @@ pub mod message_bus;
 pub mod module_control;
 pub mod platform;
 pub mod projects;
+pub mod scheduler;
 pub mod settings;
 pub mod state;
 pub mod terminal;

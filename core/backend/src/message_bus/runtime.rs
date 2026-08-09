@@ -14,8 +14,8 @@ use super::contracts::{
 };
 use super::diagnostics::{
     DUPLICATE_CHANNEL_OWNER, HANDLER_FAILED, HANDLER_UNAVAILABLE, INCOMPATIBLE_MESSAGE_VERSION,
-    NO_ACTIVE_CHANNEL_OWNER, ROUTE_GENERATION_CHANGED, SUBSCRIBER_LAG, UNAUTHORIZED_SENDER,
-    UNKNOWN_MESSAGE_CONTRACT,
+    NO_ACTIVE_CHANNEL_OWNER, ROUTE_GENERATION_CHANGED, SCHEDULER_SECRET_PAYLOAD_FORBIDDEN,
+    SUBSCRIBER_LAG, UNAUTHORIZED_SENDER, UNKNOWN_MESSAGE_CONTRACT,
 };
 use super::routes::{
     BroadcastDelivery, DeliveryRecorder, DirectedDelivery, PortRequest, PreparedDirected,
@@ -526,11 +526,41 @@ impl RuntimeMessageBus {
         requests: &[SchedulerPreflightRequest],
         operation: impl FnOnce(SchedulerPreflightSnapshot) -> T,
     ) -> Result<T, SchedulerPreflightError> {
+        self.with_scheduler_preflight_all(requests, operation)
+            .await
+            .map_err(|errors| {
+                errors
+                    .into_iter()
+                    .next()
+                    .expect("all-errors preflight only fails with at least one error")
+            })
+    }
+
+    /// Validates every scheduler candidate against one immutable live route
+    /// table and reports each failure in input order.
+    ///
+    /// The callback is synchronous and runs only when every request succeeds,
+    /// while the route update mutex remains held. This lets the scheduler
+    /// build one source-indexed candidate snapshot against one bus generation
+    /// without granting authority or delivering a message.
+    pub async fn with_scheduler_preflight_all<T>(
+        &self,
+        requests: &[SchedulerPreflightRequest],
+        operation: impl FnOnce(SchedulerPreflightSnapshot) -> T,
+    ) -> Result<T, Vec<SchedulerPreflightError>> {
         let _updates = self.inner.updates.lock().await;
         let routes = self.inner.routes.borrow().clone();
-        for (request_index, request) in requests.iter().enumerate() {
-            validate_scheduler_preflight_request(&routes, request)
-                .map_err(|error| SchedulerPreflightError::new(request_index, error))?;
+        let errors = requests
+            .iter()
+            .enumerate()
+            .filter_map(|(request_index, request)| {
+                validate_scheduler_preflight_request(&routes, request)
+                    .err()
+                    .map(|error| SchedulerPreflightError::new(request_index, error))
+            })
+            .collect::<Vec<_>>();
+        if !errors.is_empty() {
+            return Err(errors);
         }
         Ok(operation(SchedulerPreflightSnapshot::from_routes(
             &routes.public,
@@ -1133,11 +1163,23 @@ fn validate_scheduler_preflight_request(
         ));
     }
 
-    registration
+    let contract = registration
         .declarations()
         .contract(expected)
-        .expect("active route contract was prepared")
-        .validate_envelope(&request.envelope)
+        .expect("active route contract was prepared");
+    if contract
+        .contract()
+        .schema
+        .redacted_fields
+        .iter()
+        .any(|pointer| request.envelope.payload.pointer(pointer).is_some())
+    {
+        return Err(MessageContractError::new(
+            SCHEDULER_SECRET_PAYLOAD_FORBIDDEN,
+            "Scheduled payload contains a field marked secret by its message contract",
+        ));
+    }
+    contract.validate_envelope(&request.envelope)
 }
 
 pub struct RuntimeSubscription {
@@ -1202,7 +1244,8 @@ mod tests {
     use crate::message_bus::{
         BroadcastTopicDeclaration, CapabilityPortDeclaration, DirectedChannelDeclaration,
         MessageDeclarations, MessageSchemaDescriptor, MessageTypeContract, RegistrationHandlers,
-        RouteEndpointRef, INVALID_PAYLOAD, PAYLOAD_TOO_LARGE, UNAUTHORIZED_SENDER,
+        RouteEndpointRef, INVALID_PAYLOAD, PAYLOAD_TOO_LARGE, SCHEDULER_SECRET_PAYLOAD_FORBIDDEN,
+        UNAUTHORIZED_SENDER,
     };
 
     const CHANNEL: &str = "fixture.directed";
@@ -1702,6 +1745,115 @@ mod tests {
         );
         assert!(!invalid_payload.error().message.contains("not-an-integer"));
         assert_eq!(handled.load(Ordering::SeqCst), 0);
+        registration.dispose().await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn scheduler_preflight_all_reports_every_indexed_failure_from_one_route_snapshot() {
+        let temporary = tempfile::tempdir().unwrap();
+        let context = context("scheduler-preflight-all", temporary.path().to_path_buf());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let mut route_declarations = declarations(&[CHANNEL], true, false);
+        route_declarations.handles[0].scheduler_allowed = false;
+        let registration = registration(
+            &context,
+            "fixture@scheduler#all",
+            route_declarations,
+            RegistrationHandlers::new().with_directed(CHANNEL, |_| async { Ok(()) }),
+        );
+        let baseline_routes = bus.register(Arc::clone(&registration)).await.unwrap();
+        let baseline_wire = serde_json::to_vec(&baseline_routes).unwrap();
+        let mut invalid_payload = envelope(TOPIC, 1);
+        invalid_payload.payload = json!({"value": "not-an-integer"});
+        let callback_ran = Arc::new(AtomicBool::new(false));
+
+        let errors = bus
+            .with_scheduler_preflight_all(
+                &[
+                    SchedulerPreflightRequest {
+                        target_kind: SchedulerPreflightTargetKind::Channel,
+                        envelope: envelope(CHANNEL, 1),
+                    },
+                    SchedulerPreflightRequest {
+                        target_kind: SchedulerPreflightTargetKind::Channel,
+                        envelope: envelope("fixture.absent", 2),
+                    },
+                    SchedulerPreflightRequest {
+                        target_kind: SchedulerPreflightTargetKind::Topic,
+                        envelope: invalid_payload,
+                    },
+                ],
+                {
+                    let callback_ran = Arc::clone(&callback_ran);
+                    move |_| callback_ran.store(true, Ordering::SeqCst)
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            errors
+                .iter()
+                .map(|error| (error.request_index(), error.error().code.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, UNAUTHORIZED_SENDER),
+                (1, NO_ACTIVE_CHANNEL_OWNER),
+                (2, INVALID_PAYLOAD),
+            ]
+        );
+        assert!(errors.iter().all(|error| {
+            error.error().message == "Scheduled target failed message-bus preflight"
+        }));
+        assert!(!callback_ran.load(Ordering::SeqCst));
+        assert_eq!(bus.snapshot(), baseline_routes);
+        assert_eq!(serde_json::to_vec(&bus.snapshot()).unwrap(), baseline_wire);
+        registration.dispose().await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn scheduler_preflight_all_rejects_secret_marked_payloads_without_leaking_them() {
+        let temporary = tempfile::tempdir().unwrap();
+        let context = context("scheduler-preflight-secret", temporary.path().to_path_buf());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let mut route_declarations = declarations(&[], true, false);
+        route_declarations.provides[0].schema.redacted_fields = vec!["/secret".to_string()];
+        let registration = registration(
+            &context,
+            "fixture@scheduler#secret",
+            route_declarations,
+            RegistrationHandlers::new(),
+        );
+        bus.register(Arc::clone(&registration)).await.unwrap();
+        let secret = "not-for-diagnostics";
+        let mut envelope = envelope(TOPIC, 1);
+        envelope.payload = json!({"value": 1, "secret": secret});
+        let callback_ran = Arc::new(AtomicBool::new(false));
+
+        let errors = bus
+            .with_scheduler_preflight_all(
+                &[SchedulerPreflightRequest {
+                    target_kind: SchedulerPreflightTargetKind::Topic,
+                    envelope,
+                }],
+                {
+                    let callback_ran = Arc::clone(&callback_ran);
+                    move |_| callback_ran.store(true, Ordering::SeqCst)
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].request_index(), 0);
+        assert_eq!(errors[0].error().code, SCHEDULER_SECRET_PAYLOAD_FORBIDDEN);
+        assert_eq!(
+            errors[0].error().message,
+            "Scheduled target failed message-bus preflight"
+        );
+        assert!(!errors[0].error().message.contains(secret));
+        assert!(!errors[0].error().message.contains("/secret"));
+        assert!(!callback_ran.load(Ordering::SeqCst));
         registration.dispose().await;
     }
 

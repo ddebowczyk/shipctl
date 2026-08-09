@@ -1,0 +1,11 @@
+schema_version: 2
+id: agents.version
+enabled: true
+cron: "*/5 * * * * Europe/Warsaw"
+target:
+  kind: channel
+  id: agents.version
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload: {}

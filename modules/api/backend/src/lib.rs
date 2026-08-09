@@ -72,6 +72,17 @@ pub trait SnapshotProvider: Send + Sync {
     fn capture(&self) -> Result<Vec<CapturedSnapshotEntry>, String>;
     fn validate_payload(&self, entry_id: &str, payload: &[u8]) -> Result<(), String>;
 
+    /// Whether this provider owns a discovered durable file that is not one of
+    /// its statically declared paths. Providers must opt in explicitly; this
+    /// preserves fail-closed archive classification for ordinary files while
+    /// allowing a provider-owned configuration directory.
+    fn owns_source_path(&self, source_path: &Path) -> bool {
+        self.entries()
+            .iter()
+            .flat_map(|entry| entry.source_paths.iter())
+            .any(|declared| declared == source_path)
+    }
+
     /// Return the provider-owned canonical representation used to compare
     /// restorable state across save/restore boundaries. The default is exact
     /// payload identity; structured stores can exclude storage-engine layout

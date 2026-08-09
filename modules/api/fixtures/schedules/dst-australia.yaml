@@ -1,0 +1,12 @@
+schema_version: 1
+id: agents.dst-sydney
+enabled: true
+cron: "30 2 * * * Australia/Sydney"
+target:
+  kind: channel
+  id: agents.dst-sydney
+message:
+  type: fixture.agent-wakeup
+  version: 1
+  payload:
+    reason: dst
