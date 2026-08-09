@@ -71,13 +71,36 @@ impl PtyManager {
         channel: Channel<PtyOutput>,
     ) -> Result<u32, String> {
         self.inject_instance_environment(&mut env);
-        let session = PtySession::spawn(command, args, cwd, env, cols, rows, color_theme, channel)?;
 
-        let mut next_id = self.next_id.lock().unwrap();
-        let id = *next_id;
-        *next_id += 1;
+        let id = {
+            let mut next_id = self.next_id.lock().unwrap();
+            let id = *next_id;
+            *next_id += 1;
+            id
+        };
 
-        self.sessions.lock().unwrap().insert(id, session);
+        // Hold the map lock until the newly spawned session is visible. An
+        // immediately completing child can otherwise run its reaper between
+        // `spawn` and `insert`, leaving an already-dead session behind.
+        let mut sessions = self.sessions.lock().unwrap();
+        let reaper_sessions = Arc::downgrade(&self.sessions);
+        let session = PtySession::spawn(
+            command,
+            args,
+            cwd,
+            env,
+            cols,
+            rows,
+            color_theme,
+            channel,
+            move || {
+                if let Some(sessions) = reaper_sessions.upgrade() {
+                    sessions.lock().unwrap().remove(&id);
+                }
+            },
+        )?;
+
+        sessions.insert(id, session);
         Ok(id)
     }
 
@@ -98,10 +121,12 @@ impl PtyManager {
 
     pub fn acknowledge_output(&self, pty_id: u32, bytes: usize) -> Result<(), String> {
         let sessions = self.sessions.lock().unwrap();
-        let session = sessions
-            .get(&pty_id)
-            .ok_or_else(|| format!("PTY {pty_id} not found"))?;
-        session.acknowledge_output(bytes);
+        if let Some(session) = sessions.get(&pty_id) {
+            session.acknowledge_output(bytes);
+        }
+        // The frontend may acknowledge final output after the completion
+        // event caused the host to reap the session. That acknowledgement is
+        // no longer needed for flow control, so it is intentionally a no-op.
         Ok(())
     }
 
@@ -171,8 +196,12 @@ fn terminate_all_before_deadline<T: TerminationTarget>(sessions: &mut [T], deadl
 mod tests {
     use super::{terminate_all_before_deadline, PtyManager, TerminationTarget};
     use std::collections::HashMap;
+    use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
+    use tauri::ipc::{Channel, InvokeResponseBody};
+
+    use crate::terminal::session::{PtyColorTheme, PtyOutput};
 
     struct FakeSession {
         name: &'static str,
@@ -242,5 +271,47 @@ mod tests {
                 "force:second"
             ]
         );
+    }
+
+    fn test_theme() -> PtyColorTheme {
+        PtyColorTheme {
+            foreground: "#4c4f69".to_string(),
+            background: "#eff1f5".to_string(),
+            palette: vec!["#000000".to_string(); 16],
+        }
+    }
+
+    #[test]
+    fn naturally_completed_sessions_are_reaped_before_exit_delivery() {
+        let manager = PtyManager::new("runtime-id");
+        let (sender, receiver) = mpsc::channel();
+        let channel = Channel::<PtyOutput>::new(move |body| {
+            let InvokeResponseBody::Json(source) = body else {
+                panic!("terminal output must use JSON transport");
+            };
+            sender.send(source).unwrap();
+            Ok(())
+        });
+        let cwd = std::env::current_dir().unwrap();
+        let pty_id = manager
+            .spawn(
+                "exit 0",
+                None,
+                cwd.to_str().unwrap(),
+                HashMap::new(),
+                80,
+                24,
+                test_theme(),
+                channel,
+            )
+            .unwrap();
+
+        let exit = receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("a completed shell must deliver its terminal exit");
+        assert!(exit.contains("\"event\":\"exit\""));
+        assert_eq!(manager.session_count(), 0);
+        assert!(manager.write(pty_id, b"after-exit").is_err());
+        assert!(manager.acknowledge_output(pty_id, 1).is_ok());
     }
 }

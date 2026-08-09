@@ -79,6 +79,14 @@ test("tab close and natural exit retain the current restore-record semantics", (
   assert.match(runtime, /event\.type === "stop-requested"[\s\S]*if \(metadata\.record\) await discardSession\(metadata\.record\.recordId\)/s);
   assert.match(runtime, /if \(!metadata\.record \|\| event\.reason === "manual-stop"\) return/);
   assert.match(runtime, /await discardSession\(metadata\.record\.recordId\)\.catch/);
+  assert.match(
+    pty,
+    /if \(owned\.state === "exited"\) \{\s*await stopTerminalSession\(tab\.moduleSessionId\);\s*return;\s*\}[\s\S]*await requestTerminalSessionOwnerAction\(\{/s,
+  );
+  assert.match(
+    pty,
+    /if \(owned\.state === "running"\) \{\s*await requestTerminalSessionOwnerAction\(\{[\s\S]*reason: "project-removal",[\s\S]*\}\);\s*\}\s*await stopTerminalSession\(tab\.moduleSessionId\)/s,
+  );
   assert.match(pty, /type: "stop-requested"/);
   assert.doesNotMatch(pty, /discardAssistantSession|rearmAssistantSession|failAssistantSessionCapture/);
 });

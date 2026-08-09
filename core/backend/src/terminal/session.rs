@@ -136,7 +136,9 @@ fn run_output_coalescer(
     channel: Channel<PtyOutput>,
     output_flow: Arc<OutputFlowControl>,
     alive: Arc<AtomicBool>,
+    on_completion: impl FnOnce(),
 ) {
+    let mut on_completion = Some(on_completion);
     let mut trailing_escape = false;
 
     while let Ok(message) = receiver.recv() {
@@ -145,6 +147,13 @@ fn run_output_coalescer(
                 let _ = dispatch_output(&channel, &output_flow, "\x1b".to_string());
             }
             if let ReaderOutput::Exit(code) = message {
+                // The reader has drained and waited for the child. Reap the
+                // host-owned session before making the completion visible to
+                // the frontend, so a close/exit race cannot reach the
+                // destructive termination path for an already-complete PTY.
+                if let Some(reap) = on_completion.take() {
+                    reap();
+                }
                 let _ = channel.send(PtyOutput::Exit { code });
             }
             break;
@@ -184,6 +193,12 @@ fn run_output_coalescer(
         if let Some(code) = exit_code {
             if trailing_escape {
                 let _ = dispatch_output(&channel, &output_flow, "\x1b".to_string());
+            }
+            // See the corresponding direct-exit branch above. The completion
+            // callback is deliberately signal-free; manual close and shutdown
+            // retain their separate process-tree termination path.
+            if let Some(reap) = on_completion.take() {
+                reap();
             }
             let _ = channel.send(PtyOutput::Exit { code });
             break;
@@ -506,6 +521,7 @@ impl PtySession {
         rows: u16,
         color_theme: PtyColorTheme,
         channel: Channel<PtyOutput>,
+        on_completion: impl FnOnce() + Send + 'static,
     ) -> Result<Self, String> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -583,6 +599,7 @@ impl PtySession {
                 channel,
                 coalescer_output_flow,
                 coalescer_alive,
+                on_completion,
             );
         });
 
@@ -800,15 +817,18 @@ fn process_tree_is_alive(pid: i32, descendants: &[i32]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_utf8_chunks, hold_trailing_escape, respond_to_terminal_queries, OutputFlowControl,
-        PtyColorTheme, FLOW_CONTROL_HIGH_WATERMARK_BYTES, FLOW_CONTROL_LOW_WATERMARK_BYTES,
+        decode_utf8_chunks, hold_trailing_escape, respond_to_terminal_queries,
+        run_output_coalescer, OutputFlowControl, PtyColorTheme, ReaderOutput,
+        FLOW_CONTROL_HIGH_WATERMARK_BYTES, FLOW_CONTROL_LOW_WATERMARK_BYTES,
         MAX_PENDING_CONTROL_BYTES,
     };
     use std::io::{Result as IoResult, Write};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::sync_channel;
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
+    use tauri::ipc::{Channel, InvokeResponseBody};
 
     struct TestWriter(Arc<Mutex<Vec<u8>>>);
 
@@ -1033,5 +1053,34 @@ mod tests {
         let mut complete = "output\x1b[2J".to_string();
         assert!(!hold_trailing_escape(&mut complete));
         assert_eq!(complete, "output\x1b[2J");
+    }
+
+    #[test]
+    fn reaps_before_delivering_a_terminal_exit() {
+        let (sender, receiver) = sync_channel(1);
+        sender.send(ReaderOutput::Exit(0)).unwrap();
+        drop(sender);
+
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let delivered_order = Arc::clone(&order);
+        let channel = Channel::new(move |body| {
+            let InvokeResponseBody::Json(source) = body else {
+                panic!("terminal output must use JSON transport");
+            };
+            assert!(source.contains("\"event\":\"exit\""));
+            delivered_order.lock().unwrap().push("exit");
+            Ok(())
+        });
+        let completed_order = Arc::clone(&order);
+
+        run_output_coalescer(
+            receiver,
+            channel,
+            Arc::new(OutputFlowControl::default()),
+            Arc::new(AtomicBool::new(true)),
+            move || completed_order.lock().unwrap().push("reap"),
+        );
+
+        assert_eq!(*order.lock().unwrap(), vec!["reap", "exit"]);
     }
 }

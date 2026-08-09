@@ -23,6 +23,7 @@ import {
   requestTerminalSessionOwnerAction,
   terminalSessionExitReason,
 } from "./terminalSessions.ts";
+import { shouldAutoCloseBlankTerminal } from "./terminalExitPolicy.ts";
 import { unregisterTerminal, writeTerminalOutput } from "./terminalOutputQueue.ts";
 
 // Debounce timers for activity detection — clears "active" after 3s of silence.
@@ -78,6 +79,18 @@ function cleanupActivityState(ptyId: number) {
   activityActive.delete(ptyId);
 }
 
+function findTerminalTabPlacement(ptyId: number) {
+  for (const [projectPath, project] of Object.entries(
+    useTerminalStore.getState().projectState,
+  )) {
+    const tab = project.tabs.find(
+      (entry) => entry.kind === "terminal" && entry.ptyId === ptyId,
+    );
+    if (tab?.kind === "terminal") return { projectPath, tab };
+  }
+  return null;
+}
+
 // Terminal registration, the write queue, and output acknowledgement live in
 // "./terminalOutputQueue.ts"; this hook owns PTY lifecycle and session state.
 
@@ -119,6 +132,14 @@ export function usePty(
       } else if (msg.event === "exit") {
         cleanupActivityState(ptyId);
         setTabExited(ptyId, msg.data.code);
+        const placement = findTerminalTabPlacement(ptyId);
+        if (placement && shouldAutoCloseBlankTerminal(placement.tab, msg.data.code)) {
+          // Natural completion is already host-reaped. Forget only frontend
+          // state; never route it through killPty's process-tree signals.
+          unregisterTerminal(ptyId);
+          removeActivity(ptyId);
+          removeTabFromProject(placement.projectPath, placement.tab.id);
+        }
         const stoppedByUser = stoppingPtys.delete(ptyId);
         completeHostTerminalSession(ptyId, stoppedByUser, msg.data.code);
       }
@@ -126,6 +147,8 @@ export function usePty(
     [
       setTabActive,
       setTabExited,
+      removeActivity,
+      removeTabFromProject,
     ],
   );
 
@@ -435,6 +458,15 @@ export function usePty(
       if (tab.moduleSessionId) {
         const owned = hostTerminalSessions.get(tab.moduleSessionId);
         if (!owned) return;
+
+        // The owner has already received its natural-exit notification. Replaying
+        // stop-requested here would repeat owner cleanup (for example, discarding
+        // an assistant restore record that the exit handler already discarded).
+        if (owned.state === "exited") {
+          await stopTerminalSession(tab.moduleSessionId);
+          return;
+        }
+
         try {
           await requestTerminalSessionOwnerAction({
             type: "stop-requested",
@@ -480,11 +512,13 @@ export function usePty(
       if (tab.moduleSessionId) {
         const owned = hostTerminalSessions.get(tab.moduleSessionId);
         if (!owned) continue;
-        await requestTerminalSessionOwnerAction({
-          type: "stop-requested",
-          session: owned.session,
-          reason: "project-removal",
-        });
+        if (owned.state === "running") {
+          await requestTerminalSessionOwnerAction({
+            type: "stop-requested",
+            session: owned.session,
+            reason: "project-removal",
+          });
+        }
         await stopTerminalSession(tab.moduleSessionId);
         continue;
       }
