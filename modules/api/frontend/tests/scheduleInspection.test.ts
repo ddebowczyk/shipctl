@@ -69,6 +69,21 @@ test("TypeScript accepts only stable redacted scheduler diagnostics", () => {
     parseScheduleInspection({ ...golden, diagnostics: [secretPayloadDiagnostic] }).diagnostics,
     [secretPayloadDiagnostic],
   );
+  const sourceDriftDiagnostic = {
+    schemaVersion: 1,
+    code: SCHEDULE_DIAGNOSTIC_CODES.sourceDrift,
+    severity: "warning",
+    context: {
+      fields: {
+        acceptedSnapshotDigestSha256: "a".repeat(64),
+        candidateSnapshotDigestSha256: "b".repeat(64),
+      },
+    },
+  };
+  assert.deepEqual(
+    parseScheduleInspection({ ...golden, diagnostics: [sourceDriftDiagnostic] }).diagnostics,
+    [sourceDriftDiagnostic],
+  );
   assert.throws(
     () => parseScheduleInspection({ ...golden, diagnostics: [{ ...diagnostic, code: "scheduler.new" }] }),
     (error: unknown) =>

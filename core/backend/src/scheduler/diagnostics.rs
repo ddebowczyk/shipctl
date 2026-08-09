@@ -16,6 +16,7 @@ pub const NEXT_OCCURRENCE_UNAVAILABLE: &str = "scheduler.definition.next_occurre
 pub const SCHEDULE_DISABLED: &str = "scheduler.definition.disabled";
 pub const SCHEDULE_NOT_FOUND: &str = "scheduler.definition.not_found";
 pub const DUPLICATE_ID: &str = "scheduler.snapshot.duplicate_id";
+pub const SNAPSHOT_SOURCE_DRIFT: &str = "scheduler.snapshot.source_drift";
 pub const TARGET_UNAVAILABLE: &str = "scheduler.target.unavailable";
 pub const TARGET_MESSAGE_INCOMPATIBLE: &str = "scheduler.target.message_incompatible";
 pub const TARGET_UNAUTHORIZED: &str = "scheduler.target.unauthorized";
@@ -37,6 +38,7 @@ pub const PUBLIC_CODES: &[&str] = &[
     SCHEDULE_DISABLED,
     SCHEDULE_NOT_FOUND,
     DUPLICATE_ID,
+    SNAPSHOT_SOURCE_DRIFT,
     TARGET_UNAVAILABLE,
     TARGET_MESSAGE_INCOMPATIBLE,
     TARGET_UNAUTHORIZED,

@@ -1,6 +1,10 @@
 use serde::Serialize;
 
-pub const CONTROL_PROTOCOL_VERSION: u32 = 3;
+/// The authenticated running-instance protocol version.
+///
+/// Version four adds the strict scheduler command family, including caller
+/// supplied mutation request identities for retry-safe refresh and trigger.
+pub const CONTROL_PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BuildIdentity<'a> {

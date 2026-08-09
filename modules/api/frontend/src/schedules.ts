@@ -16,6 +16,7 @@ export const SCHEDULE_DIAGNOSTIC_CODES = {
   scheduleDisabled: "scheduler.definition.disabled",
   scheduleNotFound: "scheduler.definition.not_found",
   duplicateId: "scheduler.snapshot.duplicate_id",
+  sourceDrift: "scheduler.snapshot.source_drift",
   targetUnavailable: "scheduler.target.unavailable",
   targetMessageIncompatible: "scheduler.target.message_incompatible",
   targetUnauthorized: "scheduler.target.unauthorized",

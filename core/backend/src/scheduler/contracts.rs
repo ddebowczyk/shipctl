@@ -20,6 +20,11 @@ use super::{ScheduleDiagnostic, ScheduleDiagnosticSeverity};
 
 pub const SCHEDULE_SCHEMA_VERSION: u32 = 1;
 pub const SCHEDULE_INSPECTION_SCHEMA_VERSION: u32 = 1;
+/// Schema for scheduler control projections sent through the authenticated
+/// running-instance endpoint. This is deliberately separate from the source
+/// and inspection schemas: changing a control wrapper must not reinterpret a
+/// schedule file or an accepted snapshot.
+pub const SCHEDULE_CONTROL_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -168,6 +173,65 @@ pub struct ScheduleInspection {
     pub schedules: Vec<ScheduleDefinitionInspection>,
     #[serde(default)]
     pub diagnostics: Vec<ScheduleDiagnostic>,
+}
+
+/// A redacted, read-only comparison between the accepted snapshot and the
+/// complete directory currently on disk.
+///
+/// A missing candidate digest means parsing failed; callers must use
+/// `diagnostics` rather than attempting to infer a partial candidate. The
+/// candidate is never preflighted, published, or used to alter a timer.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScheduleVerification {
+    pub schema_version: u32,
+    pub code: String,
+    pub matches_accepted: bool,
+    pub accepted: ScheduleInspection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_digest_sha256: Option<String>,
+    #[serde(default)]
+    pub diagnostics: Vec<ScheduleDiagnostic>,
+}
+
+/// Scheduler health combines accepted source/runtime observations with a
+/// read-only source verification. It intentionally carries only inspection
+/// facts and redacted diagnostics; message payloads never cross this boundary.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScheduleDiagnosticReport {
+    pub schema_version: u32,
+    pub code: String,
+    pub healthy: bool,
+    pub inspection: ScheduleInspection,
+    #[serde(default)]
+    pub diagnostics: Vec<ScheduleDiagnostic>,
+}
+
+/// The outcome of one complete refresh attempt. `inspection` is always the
+/// currently accepted state, including after a rejected candidate.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScheduleRefreshReport {
+    pub schema_version: u32,
+    pub code: String,
+    pub applied: bool,
+    pub inspection: ScheduleInspection,
+    #[serde(default)]
+    pub diagnostics: Vec<ScheduleDiagnostic>,
+}
+
+/// The redacted result of a manual trigger. The included inspection is taken
+/// after the shared delivery path completes, but triggering itself never moves
+/// the schedule generation or next occurrence.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScheduleTriggerReport {
+    pub schema_version: u32,
+    pub code: String,
+    pub inspection: ScheduleInspection,
+    pub schedule_id: String,
+    pub delivery: ScheduleDeliverySummary,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

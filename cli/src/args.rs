@@ -23,6 +23,10 @@ pub struct Cli {
     #[arg(long, global = true, value_enum, default_value_t)]
     pub output: OutputFormat,
 
+    /// Include non-secret diagnostic context where the command supports it.
+    #[arg(long, global = true)]
+    pub full: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -48,6 +52,11 @@ pub enum Command {
     Messages {
         #[command(subcommand)]
         command: MessagesCommand,
+    },
+    /// Inspect, verify, refresh, or trigger schedules in a running instance.
+    Schedule {
+        #[command(subcommand)]
+        command: ScheduleCommand,
     },
     /// Inspect asynchronous module operations.
     Operations {
@@ -151,6 +160,76 @@ pub enum MessagesCommand {
     Inspect(MessageTargetArgs),
     /// Diagnose current message failures, lag, and drain blockers.
     Diagnose(MessageTargetArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ScheduleCommand {
+    /// List accepted schedules in one explicitly named running instance.
+    List(ScheduleTargetArgs),
+    /// Inspect one accepted schedule in an explicitly named running instance.
+    Inspect(ScheduleIdArgs),
+    /// Diagnose schedule source, accepted state, target, bus, and runtime health.
+    Diagnose(ScheduleTargetArgs),
+    /// Compare current schedule sources to accepted state without publishing changes.
+    Verify(ScheduleTargetArgs),
+    /// Refresh schedules in one named instance or independently in every running instance.
+    Refresh(ScheduleRefreshArgs),
+    /// Deliver one accepted schedule now through its typed scheduler route.
+    Trigger(ScheduleTriggerArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ScheduleTargetArgs {
+    /// Exact running instance name or UUID.
+    #[arg(long)]
+    pub instance: String,
+
+    #[command(flatten)]
+    pub runtime: RuntimeRootArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct ScheduleIdArgs {
+    /// Accepted schedule identifier.
+    pub id: String,
+
+    #[command(flatten)]
+    pub target: ScheduleTargetArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct ScheduleRefreshArgs {
+    /// Exact running instance name or UUID.
+    #[arg(
+        long,
+        required_unless_present = "all_instances",
+        conflicts_with = "all_instances"
+    )]
+    pub instance: Option<String>,
+
+    /// Refresh every currently running instance independently.
+    #[arg(long, conflicts_with = "instance")]
+    pub all_instances: bool,
+
+    /// Reuse this UUID to retry the same refresh per target without applying it twice.
+    #[arg(long)]
+    pub request_id: Option<Uuid>,
+
+    #[command(flatten)]
+    pub runtime: RuntimeRootArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct ScheduleTriggerArgs {
+    /// Accepted schedule identifier.
+    pub id: String,
+
+    #[command(flatten)]
+    pub target: ScheduleTargetArgs,
+
+    /// Reuse this UUID to retry the same trigger without delivering twice.
+    #[arg(long)]
+    pub request_id: Option<Uuid>,
 }
 
 #[derive(Debug, Args)]

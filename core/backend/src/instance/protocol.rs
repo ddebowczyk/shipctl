@@ -6,16 +6,18 @@ use uuid::Uuid;
 use super::context::InstanceBuildIdentity;
 use crate::message_bus::{MessageDiagnosticReport, MessageRuntimeInspection};
 use crate::module_control::{Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind};
+use crate::scheduler::{
+    ScheduleDiagnosticReport, ScheduleInspection, ScheduleRefreshReport, ScheduleTriggerReport,
+    ScheduleVerification,
+};
 use crate::state::archive::StateArchiveInspection;
 
 /// The JSON-line envelope version for the authenticated local endpoint.
 ///
-/// Version three adds the hello handshake, caller metadata, and structured
-/// instance/module diagnostics to the explicit request, response, event, and
-/// completion frames. The build control-protocol version remains the
-/// compatibility check between executable roles; this version only describes
-/// the wire envelope.
-pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 3;
+/// Version four adds strict scheduler commands and results. The build
+/// control-protocol version remains the compatibility check between executable
+/// roles; this version only describes the wire envelope.
+pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -219,7 +221,8 @@ pub struct ControlRequest {
 #[serde(
     rename_all = "snake_case",
     rename_all_fields = "camelCase",
-    tag = "type"
+    tag = "type",
+    deny_unknown_fields
 )]
 pub enum ControlOperation {
     Hello,
@@ -229,6 +232,7 @@ pub enum ControlOperation {
     Shutdown { force: bool },
     Modules { command: ModuleCommand },
     Messages { command: MessageCommand },
+    Schedules { command: ScheduleCommand },
     Operations { command: OperationCommand },
 }
 
@@ -237,6 +241,28 @@ pub enum ControlOperation {
 pub enum MessageCommand {
     Inspect {},
     Diagnose {},
+}
+
+/// Scheduler commands carried by the authenticated running-instance endpoint.
+///
+/// The enclosing [`ControlRequest::request_id`] is the mutation identity for
+/// `refresh` and `trigger`; callers must retain it when retrying a response
+/// that may have been lost. The named instance is selected before this command
+/// reaches the endpoint, so no command can silently select another instance.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type",
+    deny_unknown_fields
+)]
+pub enum ScheduleCommand {
+    List {},
+    Inspect { schedule_id: String },
+    Diagnose {},
+    Verify {},
+    Refresh {},
+    Trigger { schedule_id: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -283,7 +309,12 @@ pub struct ControlResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+#[serde(
+    rename_all = "snake_case",
+    tag = "type",
+    content = "value",
+    deny_unknown_fields
+)]
 pub enum ControlResponseResult {
     Hello(ControlHello),
     Instance(InstanceRecord),
@@ -295,6 +326,11 @@ pub enum ControlResponseResult {
     ModuleOperation(ModuleOperation),
     MessageInspection(MessageRuntimeInspection),
     MessageDiagnostics(MessageDiagnosticReport),
+    ScheduleInspection(ScheduleInspection),
+    ScheduleDiagnostics(ScheduleDiagnosticReport),
+    ScheduleVerification(ScheduleVerification),
+    ScheduleRefresh(ScheduleRefreshReport),
+    ScheduleTrigger(ScheduleTriggerReport),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -375,7 +411,21 @@ impl ControlStream {
 
 #[cfg(test)]
 mod tests {
-    use super::MessageCommand;
+    use super::{ControlOperation, ControlResponseResult, MessageCommand, ScheduleCommand};
+    use crate::scheduler::{ScheduleInspection, SCHEDULE_INSPECTION_SCHEMA_VERSION};
+
+    fn schedule_inspection() -> ScheduleInspection {
+        ScheduleInspection {
+            schema_version: SCHEDULE_INSPECTION_SCHEMA_VERSION,
+            instance_id: "test-instance".to_string(),
+            incarnation: "test-incarnation".to_string(),
+            schedule_generation: 1,
+            snapshot_digest_sha256: "accepted".to_string(),
+            bus_route_generation: 2,
+            schedules: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
 
     #[test]
     fn message_commands_are_strict_and_round_trip() {
@@ -394,5 +444,66 @@ mod tests {
             "unexpected": true
         }))
         .is_err());
+    }
+
+    #[test]
+    fn schedule_commands_are_strict_and_round_trip() {
+        let commands = [
+            ScheduleCommand::List {},
+            ScheduleCommand::Inspect {
+                schedule_id: "agents.refresh".to_string(),
+            },
+            ScheduleCommand::Diagnose {},
+            ScheduleCommand::Verify {},
+            ScheduleCommand::Refresh {},
+            ScheduleCommand::Trigger {
+                schedule_id: "agents.refresh".to_string(),
+            },
+        ];
+
+        for command in commands {
+            let encoded = serde_json::to_value(&command).unwrap();
+            let decoded: ScheduleCommand = serde_json::from_value(encoded).unwrap();
+            assert_eq!(decoded, command);
+        }
+
+        assert!(
+            serde_json::from_value::<ScheduleCommand>(serde_json::json!({
+                "type": "trigger",
+                "scheduleId": "agents.refresh",
+                "unexpected": true
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn schedule_operation_outer_fields_are_strict() {
+        let operation = ControlOperation::Schedules {
+            command: ScheduleCommand::Trigger {
+                schedule_id: "agents.refresh".to_string(),
+            },
+        };
+        let mut valid = serde_json::to_value(operation).unwrap();
+
+        assert!(serde_json::from_value::<ControlOperation>(valid.clone()).is_ok());
+        valid
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected".to_string(), serde_json::json!(true));
+        assert!(serde_json::from_value::<ControlOperation>(valid).is_err());
+    }
+
+    #[test]
+    fn schedule_result_outer_fields_are_strict() {
+        let result = ControlResponseResult::ScheduleInspection(schedule_inspection());
+        let mut valid = serde_json::to_value(result).unwrap();
+
+        assert!(serde_json::from_value::<ControlResponseResult>(valid.clone()).is_ok());
+        valid
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected".to_string(), serde_json::json!(true));
+        assert!(serde_json::from_value::<ControlResponseResult>(valid).is_err());
     }
 }

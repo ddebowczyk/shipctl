@@ -33,6 +33,12 @@ Refresh and trigger are explicit mutations with request identity so a client
 can retry after a lost response without applying a second refresh or duplicate
 manual trigger. Inspection and verification are read-only.
 
+`refresh` and `trigger` accept an optional `--request-id <UUID>`; reusing it
+replays the original redacted result for the same command during that running
+instance incarnation. A request ID reused for a different scheduler command is
+rejected. The replay ledger is instance-local memory only and ends with the
+host process; it is not schedule state or an execution journal.
+
 The response identifies instance name and incarnation, schedule generation,
 source digest, bus route generation, operation outcome, and diagnostics.
 

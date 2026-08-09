@@ -21,7 +21,7 @@ use super::protocol::{
     ControlResponse, ControlResponseResult, ControlStream, DiscoveryProblem,
     DiscoveryProblemCategory, DiscoveryReport, InstanceDiagnosticReport, InstanceLifecycle,
     InstanceRecord, MessageCommand, ModuleCommand, ModuleControlStatus, OperationCommand,
-    StopOutcome, StoredDescriptor, CONTROL_FRAME_SCHEMA_VERSION,
+    ScheduleCommand, StopOutcome, StoredDescriptor, CONTROL_FRAME_SCHEMA_VERSION,
 };
 use crate::message_bus::{MessageDiagnosticReport, MessageRuntimeInspection, RUNTIME_UNAVAILABLE};
 use crate::module_control::codes::{
@@ -31,10 +31,14 @@ use crate::module_control::{
     Diagnostic, DiagnosticSeverity, ModuleInspection, ModuleOperation, ModuleOperationKind,
     RedactedEvidence, MODULE_CONTROL_SCHEMA_VERSION,
 };
+use crate::scheduler::{
+    ScheduleDiagnosticReport, ScheduleInspection, ScheduleRefreshReport, ScheduleTriggerReport,
+    ScheduleVerification,
+};
 use crate::state::archive::StateArchiveInspection;
 
 const DESCRIPTOR_SCHEMA_VERSION: u32 = 1;
-const ENDPOINT_PROTOCOL: &str = "local_socket_json_line_v3";
+const ENDPOINT_PROTOCOL: &str = "local_socket_json_line_v4";
 
 pub trait ControlHandler: Send + Sync + 'static {
     fn active_work(&self) -> Vec<ActiveWorkBlocker>;
@@ -68,6 +72,20 @@ pub trait ControlHandler: Send + Sync + 'static {
         Err(ControlError::new(
             RUNTIME_UNAVAILABLE,
             "This instance does not provide runtime message inspection",
+        ))
+    }
+    /// Scheduler commands remain data-only at this endpoint boundary. The
+    /// scheduler service owns refresh, manual-delivery, and request-identity
+    /// behavior; this adapter only carries an authenticated frame identity to
+    /// the current instance.
+    fn schedule_control(
+        &self,
+        _command: ScheduleCommand,
+        _request_id: Uuid,
+    ) -> Result<ControlStream, ControlError> {
+        Err(ControlError::new(
+            "scheduler.control.unavailable",
+            "This instance does not provide scheduler control",
         ))
     }
     fn operation_control(&self, _command: OperationCommand) -> Result<ControlStream, ControlError> {
@@ -510,6 +528,18 @@ fn dispatch_request(
                 Vec::new(),
             ),
         },
+        ControlOperation::Schedules { command } => {
+            match handler.schedule_control(command, request.request_id) {
+                Ok(stream) => (
+                    ControlResponse::success(request.request_id, stream.result),
+                    stream.events,
+                ),
+                Err(error) => (
+                    ControlResponse::failure(request.request_id, error),
+                    Vec::new(),
+                ),
+            }
+        }
         ControlOperation::Operations { command } => match handler.operation_control(command) {
             Ok(stream) => (
                 ControlResponse::success(request.request_id, stream.result),
@@ -748,6 +778,112 @@ impl InstanceDirectory {
         .and_then(expect_message_diagnostics_result)
     }
 
+    /// Lists the accepted schedule snapshot for one explicitly selected live
+    /// instance.
+    pub fn list_schedules(&self, selector: &str) -> Result<ScheduleInspection, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Schedules {
+                command: ScheduleCommand::List {},
+            },
+        )
+        .and_then(expect_schedule_inspection_result)
+    }
+
+    /// Inspects one accepted schedule in one explicitly selected live
+    /// instance.
+    pub fn inspect_schedule(
+        &self,
+        selector: &str,
+        schedule_id: String,
+    ) -> Result<ScheduleInspection, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Schedules {
+                command: ScheduleCommand::Inspect { schedule_id },
+            },
+        )
+        .and_then(expect_schedule_inspection_result)
+    }
+
+    /// Diagnoses the accepted schedule snapshot for one explicitly selected
+    /// live instance.
+    pub fn diagnose_schedules(
+        &self,
+        selector: &str,
+    ) -> Result<ScheduleDiagnosticReport, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Schedules {
+                command: ScheduleCommand::Diagnose {},
+            },
+        )
+        .and_then(expect_schedule_diagnostics_result)
+    }
+
+    /// Verifies the schedule source against one explicitly selected live
+    /// instance without changing its accepted snapshot.
+    pub fn verify_schedules(&self, selector: &str) -> Result<ScheduleVerification, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Schedules {
+                command: ScheduleCommand::Verify {},
+            },
+        )
+        .and_then(expect_schedule_verification_result)
+    }
+
+    /// Refreshes schedules with the caller's stable retry identity.
+    ///
+    /// A retry must use the same `request_id`; the receiving scheduler service
+    /// owns replay behavior for the current instance incarnation.
+    pub fn refresh_schedules_with_request_id(
+        &self,
+        selector: &str,
+        request_id: Uuid,
+    ) -> Result<ScheduleRefreshReport, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request_with_id(
+            &descriptor,
+            ControlOperation::Schedules {
+                command: ScheduleCommand::Refresh {},
+            },
+            request_id,
+        )
+        .and_then(expect_schedule_refresh_result)
+    }
+
+    /// Triggers one accepted schedule with the caller's stable retry identity.
+    ///
+    /// A retry must use the same `request_id`; the receiving scheduler service
+    /// owns replay behavior for the current instance incarnation.
+    pub fn trigger_schedule_with_request_id(
+        &self,
+        selector: &str,
+        schedule_id: String,
+        request_id: Uuid,
+    ) -> Result<ScheduleTriggerReport, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request_with_id(
+            &descriptor,
+            ControlOperation::Schedules {
+                command: ScheduleCommand::Trigger { schedule_id },
+            },
+            request_id,
+        )
+        .and_then(expect_schedule_trigger_result)
+    }
+
     pub fn transition_module(
         &self,
         selector: Option<&str>,
@@ -938,7 +1074,17 @@ fn request(
     descriptor: &StoredDescriptor,
     operation: ControlOperation,
 ) -> Result<ControlStream, ControlError> {
-    let request_id = Uuid::new_v4();
+    request_with_id(descriptor, operation, Uuid::new_v4())
+}
+
+/// Sends one authenticated request using the caller's stable mutation
+/// identity. Read-only callers use [`request`], while retryable scheduler
+/// refresh and trigger clients reuse this UUID after a lost response.
+fn request_with_id(
+    descriptor: &StoredDescriptor,
+    operation: ControlOperation,
+    request_id: Uuid,
+) -> Result<ControlStream, ControlError> {
     let frame = ControlRequest {
         frame_type: "request".to_string(),
         frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
@@ -1190,6 +1336,66 @@ fn expect_message_diagnostics_result(
     }
 }
 
+fn expect_schedule_inspection_result(
+    stream: ControlStream,
+) -> Result<ScheduleInspection, ControlError> {
+    match stream.result {
+        ControlResponseResult::ScheduleInspection(inspection) => Ok(inspection),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-inspection result for a schedule inspection request",
+        )),
+    }
+}
+
+fn expect_schedule_diagnostics_result(
+    stream: ControlStream,
+) -> Result<ScheduleDiagnosticReport, ControlError> {
+    match stream.result {
+        ControlResponseResult::ScheduleDiagnostics(report) => Ok(report),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-diagnostic result for a schedule diagnosis request",
+        )),
+    }
+}
+
+fn expect_schedule_verification_result(
+    stream: ControlStream,
+) -> Result<ScheduleVerification, ControlError> {
+    match stream.result {
+        ControlResponseResult::ScheduleVerification(verification) => Ok(verification),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-verification result for a schedule verification request",
+        )),
+    }
+}
+
+fn expect_schedule_refresh_result(
+    stream: ControlStream,
+) -> Result<ScheduleRefreshReport, ControlError> {
+    match stream.result {
+        ControlResponseResult::ScheduleRefresh(report) => Ok(report),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-refresh result for a schedule refresh request",
+        )),
+    }
+}
+
+fn expect_schedule_trigger_result(
+    stream: ControlStream,
+) -> Result<ScheduleTriggerReport, ControlError> {
+    match stream.result {
+        ControlResponseResult::ScheduleTrigger(report) => Ok(report),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-trigger result for a schedule trigger request",
+        )),
+    }
+}
+
 fn expect_module_operation_result(stream: ControlStream) -> Result<ModuleOperation, ControlError> {
     match stream.result {
         ControlResponseResult::ModuleOperation(operation) => Ok(operation),
@@ -1336,11 +1542,15 @@ fn peer_is_current_user(_stream: &Stream) -> std::io::Result<bool> {
 mod tests {
     use super::*;
     use crate::instance::context::{InstanceLaunchOptions, LaunchProvenance};
+    use crate::scheduler::contracts::{ScheduleDeliveryOutcome, ScheduleDeliverySummary};
+    use crate::scheduler::{SCHEDULE_CONTROL_SCHEMA_VERSION, SCHEDULE_INSPECTION_SCHEMA_VERSION};
     use std::sync::atomic::AtomicUsize;
+    use std::sync::Mutex;
 
     struct FakeHandler {
         active: AtomicUsize,
         shutdown: AtomicBool,
+        schedule_requests: Mutex<Vec<(ScheduleCommand, Uuid)>>,
     }
 
     impl ControlHandler for FakeHandler {
@@ -1360,6 +1570,78 @@ mod tests {
         fn shutdown(&self, _force: bool) -> Result<(), ControlError> {
             self.shutdown.store(true, Ordering::SeqCst);
             Ok(())
+        }
+
+        fn schedule_control(
+            &self,
+            command: ScheduleCommand,
+            request_id: Uuid,
+        ) -> Result<ControlStream, ControlError> {
+            let result = match &command {
+                ScheduleCommand::List {} | ScheduleCommand::Inspect { .. } => {
+                    ControlResponseResult::ScheduleInspection(schedule_inspection())
+                }
+                ScheduleCommand::Diagnose {} => {
+                    ControlResponseResult::ScheduleDiagnostics(ScheduleDiagnosticReport {
+                        schema_version: SCHEDULE_CONTROL_SCHEMA_VERSION,
+                        code: "scheduler.control.diagnosed".to_string(),
+                        healthy: true,
+                        inspection: schedule_inspection(),
+                        diagnostics: Vec::new(),
+                    })
+                }
+                ScheduleCommand::Verify {} => {
+                    ControlResponseResult::ScheduleVerification(ScheduleVerification {
+                        schema_version: SCHEDULE_CONTROL_SCHEMA_VERSION,
+                        code: "scheduler.control.verified".to_string(),
+                        matches_accepted: true,
+                        accepted: schedule_inspection(),
+                        candidate_digest_sha256: Some("candidate".to_string()),
+                        diagnostics: Vec::new(),
+                    })
+                }
+                ScheduleCommand::Refresh {} => {
+                    ControlResponseResult::ScheduleRefresh(ScheduleRefreshReport {
+                        schema_version: SCHEDULE_CONTROL_SCHEMA_VERSION,
+                        code: "scheduler.control.refreshed".to_string(),
+                        applied: true,
+                        inspection: schedule_inspection(),
+                        diagnostics: Vec::new(),
+                    })
+                }
+                ScheduleCommand::Trigger { schedule_id } => {
+                    ControlResponseResult::ScheduleTrigger(ScheduleTriggerReport {
+                        schema_version: SCHEDULE_CONTROL_SCHEMA_VERSION,
+                        code: "scheduler.control.triggered".to_string(),
+                        inspection: schedule_inspection(),
+                        schedule_id: schedule_id.clone(),
+                        delivery: ScheduleDeliverySummary {
+                            occurrence_utc: "2026-08-09T00:00:00Z".to_string(),
+                            outcome: ScheduleDeliveryOutcome::Delivered,
+                            route_generation: 2,
+                            diagnostic: None,
+                        },
+                    })
+                }
+            };
+            self.schedule_requests
+                .lock()
+                .unwrap()
+                .push((command, request_id));
+            Ok(ControlStream::result(result))
+        }
+    }
+
+    fn schedule_inspection() -> ScheduleInspection {
+        ScheduleInspection {
+            schema_version: SCHEDULE_INSPECTION_SCHEMA_VERSION,
+            instance_id: "test-instance".to_string(),
+            incarnation: "test-incarnation".to_string(),
+            schedule_generation: 1,
+            snapshot_digest_sha256: "accepted".to_string(),
+            bus_route_generation: 2,
+            schedules: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -1390,6 +1672,7 @@ mod tests {
         let handler = Arc::new(FakeHandler {
             active: AtomicUsize::new(2),
             shutdown: AtomicBool::new(false),
+            schedule_requests: Mutex::new(Vec::new()),
         });
         let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
         let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
@@ -1418,6 +1701,196 @@ mod tests {
         assert_eq!(repeated.code.as_str(), "control.instance.absent");
         assert!(directory.discover().instances.is_empty());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn authenticated_schedule_dispatch_preserves_the_caller_request_identity() {
+        let (context, root) = fixture("schedule-dispatch");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = Arc::new(FakeHandler {
+            active: AtomicUsize::new(0),
+            shutdown: AtomicBool::new(false),
+            schedule_requests: Mutex::new(Vec::new()),
+        });
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let descriptor: StoredDescriptor =
+            serde_json::from_slice(&fs::read(server.descriptor_path()).unwrap()).unwrap();
+        let request_id = Uuid::new_v4();
+
+        let stream = request_with_id(
+            &descriptor,
+            ControlOperation::Schedules {
+                command: ScheduleCommand::Trigger {
+                    schedule_id: "agents.refresh".to_string(),
+                },
+            },
+            request_id,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            stream.result,
+            ControlResponseResult::ScheduleTrigger(ref report)
+                if report.schedule_id == "agents.refresh"
+        ));
+        assert_eq!(
+            handler.schedule_requests.lock().unwrap().as_slice(),
+            &[(
+                ScheduleCommand::Trigger {
+                    schedule_id: "agents.refresh".to_string(),
+                },
+                request_id,
+            )]
+        );
+
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn schedule_directory_methods_return_typed_results_and_preserve_mutation_ids() {
+        let (context, root) = fixture("schedule-directory");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = Arc::new(FakeHandler {
+            active: AtomicUsize::new(0),
+            shutdown: AtomicBool::new(false),
+            schedule_requests: Mutex::new(Vec::new()),
+        });
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+        let refresh_request_id = Uuid::new_v4();
+        let trigger_request_id = Uuid::new_v4();
+
+        assert_eq!(
+            directory
+                .list_schedules("schedule-directory")
+                .unwrap()
+                .schedule_generation,
+            1
+        );
+        assert_eq!(
+            directory
+                .inspect_schedule("schedule-directory", "agents.refresh".to_string())
+                .unwrap()
+                .snapshot_digest_sha256,
+            "accepted"
+        );
+        assert!(
+            directory
+                .diagnose_schedules("schedule-directory")
+                .unwrap()
+                .healthy
+        );
+        assert!(
+            directory
+                .verify_schedules("schedule-directory")
+                .unwrap()
+                .matches_accepted
+        );
+        assert!(
+            directory
+                .refresh_schedules_with_request_id("schedule-directory", refresh_request_id)
+                .unwrap()
+                .applied
+        );
+        assert_eq!(
+            directory
+                .trigger_schedule_with_request_id(
+                    "schedule-directory",
+                    "agents.refresh".to_string(),
+                    trigger_request_id,
+                )
+                .unwrap()
+                .schedule_id,
+            "agents.refresh"
+        );
+
+        let schedule_requests = handler.schedule_requests.lock().unwrap();
+        assert_eq!(schedule_requests.len(), 6);
+        assert_eq!(
+            schedule_requests[4],
+            (ScheduleCommand::Refresh {}, refresh_request_id)
+        );
+        assert_eq!(
+            schedule_requests[5],
+            (
+                ScheduleCommand::Trigger {
+                    schedule_id: "agents.refresh".to_string(),
+                },
+                trigger_request_id,
+            )
+        );
+
+        drop(schedule_requests);
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn schedule_operations_require_current_schema_protocol_and_authentication() {
+        let (context, root) = fixture("schedule-authentication");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = Arc::new(FakeHandler {
+            active: AtomicUsize::new(0),
+            shutdown: AtomicBool::new(false),
+            schedule_requests: Mutex::new(Vec::new()),
+        });
+        let server = ControlServer::start(context, leases, handler.clone()).unwrap();
+        let descriptor: StoredDescriptor =
+            serde_json::from_slice(&fs::read(server.descriptor_path()).unwrap()).unwrap();
+        let stopping = AtomicBool::new(false);
+
+        let mut invalid_schema = schedule_request(&descriptor, Uuid::new_v4());
+        invalid_schema.frame_schema_version -= 1;
+        let (response, events) =
+            dispatch_request(invalid_schema, &descriptor, &*handler, &stopping);
+        assert!(events.is_empty());
+        assert_eq!(
+            response.error.unwrap().code.as_str(),
+            "control.instance.protocol_incompatible"
+        );
+
+        let mut invalid_protocol = schedule_request(&descriptor, Uuid::new_v4());
+        invalid_protocol.control_protocol_version -= 1;
+        let (response, events) =
+            dispatch_request(invalid_protocol, &descriptor, &*handler, &stopping);
+        assert!(events.is_empty());
+        assert_eq!(
+            response.error.unwrap().code.as_str(),
+            "control.instance.protocol_incompatible"
+        );
+
+        let mut invalid_authentication = schedule_request(&descriptor, Uuid::new_v4());
+        invalid_authentication.auth_token = "wrong-token".to_string();
+        let (response, events) =
+            dispatch_request(invalid_authentication, &descriptor, &*handler, &stopping);
+        assert!(events.is_empty());
+        assert_eq!(
+            response.error.unwrap().code.as_str(),
+            "control.instance.unauthorized"
+        );
+        assert!(handler.schedule_requests.lock().unwrap().is_empty());
+
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn schedule_request(descriptor: &StoredDescriptor, request_id: Uuid) -> ControlRequest {
+        ControlRequest {
+            frame_type: "request".to_string(),
+            frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
+            control_protocol_version: descriptor.instance.build.control_protocol_version,
+            request_id,
+            auth_token: descriptor.auth_token.clone(),
+            caller: ControlCaller {
+                process_id: std::process::id(),
+                executable_role: "shipctl-cli".to_string(),
+                injected_instance_id: None,
+            },
+            operation: ControlOperation::Schedules {
+                command: ScheduleCommand::List {},
+            },
+        }
     }
 
     #[test]

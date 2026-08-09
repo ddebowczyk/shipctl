@@ -10,6 +10,7 @@ use std::process::{Command, ExitCode};
 use clap::error::ErrorKind as ClapErrorKind;
 use clap::Parser;
 use serde::Serialize;
+use serde_json::Value;
 use shipctl_core::build_info::BuildIdentity;
 use shipctl_core::instance::ControlError;
 use shipctl_core::message_bus::{
@@ -20,11 +21,17 @@ use shipctl_core::module_control::codes::{
     RUNTIME_DIAGNOSED, RUNTIME_INSPECTED,
 };
 use shipctl_core::module_control::ModuleOperationKind;
+use shipctl_core::scheduler::contracts::ScheduleDeliveryOutcome;
+use shipctl_core::scheduler::{
+    SCHEDULE_CONTROL_INSPECTED, SCHEDULE_CONTROL_LISTED, SCHEDULE_CONTROL_REFRESHED,
+    SCHEDULE_CONTROL_REFRESH_PARTIAL, SCHEDULE_CONTROL_REFRESH_REJECTED,
+};
 use shipctl_core::state::archive::inspect_archive;
+use uuid::Uuid;
 
 use args::{
     Cli, Command as CliCommand, InstancesCommand, MessagesCommand, ModulesCommand,
-    OperationsCommand, StateCommand, UiCommand,
+    OperationsCommand, ScheduleCommand, StateCommand, UiCommand,
 };
 use instances::{StartDisposition, StartRequest};
 use output::OutputFormat;
@@ -101,6 +108,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         Some(CliCommand::Instances { command }) => run_instances(command, cli.output),
         Some(CliCommand::Modules { command }) => run_modules(command, cli.output),
         Some(CliCommand::Messages { command }) => run_messages(command, cli.output),
+        Some(CliCommand::Schedule { command }) => run_schedules(command, cli.output, cli.full),
         Some(CliCommand::Operations { command }) => run_operations(command, cli.output),
         Some(CliCommand::State { command }) => run_state(command, cli.output),
         Some(CliCommand::Version) => {
@@ -153,6 +161,143 @@ fn run_messages(command: MessagesCommand, output: OutputFormat) -> ExitCode {
                     })
                 }
                 Err(error) => emit_failure(output, "messages.diagnose", &error, false),
+            }
+        }
+    }
+}
+
+fn run_schedules(command: ScheduleCommand, output: OutputFormat, full: bool) -> ExitCode {
+    match command {
+        ScheduleCommand::List(args) => {
+            let operation = "schedule.list";
+            match instances::list_schedules(args.runtime.runtime_root.as_deref(), &args.instance) {
+                Ok(data) => emit_schedule_success(
+                    output,
+                    operation,
+                    SCHEDULE_CONTROL_LISTED,
+                    false,
+                    full,
+                    data,
+                )
+                .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
+                Err(error) => emit_failure(output, operation, &error, false),
+            }
+        }
+        ScheduleCommand::Inspect(args) => {
+            let operation = "schedule.inspect";
+            match instances::inspect_schedule(
+                args.target.runtime.runtime_root.as_deref(),
+                &args.target.instance,
+                args.id,
+            ) {
+                Ok(data) => emit_schedule_success(
+                    output,
+                    operation,
+                    SCHEDULE_CONTROL_INSPECTED,
+                    false,
+                    full,
+                    data,
+                )
+                .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
+                Err(error) => emit_failure(output, operation, &error, false),
+            }
+        }
+        ScheduleCommand::Diagnose(args) => {
+            let operation = "schedule.diagnose";
+            match instances::diagnose_schedules(
+                args.runtime.runtime_root.as_deref(),
+                &args.instance,
+            ) {
+                Ok(data) => {
+                    let succeeded = data.healthy;
+                    let code = data.code.clone();
+                    emit_schedule_outcome(output, operation, &code, succeeded, full, data)
+                        .unwrap_or_else(|message| emit_render_failure(output, operation, message))
+                }
+                Err(error) => emit_failure(output, operation, &error, false),
+            }
+        }
+        ScheduleCommand::Verify(args) => {
+            let operation = "schedule.verify";
+            match instances::verify_schedules(args.runtime.runtime_root.as_deref(), &args.instance)
+            {
+                Ok(data) => {
+                    let succeeded = data.matches_accepted;
+                    let code = data.code.clone();
+                    emit_schedule_outcome(output, operation, &code, succeeded, full, data)
+                        .unwrap_or_else(|message| emit_render_failure(output, operation, message))
+                }
+                Err(error) => emit_failure(output, operation, &error, false),
+            }
+        }
+        ScheduleCommand::Refresh(args) if args.all_instances => {
+            let operation = "schedule.refresh";
+            match instances::refresh_all_schedules(
+                args.runtime.runtime_root.as_deref(),
+                args.request_id,
+            ) {
+                Ok(data) if data.is_no_op() => emit_schedule_success(
+                    output,
+                    operation,
+                    SCHEDULE_CONTROL_REFRESHED,
+                    true,
+                    full,
+                    data,
+                )
+                .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
+                Ok(data) => {
+                    let succeeded = data.all_applied();
+                    let code = if succeeded {
+                        SCHEDULE_CONTROL_REFRESHED
+                    } else if data.applied_count > 0 {
+                        SCHEDULE_CONTROL_REFRESH_PARTIAL
+                    } else {
+                        SCHEDULE_CONTROL_REFRESH_REJECTED
+                    };
+                    emit_schedule_outcome(output, operation, code, succeeded, full, data)
+                        .unwrap_or_else(|message| emit_render_failure(output, operation, message))
+                }
+                Err(error) => emit_failure(output, operation, &error, false),
+            }
+        }
+        ScheduleCommand::Refresh(args) => {
+            let operation = "schedule.refresh";
+            let request_id = args.request_id.unwrap_or_else(Uuid::new_v4);
+            let instance = args
+                .instance
+                .as_deref()
+                .expect("clap requires --instance unless --all-instances is selected");
+            match instances::refresh_schedules(
+                args.runtime.runtime_root.as_deref(),
+                instance,
+                request_id,
+            ) {
+                Ok(data) => {
+                    let succeeded = data.applied;
+                    let code = data.code.clone();
+                    emit_schedule_outcome(output, operation, &code, succeeded, full, data)
+                        .unwrap_or_else(|message| emit_render_failure(output, operation, message))
+                }
+                Err(error) => emit_failure(output, operation, &error, false),
+            }
+        }
+        ScheduleCommand::Trigger(args) => {
+            let operation = "schedule.trigger";
+            let request_id = args.request_id.unwrap_or_else(Uuid::new_v4);
+            match instances::trigger_schedule(
+                args.target.runtime.runtime_root.as_deref(),
+                &args.target.instance,
+                args.id,
+                request_id,
+            ) {
+                Ok(data) => {
+                    let succeeded =
+                        matches!(&data.delivery.outcome, ScheduleDeliveryOutcome::Delivered);
+                    let code = data.code.clone();
+                    emit_schedule_outcome(output, operation, &code, succeeded, full, data)
+                        .unwrap_or_else(|message| emit_render_failure(output, operation, message))
+                }
+                Err(error) => emit_failure(output, operation, &error, false),
             }
         }
     }
@@ -543,6 +688,12 @@ fn operation_hint(args: &[OsString]) -> &str {
             ("modules", "disable") => "modules.disable",
             ("messages", "inspect") => "messages.inspect",
             ("messages", "diagnose") => "messages.diagnose",
+            ("schedule", "list") => "schedule.list",
+            ("schedule", "inspect") => "schedule.inspect",
+            ("schedule", "diagnose") => "schedule.diagnose",
+            ("schedule", "verify") => "schedule.verify",
+            ("schedule", "refresh") => "schedule.refresh",
+            ("schedule", "trigger") => "schedule.trigger",
             ("operations", "inspect") => "operations.inspect",
             ("state", "save") => "state.save",
             ("state", "inspect") => "state.inspect",
@@ -595,6 +746,74 @@ fn emit_outcome(
     } else {
         ExitCode::FAILURE
     })
+}
+
+fn emit_schedule_success(
+    format: OutputFormat,
+    operation: &str,
+    code: &str,
+    no_op: bool,
+    full: bool,
+    data: impl Serialize,
+) -> Result<ExitCode, String> {
+    emit_success(
+        format,
+        operation,
+        code,
+        no_op,
+        schedule_output_data(full, data)?,
+    )
+}
+
+fn emit_schedule_outcome(
+    format: OutputFormat,
+    operation: &str,
+    code: &str,
+    succeeded: bool,
+    full: bool,
+    data: impl Serialize,
+) -> Result<ExitCode, String> {
+    emit_outcome(
+        format,
+        operation,
+        code,
+        succeeded,
+        schedule_output_data(full, data)?,
+    )
+}
+
+/// The regular projection retains stable diagnostic code, severity, source,
+/// and schedule identity while dropping optional context. `--full` restores
+/// that already-redacted context without altering any scheduler decision data.
+fn schedule_output_data(full: bool, data: impl Serialize) -> Result<Value, String> {
+    let mut value = serde_json::to_value(data).map_err(|error| error.to_string())?;
+    if !full {
+        strip_schedule_diagnostic_context(&mut value);
+    }
+    Ok(value)
+}
+
+fn strip_schedule_diagnostic_context(value: &mut Value) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                strip_schedule_diagnostic_context(item);
+            }
+        }
+        Value::Object(fields) => {
+            let is_schedule_diagnostic = fields.contains_key("schemaVersion")
+                && fields.contains_key("code")
+                && fields.contains_key("severity")
+                && fields.contains_key("context");
+            if is_schedule_diagnostic {
+                fields.remove("context");
+            }
+            for field in fields.values_mut() {
+                strip_schedule_diagnostic_context(field);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn emit_failure(
@@ -816,6 +1035,159 @@ mod tests {
         assert!(Cli::try_parse_from(["shipctl", "messages", "inspect"]).is_err());
         assert!(
             Cli::try_parse_from(["shipctl", "messages", "send", "--instance", "fixture"]).is_err()
+        );
+    }
+
+    #[test]
+    fn clap_exposes_only_explicit_schedule_targets() {
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "schedule",
+            "list",
+            "--instance",
+            "fixture",
+            "--runtime-root=/tmp/runtime",
+            "--full",
+            "--output=json",
+        ])
+        .unwrap();
+        assert!(parsed.full);
+        let Some(CliCommand::Schedule {
+            command: ScheduleCommand::List(list),
+        }) = parsed.command
+        else {
+            panic!("expected schedule list");
+        };
+        assert_eq!(list.instance, "fixture");
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "schedule",
+            "inspect",
+            "daily-usage",
+            "--instance=fixture",
+        ])
+        .unwrap();
+        let Some(CliCommand::Schedule {
+            command: ScheduleCommand::Inspect(inspect),
+        }) = parsed.command
+        else {
+            panic!("expected schedule inspect");
+        };
+        assert_eq!(inspect.id, "daily-usage");
+        assert_eq!(inspect.target.instance, "fixture");
+
+        for command in ["diagnose", "verify"] {
+            assert!(Cli::try_parse_from(
+                ["shipctl", "schedule", command, "--instance", "fixture",]
+            )
+            .is_ok());
+        }
+
+        let request_id = "b56fd2d4-3f84-4ad0-9e36-c887bc62cc4c";
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "schedule",
+            "refresh",
+            "--instance",
+            "fixture",
+            "--request-id",
+            request_id,
+        ])
+        .unwrap();
+        let Some(CliCommand::Schedule {
+            command: ScheduleCommand::Refresh(refresh),
+        }) = parsed.command
+        else {
+            panic!("expected single-instance schedule refresh");
+        };
+        assert_eq!(refresh.instance.as_deref(), Some("fixture"));
+        assert!(!refresh.all_instances);
+        assert_eq!(refresh.request_id.unwrap().to_string(), request_id);
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "schedule",
+            "refresh",
+            "--all-instances",
+            "--request-id",
+            request_id,
+        ])
+        .unwrap();
+        let Some(CliCommand::Schedule {
+            command: ScheduleCommand::Refresh(refresh),
+        }) = parsed.command
+        else {
+            panic!("expected all-instance schedule refresh");
+        };
+        assert!(refresh.all_instances);
+        assert!(refresh.instance.is_none());
+        assert_eq!(refresh.request_id.unwrap().to_string(), request_id);
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "schedule",
+            "trigger",
+            "daily-usage",
+            "--instance",
+            "fixture",
+            "--request-id",
+            request_id,
+        ])
+        .unwrap();
+        let Some(CliCommand::Schedule {
+            command: ScheduleCommand::Trigger(trigger),
+        }) = parsed.command
+        else {
+            panic!("expected schedule trigger");
+        };
+        assert_eq!(trigger.id, "daily-usage");
+        assert_eq!(trigger.target.instance, "fixture");
+        assert_eq!(trigger.request_id.unwrap().to_string(), request_id);
+
+        assert!(Cli::try_parse_from(["shipctl", "schedule", "list"]).is_err());
+        assert!(Cli::try_parse_from(["shipctl", "schedule", "inspect", "daily-usage"]).is_err());
+        assert!(Cli::try_parse_from(["shipctl", "schedule", "diagnose"]).is_err());
+        assert!(Cli::try_parse_from(["shipctl", "schedule", "verify"]).is_err());
+        assert!(Cli::try_parse_from(["shipctl", "schedule", "refresh"]).is_err());
+        assert!(Cli::try_parse_from(["shipctl", "schedule", "trigger", "daily-usage"]).is_err());
+        assert!(Cli::try_parse_from([
+            "shipctl",
+            "schedule",
+            "refresh",
+            "--instance",
+            "fixture",
+            "--all-instances",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn schedule_default_projection_omits_only_diagnostic_context() {
+        let diagnostic = serde_json::json!({
+            "schemaVersion": 1,
+            "code": "scheduler.source.invalid",
+            "severity": "error",
+            "sourcePath": "schedules/daily.yaml",
+            "context": {"fields": {"reason": "missing target"}},
+        });
+        let data = serde_json::json!({
+            "count": 1,
+            "diagnostics": [diagnostic],
+            "unrelated": {"context": {"preserved": true}},
+        });
+
+        let default = schedule_output_data(false, &data).unwrap();
+        assert!(default["diagnostics"][0].get("context").is_none());
+        assert_eq!(
+            default["unrelated"]["context"]["preserved"],
+            serde_json::json!(true)
+        );
+
+        let full = schedule_output_data(true, &data).unwrap();
+        assert_eq!(
+            full["diagnostics"][0]["context"]["fields"]["reason"],
+            serde_json::json!("missing target")
         );
     }
 

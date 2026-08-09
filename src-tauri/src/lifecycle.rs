@@ -3,8 +3,9 @@
 //! shell that composes them rather than to any one capability.
 
 use shipctl_core::instance::{
-    ActiveWorkBlocker, ControlError, ControlHandler, ControlResponseResult, ControlStream,
-    MessageCommand, ModuleCommand, ModuleControlStatus, OperationCommand,
+    ActiveWorkBlocker, ControlError, ControlHandler, ControlRequestId, ControlResponseResult,
+    ControlStream, MessageCommand, ModuleCommand, ModuleControlStatus, OperationCommand,
+    ScheduleCommand,
 };
 use shipctl_core::message_bus::{
     diagnose_message_runtime, MessageBusBridgeService, MessageModuleInspection,
@@ -13,7 +14,7 @@ use shipctl_core::message_bus::{
 use shipctl_core::module_control::codes::{CONTROL_CAPABILITY_UNAVAILABLE, MUTATION_UNAVAILABLE};
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::projects::watcher::GitWatcher;
-use shipctl_core::scheduler::SchedulerService;
+use shipctl_core::scheduler::{SchedulerControlError, SchedulerService};
 use shipctl_core::state::archive::{StateArchiveInspection, StateArchiveService};
 use shipctl_core::terminal::manager::PtyManager;
 use std::path::Path;
@@ -134,6 +135,48 @@ impl ControlHandler for TauriControlHandler {
         }))
     }
 
+    fn schedule_control(
+        &self,
+        command: ScheduleCommand,
+        request_id: ControlRequestId,
+    ) -> Result<ControlStream, ControlError> {
+        let scheduler = self.app.state::<SchedulerService>().inner().clone();
+        match command {
+            ScheduleCommand::List {} => Ok(ControlStream::result(
+                ControlResponseResult::ScheduleInspection(scheduler.inspect()),
+            )),
+            ScheduleCommand::Inspect { schedule_id } => scheduler
+                .inspect_schedule(&schedule_id)
+                .map(ControlResponseResult::ScheduleInspection)
+                .map(ControlStream::result)
+                .map_err(scheduler_control_error),
+            ScheduleCommand::Diagnose {} => Ok(ControlStream::result(
+                ControlResponseResult::ScheduleDiagnostics(scheduler.diagnose()),
+            )),
+            ScheduleCommand::Verify {} => Ok(ControlStream::result(
+                ControlResponseResult::ScheduleVerification(scheduler.verify()),
+            )),
+            ScheduleCommand::Refresh {} => tauri::async_runtime::block_on(async move {
+                scheduler
+                    .refresh_with_request_id(request_id)
+                    .await
+                    .map(ControlResponseResult::ScheduleRefresh)
+                    .map(ControlStream::result)
+                    .map_err(scheduler_control_error)
+            }),
+            ScheduleCommand::Trigger { schedule_id } => {
+                tauri::async_runtime::block_on(async move {
+                    scheduler
+                        .trigger_with_request_id(&schedule_id, request_id)
+                        .await
+                        .map(ControlResponseResult::ScheduleTrigger)
+                        .map(ControlStream::result)
+                        .map_err(scheduler_control_error)
+                })
+            }
+        }
+    }
+
     fn operation_control(&self, command: OperationCommand) -> Result<ControlStream, ControlError> {
         let service = self.module_service()?;
         let OperationCommand::Inspect { operation_id } = command;
@@ -150,6 +193,14 @@ impl ControlHandler for TauriControlHandler {
         perform_shutdown(&self.app);
         Ok(())
     }
+}
+
+fn scheduler_control_error(error: SchedulerControlError) -> ControlError {
+    let message = error.diagnostic().map_or_else(
+        || "Scheduler request identity conflicts with an existing mutation".to_string(),
+        |diagnostic| format!("Scheduler control rejected: {}", diagnostic.code),
+    );
+    ControlError::new(error.code(), message)
 }
 
 fn perform_shutdown(app: &tauri::AppHandle) {

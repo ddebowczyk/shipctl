@@ -5,13 +5,14 @@
 //! durable tick state.
 
 use cronexpr::jiff::Timestamp;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{watch, Mutex as AsyncMutex};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep_until, Instant};
+use uuid::Uuid;
 
 use crate::instance::InstanceContext;
 use crate::message_bus::{
@@ -22,13 +23,14 @@ use crate::message_bus::{
 
 use super::contracts::{
     schedule_snapshot, ScheduleDefinition, ScheduleDeliveryOutcome, ScheduleDeliverySummary,
-    ScheduleInspection, ScheduleSnapshot, ScheduleTargetAvailability, ScheduleTargetKind,
-    SCHEDULE_INSPECTION_SCHEMA_VERSION,
+    ScheduleDiagnosticReport, ScheduleInspection, ScheduleRefreshReport, ScheduleSnapshot,
+    ScheduleTargetAvailability, ScheduleTargetKind, ScheduleTriggerReport, ScheduleVerification,
+    SCHEDULE_CONTROL_SCHEMA_VERSION, SCHEDULE_INSPECTION_SCHEMA_VERSION,
 };
 use super::diagnostics::{
     CRON_INVALID, NEXT_OCCURRENCE_UNAVAILABLE, PAYLOAD_INVALID, PAYLOAD_TOO_LARGE,
-    SCHEDULE_DISABLED, SCHEDULE_NOT_FOUND, SECRET_PAYLOAD_FORBIDDEN, TARGET_MESSAGE_INCOMPATIBLE,
-    TARGET_UNAUTHORIZED, TARGET_UNAVAILABLE,
+    SCHEDULE_DISABLED, SCHEDULE_NOT_FOUND, SECRET_PAYLOAD_FORBIDDEN, SNAPSHOT_SOURCE_DRIFT,
+    TARGET_MESSAGE_INCOMPATIBLE, TARGET_UNAUTHORIZED, TARGET_UNAVAILABLE,
 };
 use super::loader::{load_schedule_candidate, ScheduleLoadCandidate};
 use super::{ScheduleDiagnostic, ScheduleDiagnosticSeverity};
@@ -44,6 +46,22 @@ pub struct ScheduleRefreshResult {
     pub snapshot: ScheduleSnapshot,
     pub diagnostics: Vec<ScheduleDiagnostic>,
 }
+
+/// Stable operation codes for machine-facing scheduler control reports. They
+/// are outcomes, not diagnostics: failures continue to carry only redacted
+/// scheduler diagnostic codes.
+pub const SCHEDULE_CONTROL_LISTED: &str = "scheduler.control.listed";
+pub const SCHEDULE_CONTROL_INSPECTED: &str = "scheduler.control.inspected";
+pub const SCHEDULE_CONTROL_DIAGNOSED: &str = "scheduler.control.diagnosed";
+pub const SCHEDULE_CONTROL_VERIFIED: &str = "scheduler.control.verified";
+pub const SCHEDULE_CONTROL_REFRESHED: &str = "scheduler.control.refreshed";
+pub const SCHEDULE_CONTROL_REFRESH_REJECTED: &str = "scheduler.control.refresh_rejected";
+/// Aggregate result emitted by a caller that fans one refresh identity out to
+/// several independent instance incarnations. Individual scheduler services
+/// never emit this: each service can report only its own accepted snapshot.
+pub const SCHEDULE_CONTROL_REFRESH_PARTIAL: &str = "scheduler.control.refresh_partial";
+pub const SCHEDULE_CONTROL_TRIGGERED: &str = "scheduler.control.triggered";
+pub const SCHEDULE_CONTROL_REQUEST_ID_CONFLICT: &str = "scheduler.control.request_id_conflict";
 
 /// Construction rejects accidental cross-instance composition before any
 /// schedule source is read or published.
@@ -95,6 +113,42 @@ impl fmt::Display for SchedulerTriggerError {
 }
 
 impl std::error::Error for SchedulerTriggerError {}
+
+/// A scheduler-local control failure. It deliberately does not retain a
+/// request payload or a source document; control adapters can render its
+/// stable code or its already-redacted selection diagnostic.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SchedulerControlError {
+    NotFound(ScheduleDiagnostic),
+    Trigger(SchedulerTriggerError),
+    RequestIdConflict,
+}
+
+impl SchedulerControlError {
+    pub fn code(&self) -> &str {
+        match self {
+            Self::NotFound(diagnostic) => &diagnostic.code,
+            Self::Trigger(error) => &error.diagnostic().code,
+            Self::RequestIdConflict => SCHEDULE_CONTROL_REQUEST_ID_CONFLICT,
+        }
+    }
+
+    pub fn diagnostic(&self) -> Option<&ScheduleDiagnostic> {
+        match self {
+            Self::NotFound(diagnostic) => Some(diagnostic),
+            Self::Trigger(error) => Some(error.diagnostic()),
+            Self::RequestIdConflict => None,
+        }
+    }
+}
+
+impl fmt::Display for SchedulerControlError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.code())
+    }
+}
+
+impl std::error::Error for SchedulerControlError {}
 
 /// One accepted scheduler snapshot and the exact message-route identity that
 /// validated it. This is the watch value consumed by later job ownership; it
@@ -212,6 +266,32 @@ struct StartupState {
     candidate: Option<ScheduleLoadCandidate>,
 }
 
+/// A request identity binds one control-plane mutation to its canonical
+/// scheduler operation for this process incarnation. The ledger is memory
+/// only, is released with the service, and therefore cannot create a durable
+/// scheduler operation journal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SchedulerMutationFingerprint {
+    Refresh,
+    Trigger { schedule_id: String },
+}
+
+#[derive(Clone, Debug)]
+enum SchedulerMutationOutcome {
+    Refresh(Result<ScheduleRefreshReport, SchedulerControlError>),
+    Trigger(Result<ScheduleTriggerReport, SchedulerControlError>),
+}
+
+struct SchedulerMutationEntry {
+    fingerprint: SchedulerMutationFingerprint,
+    completion: watch::Sender<Option<SchedulerMutationOutcome>>,
+}
+
+enum SchedulerMutationReservation {
+    Leader(watch::Sender<Option<SchedulerMutationOutcome>>),
+    Follower(watch::Receiver<Option<SchedulerMutationOutcome>>),
+}
+
 struct SchedulerServiceInner {
     context: InstanceContext,
     schedule_root: PathBuf,
@@ -223,6 +303,7 @@ struct SchedulerServiceInner {
     clock: Arc<dyn SchedulerClock>,
     jobs: Mutex<SchedulerJobs>,
     shutdown: watch::Sender<bool>,
+    mutations: AsyncMutex<BTreeMap<Uuid, SchedulerMutationEntry>>,
 }
 
 /// Instance-local schedule configuration service.
@@ -305,6 +386,7 @@ impl SchedulerService {
                 clock,
                 jobs: Mutex::new(SchedulerJobs::default()),
                 shutdown,
+                mutations: AsyncMutex::new(BTreeMap::new()),
             }),
         })
     }
@@ -412,6 +494,89 @@ impl SchedulerService {
         inspection
     }
 
+    /// Returns the accepted snapshot for `schedule_id` while preserving the
+    /// enclosing instance, incarnation, generation, digest, and bus evidence.
+    /// It never reads source files or changes a task.
+    pub fn inspect_schedule(
+        &self,
+        schedule_id: &str,
+    ) -> Result<ScheduleInspection, SchedulerControlError> {
+        let mut inspection = self.inspect();
+        if !inspection
+            .schedules
+            .iter()
+            .any(|schedule| schedule.id == schedule_id)
+        {
+            return Err(SchedulerControlError::NotFound(not_found_diagnostic()));
+        }
+        inspection
+            .schedules
+            .retain(|schedule| schedule.id == schedule_id);
+        Ok(inspection)
+    }
+
+    /// Parses the live source directory and compares its complete candidate
+    /// digest with the accepted snapshot. This intentionally stops before bus
+    /// preflight or publication, so verify cannot change a timer, generation,
+    /// job set, or runtime observation.
+    pub fn verify(&self) -> ScheduleVerification {
+        let accepted = self.inspect();
+        let candidate = load_schedule_candidate(&self.inner.schedule_root);
+        let (candidate_digest_sha256, mut diagnostics) =
+            match candidate.valid_snapshot(accepted.schedule_generation) {
+                Ok(snapshot) => (Some(snapshot.digest_sha256), Vec::new()),
+                Err(diagnostics) => (None, diagnostics),
+            };
+        let matches_accepted = candidate_digest_sha256
+            .as_deref()
+            .is_some_and(|digest| digest == accepted.snapshot_digest_sha256);
+        if candidate_digest_sha256.is_some() && !matches_accepted {
+            diagnostics.push(source_drift_diagnostic(
+                &accepted.snapshot_digest_sha256,
+                candidate_digest_sha256
+                    .as_deref()
+                    .expect("a present candidate digest was checked above"),
+            ));
+        }
+        sort_diagnostics(&mut diagnostics);
+        ScheduleVerification {
+            schema_version: SCHEDULE_CONTROL_SCHEMA_VERSION,
+            code: SCHEDULE_CONTROL_VERIFIED.to_string(),
+            matches_accepted,
+            accepted,
+            candidate_digest_sha256,
+            diagnostics,
+        }
+    }
+
+    /// Builds the health projection from immutable source verification and the
+    /// current accepted/runtime observations. It does not revalidate routes,
+    /// publish a candidate, or alter scheduler state.
+    pub fn diagnose(&self) -> ScheduleDiagnosticReport {
+        let verification = self.verify();
+        let inspection = verification.accepted;
+        let mut diagnostics = verification.diagnostics;
+        diagnostics.extend(inspection.diagnostics.clone());
+        diagnostics.extend(
+            inspection
+                .schedules
+                .iter()
+                .filter_map(|schedule| schedule.diagnostic.clone()),
+        );
+        sort_diagnostics(&mut diagnostics);
+        diagnostics.dedup();
+        let healthy = diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != ScheduleDiagnosticSeverity::Error);
+        ScheduleDiagnosticReport {
+            schema_version: SCHEDULE_CONTROL_SCHEMA_VERSION,
+            code: SCHEDULE_CONTROL_DIAGNOSED.to_string(),
+            healthy,
+            inspection,
+            diagnostics,
+        }
+    }
+
     /// Begins exactly one initial route-readiness attempt.
     ///
     /// The message bridge is opened by the frontend after Tauri setup, so a
@@ -478,6 +643,10 @@ impl SchedulerService {
     /// only after a successful whole-candidate route preflight.
     pub async fn refresh(&self) -> ScheduleRefreshResult {
         let _refresh = self.inner.refresh.lock().await;
+        self.refresh_locked().await
+    }
+
+    async fn refresh_locked(&self) -> ScheduleRefreshResult {
         // An explicit refresh supersedes a source snapshot retained before the
         // bridge first became ready. It must never be overwritten later.
         self.inner
@@ -487,6 +656,63 @@ impl SchedulerService {
             .candidate = None;
         let candidate = load_schedule_candidate(&self.inner.schedule_root);
         self.apply_candidate_locked(candidate).await
+    }
+
+    /// Performs one explicit refresh under an outer request identity. A retry
+    /// with the same UUID returns the original redacted report; a different
+    /// UUID remains an independent complete-directory operation.
+    pub async fn refresh_with_request_id(
+        &self,
+        request_id: Uuid,
+    ) -> Result<ScheduleRefreshReport, SchedulerControlError> {
+        match self
+            .reserve_mutation(request_id, SchedulerMutationFingerprint::Refresh)
+            .await?
+        {
+            SchedulerMutationReservation::Follower(completion) => {
+                match self.await_mutation(completion).await {
+                    SchedulerMutationOutcome::Refresh(result) => result,
+                    SchedulerMutationOutcome::Trigger(_) => {
+                        unreachable!("matching mutation fingerprints cannot change operation kind")
+                    }
+                }
+            }
+            SchedulerMutationReservation::Leader(completion) => {
+                // The operation is detached from this specific endpoint read.
+                // If its response is lost, the same request ID can reconnect
+                // and observe the completed outcome instead of performing a
+                // second refresh. The task still belongs only to this service
+                // incarnation because the ledger and service share ownership.
+                let waiter = completion.subscribe();
+                let service = self.clone();
+                tokio::spawn(async move {
+                    let report = service.refresh_control_report().await;
+                    completion.send_replace(Some(SchedulerMutationOutcome::Refresh(Ok(report))));
+                });
+                match self.await_mutation(waiter).await {
+                    SchedulerMutationOutcome::Refresh(result) => result,
+                    SchedulerMutationOutcome::Trigger(_) => {
+                        unreachable!("matching mutation fingerprints cannot change operation kind")
+                    }
+                }
+            }
+        }
+    }
+
+    async fn refresh_control_report(&self) -> ScheduleRefreshReport {
+        let _refresh = self.inner.refresh.lock().await;
+        let result = self.refresh_locked().await;
+        ScheduleRefreshReport {
+            schema_version: SCHEDULE_CONTROL_SCHEMA_VERSION,
+            code: if result.applied {
+                SCHEDULE_CONTROL_REFRESHED.to_string()
+            } else {
+                SCHEDULE_CONTROL_REFRESH_REJECTED.to_string()
+            },
+            applied: result.applied,
+            inspection: self.inspect(),
+            diagnostics: result.diagnostics,
+        }
     }
 
     /// Test-only seam for proving that a candidate prepared before a route
@@ -1026,6 +1252,105 @@ impl SchedulerService {
         }
     }
 
+    /// Performs one manual trigger under an outer request identity. The
+    /// replay ledger is scoped to this `SchedulerService`, and therefore to
+    /// exactly one instance incarnation. It caches both successful delivery
+    /// receipts and redacted selection failures without creating durable state.
+    pub async fn trigger_with_request_id(
+        &self,
+        schedule_id: &str,
+        request_id: Uuid,
+    ) -> Result<ScheduleTriggerReport, SchedulerControlError> {
+        let fingerprint = SchedulerMutationFingerprint::Trigger {
+            schedule_id: schedule_id.to_string(),
+        };
+        match self.reserve_mutation(request_id, fingerprint).await? {
+            SchedulerMutationReservation::Follower(completion) => {
+                match self.await_mutation(completion).await {
+                    SchedulerMutationOutcome::Trigger(result) => result,
+                    SchedulerMutationOutcome::Refresh(_) => {
+                        unreachable!("matching mutation fingerprints cannot change operation kind")
+                    }
+                }
+            }
+            SchedulerMutationReservation::Leader(completion) => {
+                // See `refresh_with_request_id`: retain execution after an
+                // endpoint loses its response, so a retry observes this exact
+                // redacted receipt or failure instead of sending twice.
+                let waiter = completion.subscribe();
+                let service = self.clone();
+                let schedule_id = schedule_id.to_string();
+                tokio::spawn(async move {
+                    let outcome = service.trigger_control_report(&schedule_id).await;
+                    completion.send_replace(Some(SchedulerMutationOutcome::Trigger(outcome)));
+                });
+                match self.await_mutation(waiter).await {
+                    SchedulerMutationOutcome::Trigger(result) => result,
+                    SchedulerMutationOutcome::Refresh(_) => {
+                        unreachable!("matching mutation fingerprints cannot change operation kind")
+                    }
+                }
+            }
+        }
+    }
+
+    async fn trigger_control_report(
+        &self,
+        schedule_id: &str,
+    ) -> Result<ScheduleTriggerReport, SchedulerControlError> {
+        self.trigger(schedule_id)
+            .await
+            .map(|delivery| ScheduleTriggerReport {
+                schema_version: SCHEDULE_CONTROL_SCHEMA_VERSION,
+                code: SCHEDULE_CONTROL_TRIGGERED.to_string(),
+                inspection: self.inspect(),
+                schedule_id: schedule_id.to_string(),
+                delivery,
+            })
+            .map_err(SchedulerControlError::Trigger)
+    }
+
+    async fn reserve_mutation(
+        &self,
+        request_id: Uuid,
+        fingerprint: SchedulerMutationFingerprint,
+    ) -> Result<SchedulerMutationReservation, SchedulerControlError> {
+        let mut mutations = self.inner.mutations.lock().await;
+        match mutations.entry(request_id) {
+            Entry::Occupied(entry) => {
+                if entry.get().fingerprint != fingerprint {
+                    return Err(SchedulerControlError::RequestIdConflict);
+                }
+                Ok(SchedulerMutationReservation::Follower(
+                    entry.get().completion.subscribe(),
+                ))
+            }
+            Entry::Vacant(entry) => {
+                let (completion, _) = watch::channel(None);
+                entry.insert(SchedulerMutationEntry {
+                    fingerprint,
+                    completion: completion.clone(),
+                });
+                Ok(SchedulerMutationReservation::Leader(completion))
+            }
+        }
+    }
+
+    async fn await_mutation(
+        &self,
+        mut completion: watch::Receiver<Option<SchedulerMutationOutcome>>,
+    ) -> SchedulerMutationOutcome {
+        loop {
+            if let Some(outcome) = completion.borrow_and_update().clone() {
+                return outcome;
+            }
+            completion
+                .changed()
+                .await
+                .expect("scheduler mutation ledger retains its completion sender");
+        }
+    }
+
     fn selected_definition(
         &self,
         schedule_id: &str,
@@ -1363,6 +1688,31 @@ fn diagnostic_for_definition(code: &str, definition: &ScheduleDefinition) -> Sch
         source_path: Some(definition.source_path.clone()),
         schedule_id: Some(definition.id.clone()),
         context: Default::default(),
+    }
+}
+
+fn source_drift_diagnostic(
+    accepted_snapshot_digest_sha256: &str,
+    candidate_snapshot_digest_sha256: &str,
+) -> ScheduleDiagnostic {
+    ScheduleDiagnostic {
+        schema_version: SCHEDULE_INSPECTION_SCHEMA_VERSION,
+        code: SNAPSHOT_SOURCE_DRIFT.to_string(),
+        severity: ScheduleDiagnosticSeverity::Warning,
+        source_path: None,
+        schedule_id: None,
+        context: super::diagnostics::RedactedScheduleContext {
+            fields: BTreeMap::from([
+                (
+                    "acceptedSnapshotDigestSha256".to_string(),
+                    accepted_snapshot_digest_sha256.to_string(),
+                ),
+                (
+                    "candidateSnapshotDigestSha256".to_string(),
+                    candidate_snapshot_digest_sha256.to_string(),
+                ),
+            ]),
+        },
     }
 }
 
@@ -2924,6 +3274,348 @@ mod tests {
             ScheduleTargetAvailability::Available
         );
         assert!(inspection.schedules[0].next_occurrence_utc.is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_only_control_detects_source_drift_without_changing_accepted_state_or_jobs() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        write_schedule(
+            &schedule_root,
+            "schedule.yaml",
+            "agents.readonly",
+            true,
+            "*/5 * * * * Europe/Warsaw",
+            "channel",
+            "agents.readonly",
+            json!({"reason": "accepted"}),
+        );
+        let context = context("scheduler-read-only", temporary.path());
+        let paths = context.paths();
+        let bus = RuntimeMessageBus::new(context.clone());
+        let service = SchedulerService::new(context, &schedule_root, bus.clone()).unwrap();
+        register_channels(
+            &service.inner.context,
+            &bus,
+            &[("agents.readonly", true)],
+            Vec::new(),
+            256,
+        )
+        .await;
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+
+        let accepted_before = serde_json::to_vec(&service.accepted_snapshot()).unwrap();
+        let inspection_before = service.inspect();
+        let jobs_before = service.active_job_count();
+        let snapshots = service.subscribe_snapshots();
+
+        write_schedule(
+            &schedule_root,
+            "schedule.yaml",
+            "agents.readonly",
+            true,
+            "*/10 * * * * Europe/Warsaw",
+            "channel",
+            "agents.readonly",
+            json!({"reason": "candidate-drift"}),
+        );
+        let source_before = fs::read(schedule_root.join("schedule.yaml")).unwrap();
+        let durable_before = durable_tree_digest(&paths.state_root);
+
+        let verification = service.verify();
+        assert_eq!(verification.code, SCHEDULE_CONTROL_VERIFIED);
+        assert!(!verification.matches_accepted);
+        assert_eq!(verification.accepted, inspection_before);
+        assert!(verification.candidate_digest_sha256.is_some());
+        assert!(verification.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == super::super::diagnostics::SNAPSHOT_SOURCE_DRIFT
+        }));
+
+        let diagnosis = service.diagnose();
+        assert_eq!(diagnosis.code, SCHEDULE_CONTROL_DIAGNOSED);
+        assert!(
+            diagnosis.healthy,
+            "source drift is observational warning only"
+        );
+        assert_eq!(diagnosis.inspection, inspection_before);
+        assert!(diagnosis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == super::super::diagnostics::SNAPSHOT_SOURCE_DRIFT
+        }));
+
+        let filtered = service.inspect_schedule("agents.readonly").unwrap();
+        assert_eq!(filtered.instance_id, inspection_before.instance_id);
+        assert_eq!(filtered.incarnation, inspection_before.incarnation);
+        assert_eq!(
+            filtered.schedule_generation,
+            inspection_before.schedule_generation
+        );
+        assert_eq!(
+            filtered.snapshot_digest_sha256,
+            inspection_before.snapshot_digest_sha256
+        );
+        assert_eq!(
+            filtered.bus_route_generation,
+            inspection_before.bus_route_generation
+        );
+        assert_eq!(filtered.schedules.len(), 1);
+        assert_eq!(filtered.schedules[0].id, "agents.readonly");
+        assert!(matches!(
+            service.inspect_schedule("agents.missing"),
+            Err(SchedulerControlError::NotFound(diagnostic))
+                if diagnostic.code == SCHEDULE_NOT_FOUND
+        ));
+
+        assert_eq!(
+            serde_json::to_vec(&service.accepted_snapshot()).unwrap(),
+            accepted_before
+        );
+        assert_eq!(service.inspect(), inspection_before);
+        assert_eq!(service.active_job_count(), jobs_before);
+        assert_eq!(durable_tree_digest(&paths.state_root), durable_before);
+        assert_eq!(
+            fs::read(schedule_root.join("schedule.yaml")).unwrap(),
+            source_before
+        );
+        assert!(!snapshots.has_changed().unwrap());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rejected_request_id_refresh_is_replayed_without_replacing_accepted_state() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        write_schedule(
+            &schedule_root,
+            "schedule.yaml",
+            "agents.rejected-refresh",
+            true,
+            "*/5 * * * * Europe/Warsaw",
+            "channel",
+            "agents.rejected-refresh",
+            json!({"reason": "accepted"}),
+        );
+        let context = context("scheduler-rejected-request", temporary.path());
+        let paths = context.paths();
+        let bus = RuntimeMessageBus::new(context.clone());
+        let service = SchedulerService::new(context, &schedule_root, bus.clone()).unwrap();
+        register_channels(
+            &service.inner.context,
+            &bus,
+            &[("agents.rejected-refresh", true)],
+            Vec::new(),
+            256,
+        )
+        .await;
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        let accepted_before = serde_json::to_vec(&service.accepted_snapshot()).unwrap();
+        let jobs_before = service.active_job_count();
+
+        write_fixture(&schedule_root, "invalid-unknown-field.yaml");
+        let durable_after_invalid_source = durable_tree_digest(&paths.state_root);
+        let request_id = Uuid::new_v4();
+        let rejected = service.refresh_with_request_id(request_id).await.unwrap();
+        assert_eq!(rejected.code, SCHEDULE_CONTROL_REFRESH_REJECTED);
+        assert!(!rejected.applied);
+        assert!(rejected.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == super::super::diagnostics::SOURCE_UNKNOWN_FIELD
+        }));
+        assert_eq!(
+            serde_json::to_vec(&service.accepted_snapshot()).unwrap(),
+            accepted_before
+        );
+        assert_eq!(service.active_job_count(), jobs_before);
+        assert_eq!(
+            durable_tree_digest(&paths.state_root),
+            durable_after_invalid_source
+        );
+
+        write_schedule(
+            &schedule_root,
+            "schedule.yaml",
+            "agents.rejected-refresh",
+            true,
+            "*/10 * * * * Europe/Warsaw",
+            "channel",
+            "agents.rejected-refresh",
+            json!({"reason": "would-apply-with-a-new-request-id"}),
+        );
+        let durable_after_valid_source = durable_tree_digest(&paths.state_root);
+        let replay = service.refresh_with_request_id(request_id).await.unwrap();
+        assert_eq!(replay, rejected);
+        assert_eq!(
+            serde_json::to_vec(&service.accepted_snapshot()).unwrap(),
+            accepted_before
+        );
+        assert_eq!(service.active_job_count(), jobs_before);
+        assert_eq!(
+            durable_tree_digest(&paths.state_root),
+            durable_after_valid_source
+        );
+
+        let applied = service
+            .refresh_with_request_id(Uuid::new_v4())
+            .await
+            .unwrap();
+        assert_eq!(applied.code, SCHEDULE_CONTROL_REFRESHED);
+        assert!(applied.applied);
+        assert_eq!(
+            applied.inspection.schedule_generation,
+            rejected.inspection.schedule_generation + 1
+        );
+        assert_eq!(
+            durable_tree_digest(&paths.state_root),
+            durable_after_valid_source
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn request_identity_replays_concurrent_refresh_and_trigger_without_duplicate_work() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.replay",
+            true,
+            "*/5 * * * * Europe/Warsaw",
+            "channel",
+            "agents.replay",
+        );
+        let context = context("scheduler-request-replay", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let service = SchedulerService::new(context, &schedule_root, bus.clone()).unwrap();
+        let (handled, delivered) =
+            register_notifying_channel(&service.inner.context, &bus, "agents.replay").await;
+
+        let refresh_request_id = Uuid::new_v4();
+        let held_refresh = service.inner.refresh.lock().await;
+        let first = tokio::spawn({
+            let service = service.clone();
+            async move { service.refresh_with_request_id(refresh_request_id).await }
+        });
+        tokio::task::yield_now().await;
+        let second = tokio::spawn({
+            let service = service.clone();
+            async move { service.refresh_with_request_id(refresh_request_id).await }
+        });
+        tokio::task::yield_now().await;
+        assert!(!first.is_finished());
+        assert!(!second.is_finished());
+        drop(held_refresh);
+
+        let first = first.await.unwrap().unwrap();
+        let second = second.await.unwrap().unwrap();
+        assert_eq!(first, second);
+        assert!(first.applied);
+        assert_eq!(first.inspection.schedule_generation, 1);
+        assert_eq!(service.accepted_snapshot().generation, 1);
+
+        let trigger_request_id = Uuid::new_v4();
+        // `join!` polls both requests before either replay waiter can return,
+        // proving the follower observes an in-flight same-ID delivery rather
+        // than merely a response already cached by a sequential retry.
+        let (triggered, replayed) = tokio::join!(
+            service.trigger_with_request_id("agents.replay", trigger_request_id),
+            service.trigger_with_request_id("agents.replay", trigger_request_id),
+        );
+        let triggered = triggered.unwrap();
+        let replayed = replayed.unwrap();
+        assert_eq!(triggered, replayed);
+        delivered.notified().await;
+        tokio::task::yield_now().await;
+        assert_eq!(handled.load(Ordering::SeqCst), 1);
+
+        service
+            .trigger_with_request_id("agents.replay", Uuid::new_v4())
+            .await
+            .unwrap();
+        delivered.notified().await;
+        assert_eq!(handled.load(Ordering::SeqCst), 2);
+
+        assert!(matches!(
+            service
+                .trigger_with_request_id("agents.replay", refresh_request_id)
+                .await,
+            Err(SchedulerControlError::RequestIdConflict)
+        ));
+        let failed_request_id = Uuid::new_v4();
+        let failed = service
+            .trigger_with_request_id("agents.missing", failed_request_id)
+            .await
+            .unwrap_err();
+        assert_eq!(failed.code(), SCHEDULE_NOT_FOUND);
+        assert_eq!(
+            service
+                .trigger_with_request_id("agents.missing", failed_request_id)
+                .await
+                .unwrap_err(),
+            failed
+        );
+        assert!(matches!(
+            service
+                .trigger_with_request_id("agents.other", failed_request_id)
+                .await,
+            Err(SchedulerControlError::RequestIdConflict)
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn control_reports_are_versioned_and_never_serialize_schedule_payloads() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        write_schedule(
+            &schedule_root,
+            "schedule.yaml",
+            "agents.redacted",
+            true,
+            "*/5 * * * * Europe/Warsaw",
+            "channel",
+            "agents.redacted",
+            json!({"reason": "control-report-private-payload"}),
+        );
+        let context = context("scheduler-redaction", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let service = SchedulerService::new(context, &schedule_root, bus.clone()).unwrap();
+        let (_handled, delivered) =
+            register_notifying_channel(&service.inner.context, &bus, "agents.redacted").await;
+        assert!(service.refresh().await.applied);
+
+        let inspection = service.inspect();
+        let verification = service.verify();
+        let diagnosis = service.diagnose();
+        let refresh = service
+            .refresh_with_request_id(Uuid::new_v4())
+            .await
+            .unwrap();
+        let trigger = service
+            .trigger_with_request_id("agents.redacted", Uuid::new_v4())
+            .await
+            .unwrap();
+        assert_eq!(
+            inspection.schema_version,
+            SCHEDULE_INSPECTION_SCHEMA_VERSION
+        );
+        for schema_version in [
+            verification.schema_version,
+            diagnosis.schema_version,
+            refresh.schema_version,
+            trigger.schema_version,
+        ] {
+            assert_eq!(schema_version, SCHEDULE_CONTROL_SCHEMA_VERSION);
+        }
+        let reports = [
+            serde_json::to_string(&inspection).unwrap(),
+            serde_json::to_string(&verification).unwrap(),
+            serde_json::to_string(&diagnosis).unwrap(),
+            serde_json::to_string(&refresh).unwrap(),
+            serde_json::to_string(&trigger).unwrap(),
+        ];
+        delivered.notified().await;
+
+        for report in reports {
+            assert!(!report.contains("control-report-private-payload"));
+            assert!(!report.contains("\"payload\""));
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

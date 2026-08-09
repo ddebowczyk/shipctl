@@ -17,5 +17,7 @@ pub use protocol::{
     ControlEvent, ControlEventPayload, ControlHello, ControlOperation, ControlRequest,
     ControlResponse, ControlResponseResult, ControlStream, DiscoveryProblem, DiscoveryReport,
     InstanceDiagnosticReport, InstanceRecord, MessageCommand, ModuleCommand, ModuleControlStatus,
-    OperationCommand, StopOutcome, CONTROL_FRAME_SCHEMA_VERSION,
+    OperationCommand, ScheduleCommand, StopOutcome, CONTROL_FRAME_SCHEMA_VERSION,
 };
+/// Caller-owned identity for retryable running-instance mutations.
+pub use uuid::Uuid as ControlRequestId;
