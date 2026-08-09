@@ -469,6 +469,55 @@ impl std::error::Error for SchedulerPreflightError {
     }
 }
 
+/// A scheduler delivery failure bound to the exact live route table used for
+/// validation and delivery.
+///
+/// The message-bus error is redacted before it enters this wrapper, so the
+/// scheduler can retain its code and route generation without retaining a
+/// payload or schema-validation detail.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SchedulerDeliveryError {
+    route_generation: u64,
+    error: MessageContractError,
+}
+
+impl SchedulerDeliveryError {
+    fn new(route_generation: u64, error: MessageContractError) -> Self {
+        Self {
+            route_generation,
+            error: redact_scheduler_delivery_error(error),
+        }
+    }
+
+    pub(crate) fn route_generation(&self) -> u64 {
+        self.route_generation
+    }
+
+    pub(crate) fn code(&self) -> &str {
+        &self.error.code
+    }
+
+    pub(crate) fn error(&self) -> &MessageContractError {
+        &self.error
+    }
+}
+
+impl std::fmt::Display for SchedulerDeliveryError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Scheduler delivery on route generation {} failed: {}",
+            self.route_generation, self.error
+        )
+    }
+}
+
+impl std::error::Error for SchedulerDeliveryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
 impl RuntimeMessageBus {
     pub fn new(context: InstanceContext) -> Self {
         let initial = Arc::new(RouteTable::empty(&context));
@@ -855,6 +904,69 @@ impl RuntimeMessageBus {
         }
     }
 
+    /// Delivers a scheduler-owned occurrence through a live directed channel.
+    ///
+    /// The scheduler is a host capability, not a module activation: it never
+    /// receives a fabricated [`ModuleMessageAuthority`] or a synthetic grant.
+    /// A route opts into this path explicitly with `scheduler_allowed`; the
+    /// current route table and its compiled contract are checked immediately
+    /// before the bounded delivery is accepted.
+    pub(crate) async fn send_from_scheduler(
+        &self,
+        envelope: MessageEnvelope,
+    ) -> Result<DeliveryReceipt, SchedulerDeliveryError> {
+        let table = self.inner.routes.borrow().clone();
+        let result: Result<DeliveryReceipt, MessageContractError> = async {
+            validate_scheduler_target(&table, SchedulerPreflightTargetKind::Channel, &envelope)?;
+            let route = table
+                .channels
+                .get(&envelope.endpoint)
+                .expect("validated scheduler channel must exist in its route table");
+            if route.registration.is_withdrawn() {
+                return Err(MessageContractError::new(
+                    HANDLER_UNAVAILABLE,
+                    format!("Channel {:?} is withdrawn", envelope.endpoint),
+                ));
+            }
+            route
+                .route
+                .sender
+                .send(DirectedDelivery {
+                    envelope: envelope.clone(),
+                    route_generation: table.public.route_generation,
+                })
+                .await
+                .map_err(|_| {
+                    MessageContractError::new(
+                        HANDLER_UNAVAILABLE,
+                        format!("Channel {:?} handler is unavailable", envelope.endpoint),
+                    )
+                })?;
+            Ok(DeliveryReceipt {
+                schema_version: MESSAGE_CONTRACT_SCHEMA_VERSION,
+                endpoint: envelope.endpoint.clone(),
+                message: envelope.message.clone(),
+                route_generation: table.public.route_generation,
+            })
+        }
+        .await;
+        match result {
+            Ok(receipt) => {
+                self.inner.observations.accepted(&envelope.endpoint);
+                Ok(receipt)
+            }
+            Err(error) => {
+                let error = SchedulerDeliveryError::new(table.public.route_generation, error);
+                self.inner.observations.rejected(
+                    error.error(),
+                    &envelope,
+                    error.route_generation(),
+                );
+                Err(error)
+            }
+        }
+    }
+
     pub fn subscribe(
         &self,
         authority: &ModuleMessageAuthority,
@@ -927,6 +1039,61 @@ impl RuntimeMessageBus {
                 self.inner
                     .observations
                     .rejected(&error, &envelope, table.public.route_generation);
+                Err(error)
+            }
+        }
+    }
+
+    /// Publishes a scheduler-owned occurrence through a live broadcast topic.
+    ///
+    /// This has the same host-only authorization boundary as
+    /// [`Self::send_from_scheduler`]: no module grant is synthesized, and the
+    /// live route must explicitly permit scheduler delivery.
+    pub(crate) fn publish_from_scheduler(
+        &self,
+        envelope: MessageEnvelope,
+    ) -> Result<PublishReceipt, SchedulerDeliveryError> {
+        let table = self.inner.routes.borrow().clone();
+        let result: Result<PublishReceipt, MessageContractError> = (|| {
+            validate_scheduler_target(&table, SchedulerPreflightTargetKind::Topic, &envelope)?;
+            let route = table
+                .topics
+                .get(&envelope.endpoint)
+                .expect("validated scheduler topic must exist in its route table");
+            if route.registration.is_withdrawn() {
+                return Err(MessageContractError::new(
+                    HANDLER_UNAVAILABLE,
+                    format!("Topic {:?} is withdrawn", envelope.endpoint),
+                ));
+            }
+            let subscriber_count = route
+                .route
+                .sender
+                .send(BroadcastDelivery {
+                    envelope: envelope.clone(),
+                    route_generation: table.public.route_generation,
+                })
+                .unwrap_or(0) as u32;
+            Ok(PublishReceipt {
+                schema_version: MESSAGE_CONTRACT_SCHEMA_VERSION,
+                endpoint: envelope.endpoint.clone(),
+                message: envelope.message.clone(),
+                route_generation: table.public.route_generation,
+                subscriber_count,
+            })
+        })();
+        match result {
+            Ok(receipt) => {
+                self.inner.observations.accepted(&envelope.endpoint);
+                Ok(receipt)
+            }
+            Err(error) => {
+                let error = SchedulerDeliveryError::new(table.public.route_generation, error);
+                self.inner.observations.rejected(
+                    error.error(),
+                    &envelope,
+                    error.route_generation(),
+                );
                 Err(error)
             }
         }
@@ -1097,20 +1264,22 @@ fn validate_scheduler_preflight_request(
     routes: &RouteTable,
     request: &SchedulerPreflightRequest,
 ) -> Result<(), MessageContractError> {
-    let (registration, expected, scheduler_allowed) = match request.target_kind {
+    validate_scheduler_target(routes, request.target_kind, &request.envelope)
+}
+
+fn validate_scheduler_target(
+    routes: &RouteTable,
+    target_kind: SchedulerPreflightTargetKind,
+    envelope: &MessageEnvelope,
+) -> Result<(), MessageContractError> {
+    let (registration, expected, scheduler_allowed) = match target_kind {
         SchedulerPreflightTargetKind::Channel => {
-            let route = routes
-                .channels
-                .get(&request.envelope.endpoint)
-                .ok_or_else(|| {
-                    MessageContractError::new(
-                        NO_ACTIVE_CHANNEL_OWNER,
-                        format!(
-                            "Channel {:?} has no active owner",
-                            request.envelope.endpoint
-                        ),
-                    )
-                })?;
+            let route = routes.channels.get(&envelope.endpoint).ok_or_else(|| {
+                MessageContractError::new(
+                    NO_ACTIVE_CHANNEL_OWNER,
+                    format!("Channel {:?} has no active owner", envelope.endpoint),
+                )
+            })?;
             (
                 route.registration.as_ref(),
                 &route.route.declaration.endpoint.message,
@@ -1118,18 +1287,12 @@ fn validate_scheduler_preflight_request(
             )
         }
         SchedulerPreflightTargetKind::Topic => {
-            let route = routes
-                .topics
-                .get(&request.envelope.endpoint)
-                .ok_or_else(|| {
-                    MessageContractError::new(
-                        NO_ACTIVE_CHANNEL_OWNER,
-                        format!(
-                            "Topic {:?} has no active publisher",
-                            request.envelope.endpoint
-                        ),
-                    )
-                })?;
+            let route = routes.topics.get(&envelope.endpoint).ok_or_else(|| {
+                MessageContractError::new(
+                    NO_ACTIVE_CHANNEL_OWNER,
+                    format!("Topic {:?} has no active publisher", envelope.endpoint),
+                )
+            })?;
             (
                 route.registration.as_ref(),
                 &route.route.declaration.endpoint.message,
@@ -1138,21 +1301,21 @@ fn validate_scheduler_preflight_request(
         }
     };
 
-    if request.envelope.message.id != expected.id {
+    if envelope.message.id != expected.id {
         return Err(MessageContractError::new(
             UNKNOWN_MESSAGE_CONTRACT,
             format!(
                 "Message contract {:?} is not installed for this route",
-                request.envelope.message.id
+                envelope.message.id
             ),
         ));
     }
-    if request.envelope.message != *expected {
+    if envelope.message != *expected {
         return Err(MessageContractError::new(
             INCOMPATIBLE_MESSAGE_VERSION,
             format!(
                 "Message version {} does not match the route contract version {}",
-                request.envelope.message.version, expected.version
+                envelope.message.version, expected.version
             ),
         ));
     }
@@ -1172,14 +1335,21 @@ fn validate_scheduler_preflight_request(
         .schema
         .redacted_fields
         .iter()
-        .any(|pointer| request.envelope.payload.pointer(pointer).is_some())
+        .any(|pointer| envelope.payload.pointer(pointer).is_some())
     {
         return Err(MessageContractError::new(
             SCHEDULER_SECRET_PAYLOAD_FORBIDDEN,
             "Scheduled payload contains a field marked secret by its message contract",
         ));
     }
-    contract.validate_envelope(&request.envelope)
+    contract.validate_envelope(envelope)
+}
+
+fn redact_scheduler_delivery_error(error: MessageContractError) -> MessageContractError {
+    MessageContractError {
+        code: error.code,
+        message: "Scheduled delivery failed message-bus validation".to_string(),
+    }
 }
 
 pub struct RuntimeSubscription {
@@ -1627,6 +1797,252 @@ mod tests {
         assert_eq!(endpoint.accepted, 0);
         assert_eq!(endpoint.delivered, 0);
         registration.dispose().await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn scheduler_delivery_uses_live_enabled_routes_without_a_module_authority() {
+        let temporary = tempfile::tempdir().unwrap();
+        let context = context("scheduler-delivery", temporary.path().to_path_buf());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let handled = Arc::new(AtomicU64::new(0));
+        let registration = registration(
+            &context,
+            "fixture@scheduler#delivery",
+            declarations(&[CHANNEL], true, false),
+            RegistrationHandlers::new().with_directed(CHANNEL, {
+                let handled = Arc::clone(&handled);
+                move |_| {
+                    let handled = Arc::clone(&handled);
+                    async move {
+                        handled.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    }
+                }
+            }),
+        );
+        let routes = bus.register(Arc::clone(&registration)).await.unwrap();
+        let subscriber = authority("subscriber", &[format!("message.subscribe.{TOPIC}")]);
+        let mut subscription = bus.subscribe(&subscriber, TOPIC).unwrap();
+
+        let channel_receipt = bus.send_from_scheduler(envelope(CHANNEL, 1)).await.unwrap();
+        assert_eq!(channel_receipt.endpoint, CHANNEL);
+        assert_eq!(channel_receipt.message, message(MESSAGE));
+        assert_eq!(channel_receipt.route_generation, routes.route_generation);
+        wait_until(|| handled.load(Ordering::SeqCst) == 1).await;
+
+        let topic_receipt = bus.publish_from_scheduler(envelope(TOPIC, 2)).unwrap();
+        assert_eq!(topic_receipt.endpoint, TOPIC);
+        assert_eq!(topic_receipt.message, message(MESSAGE));
+        assert_eq!(topic_receipt.route_generation, routes.route_generation);
+        assert_eq!(topic_receipt.subscriber_count, 1);
+        assert_eq!(subscription.recv().await.unwrap().payload["value"], 2);
+
+        let observations = bus.inspect_endpoints().await;
+        let channel = observations
+            .iter()
+            .find(|observation| observation.endpoint == CHANNEL)
+            .unwrap();
+        assert_eq!(
+            (channel.accepted, channel.delivered, channel.failed),
+            (1, 1, 0)
+        );
+        let topic = observations
+            .iter()
+            .find(|observation| observation.endpoint == TOPIC)
+            .unwrap();
+        assert_eq!((topic.accepted, topic.failed), (1, 0));
+        registration.dispose().await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn scheduler_delivery_rejects_routes_that_do_not_authorize_the_scheduler() {
+        let temporary = tempfile::tempdir().unwrap();
+        let context = context("scheduler-unauthorized", temporary.path().to_path_buf());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let mut declarations = declarations(&[CHANNEL], true, false);
+        declarations.handles[0].scheduler_allowed = false;
+        declarations.publishes[0].scheduler_allowed = false;
+        let registration = registration(
+            &context,
+            "fixture@scheduler#unauthorized",
+            declarations,
+            RegistrationHandlers::new().with_directed(CHANNEL, |_| async { Ok(()) }),
+        );
+        let routes = bus.register(Arc::clone(&registration)).await.unwrap();
+
+        let channel_error = bus
+            .send_from_scheduler(envelope(CHANNEL, 1))
+            .await
+            .unwrap_err();
+        let topic_error = bus.publish_from_scheduler(envelope(TOPIC, 2)).unwrap_err();
+        assert_eq!(channel_error.code(), UNAUTHORIZED_SENDER);
+        assert_eq!(topic_error.code(), UNAUTHORIZED_SENDER);
+        assert_eq!(channel_error.route_generation(), routes.route_generation);
+        assert_eq!(topic_error.route_generation(), routes.route_generation);
+        assert_eq!(
+            channel_error.error().message,
+            "Scheduled delivery failed message-bus validation"
+        );
+        assert_eq!(topic_error.error().message, channel_error.error().message);
+
+        let observations = bus.inspect_endpoints().await;
+        for endpoint in [CHANNEL, TOPIC] {
+            let observation = observations
+                .iter()
+                .find(|observation| observation.endpoint == endpoint)
+                .unwrap();
+            assert_eq!(observation.accepted, 0);
+            assert_eq!(observation.failed, 1);
+            assert_eq!(
+                observation.last_failure.as_ref().unwrap().code,
+                UNAUTHORIZED_SENDER
+            );
+            assert!(observation
+                .last_failure
+                .as_ref()
+                .unwrap()
+                .context
+                .fields
+                .is_empty());
+        }
+        registration.dispose().await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn scheduler_delivery_rejects_withdrawn_live_routes_without_delivery() {
+        let temporary = tempfile::tempdir().unwrap();
+        let context = context("scheduler-withdrawn", temporary.path().to_path_buf());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let handled = Arc::new(AtomicU64::new(0));
+        let registration = registration(
+            &context,
+            "fixture@scheduler#withdrawn",
+            declarations(&[CHANNEL], true, false),
+            RegistrationHandlers::new().with_directed(CHANNEL, {
+                let handled = Arc::clone(&handled);
+                move |_| {
+                    let handled = Arc::clone(&handled);
+                    async move {
+                        handled.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    }
+                }
+            }),
+        );
+        bus.register(Arc::clone(&registration)).await.unwrap();
+        let withdrawn = bus.withdraw(registration.activation_id()).await.unwrap();
+        let withdrawn_generation = bus.snapshot().route_generation;
+
+        let channel_error = bus
+            .send_from_scheduler(envelope(CHANNEL, 1))
+            .await
+            .unwrap_err();
+        let topic_error = bus.publish_from_scheduler(envelope(TOPIC, 2)).unwrap_err();
+        assert_eq!(channel_error.code(), NO_ACTIVE_CHANNEL_OWNER);
+        assert_eq!(topic_error.code(), NO_ACTIVE_CHANNEL_OWNER);
+        assert_eq!(channel_error.route_generation(), withdrawn_generation);
+        assert_eq!(topic_error.route_generation(), withdrawn_generation);
+        assert_eq!(
+            channel_error.error().message,
+            "Scheduled delivery failed message-bus validation"
+        );
+        assert_eq!(topic_error.error().message, channel_error.error().message);
+        assert_eq!(handled.load(Ordering::SeqCst), 0);
+
+        let observations = bus.inspect_endpoints().await;
+        for endpoint in [CHANNEL, TOPIC] {
+            let observation = observations
+                .iter()
+                .find(|observation| observation.endpoint == endpoint)
+                .unwrap();
+            assert_eq!(observation.accepted, 0);
+            assert_eq!(observation.failed, 1);
+            assert_eq!(
+                observation.last_failure.as_ref().unwrap().code,
+                NO_ACTIVE_CHANNEL_OWNER
+            );
+            assert!(observation
+                .last_failure
+                .as_ref()
+                .unwrap()
+                .context
+                .fields
+                .is_empty());
+        }
+        withdrawn.dispose().await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn scheduler_delivery_failure_keeps_the_route_generation_captured_before_withdrawal() {
+        let temporary = tempfile::tempdir().unwrap();
+        let context = context("scheduler-withdrawal-race", temporary.path().to_path_buf());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let registration = registration(
+            &context,
+            "fixture@scheduler#withdrawal-race",
+            declarations(&[CHANNEL], false, false),
+            RegistrationHandlers::new().with_directed(CHANNEL, {
+                let entered = Arc::clone(&entered);
+                let release = Arc::clone(&release);
+                move |message| {
+                    let entered = Arc::clone(&entered);
+                    let release = Arc::clone(&release);
+                    async move {
+                        if message.payload["value"].as_u64() == Some(1) {
+                            entered.notify_one();
+                            release.notified().await;
+                        }
+                        Ok(())
+                    }
+                }
+            }),
+        );
+        let initial_routes = bus.register(Arc::clone(&registration)).await.unwrap();
+        let sender = authority("sender", &[format!("message.send.{CHANNEL}")]);
+        bus.send(&sender, envelope(CHANNEL, 1)).await.unwrap();
+        entered.notified().await;
+        bus.send(&sender, envelope(CHANNEL, 2)).await.unwrap();
+
+        let pending = tokio::spawn({
+            let bus = bus.clone();
+            async move { bus.send_from_scheduler(envelope(CHANNEL, 3)).await }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !pending.is_finished(),
+            "the scheduler send must be waiting on the bounded live channel"
+        );
+
+        let withdrawn = bus.withdraw(registration.activation_id()).await.unwrap();
+        let current_routes = bus.snapshot();
+        assert!(current_routes.route_generation > initial_routes.route_generation);
+        release.notify_one();
+
+        let failure = pending.await.unwrap().unwrap_err();
+        assert_eq!(failure.code(), HANDLER_UNAVAILABLE);
+        assert_eq!(failure.route_generation(), initial_routes.route_generation);
+        assert_ne!(failure.route_generation(), current_routes.route_generation);
+        assert_eq!(
+            failure.error().message,
+            "Scheduled delivery failed message-bus validation"
+        );
+        let observation = bus
+            .inspect_endpoints()
+            .await
+            .into_iter()
+            .find(|observation| observation.endpoint == CHANNEL)
+            .unwrap();
+        assert_eq!(
+            observation.last_failure.as_ref().unwrap().route_generation,
+            initial_routes.route_generation
+        );
+        assert_eq!(
+            observation.last_failure.as_ref().unwrap().code,
+            HANDLER_UNAVAILABLE
+        );
+        withdrawn.dispose().await;
     }
 
     #[tokio::test(flavor = "current_thread")]

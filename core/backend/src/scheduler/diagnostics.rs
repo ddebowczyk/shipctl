@@ -13,6 +13,8 @@ pub const IDENTIFIER_INVALID: &str = "scheduler.definition.identifier_invalid";
 pub const CRON_TIMEZONE_REQUIRED: &str = "scheduler.definition.cron_timezone_required";
 pub const CRON_INVALID: &str = "scheduler.definition.cron_invalid";
 pub const NEXT_OCCURRENCE_UNAVAILABLE: &str = "scheduler.definition.next_occurrence_unavailable";
+pub const SCHEDULE_DISABLED: &str = "scheduler.definition.disabled";
+pub const SCHEDULE_NOT_FOUND: &str = "scheduler.definition.not_found";
 pub const DUPLICATE_ID: &str = "scheduler.snapshot.duplicate_id";
 pub const TARGET_UNAVAILABLE: &str = "scheduler.target.unavailable";
 pub const TARGET_MESSAGE_INCOMPATIBLE: &str = "scheduler.target.message_incompatible";
@@ -32,6 +34,8 @@ pub const PUBLIC_CODES: &[&str] = &[
     CRON_TIMEZONE_REQUIRED,
     CRON_INVALID,
     NEXT_OCCURRENCE_UNAVAILABLE,
+    SCHEDULE_DISABLED,
+    SCHEDULE_NOT_FOUND,
     DUPLICATE_ID,
     TARGET_UNAVAILABLE,
     TARGET_MESSAGE_INCOMPATIBLE,

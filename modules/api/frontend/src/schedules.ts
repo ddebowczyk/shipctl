@@ -13,6 +13,8 @@ export const SCHEDULE_DIAGNOSTIC_CODES = {
   cronTimezoneRequired: "scheduler.definition.cron_timezone_required",
   cronInvalid: "scheduler.definition.cron_invalid",
   nextOccurrenceUnavailable: "scheduler.definition.next_occurrence_unavailable",
+  scheduleDisabled: "scheduler.definition.disabled",
+  scheduleNotFound: "scheduler.definition.not_found",
   duplicateId: "scheduler.snapshot.duplicate_id",
   targetUnavailable: "scheduler.target.unavailable",
   targetMessageIncompatible: "scheduler.target.message_incompatible",

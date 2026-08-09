@@ -1,8 +1,8 @@
-//! Instance-local schedule definitions and their inspection contracts.
+//! Instance-local schedule definitions, inspection, and runtime delivery.
 //!
-//! This capability owns the strict configuration boundary. Runtime jobs and
-//! control commands arrive in later scheduler stages; no timer or watcher is
-//! created here.
+//! This capability owns strict source validation, atomic accepted snapshots,
+//! and in-memory cancellable jobs. Control commands arrive in a later stage;
+//! source files are never watched or polled.
 
 pub mod contracts;
 pub mod diagnostics;
@@ -20,5 +20,6 @@ pub use diagnostics::{ScheduleDiagnostic, ScheduleDiagnosticSeverity};
 pub use loader::{load_schedule_candidate, ScheduleLoadCandidate};
 pub use runtime::{
     AcceptedScheduleSnapshot, ScheduleRefreshResult, SchedulerService, SchedulerServiceError,
+    SchedulerTriggerError,
 };
 pub use snapshot::SchedulerSnapshotProvider;

@@ -1,16 +1,17 @@
-//! Atomic in-memory schedule refresh for one running instance.
+//! Atomic, instance-local schedule refresh and cancellable runtime delivery.
 //!
-//! This module owns accepted configuration state only. It deliberately does
-//! not create timers, jobs, delivery authority, filesystem watchers, or
-//! persistence. Those belong to later scheduler stages.
+//! The service accepts complete source snapshots against live message routes,
+//! owns only in-memory jobs, and never polls, watches source files, or writes
+//! durable tick state.
 
-use std::collections::BTreeMap;
+use cronexpr::jiff::Timestamp;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-
-use cronexpr::jiff::Timestamp;
 use tokio::sync::{watch, Mutex as AsyncMutex};
+use tokio::task::JoinHandle;
+use tokio::time::{sleep_until, Instant};
 
 use crate::instance::InstanceContext;
 use crate::message_bus::{
@@ -20,12 +21,14 @@ use crate::message_bus::{
 };
 
 use super::contracts::{
-    schedule_snapshot, ScheduleDefinition, ScheduleInspection, ScheduleSnapshot,
-    ScheduleTargetAvailability, ScheduleTargetKind, SCHEDULE_INSPECTION_SCHEMA_VERSION,
+    schedule_snapshot, ScheduleDefinition, ScheduleDeliveryOutcome, ScheduleDeliverySummary,
+    ScheduleInspection, ScheduleSnapshot, ScheduleTargetAvailability, ScheduleTargetKind,
+    SCHEDULE_INSPECTION_SCHEMA_VERSION,
 };
 use super::diagnostics::{
     CRON_INVALID, NEXT_OCCURRENCE_UNAVAILABLE, PAYLOAD_INVALID, PAYLOAD_TOO_LARGE,
-    SECRET_PAYLOAD_FORBIDDEN, TARGET_MESSAGE_INCOMPATIBLE, TARGET_UNAUTHORIZED, TARGET_UNAVAILABLE,
+    SCHEDULE_DISABLED, SCHEDULE_NOT_FOUND, SECRET_PAYLOAD_FORBIDDEN, TARGET_MESSAGE_INCOMPATIBLE,
+    TARGET_UNAUTHORIZED, TARGET_UNAVAILABLE,
 };
 use super::loader::{load_schedule_candidate, ScheduleLoadCandidate};
 use super::{ScheduleDiagnostic, ScheduleDiagnosticSeverity};
@@ -65,6 +68,34 @@ impl fmt::Display for SchedulerServiceError {
 
 impl std::error::Error for SchedulerServiceError {}
 
+/// A manual trigger always uses the same typed delivery path as a timer job.
+/// These errors describe only a schedule selection that cannot enter that
+/// path; delivery rejection is represented by a redacted summary instead.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SchedulerTriggerError {
+    NotFound(ScheduleDiagnostic),
+    Disabled(ScheduleDiagnostic),
+    Unavailable(ScheduleDiagnostic),
+}
+
+impl SchedulerTriggerError {
+    pub fn diagnostic(&self) -> &ScheduleDiagnostic {
+        match self {
+            Self::NotFound(diagnostic)
+            | Self::Disabled(diagnostic)
+            | Self::Unavailable(diagnostic) => diagnostic,
+        }
+    }
+}
+
+impl fmt::Display for SchedulerTriggerError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.diagnostic().code)
+    }
+}
+
+impl std::error::Error for SchedulerTriggerError {}
+
 /// One accepted scheduler snapshot and the exact message-route identity that
 /// validated it. This is the watch value consumed by later job ownership; it
 /// cannot observe a new definition set without its matching bus generation.
@@ -86,6 +117,77 @@ struct SchedulerRouteBinding {
     route_generation: u64,
 }
 
+/// The clock abstraction keeps calendar time explicit. Tokio's paused test
+/// clock intentionally does not alter system wall time, so scheduler tests
+/// inject a coupled wall clock without changing production semantics.
+trait SchedulerClock: Send + Sync {
+    fn now(&self) -> Timestamp;
+
+    /// A clock adjustment means a waiter must discard its old deadline and
+    /// calculate a fresh strictly-future occurrence. Production has no
+    /// portable adjustment event source, while the test clock uses this to
+    /// model wall-clock corrections deterministically.
+    fn subscribe_adjustments(&self) -> watch::Receiver<()>;
+}
+
+struct SystemSchedulerClock {
+    adjustments: watch::Sender<()>,
+}
+
+impl Default for SystemSchedulerClock {
+    fn default() -> Self {
+        let (adjustments, _) = watch::channel(());
+        Self { adjustments }
+    }
+}
+
+impl SchedulerClock for SystemSchedulerClock {
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
+    }
+
+    fn subscribe_adjustments(&self) -> watch::Receiver<()> {
+        self.adjustments.subscribe()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SchedulerJobIdentity {
+    definition_digest_sha256: String,
+}
+
+struct SchedulerJob {
+    identity: SchedulerJobIdentity,
+    cancel: watch::Sender<bool>,
+    task: JoinHandle<()>,
+}
+
+/// A pending typed delivery is always raced against scheduler ownership and
+/// route changes. This prevents a bounded channel from preserving an obsolete
+/// timer or manual action after its accepted definition has changed.
+enum ControlledDelivery {
+    Completed(Option<ScheduleDeliverySummary>),
+    Cancelled,
+    Shutdown,
+    Accepted(Arc<AcceptedScheduleSnapshot>),
+    RouteChanged,
+    ClockAdjusted,
+}
+
+#[derive(Clone, Debug)]
+struct ScheduleRuntimeState {
+    next_occurrence_utc: Option<String>,
+    last_attempt: Option<ScheduleDeliverySummary>,
+    target_availability: ScheduleTargetAvailability,
+    diagnostic: Option<ScheduleDiagnostic>,
+}
+
+#[derive(Default)]
+struct SchedulerJobs {
+    shutdown: bool,
+    jobs: BTreeMap<String, SchedulerJob>,
+}
+
 impl From<SchedulerPreflightSnapshot> for SchedulerRouteBinding {
     fn from(snapshot: SchedulerPreflightSnapshot) -> Self {
         Self {
@@ -101,7 +203,7 @@ struct SchedulerState {
     snapshot: ScheduleSnapshot,
     binding: Option<SchedulerRouteBinding>,
     diagnostics: Vec<ScheduleDiagnostic>,
-    next_occurrences: BTreeMap<String, Option<String>>,
+    runtime: BTreeMap<String, ScheduleRuntimeState>,
 }
 
 #[derive(Debug, Default)]
@@ -118,6 +220,9 @@ struct SchedulerServiceInner {
     state: Mutex<SchedulerState>,
     snapshots: watch::Sender<Arc<AcceptedScheduleSnapshot>>,
     startup: Mutex<StartupState>,
+    clock: Arc<dyn SchedulerClock>,
+    jobs: Mutex<SchedulerJobs>,
+    shutdown: watch::Sender<bool>,
 }
 
 /// Instance-local schedule configuration service.
@@ -135,6 +240,20 @@ impl SchedulerService {
         context: InstanceContext,
         schedule_root: impl Into<PathBuf>,
         bus: RuntimeMessageBus,
+    ) -> Result<Self, SchedulerServiceError> {
+        Self::new_with_clock(
+            context,
+            schedule_root,
+            bus,
+            Arc::new(SystemSchedulerClock::default()),
+        )
+    }
+
+    fn new_with_clock(
+        context: InstanceContext,
+        schedule_root: impl Into<PathBuf>,
+        bus: RuntimeMessageBus,
+        clock: Arc<dyn SchedulerClock>,
     ) -> Result<Self, SchedulerServiceError> {
         let schedule_root = schedule_root.into();
         if bus.context() != &context {
@@ -160,6 +279,7 @@ impl SchedulerService {
             bus_route_generation: initial_binding.route_generation,
             removed_schedule_ids: Vec::new(),
         }));
+        let (shutdown, _) = watch::channel(false);
 
         Ok(Self {
             inner: Arc::new(SchedulerServiceInner {
@@ -175,13 +295,16 @@ impl SchedulerService {
                     // claims a later bridge generation for unaccepted state.
                     binding: Some(initial_binding),
                     diagnostics,
-                    next_occurrences: BTreeMap::new(),
+                    runtime: BTreeMap::new(),
                 }),
                 snapshots,
                 startup: Mutex::new(StartupState {
                     started: false,
                     candidate: startup_candidate,
                 }),
+                clock,
+                jobs: Mutex::new(SchedulerJobs::default()),
+                shutdown,
             }),
         })
     }
@@ -209,6 +332,45 @@ impl SchedulerService {
         self.inner.snapshots.subscribe()
     }
 
+    /// Returns the number of still-running schedule jobs owned by this
+    /// instance. Finished route-invalidated jobs are not counted, and no job
+    /// from another instance can be present in this service-owned registry.
+    pub fn active_job_count(&self) -> usize {
+        self.inner
+            .jobs
+            .lock()
+            .expect("scheduler job mutex must not be poisoned")
+            .jobs
+            .values()
+            .filter(|job| !job.task.is_finished())
+            .count()
+    }
+
+    /// Cancels every scheduler-owned task. It is safe to call repeatedly from
+    /// the instance lifecycle; shutdown never writes a tick or waits for a
+    /// deadline to elapse.
+    pub fn shutdown(&self) {
+        let mut jobs = self
+            .inner
+            .jobs
+            .lock()
+            .expect("scheduler job mutex must not be poisoned");
+        if jobs.shutdown {
+            return;
+        }
+        jobs.shutdown = true;
+        self.inner.shutdown.send_replace(true);
+        for job in jobs.jobs.values_mut() {
+            job.cancel.send_replace(true);
+            job.task.abort();
+        }
+        jobs.jobs.clear();
+    }
+
+    fn shutdown_receiver(&self) -> watch::Receiver<bool> {
+        self.inner.shutdown.subscribe()
+    }
+
     /// Produces an inspection projection of the accepted state plus the most
     /// recent redacted candidate diagnostics.
     pub fn inspect(&self) -> ScheduleInspection {
@@ -233,13 +395,18 @@ impl SchedulerService {
                 && value.route_generation == routes.route_generation
         });
         for schedule in &mut inspection.schedules {
-            schedule.next_occurrence_utc =
-                state.next_occurrences.get(&schedule.id).cloned().flatten();
-            schedule.target_availability = if binding_is_current {
-                ScheduleTargetAvailability::Available
+            if let Some(runtime) = state.runtime.get(&schedule.id) {
+                schedule.next_occurrence_utc = runtime.next_occurrence_utc.clone();
+                schedule.last_attempt = runtime.last_attempt.clone();
+                schedule.diagnostic = runtime.diagnostic.clone();
+                schedule.target_availability = runtime.target_availability.clone();
             } else {
-                ScheduleTargetAvailability::Unknown
-            };
+                schedule.target_availability = if binding_is_current {
+                    ScheduleTargetAvailability::Available
+                } else {
+                    ScheduleTargetAvailability::Unknown
+                };
+            }
         }
         inspection.diagnostics = state.diagnostics.clone();
         inspection
@@ -254,6 +421,15 @@ impl SchedulerService {
     /// a watcher or a retry loop.
     pub fn start_initial_route_refresh(&self) {
         let should_start = {
+            if self
+                .inner
+                .jobs
+                .lock()
+                .expect("scheduler job mutex must not be poisoned")
+                .shutdown
+            {
+                return;
+            }
             let mut startup = self
                 .inner
                 .startup
@@ -272,19 +448,27 @@ impl SchedulerService {
 
         let service = self.clone();
         let mut routes = self.inner.bus.subscribe_snapshots();
+        let mut shutdown = self.shutdown_receiver();
         tokio::spawn(async move {
             let route_ready = if routes.borrow().route_generation > 0 {
                 true
             } else {
                 loop {
-                    match routes.changed().await {
-                        Ok(()) if routes.borrow().route_generation > 0 => break true,
-                        Ok(()) => continue,
-                        Err(_) => break false,
+                    tokio::select! {
+                        changed = routes.changed() => match changed {
+                            Ok(()) if routes.borrow().route_generation > 0 => break true,
+                            Ok(()) => continue,
+                            Err(_) => break false,
+                        },
+                        changed = shutdown.changed() => {
+                            if changed.is_err() || *shutdown.borrow_and_update() {
+                                break false;
+                            }
+                        }
                     }
                 }
             };
-            if route_ready {
+            if route_ready && !*shutdown.borrow() {
                 service.apply_initial_candidate().await;
             }
         });
@@ -354,44 +538,88 @@ impl SchedulerService {
                 // Calculate at this publication point so every enabled
                 // definition retains a strictly future occurrence even if a
                 // refresh waited for a concurrent route update.
-                let next_occurrences = next_occurrences(&definitions, Timestamp::now())?;
-                let mut state = self
-                    .inner
-                    .state
-                    .lock()
-                    .expect("scheduler state mutex must not be poisoned");
-                let generation = state
-                    .snapshot
-                    .generation
-                    .checked_add(1)
-                    .expect("scheduler generation overflow");
-                let removed_schedule_ids = state
-                    .snapshot
-                    .definitions
-                    .iter()
-                    .filter(|accepted| {
-                        !definitions
-                            .iter()
-                            .any(|candidate| candidate.id == accepted.id)
-                    })
-                    .map(|definition| definition.id.clone())
-                    .collect::<Vec<_>>();
-                let snapshot = schedule_snapshot(generation, definitions.clone())
-                    .expect("validated schedule candidates cannot fail canonicalization");
-                state.snapshot = snapshot.clone();
                 let binding = SchedulerRouteBinding::from(preflight);
-                state.binding = Some(binding.clone());
-                state.diagnostics.clear();
-                state.next_occurrences = next_occurrences.clone();
-                self.inner
-                    .snapshots
-                    .send_replace(Arc::new(AcceptedScheduleSnapshot {
+                let next_occurrences = next_occurrences(&definitions, self.inner.clock.now())?;
+                let (snapshot, accepted) = {
+                    let mut state = self
+                        .inner
+                        .state
+                        .lock()
+                        .expect("scheduler state mutex must not be poisoned");
+                    let prior_definitions = state.snapshot.definitions.clone();
+                    let prior_runtime = std::mem::take(&mut state.runtime);
+                    let generation = state
+                        .snapshot
+                        .generation
+                        .checked_add(1)
+                        .expect("scheduler generation overflow");
+                    let removed_schedule_ids = prior_definitions
+                        .iter()
+                        .filter(|accepted| {
+                            !definitions
+                                .iter()
+                                .any(|candidate| candidate.id == accepted.id)
+                        })
+                        .map(|definition| definition.id.clone())
+                        .collect::<Vec<_>>();
+                    let snapshot = schedule_snapshot(generation, definitions.clone())
+                        .expect("validated schedule candidates cannot fail canonicalization");
+                    let retained_ids = definitions
+                        .iter()
+                        .filter(|candidate| {
+                            prior_definitions.iter().any(|accepted| {
+                                accepted.id == candidate.id
+                                    && accepted.definition_digest_sha256
+                                        == candidate.definition_digest_sha256
+                            })
+                        })
+                        .map(|definition| definition.id.clone())
+                        .collect::<BTreeSet<_>>();
+                    let runtime = definitions
+                        .iter()
+                        .map(|definition| {
+                            let mut value = ScheduleRuntimeState {
+                                next_occurrence_utc: next_occurrences
+                                    .get(&definition.id)
+                                    .cloned()
+                                    .flatten(),
+                                last_attempt: None,
+                                target_availability: ScheduleTargetAvailability::Available,
+                                diagnostic: None,
+                            };
+                            if retained_ids.contains(&definition.id) {
+                                if let Some(previous) = prior_runtime.get(&definition.id) {
+                                    value.next_occurrence_utc =
+                                        previous.next_occurrence_utc.clone();
+                                    value.last_attempt = previous.last_attempt.clone();
+                                    // A definition digest intentionally
+                                    // excludes its source filename so a move
+                                    // retains the same job. Its inspection
+                                    // diagnostics must nevertheless describe
+                                    // the newly accepted source, never the
+                                    // retired path.
+                                    rebind_runtime_provenance(&mut value, definition);
+                                }
+                            }
+                            (definition.id.clone(), value)
+                        })
+                        .collect::<BTreeMap<_, _>>();
+
+                    state.snapshot = snapshot.clone();
+                    state.binding = Some(binding.clone());
+                    state.diagnostics.clear();
+                    state.runtime = runtime;
+                    let accepted = Arc::new(AcceptedScheduleSnapshot {
                         snapshot: snapshot.clone(),
-                        instance_id: binding.instance_id,
-                        incarnation: binding.incarnation,
+                        instance_id: binding.instance_id.clone(),
+                        incarnation: binding.incarnation.clone(),
                         bus_route_generation: binding.route_generation,
                         removed_schedule_ids,
-                    }));
+                    });
+                    (snapshot, accepted)
+                };
+                self.inner.snapshots.send_replace(Arc::clone(&accepted));
+                self.reconcile_jobs(accepted);
                 Ok(snapshot)
             })
             .await;
@@ -404,6 +632,516 @@ impl SchedulerService {
             },
             Ok(Err(diagnostics)) => self.reject(diagnostics),
             Err(errors) => self.reject(preflight_diagnostics(&definitions, errors)),
+        }
+    }
+
+    /// Reconciles only this service's owned task controls. The caller has
+    /// already atomically published the accepted snapshot, so a spawned job
+    /// always begins from a complete definition set and can observe the same
+    /// watch value that external inspection uses.
+    fn reconcile_jobs(&self, accepted: Arc<AcceptedScheduleSnapshot>) {
+        let desired = accepted
+            .snapshot
+            .definitions
+            .iter()
+            .filter(|definition| definition.enabled)
+            .map(|definition| {
+                (
+                    definition.id.clone(),
+                    (
+                        definition.clone(),
+                        SchedulerJobIdentity {
+                            definition_digest_sha256: definition.definition_digest_sha256.clone(),
+                        },
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut jobs = self
+            .inner
+            .jobs
+            .lock()
+            .expect("scheduler job mutex must not be poisoned");
+        if jobs.shutdown {
+            return;
+        }
+
+        let obsolete = jobs
+            .jobs
+            .iter()
+            .filter_map(|(id, job)| match desired.get(id) {
+                Some((_, identity)) if job.identity == *identity && !job.task.is_finished() => None,
+                _ => Some(id.clone()),
+            })
+            .collect::<Vec<_>>();
+        for id in obsolete {
+            if let Some(job) = jobs.jobs.remove(&id) {
+                job.cancel.send_replace(true);
+                job.task.abort();
+            }
+        }
+
+        for (id, (definition, identity)) in desired {
+            if jobs.jobs.contains_key(&id) {
+                continue;
+            }
+            let (cancel, cancellation) = watch::channel(false);
+            let service = self.clone();
+            let task_identity = identity.clone();
+            let task = tokio::spawn(async move {
+                service
+                    .run_job(definition, task_identity, cancellation)
+                    .await;
+            });
+            jobs.jobs.insert(
+                id,
+                SchedulerJob {
+                    identity,
+                    cancel,
+                    task,
+                },
+            );
+        }
+    }
+
+    async fn run_job(
+        &self,
+        mut definition: ScheduleDefinition,
+        identity: SchedulerJobIdentity,
+        mut cancellation: watch::Receiver<bool>,
+    ) {
+        let mut accepted = self.subscribe_snapshots();
+        let mut routes = self.inner.bus.subscribe_snapshots();
+        let mut shutdown = self.shutdown_receiver();
+        let mut clock_adjustments = self.inner.clock.subscribe_adjustments();
+        let mut last_scheduled_occurrence = None;
+
+        loop {
+            if *cancellation.borrow() || *shutdown.borrow() {
+                return;
+            }
+            let _ = clock_adjustments.borrow_and_update();
+            let now = self.inner.clock.now();
+            let floor = last_scheduled_occurrence
+                .filter(|previous| *previous > now)
+                .unwrap_or(now);
+            let due = match next_occurrence_timestamp(&definition, floor) {
+                Ok(Some(due)) => due,
+                Ok(None) => return,
+                Err(diagnostic) => {
+                    self.record_runtime_diagnostic(&definition, &identity, diagnostic);
+                    return;
+                }
+            };
+            self.set_next_occurrence(&definition, &identity, Some(due.to_string()));
+            let deadline = deadline_for(now, due);
+
+            tokio::select! {
+                biased;
+                changed = cancellation.changed() => {
+                    if changed.is_err() || *cancellation.borrow_and_update() {
+                        return;
+                    }
+                }
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow_and_update() {
+                        return;
+                    }
+                }
+                changed = accepted.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    let current = accepted.borrow_and_update().clone();
+                    let Some(current_definition) =
+                        accepted_snapshot_definition(&current, &definition, &identity)
+                    else {
+                        return;
+                    };
+                    definition = current_definition;
+                }
+                changed = routes.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    let _ = routes.borrow_and_update();
+                    self.revalidate_route(&definition, &identity).await;
+                }
+                changed = clock_adjustments.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+                _ = sleep_until(deadline) => {
+                    // A wall-clock correction can make a monotonic deadline
+                    // arrive before its calendar occurrence. Re-arm from the
+                    // corrected clock rather than firing an early replay.
+                    let observed_now = self.inner.clock.now();
+                    if observed_now < due {
+                        continue;
+                    }
+                    // A wake after at least one whole calendar occurrence has
+                    // passed is a suspend/forward-clock miss, not a backlog.
+                    // Recompute from wall time and never enumerate the missed
+                    // occurrences. Minor timer latency within this occurrence
+                    // still executes its one scheduled delivery.
+                    match next_occurrence_timestamp(&definition, due) {
+                        Ok(Some(following)) if following <= observed_now => continue,
+                        Ok(Some(_)) => {}
+                        Ok(None) => return,
+                        Err(diagnostic) => {
+                            self.record_runtime_diagnostic(&definition, &identity, diagnostic);
+                            return;
+                        }
+                    }
+                    match self
+                        .deliver_with_controls(
+                            &definition,
+                            &identity,
+                            due,
+                            &mut cancellation,
+                            &mut accepted,
+                            &mut routes,
+                            &mut shutdown,
+                            &mut clock_adjustments,
+                        )
+                        .await
+                    {
+                        ControlledDelivery::Completed(Some(_)) => {
+                            last_scheduled_occurrence = Some(due);
+                        }
+                        ControlledDelivery::Completed(None)
+                        | ControlledDelivery::Cancelled
+                        | ControlledDelivery::Shutdown => return,
+                        ControlledDelivery::Accepted(current) => {
+                            let Some(current_definition) =
+                                accepted_snapshot_definition(&current, &definition, &identity)
+                            else {
+                                return;
+                            };
+                            definition = current_definition;
+                        }
+                        ControlledDelivery::RouteChanged => {
+                            self.revalidate_route(&definition, &identity).await;
+                        }
+                        ControlledDelivery::ClockAdjusted => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// Attempts one typed delivery while observing every event that can make
+    /// that attempt obsolete. Dropping the pending `send` future on any such
+    /// event preserves bounded-channel backpressure without letting stale work
+    /// enqueue after refresh, withdrawal, or shutdown.
+    async fn deliver_with_controls(
+        &self,
+        definition: &ScheduleDefinition,
+        identity: &SchedulerJobIdentity,
+        occurrence: Timestamp,
+        cancellation: &mut watch::Receiver<bool>,
+        accepted: &mut watch::Receiver<Arc<AcceptedScheduleSnapshot>>,
+        routes: &mut watch::Receiver<Arc<crate::message_bus::MessageRouteSnapshot>>,
+        shutdown: &mut watch::Receiver<bool>,
+        clock_adjustments: &mut watch::Receiver<()>,
+    ) -> ControlledDelivery {
+        tokio::select! {
+            biased;
+            changed = cancellation.changed() => {
+                if changed.is_err() || *cancellation.borrow_and_update() {
+                    ControlledDelivery::Cancelled
+                } else {
+                    ControlledDelivery::ClockAdjusted
+                }
+            }
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow_and_update() {
+                    ControlledDelivery::Shutdown
+                } else {
+                    ControlledDelivery::ClockAdjusted
+                }
+            }
+            changed = accepted.changed() => {
+                if changed.is_err() {
+                    ControlledDelivery::Shutdown
+                } else {
+                    ControlledDelivery::Accepted(accepted.borrow_and_update().clone())
+                }
+            }
+            changed = routes.changed() => {
+                if changed.is_err() {
+                    ControlledDelivery::Shutdown
+                } else {
+                    let _ = routes.borrow_and_update();
+                    ControlledDelivery::RouteChanged
+                }
+            }
+            changed = clock_adjustments.changed() => {
+                if changed.is_err() {
+                    ControlledDelivery::Shutdown
+                } else {
+                    ControlledDelivery::ClockAdjusted
+                }
+            }
+            summary = self.deliver_occurrence(definition, identity, occurrence) => {
+                ControlledDelivery::Completed(summary)
+            }
+        }
+    }
+
+    /// Revalidates a waiting target after a route publication. A temporary
+    /// outage does not kill the schedule: it records one current redacted
+    /// diagnostic and re-arms for the next future occurrence, with no retry
+    /// of an already due occurrence.
+    async fn revalidate_route(
+        &self,
+        definition: &ScheduleDefinition,
+        identity: &SchedulerJobIdentity,
+    ) {
+        let request = preflight_request(definition);
+        match self
+            .inner
+            .bus
+            .with_scheduler_preflight_all(&[request], |_| ())
+            .await
+        {
+            Ok(()) => self.mark_route_available(definition, identity),
+            Err(errors) => {
+                let diagnostic = preflight_diagnostics(std::slice::from_ref(definition), errors)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| diagnostic_for_definition(TARGET_UNAVAILABLE, definition));
+                self.record_runtime_diagnostic(definition, identity, diagnostic);
+            }
+        }
+    }
+
+    /// Runs one timer/manual delivery attempt. The live bus validates target,
+    /// contract, scheduler permission, payload bounds, and secret fields at
+    /// this final boundary; only a typed/redacted receipt summary remains in
+    /// scheduler memory.
+    async fn deliver_occurrence(
+        &self,
+        definition: &ScheduleDefinition,
+        identity: &SchedulerJobIdentity,
+        occurrence: Timestamp,
+    ) -> Option<ScheduleDeliverySummary> {
+        // This short check is the occurrence's scheduler linearization point.
+        // A refresh that has already replaced this definition prevents the old
+        // task from initiating another delivery; a delivery accepted before
+        // that replacement can only write its result back when the definition
+        // digest still matches.
+        if !self.current_definition_matches(definition, identity) {
+            return None;
+        }
+
+        let envelope = preflight_request(definition).envelope;
+        let result = match definition.target.kind {
+            ScheduleTargetKind::Channel => self
+                .inner
+                .bus
+                .send_from_scheduler(envelope)
+                .await
+                .map(|receipt| receipt.route_generation),
+            ScheduleTargetKind::Topic => self
+                .inner
+                .bus
+                .publish_from_scheduler(envelope)
+                .map(|receipt| receipt.route_generation),
+        };
+        let summary = match result {
+            Ok(route_generation) => ScheduleDeliverySummary {
+                occurrence_utc: occurrence.to_string(),
+                outcome: ScheduleDeliveryOutcome::Delivered,
+                route_generation,
+                diagnostic: None,
+            },
+            Err(error) => ScheduleDeliverySummary {
+                occurrence_utc: occurrence.to_string(),
+                outcome: ScheduleDeliveryOutcome::Failed,
+                route_generation: error.route_generation(),
+                diagnostic: Some(diagnostic_for_definition(
+                    preflight_code(error.code()),
+                    definition,
+                )),
+            },
+        };
+        self.record_delivery(definition, identity, summary.clone());
+        Some(summary)
+    }
+
+    /// Internally triggers one accepted enabled definition through the exact
+    /// timer delivery helper. It never changes snapshot generation or next
+    /// deadline, so S4 can safely wrap it in request identity later.
+    pub async fn trigger(
+        &self,
+        schedule_id: &str,
+    ) -> Result<ScheduleDeliverySummary, SchedulerTriggerError> {
+        let (mut definition, mut identity) = self.selected_definition(schedule_id)?;
+        let occurrence = self.inner.clock.now();
+        // Manual triggers have no owned job control, but they use the exact
+        // same watcher-aware delivery boundary as timer jobs. A refresh,
+        // withdrawal, or shutdown therefore drops a pending bounded send
+        // instead of letting it enqueue stale work later.
+        let (_manual_cancellation, mut cancellation) = watch::channel(false);
+        let (_manual_adjustments, mut clock_adjustments) = watch::channel(());
+        let mut accepted = self.subscribe_snapshots();
+        let mut routes = self.inner.bus.subscribe_snapshots();
+        let mut shutdown = self.shutdown_receiver();
+
+        loop {
+            if *shutdown.borrow() {
+                return Err(SchedulerTriggerError::Unavailable(
+                    diagnostic_for_definition(TARGET_UNAVAILABLE, &definition),
+                ));
+            }
+            match self
+                .deliver_with_controls(
+                    &definition,
+                    &identity,
+                    occurrence,
+                    &mut cancellation,
+                    &mut accepted,
+                    &mut routes,
+                    &mut shutdown,
+                    &mut clock_adjustments,
+                )
+                .await
+            {
+                ControlledDelivery::Completed(Some(summary)) => return Ok(summary),
+                ControlledDelivery::Completed(None) | ControlledDelivery::Accepted(_) => {
+                    let (current_definition, current_identity) =
+                        self.selected_definition(schedule_id)?;
+                    definition = current_definition;
+                    identity = current_identity;
+                }
+                ControlledDelivery::RouteChanged | ControlledDelivery::ClockAdjusted => {}
+                ControlledDelivery::Cancelled | ControlledDelivery::Shutdown => {
+                    return Err(SchedulerTriggerError::Unavailable(
+                        diagnostic_for_definition(TARGET_UNAVAILABLE, &definition),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn selected_definition(
+        &self,
+        schedule_id: &str,
+    ) -> Result<(ScheduleDefinition, SchedulerJobIdentity), SchedulerTriggerError> {
+        let state = self
+            .inner
+            .state
+            .lock()
+            .expect("scheduler state mutex must not be poisoned");
+        let definition = state
+            .snapshot
+            .definitions
+            .iter()
+            .find(|definition| definition.id == schedule_id)
+            .cloned()
+            .ok_or_else(|| SchedulerTriggerError::NotFound(not_found_diagnostic()))?;
+        if !definition.enabled {
+            return Err(SchedulerTriggerError::Disabled(diagnostic_for_definition(
+                SCHEDULE_DISABLED,
+                &definition,
+            )));
+        }
+        let identity = SchedulerJobIdentity {
+            definition_digest_sha256: definition.definition_digest_sha256.clone(),
+        };
+        Ok((definition, identity))
+    }
+
+    fn current_definition_matches(
+        &self,
+        definition: &ScheduleDefinition,
+        identity: &SchedulerJobIdentity,
+    ) -> bool {
+        let state = self
+            .inner
+            .state
+            .lock()
+            .expect("scheduler state mutex must not be poisoned");
+        snapshot_definition_matches(&state.snapshot, definition, identity)
+    }
+
+    fn set_next_occurrence(
+        &self,
+        definition: &ScheduleDefinition,
+        identity: &SchedulerJobIdentity,
+        next_occurrence_utc: Option<String>,
+    ) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .expect("scheduler state mutex must not be poisoned");
+        if snapshot_definition_provenance_matches(&state.snapshot, definition, identity) {
+            if let Some(runtime) = state.runtime.get_mut(&definition.id) {
+                runtime.next_occurrence_utc = next_occurrence_utc;
+            }
+        }
+    }
+
+    fn mark_route_available(
+        &self,
+        definition: &ScheduleDefinition,
+        identity: &SchedulerJobIdentity,
+    ) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .expect("scheduler state mutex must not be poisoned");
+        if snapshot_definition_provenance_matches(&state.snapshot, definition, identity) {
+            if let Some(runtime) = state.runtime.get_mut(&definition.id) {
+                runtime.target_availability = ScheduleTargetAvailability::Available;
+                runtime.diagnostic = None;
+            }
+        }
+    }
+
+    fn record_runtime_diagnostic(
+        &self,
+        definition: &ScheduleDefinition,
+        identity: &SchedulerJobIdentity,
+        diagnostic: ScheduleDiagnostic,
+    ) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .expect("scheduler state mutex must not be poisoned");
+        if snapshot_definition_provenance_matches(&state.snapshot, definition, identity) {
+            if let Some(runtime) = state.runtime.get_mut(&definition.id) {
+                runtime.target_availability = ScheduleTargetAvailability::Unavailable;
+                runtime.diagnostic = Some(diagnostic);
+            }
+        }
+    }
+
+    fn record_delivery(
+        &self,
+        definition: &ScheduleDefinition,
+        identity: &SchedulerJobIdentity,
+        summary: ScheduleDeliverySummary,
+    ) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .expect("scheduler state mutex must not be poisoned");
+        if snapshot_definition_provenance_matches(&state.snapshot, definition, identity) {
+            if let Some(runtime) = state.runtime.get_mut(&definition.id) {
+                runtime.target_availability = match &summary.outcome {
+                    ScheduleDeliveryOutcome::Delivered => ScheduleTargetAvailability::Available,
+                    ScheduleDeliveryOutcome::Failed => ScheduleTargetAvailability::Unavailable,
+                };
+                runtime.diagnostic = summary.diagnostic.clone();
+                runtime.last_attempt = Some(summary);
+            }
         }
     }
 
@@ -423,6 +1161,90 @@ impl SchedulerService {
             snapshot,
             diagnostics,
         }
+    }
+}
+
+fn accepted_snapshot_definition(
+    accepted: &AcceptedScheduleSnapshot,
+    definition: &ScheduleDefinition,
+    identity: &SchedulerJobIdentity,
+) -> Option<ScheduleDefinition> {
+    accepted
+        .snapshot
+        .definitions
+        .iter()
+        .find(|current| definition_matches(current, definition, identity))
+        .cloned()
+}
+
+fn snapshot_definition_matches(
+    snapshot: &ScheduleSnapshot,
+    definition: &ScheduleDefinition,
+    identity: &SchedulerJobIdentity,
+) -> bool {
+    snapshot
+        .definitions
+        .iter()
+        .any(|current| definition_matches(current, definition, identity))
+}
+
+fn snapshot_definition_provenance_matches(
+    snapshot: &ScheduleSnapshot,
+    definition: &ScheduleDefinition,
+    identity: &SchedulerJobIdentity,
+) -> bool {
+    snapshot.definitions.iter().any(|current| {
+        definition_matches(current, definition, identity)
+            && current.source_path == definition.source_path
+    })
+}
+
+fn definition_matches(
+    current: &ScheduleDefinition,
+    definition: &ScheduleDefinition,
+    identity: &SchedulerJobIdentity,
+) -> bool {
+    current.id == definition.id
+        && current.enabled
+        && current.definition_digest_sha256 == identity.definition_digest_sha256
+}
+
+fn rebind_runtime_provenance(runtime: &mut ScheduleRuntimeState, definition: &ScheduleDefinition) {
+    if let Some(summary) = &mut runtime.last_attempt {
+        rebind_diagnostic_provenance(summary.diagnostic.as_mut(), definition);
+    }
+    rebind_diagnostic_provenance(runtime.diagnostic.as_mut(), definition);
+}
+
+fn rebind_diagnostic_provenance(
+    diagnostic: Option<&mut ScheduleDiagnostic>,
+    definition: &ScheduleDefinition,
+) {
+    if let Some(diagnostic) = diagnostic {
+        diagnostic.source_path = Some(definition.source_path.clone());
+        diagnostic.schedule_id = Some(definition.id.clone());
+    }
+}
+
+fn deadline_for(now: Timestamp, due: Timestamp) -> Instant {
+    let wait = now.duration_until(due);
+    if wait.is_positive() {
+        Instant::now()
+            .checked_add(wait.unsigned_abs())
+            .expect("cron deadline must fit Tokio instant")
+    } else {
+        Instant::now()
+    }
+}
+
+fn not_found_diagnostic() -> ScheduleDiagnostic {
+    ScheduleDiagnostic {
+        schema_version: SCHEDULE_INSPECTION_SCHEMA_VERSION,
+        code: SCHEDULE_NOT_FOUND.to_string(),
+        severity: ScheduleDiagnosticSeverity::Error,
+        source_path: None,
+        schedule_id: None,
+        context: Default::default(),
     }
 }
 
@@ -485,6 +1307,13 @@ fn next_occurrence_utc(
     definition: &ScheduleDefinition,
     now: Timestamp,
 ) -> Result<Option<String>, ScheduleDiagnostic> {
+    Ok(next_occurrence_timestamp(definition, now)?.map(|occurrence| occurrence.to_string()))
+}
+
+fn next_occurrence_timestamp(
+    definition: &ScheduleDefinition,
+    now: Timestamp,
+) -> Result<Option<Timestamp>, ScheduleDiagnostic> {
     if !definition.enabled {
         return Ok(None);
     }
@@ -493,7 +1322,7 @@ fn next_occurrence_utc(
     let next = schedule
         .find_next(now)
         .map_err(|_| diagnostic_for_definition(NEXT_OCCURRENCE_UNAVAILABLE, definition))?;
-    Ok(Some(next.timestamp().to_string()))
+    Ok(Some(next.timestamp()))
 }
 
 fn preflight_diagnostics(
@@ -521,6 +1350,7 @@ fn preflight_code(code: &str) -> &'static str {
         crate::message_bus::INVALID_PAYLOAD => PAYLOAD_INVALID,
         crate::message_bus::PAYLOAD_TOO_LARGE => PAYLOAD_TOO_LARGE,
         crate::message_bus::SCHEDULER_SECRET_PAYLOAD_FORBIDDEN => SECRET_PAYLOAD_FORBIDDEN,
+        crate::message_bus::HANDLER_UNAVAILABLE => TARGET_UNAVAILABLE,
         _ => TARGET_MESSAGE_INCOMPATIBLE,
     }
 }
@@ -550,23 +1380,88 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use serde_json::json;
-    use tempfile::tempdir;
+    use sha2::{Digest, Sha256};
+    use tempfile::{tempdir, TempDir};
+    use tokio::sync::Notify;
+    use tokio::time::advance;
     use uuid::Uuid;
 
     use crate::instance::{InstanceBuildIdentity, LaunchProvenance, RootSource};
     use crate::message_bus::{
-        DirectedChannelDeclaration, MessageContractError, MessageDeclarations,
-        MessageSchemaDescriptor, MessageTypeContract, PreparedRegistration, RegistrationHandlers,
-        RouteEndpointRef,
+        BroadcastTopicDeclaration, DirectedChannelDeclaration, MessageContractError,
+        MessageDeclarations, MessageSchemaDescriptor, MessageTypeContract, ModuleMessageAuthority,
+        PreparedRegistration, RegistrationHandlers, RouteEndpointRef,
     };
+    use crate::module_control::registry::ModuleRegistry;
     use crate::module_control::ModuleGrant;
 
     use super::*;
 
     const MESSAGE: &str = "fixture.agent-wakeup";
     const JSON_SCHEMA_DRAFT: &str = "https://json-schema.org/draft/2020-12/schema";
+
+    #[derive(Clone)]
+    struct TestSchedulerClock {
+        inner: Arc<TestSchedulerClockInner>,
+    }
+
+    struct TestSchedulerClockInner {
+        state: Mutex<TestClockState>,
+        adjustments: watch::Sender<()>,
+    }
+
+    struct TestClockState {
+        wall_at_anchor: Timestamp,
+        anchor: Instant,
+    }
+
+    impl TestSchedulerClock {
+        fn new(wall: Timestamp) -> Self {
+            let (adjustments, _) = watch::channel(());
+            Self {
+                inner: Arc::new(TestSchedulerClockInner {
+                    state: Mutex::new(TestClockState {
+                        wall_at_anchor: wall,
+                        anchor: Instant::now(),
+                    }),
+                    adjustments,
+                }),
+            }
+        }
+
+        fn set(&self, wall: Timestamp) {
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .expect("test scheduler clock mutex must not be poisoned");
+            state.wall_at_anchor = wall;
+            state.anchor = Instant::now();
+            drop(state);
+            self.inner.adjustments.send_replace(());
+        }
+    }
+
+    impl SchedulerClock for TestSchedulerClock {
+        fn now(&self) -> Timestamp {
+            let state = self
+                .inner
+                .state
+                .lock()
+                .expect("test scheduler clock mutex must not be poisoned");
+            state
+                .wall_at_anchor
+                .checked_add(Instant::now().duration_since(state.anchor))
+                .expect("test scheduler clock remains in timestamp range")
+        }
+
+        fn subscribe_adjustments(&self) -> watch::Receiver<()> {
+            self.inner.adjustments.subscribe()
+        }
+    }
 
     fn context(name: &str, root: &Path) -> InstanceContext {
         InstanceContext {
@@ -693,12 +1588,285 @@ mod tests {
         handled
     }
 
-    fn write_fixture(root: &Path, fixture: &str) {
+    async fn register_notifying_channel(
+        context: &InstanceContext,
+        bus: &RuntimeMessageBus,
+        endpoint: &str,
+    ) -> (Arc<AtomicUsize>, Arc<Notify>) {
+        register_notifying_channel_as(context, bus, "fixture@scheduler#notifying", endpoint).await
+    }
+
+    async fn register_notifying_channel_as(
+        context: &InstanceContext,
+        bus: &RuntimeMessageBus,
+        activation_id: &str,
+        endpoint: &str,
+    ) -> (Arc<AtomicUsize>, Arc<Notify>) {
+        let handled = Arc::new(AtomicUsize::new(0));
+        let delivered = Arc::new(Notify::new());
+        let handler_count = Arc::clone(&handled);
+        let handler_delivered = Arc::clone(&delivered);
+        let registration = Arc::new(
+            PreparedRegistration::prepare(
+                context,
+                activation_id,
+                &[] as &[ModuleGrant],
+                declarations_for(MESSAGE, &[(endpoint, true)], Vec::new(), 256),
+                RegistrationHandlers::new().with_directed(endpoint.to_string(), move |_| {
+                    let handler_count = Arc::clone(&handler_count);
+                    let handler_delivered = Arc::clone(&handler_delivered);
+                    async move {
+                        handler_count.fetch_add(1, Ordering::SeqCst);
+                        handler_delivered.notify_one();
+                        Ok::<(), MessageContractError>(())
+                    }
+                }),
+            )
+            .unwrap(),
+        );
+        bus.register(registration).await.unwrap();
+        (handled, delivered)
+    }
+
+    async fn register_blocking_channel(
+        context: &InstanceContext,
+        bus: &RuntimeMessageBus,
+        endpoint: &str,
+    ) -> (
+        Arc<PreparedRegistration>,
+        Arc<AtomicUsize>,
+        Arc<Notify>,
+        Arc<Notify>,
+    ) {
+        let handled = Arc::new(AtomicUsize::new(0));
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let handler_count = Arc::clone(&handled);
+        let handler_entered = Arc::clone(&entered);
+        let handler_release = Arc::clone(&release);
+        let registration = Arc::new(
+            PreparedRegistration::prepare(
+                context,
+                "fixture@scheduler#blocked",
+                &[] as &[ModuleGrant],
+                declarations_for(MESSAGE, &[(endpoint, true)], Vec::new(), 256),
+                RegistrationHandlers::new().with_directed(endpoint.to_string(), move |_| {
+                    let handler_count = Arc::clone(&handler_count);
+                    let handler_entered = Arc::clone(&handler_entered);
+                    let handler_release = Arc::clone(&handler_release);
+                    async move {
+                        if handler_count.fetch_add(1, Ordering::SeqCst) == 0 {
+                            handler_entered.notify_one();
+                            handler_release.notified().await;
+                        }
+                        Ok::<(), MessageContractError>(())
+                    }
+                }),
+            )
+            .unwrap(),
+        );
+        bus.register(Arc::clone(&registration)).await.unwrap();
+        (registration, handled, entered, release)
+    }
+
+    async fn register_failing_channel(
+        context: &InstanceContext,
+        bus: &RuntimeMessageBus,
+        activation_id: &str,
+        endpoint: &str,
+    ) -> Arc<AtomicUsize> {
+        let handled = Arc::new(AtomicUsize::new(0));
+        let handler_count = Arc::clone(&handled);
+        let registration = Arc::new(
+            PreparedRegistration::prepare(
+                context,
+                activation_id,
+                &[] as &[ModuleGrant],
+                declarations_for(MESSAGE, &[(endpoint, true)], Vec::new(), 256),
+                RegistrationHandlers::new().with_directed(endpoint.to_string(), move |_| {
+                    let handler_count = Arc::clone(&handler_count);
+                    async move {
+                        handler_count.fetch_add(1, Ordering::SeqCst);
+                        Err(MessageContractError::new(
+                            crate::message_bus::HANDLER_FAILED,
+                            "fixture handler failure",
+                        ))
+                    }
+                }),
+            )
+            .unwrap(),
+        );
+        bus.register(registration).await.unwrap();
+        handled
+    }
+
+    async fn prepare_backpressured_manual_trigger(
+        temporary: &TempDir,
+        instance_name: &str,
+    ) -> (
+        SchedulerService,
+        RuntimeMessageBus,
+        PathBuf,
+        Arc<PreparedRegistration>,
+        Arc<Notify>,
+        JoinHandle<Result<ScheduleDeliverySummary, SchedulerTriggerError>>,
+    ) {
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.manual",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.manual",
+        );
+        let context = context(instance_name, temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        let (blocked, _count, entered, release) =
+            register_blocking_channel(&service.inner.context, &bus, "agents.manual").await;
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        service.trigger("agents.manual").await.unwrap();
+        entered.notified().await;
+        service.trigger("agents.manual").await.unwrap();
+        service.trigger("agents.manual").await.unwrap();
+
+        let trigger = tokio::spawn({
+            let service = service.clone();
+            async move { service.trigger("agents.manual").await }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !trigger.is_finished(),
+            "a full channel queue must leave the manual send pending"
+        );
+        (service, bus, schedule_root, blocked, release, trigger)
+    }
+
+    async fn register_topic(
+        context: &InstanceContext,
+        bus: &RuntimeMessageBus,
+        endpoint: &str,
+        scheduler_allowed: bool,
+    ) {
+        let mut declarations = declarations_for(MESSAGE, &[], Vec::new(), 256);
+        declarations.publishes = vec![BroadcastTopicDeclaration {
+            endpoint: RouteEndpointRef {
+                id: endpoint.to_string(),
+                message: message_for(MESSAGE),
+            },
+            capacity: 2,
+            required_grant: format!("message.publish.{endpoint}"),
+            scheduler_allowed,
+        }];
+        let registration = Arc::new(
+            PreparedRegistration::prepare(
+                context,
+                "fixture@scheduler#topic",
+                &[] as &[ModuleGrant],
+                declarations,
+                RegistrationHandlers::new(),
+            )
+            .unwrap(),
+        );
+        bus.register(registration).await.unwrap();
+    }
+
+    fn topic_subscriber(endpoint: &str) -> ModuleMessageAuthority {
+        ModuleMessageAuthority::from_host(
+            "fixture@scheduler#subscriber",
+            &[ModuleGrant {
+                id: format!("message.subscribe.{endpoint}"),
+                effective: true,
+            }],
+        )
+    }
+
+    fn clear_schedule_root(root: &Path) {
         fs::create_dir_all(root).unwrap();
         for entry in fs::read_dir(root).unwrap() {
             let path = entry.unwrap().path();
             fs::remove_file(path).unwrap();
         }
+    }
+
+    fn write_schedule(
+        root: &Path,
+        filename: &str,
+        id: &str,
+        enabled: bool,
+        cron: &str,
+        target_kind: &str,
+        endpoint: &str,
+        payload: serde_json::Value,
+    ) {
+        fs::create_dir_all(root).unwrap();
+        fs::write(
+            root.join(filename),
+            format!(
+                "schema_version: 1\nid: {id}\nenabled: {enabled}\ncron: {cron:?}\ntarget:\n  kind: {target_kind}\n  id: {endpoint}\nmessage:\n  type: {MESSAGE}\n  version: 1\n  payload: {}\n",
+                serde_json::to_string(&payload).unwrap(),
+            ),
+        )
+        .unwrap();
+    }
+
+    fn replace_schedule(
+        root: &Path,
+        id: &str,
+        enabled: bool,
+        cron: &str,
+        target_kind: &str,
+        endpoint: &str,
+    ) {
+        clear_schedule_root(root);
+        write_schedule(
+            root,
+            "schedule.yaml",
+            id,
+            enabled,
+            cron,
+            target_kind,
+            endpoint,
+            json!({"reason": "scheduled"}),
+        );
+    }
+
+    fn durable_tree_digest(root: &Path) -> String {
+        fn collect(root: &Path, path: &Path, files: &mut BTreeMap<String, Vec<u8>>) {
+            if !path.exists() {
+                return;
+            }
+            if path.is_file() {
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("durable path must stay under its root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                files.insert(relative, fs::read(path).unwrap());
+                return;
+            }
+            let mut entries = fs::read_dir(path)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            entries.sort();
+            for entry in entries {
+                collect(root, &entry, files);
+            }
+        }
+
+        let mut files = BTreeMap::new();
+        collect(root, root, &mut files);
+        format!("{:x}", Sha256::digest(serde_json::to_vec(&files).unwrap()))
+    }
+
+    fn write_fixture(root: &Path, fixture: &str) {
+        clear_schedule_root(root);
         let contents = match fixture {
             "valid-channel.yaml" => {
                 include_str!("../../../../modules/api/fixtures/schedules/valid-channel.yaml")
@@ -759,6 +1927,946 @@ mod tests {
         let next = next_occurrence_utc(&definition, now).unwrap().unwrap();
         assert!(next.parse::<Timestamp>().unwrap() > now);
         assert!(next.ends_with('Z'));
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn due_channel_and_manual_trigger_share_typed_delivery_without_durable_writes() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.timer",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.timer",
+        );
+        let context = context("scheduler-timer", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service = SchedulerService::new_with_clock(
+            context,
+            &schedule_root,
+            bus.clone(),
+            Arc::new(clock.clone()),
+        )
+        .unwrap();
+        let (handled, delivered) =
+            register_notifying_channel(&service.inner.context, &bus, "agents.timer").await;
+        let paths = service.inner.context.paths();
+        drop(ModuleRegistry::open_writable(&paths).unwrap());
+        let durable_before = durable_tree_digest(&paths.state_root);
+        let source_before = fs::read(schedule_root.join("schedule.yaml")).unwrap();
+
+        let refresh = service.refresh().await;
+        assert!(refresh.applied, "{:?}", refresh.diagnostics);
+        tokio::task::yield_now().await;
+        assert_eq!(service.active_job_count(), 1);
+        let before_manual = service.inspect();
+        let next_before_manual = before_manual.schedules[0].next_occurrence_utc.clone();
+        let generation_before_manual = before_manual.schedule_generation;
+
+        let manual = service.trigger("agents.timer").await.unwrap();
+        delivered.notified().await;
+        assert_eq!(manual.outcome, ScheduleDeliveryOutcome::Delivered);
+        assert_eq!(handled.load(Ordering::SeqCst), 1);
+        let after_manual = service.inspect();
+        assert_eq!(after_manual.schedule_generation, generation_before_manual);
+        assert_eq!(
+            after_manual.schedules[0].next_occurrence_utc,
+            next_before_manual
+        );
+
+        advance(Duration::from_secs(60)).await;
+        delivered.notified().await;
+        assert_eq!(handled.load(Ordering::SeqCst), 2);
+        let after_due = service.inspect();
+        let schedule = &after_due.schedules[0];
+        assert_eq!(
+            schedule
+                .last_attempt
+                .as_ref()
+                .map(|attempt| &attempt.outcome),
+            Some(&ScheduleDeliveryOutcome::Delivered)
+        );
+        assert!(schedule
+            .next_occurrence_utc
+            .as_deref()
+            .and_then(|value| value.parse::<Timestamp>().ok())
+            .is_some_and(|next| next > clock.now()));
+        assert_eq!(
+            fs::read(schedule_root.join("schedule.yaml")).unwrap(),
+            source_before
+        );
+        assert_eq!(durable_tree_digest(&paths.state_root), durable_before);
+
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn due_topic_schedule_publishes_once_to_current_subscribers() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.status.timer",
+            true,
+            "* * * * * Etc/UTC",
+            "topic",
+            "agents.status",
+        );
+        let context = context("scheduler-topic", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        register_topic(&service.inner.context, &bus, "agents.status", true).await;
+        let mut subscriber = bus
+            .subscribe(&topic_subscriber("agents.status"), "agents.status")
+            .unwrap();
+
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        advance(Duration::from_secs(60)).await;
+        let delivered = subscriber.recv_delivery().await.unwrap();
+        assert_eq!(delivered.envelope.endpoint, "agents.status");
+        assert_eq!(delivered.envelope.payload, json!({"reason": "scheduled"}));
+        assert_eq!(delivered.route_generation, bus.snapshot().route_generation);
+        let endpoint = bus
+            .inspect_endpoints()
+            .await
+            .into_iter()
+            .find(|endpoint| endpoint.endpoint == "agents.status")
+            .unwrap();
+        assert_eq!(endpoint.accepted, 1);
+
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn changed_refresh_cancels_the_old_deadline_before_cross_generation_delivery() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.work",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.old",
+        );
+        let context = context("scheduler-change", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        let (old_count, _) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#old",
+            "agents.old",
+        )
+        .await;
+        let (new_count, new_delivery) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#new",
+            "agents.new",
+        )
+        .await;
+
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        replace_schedule(
+            &schedule_root,
+            "agents.work",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.new",
+        );
+        assert!(service.refresh().await.applied);
+        assert_eq!(service.active_job_count(), 1);
+
+        advance(Duration::from_secs(60)).await;
+        new_delivery.notified().await;
+        assert_eq!(old_count.load(Ordering::SeqCst), 0);
+        assert_eq!(new_count.load(Ordering::SeqCst), 1);
+        assert_eq!(service.inspect().schedules[0].target.id, "agents.new");
+
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn route_withdrawal_cancels_a_backpressured_delivery_before_rearming() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.blocked",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.blocked",
+        );
+        let context = context("scheduler-backpressure", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        let (blocked, _blocked_count, entered, release) =
+            register_blocking_channel(&service.inner.context, &bus, "agents.blocked").await;
+
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        // One handler is held and the two-slot route queue is full. The due
+        // timer's fourth send must remain pending until the route update
+        // cancels its future, rather than pinning this job to the old route.
+        service.trigger("agents.blocked").await.unwrap();
+        entered.notified().await;
+        service.trigger("agents.blocked").await.unwrap();
+        service.trigger("agents.blocked").await.unwrap();
+        advance(Duration::from_secs(60)).await;
+        tokio::task::yield_now().await;
+
+        bus.withdraw(blocked.activation_id()).await.unwrap();
+        let (replacement_count, replacement_delivery) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#replacement",
+            "agents.blocked",
+        )
+        .await;
+
+        loop {
+            if service.inspect().schedules[0]
+                .next_occurrence_utc
+                .as_deref()
+                == Some("2026-08-09T07:02:00Z")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        advance(Duration::from_secs(60)).await;
+        replacement_delivery.notified().await;
+        assert_eq!(replacement_count.load(Ordering::SeqCst), 1);
+
+        release.notify_one();
+        blocked.dispose().await;
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn manual_trigger_drops_a_backpressured_send_when_disabled() {
+        let temporary = tempdir().unwrap();
+        let (service, bus, schedule_root, blocked, release, trigger) =
+            prepare_backpressured_manual_trigger(&temporary, "scheduler-manual-disable").await;
+
+        replace_schedule(
+            &schedule_root,
+            "agents.manual",
+            false,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.manual",
+        );
+        assert!(service.refresh().await.applied);
+        let error = trigger.await.unwrap().unwrap_err();
+        assert_eq!(error.diagnostic().code, SCHEDULE_DISABLED);
+
+        bus.withdraw(blocked.activation_id()).await.unwrap();
+        release.notify_one();
+        blocked.dispose().await;
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn manual_trigger_drops_a_backpressured_send_when_its_route_is_withdrawn() {
+        let temporary = tempdir().unwrap();
+        let (service, bus, _schedule_root, blocked, release, trigger) =
+            prepare_backpressured_manual_trigger(&temporary, "scheduler-manual-withdrawal").await;
+
+        bus.withdraw(blocked.activation_id()).await.unwrap();
+        let summary = trigger.await.unwrap().unwrap();
+        assert_eq!(summary.outcome, ScheduleDeliveryOutcome::Failed);
+        assert_eq!(
+            summary
+                .diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.code.as_str()),
+            Some(TARGET_UNAVAILABLE)
+        );
+
+        release.notify_one();
+        blocked.dispose().await;
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn manual_trigger_drops_a_backpressured_send_during_shutdown() {
+        let temporary = tempdir().unwrap();
+        let (service, bus, _schedule_root, blocked, release, trigger) =
+            prepare_backpressured_manual_trigger(&temporary, "scheduler-manual-shutdown").await;
+
+        service.shutdown();
+        let error = trigger.await.unwrap().unwrap_err();
+        assert_eq!(error.diagnostic().code, TARGET_UNAVAILABLE);
+
+        bus.withdraw(blocked.activation_id()).await.unwrap();
+        release.notify_one();
+        blocked.dispose().await;
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn disabled_and_removed_schedules_cancel_waits_and_manual_trigger_rejects_disabled() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.cancel",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.cancel",
+        );
+        let context = context("scheduler-cancel", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        let (handled, _) =
+            register_notifying_channel(&service.inner.context, &bus, "agents.cancel").await;
+
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        assert_eq!(service.active_job_count(), 1);
+        replace_schedule(
+            &schedule_root,
+            "agents.cancel",
+            false,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.cancel",
+        );
+        assert!(service.refresh().await.applied);
+        assert_eq!(service.active_job_count(), 0);
+        let disabled = service.trigger("agents.cancel").await.unwrap_err();
+        assert_eq!(disabled.diagnostic().code, SCHEDULE_DISABLED);
+        advance(Duration::from_secs(60)).await;
+        assert_eq!(handled.load(Ordering::SeqCst), 0);
+
+        replace_schedule(
+            &schedule_root,
+            "agents.cancel",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.cancel",
+        );
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        assert_eq!(service.active_job_count(), 1);
+        clear_schedule_root(&schedule_root);
+        assert!(service.refresh().await.applied);
+        assert_eq!(service.active_job_count(), 0);
+        advance(Duration::from_secs(60)).await;
+        assert_eq!(handled.load(Ordering::SeqCst), 0);
+
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn withdrawn_target_is_redacted_and_does_not_stop_an_unrelated_schedule() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        clear_schedule_root(&schedule_root);
+        write_schedule(
+            &schedule_root,
+            "bad.yaml",
+            "agents.bad",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.bad",
+            json!({"reason": "scheduled"}),
+        );
+        write_schedule(
+            &schedule_root,
+            "good.yaml",
+            "agents.good",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.good",
+            json!({"reason": "scheduled"}),
+        );
+        let context = context("scheduler-withdrawal", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        let (withdrawn_count, _) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#bad",
+            "agents.bad",
+        )
+        .await;
+        let (healthy_count, healthy_delivery) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#good",
+            "agents.good",
+        )
+        .await;
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        assert_eq!(service.active_job_count(), 2);
+
+        bus.withdraw("fixture@scheduler#bad").await.unwrap();
+        tokio::task::yield_now().await;
+        advance(Duration::from_secs(60)).await;
+        healthy_delivery.notified().await;
+        tokio::task::yield_now().await;
+        assert_eq!(withdrawn_count.load(Ordering::SeqCst), 0);
+        assert_eq!(healthy_count.load(Ordering::SeqCst), 1);
+        let failed = service
+            .inspect()
+            .schedules
+            .into_iter()
+            .find(|schedule| schedule.id == "agents.bad")
+            .unwrap();
+        assert_eq!(
+            failed.last_attempt.as_ref().map(|attempt| &attempt.outcome),
+            Some(&ScheduleDeliveryOutcome::Failed)
+        );
+        assert_eq!(
+            failed
+                .last_attempt
+                .as_ref()
+                .and_then(|attempt| attempt.diagnostic.as_ref())
+                .map(|diagnostic| diagnostic.code.as_str()),
+            Some(TARGET_UNAVAILABLE)
+        );
+        assert_eq!(
+            failed
+                .last_attempt
+                .as_ref()
+                .map(|attempt| attempt.route_generation),
+            Some(bus.snapshot().route_generation)
+        );
+        assert_eq!(
+            failed.target_availability,
+            ScheduleTargetAvailability::Unavailable
+        );
+        let rendered = serde_json::to_string(&failed).unwrap();
+        assert!(!rendered.contains("scheduled"));
+        assert!(!rendered.contains("message-bus validation"));
+        assert_eq!(service.active_job_count(), 2);
+
+        let (recovered_count, recovered_delivery) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#bad",
+            "agents.bad",
+        )
+        .await;
+        tokio::task::yield_now().await;
+        advance(Duration::from_secs(60)).await;
+        recovered_delivery.notified().await;
+        assert_eq!(recovered_count.load(Ordering::SeqCst), 1);
+        let recovered = service
+            .inspect()
+            .schedules
+            .into_iter()
+            .find(|schedule| schedule.id == "agents.bad")
+            .unwrap();
+        assert_eq!(
+            recovered
+                .last_attempt
+                .as_ref()
+                .map(|attempt| &attempt.outcome),
+            Some(&ScheduleDeliveryOutcome::Delivered)
+        );
+        assert_eq!(
+            recovered.target_availability,
+            ScheduleTargetAvailability::Available
+        );
+        assert!(recovered.diagnostic.is_none());
+
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn retained_jobs_rebind_diagnostics_when_their_source_is_renamed() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        write_schedule(
+            &schedule_root,
+            "original.yaml",
+            "agents.rename",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.rename",
+            json!({"reason": "scheduled"}),
+        );
+        let context = context("scheduler-source-rename", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        let (_old_count, _) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#original",
+            "agents.rename",
+        )
+        .await;
+
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        bus.withdraw("fixture@scheduler#original").await.unwrap();
+        let failed = service.trigger("agents.rename").await.unwrap();
+        assert_eq!(failed.outcome, ScheduleDeliveryOutcome::Failed);
+        assert_eq!(
+            failed
+                .diagnostic
+                .as_ref()
+                .and_then(|diagnostic| diagnostic.source_path.as_deref()),
+            Some("original.yaml")
+        );
+
+        let (_replacement_count, _) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#renamed",
+            "agents.rename",
+        )
+        .await;
+        fs::rename(
+            schedule_root.join("original.yaml"),
+            schedule_root.join("renamed.yaml"),
+        )
+        .unwrap();
+        assert!(service.refresh().await.applied);
+        assert_eq!(service.active_job_count(), 1);
+        let retained = service.inspect().schedules.remove(0);
+        assert_eq!(retained.source_path, "renamed.yaml");
+        assert_eq!(
+            retained
+                .last_attempt
+                .as_ref()
+                .and_then(|attempt| attempt.diagnostic.as_ref())
+                .and_then(|diagnostic| diagnostic.source_path.as_deref()),
+            Some("renamed.yaml")
+        );
+
+        bus.withdraw("fixture@scheduler#renamed").await.unwrap();
+        loop {
+            let schedule = service.inspect().schedules.remove(0);
+            if schedule
+                .diagnostic
+                .as_ref()
+                .is_some_and(|diagnostic| diagnostic.code == TARGET_UNAVAILABLE)
+            {
+                assert_eq!(schedule.source_path, "renamed.yaml");
+                assert_eq!(
+                    schedule
+                        .diagnostic
+                        .as_ref()
+                        .and_then(|diagnostic| diagnostic.source_path.as_deref()),
+                    Some("renamed.yaml")
+                );
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn incompatible_live_route_is_redacted_then_recovers_without_recreating_the_job() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.incompatible",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.incompatible",
+        );
+        let context = context("scheduler-incompatible", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        let (_initial_count, _) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#compatible",
+            "agents.incompatible",
+        )
+        .await;
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        assert_eq!(service.active_job_count(), 1);
+
+        bus.withdraw("fixture@scheduler#compatible").await.unwrap();
+        register_channels_with_contract(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#incompatible",
+            "fixture.incompatible-message",
+            &[("agents.incompatible", true)],
+            Vec::new(),
+            256,
+        )
+        .await;
+        loop {
+            let schedule = service.inspect().schedules.remove(0);
+            if schedule
+                .diagnostic
+                .as_ref()
+                .is_some_and(|diagnostic| diagnostic.code == TARGET_MESSAGE_INCOMPATIBLE)
+            {
+                assert_eq!(
+                    schedule.target_availability,
+                    ScheduleTargetAvailability::Unavailable
+                );
+                assert_eq!(service.active_job_count(), 1);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        bus.withdraw("fixture@scheduler#incompatible")
+            .await
+            .unwrap();
+        let (recovered_count, recovered_delivery) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#recovered",
+            "agents.incompatible",
+        )
+        .await;
+        loop {
+            let schedule = service.inspect().schedules.remove(0);
+            if schedule.target_availability == ScheduleTargetAvailability::Available {
+                assert!(schedule.diagnostic.is_none());
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        advance(Duration::from_secs(60)).await;
+        recovered_delivery.notified().await;
+        assert_eq!(recovered_count.load(Ordering::SeqCst), 1);
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn handler_failure_is_redacted_in_bus_observation_and_does_not_delay_a_healthy_job() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        clear_schedule_root(&schedule_root);
+        write_schedule(
+            &schedule_root,
+            "failing.yaml",
+            "agents.failing",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.failing",
+            json!({"reason": "scheduled"}),
+        );
+        write_schedule(
+            &schedule_root,
+            "healthy.yaml",
+            "agents.healthy",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.healthy",
+            json!({"reason": "scheduled"}),
+        );
+        let context = context("scheduler-handler-failure", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        let failing_count = register_failing_channel(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#failing",
+            "agents.failing",
+        )
+        .await;
+        let (healthy_count, healthy_delivery) = register_notifying_channel_as(
+            &service.inner.context,
+            &bus,
+            "fixture@scheduler#healthy",
+            "agents.healthy",
+        )
+        .await;
+
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        advance(Duration::from_secs(60)).await;
+        healthy_delivery.notified().await;
+        loop {
+            let observation = bus
+                .inspect_endpoints()
+                .await
+                .into_iter()
+                .find(|endpoint| endpoint.endpoint == "agents.failing")
+                .unwrap();
+            if observation.failed == 1 {
+                assert_eq!(
+                    observation
+                        .last_failure
+                        .as_ref()
+                        .map(|failure| failure.code.as_str()),
+                    Some(crate::message_bus::HANDLER_FAILED)
+                );
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(failing_count.load(Ordering::SeqCst), 1);
+        assert_eq!(healthy_count.load(Ordering::SeqCst), 1);
+        let failing_schedule = service
+            .inspect()
+            .schedules
+            .into_iter()
+            .find(|schedule| schedule.id == "agents.failing")
+            .unwrap();
+        assert_eq!(
+            failing_schedule.last_attempt.as_ref().map(|attempt| &attempt.outcome),
+            Some(&ScheduleDeliveryOutcome::Delivered),
+            "the scheduler receipt is an accepted typed delivery; handler failure remains bus-owned"
+        );
+        advance(Duration::from_secs(30)).await;
+        assert_eq!(failing_count.load(Ordering::SeqCst), 1);
+        assert_eq!(healthy_count.load(Ordering::SeqCst), 1);
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn suspended_and_backward_clock_time_never_replays_missed_occurrences() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.clock",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.clock",
+        );
+        let context = context("scheduler-clock", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service = SchedulerService::new_with_clock(
+            context,
+            &schedule_root,
+            bus.clone(),
+            Arc::new(clock.clone()),
+        )
+        .unwrap();
+        let (handled, delivered) =
+            register_notifying_channel(&service.inner.context, &bus, "agents.clock").await;
+
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        advance(Duration::from_secs(10 * 60)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(handled.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            service.inspect().schedules[0]
+                .next_occurrence_utc
+                .as_deref(),
+            Some("2026-08-09T07:11:00Z")
+        );
+
+        advance(Duration::from_secs(60)).await;
+        delivered.notified().await;
+        assert_eq!(handled.load(Ordering::SeqCst), 1);
+
+        clock.set("2026-08-09T07:05:00Z".parse().unwrap());
+        tokio::task::yield_now().await;
+        assert_eq!(
+            service.inspect().schedules[0]
+                .next_occurrence_utc
+                .as_deref(),
+            Some("2026-08-09T07:12:00Z")
+        );
+        advance(Duration::from_secs(6 * 60)).await;
+        assert_eq!(handled.load(Ordering::SeqCst), 1);
+        advance(Duration::from_secs(60)).await;
+        delivered.notified().await;
+        assert_eq!(handled.load(Ordering::SeqCst), 2);
+
+        service.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn restarted_service_arms_only_the_next_future_occurrence() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.restart",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.restart",
+        );
+        let context = context("scheduler-restart", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let first = SchedulerService::new_with_clock(
+            context.clone(),
+            &schedule_root,
+            bus.clone(),
+            Arc::new(clock.clone()),
+        )
+        .unwrap();
+        let (handled, delivered) =
+            register_notifying_channel(&first.inner.context, &bus, "agents.restart").await;
+        assert!(first.refresh().await.applied);
+        tokio::task::yield_now().await;
+        first.shutdown();
+
+        advance(Duration::from_secs(10 * 60)).await;
+        let restarted =
+            SchedulerService::new_with_clock(context, &schedule_root, bus, Arc::new(clock))
+                .unwrap();
+        assert!(restarted.refresh().await.applied);
+        tokio::task::yield_now().await;
+        assert_eq!(handled.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            restarted.inspect().schedules[0]
+                .next_occurrence_utc
+                .as_deref(),
+            Some("2026-08-09T07:11:00Z")
+        );
+        advance(Duration::from_secs(60)).await;
+        delivered.notified().await;
+        assert_eq!(handled.load(Ordering::SeqCst), 1);
+
+        restarted.shutdown();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn shutdown_is_idempotent_and_cancels_every_future_delivery() {
+        let temporary = tempdir().unwrap();
+        let schedule_root = temporary.path().join("schedules");
+        replace_schedule(
+            &schedule_root,
+            "agents.shutdown",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.shutdown",
+        );
+        let context = context("scheduler-shutdown", temporary.path());
+        let bus = RuntimeMessageBus::new(context.clone());
+        let clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let service =
+            SchedulerService::new_with_clock(context, &schedule_root, bus.clone(), Arc::new(clock))
+                .unwrap();
+        let (handled, _) =
+            register_notifying_channel(&service.inner.context, &bus, "agents.shutdown").await;
+        assert!(service.refresh().await.applied);
+        tokio::task::yield_now().await;
+        assert_eq!(service.active_job_count(), 1);
+
+        service.shutdown();
+        service.shutdown();
+        assert_eq!(service.active_job_count(), 0);
+        advance(Duration::from_secs(3 * 60)).await;
+        assert_eq!(handled.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn named_instances_cannot_deliver_trigger_or_observe_each_others_schedules() {
+        let temporary = tempdir().unwrap();
+        let first_root = temporary.path().join("first");
+        let second_root = temporary.path().join("second");
+        let first_context = context("first", &first_root);
+        let second_context = context("second", &second_root);
+        let first_paths = first_context.paths();
+        let second_paths = second_context.paths();
+        replace_schedule(
+            &first_paths.schedule_root,
+            "agents.first",
+            true,
+            "* * * * * Etc/UTC",
+            "channel",
+            "agents.shared",
+        );
+        replace_schedule(
+            &second_paths.schedule_root,
+            "agents.second",
+            true,
+            "30 * * * * Etc/UTC",
+            "channel",
+            "agents.shared",
+        );
+        let first_bus = RuntimeMessageBus::new(first_context.clone());
+        let second_bus = RuntimeMessageBus::new(second_context.clone());
+        let first_clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let second_clock = TestSchedulerClock::new("2026-08-09T07:00:00Z".parse().unwrap());
+        let first = SchedulerService::new_with_clock(
+            first_context,
+            first_paths.schedule_root,
+            first_bus.clone(),
+            Arc::new(first_clock),
+        )
+        .unwrap();
+        let second = SchedulerService::new_with_clock(
+            second_context,
+            second_paths.schedule_root,
+            second_bus.clone(),
+            Arc::new(second_clock),
+        )
+        .unwrap();
+        let (first_count, first_delivery) =
+            register_notifying_channel(&first.inner.context, &first_bus, "agents.shared").await;
+        let (second_count, _) =
+            register_notifying_channel(&second.inner.context, &second_bus, "agents.shared").await;
+        assert!(first.refresh().await.applied);
+        assert!(second.refresh().await.applied);
+        tokio::task::yield_now().await;
+
+        advance(Duration::from_secs(60)).await;
+        first_delivery.notified().await;
+        assert_eq!(first_count.load(Ordering::SeqCst), 1);
+        assert_eq!(second_count.load(Ordering::SeqCst), 0);
+        assert!(matches!(
+            first.trigger("agents.second").await,
+            Err(SchedulerTriggerError::NotFound(_))
+        ));
+        first.trigger("agents.first").await.unwrap();
+        first_delivery.notified().await;
+        assert_eq!(first_count.load(Ordering::SeqCst), 2);
+        assert_eq!(second_count.load(Ordering::SeqCst), 0);
+        assert_eq!(first.inspect().schedules[0].id, "agents.first");
+        assert_eq!(second.inspect().schedules[0].id, "agents.second");
+
+        first.shutdown();
+        second.shutdown();
     }
 
     #[tokio::test(flavor = "current_thread")]

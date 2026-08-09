@@ -13,6 +13,7 @@ use shipctl_core::message_bus::{
 use shipctl_core::module_control::codes::{CONTROL_CAPABILITY_UNAVAILABLE, MUTATION_UNAVAILABLE};
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::projects::watcher::GitWatcher;
+use shipctl_core::scheduler::SchedulerService;
 use shipctl_core::state::archive::{StateArchiveInspection, StateArchiveService};
 use shipctl_core::terminal::manager::PtyManager;
 use std::path::Path;
@@ -156,6 +157,7 @@ fn perform_shutdown(app: &tauri::AppHandle) {
     if !pty_manager.begin_shutdown() {
         return;
     }
+    app.state::<SchedulerService>().shutdown();
     app.state::<GitWatcher>().shutdown();
     pty_manager.kill_all();
     app.exit(0);

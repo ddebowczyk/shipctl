@@ -32,7 +32,10 @@ shipctl-module-api = { path = "../../modules/api/backend" }
 tar = "0.4"
 rusqlite = { version = "0.40", features = ["backup", "bundled"] }
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt", "sync"] }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 
 [target.'cfg(windows)'.dependencies]
 widestring = "1"
