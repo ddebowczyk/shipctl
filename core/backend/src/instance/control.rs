@@ -20,9 +20,10 @@ use super::protocol::{
     ControlEvent, ControlEventPayload, ControlHello, ControlOperation, ControlRequest,
     ControlResponse, ControlResponseResult, ControlStream, DiscoveryProblem,
     DiscoveryProblemCategory, DiscoveryReport, InstanceDiagnosticReport, InstanceLifecycle,
-    InstanceRecord, ModuleCommand, ModuleControlStatus, OperationCommand, StopOutcome,
-    StoredDescriptor, CONTROL_FRAME_SCHEMA_VERSION,
+    InstanceRecord, MessageCommand, ModuleCommand, ModuleControlStatus, OperationCommand,
+    StopOutcome, StoredDescriptor, CONTROL_FRAME_SCHEMA_VERSION,
 };
+use crate::message_bus::{MessageDiagnosticReport, MessageRuntimeInspection, RUNTIME_UNAVAILABLE};
 use crate::module_control::codes::{
     CONTROL_CAPABILITY_UNAVAILABLE, OPERATION_CAPABILITY_UNAVAILABLE,
 };
@@ -61,6 +62,12 @@ pub trait ControlHandler: Send + Sync + 'static {
         Err(ControlError::new(
             CONTROL_CAPABILITY_UNAVAILABLE,
             "This instance does not provide module-control fixtures",
+        ))
+    }
+    fn message_control(&self, _command: MessageCommand) -> Result<ControlStream, ControlError> {
+        Err(ControlError::new(
+            RUNTIME_UNAVAILABLE,
+            "This instance does not provide runtime message inspection",
         ))
     }
     fn operation_control(&self, _command: OperationCommand) -> Result<ControlStream, ControlError> {
@@ -493,6 +500,16 @@ fn dispatch_request(
                 Vec::new(),
             ),
         },
+        ControlOperation::Messages { command } => match handler.message_control(command) {
+            Ok(stream) => (
+                ControlResponse::success(request.request_id, stream.result),
+                stream.events,
+            ),
+            Err(error) => (
+                ControlResponse::failure(request.request_id, error),
+                Vec::new(),
+            ),
+        },
         ControlOperation::Operations { command } => match handler.operation_control(command) {
             Ok(stream) => (
                 ControlResponse::success(request.request_id, stream.result),
@@ -699,6 +716,36 @@ impl InstanceDirectory {
             },
         )
         .and_then(expect_module_diagnostics_result)
+    }
+
+    pub fn inspect_messages(
+        &self,
+        selector: Option<&str>,
+    ) -> Result<MessageRuntimeInspection, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, selector)?;
+        request(
+            &descriptor,
+            ControlOperation::Messages {
+                command: MessageCommand::Inspect {},
+            },
+        )
+        .and_then(expect_message_inspection_result)
+    }
+
+    pub fn diagnose_messages(
+        &self,
+        selector: Option<&str>,
+    ) -> Result<MessageDiagnosticReport, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, selector)?;
+        request(
+            &descriptor,
+            ControlOperation::Messages {
+                command: MessageCommand::Diagnose {},
+            },
+        )
+        .and_then(expect_message_diagnostics_result)
     }
 
     pub fn transition_module(
@@ -1115,6 +1162,30 @@ fn expect_module_diagnostics_result(
         _ => Err(ControlError::new(
             "control.instance.handshake_failed",
             "The endpoint returned a non-diagnostic result for a module diagnostic request",
+        )),
+    }
+}
+
+fn expect_message_inspection_result(
+    stream: ControlStream,
+) -> Result<MessageRuntimeInspection, ControlError> {
+    match stream.result {
+        ControlResponseResult::MessageInspection(inspection) => Ok(inspection),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-inspection result for a message inspection request",
+        )),
+    }
+}
+
+fn expect_message_diagnostics_result(
+    stream: ControlStream,
+) -> Result<MessageDiagnosticReport, ControlError> {
+    match stream.result {
+        ControlResponseResult::MessageDiagnostics(diagnostics) => Ok(diagnostics),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-diagnostic result for a message diagnosis request",
         )),
     }
 }

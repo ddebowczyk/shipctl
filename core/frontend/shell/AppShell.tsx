@@ -34,15 +34,18 @@ import { getErrorMessage } from "../platform/index.ts";
 import { useNoticeStore } from "../shared/index.ts";
 import {
   activateModules,
+  activateModulesWithMessages,
   bindTerminalSessionDimensions,
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
   MODULE_HOST_SERVICES,
+  ENABLED_MODULES,
   notifyModulesBeforeShutdown,
   notifyModulesProjectOpened,
   notifyModulesProjectRemoved,
   notifyModulesProjectsChanged,
   panelIdForTab,
+  openModuleMessageBridge,
   publishFrontendRuntimeSnapshot,
 } from "../host/index.ts";
 import {
@@ -183,11 +186,41 @@ export default function AppShell() {
   const { loadSettings: loadTerminalSettings } = useTerminalSettingsStore.getState();
 
   useEffect(() => {
-    const deactivate = activateModules(MODULE_HOST_SERVICES);
-    void publishFrontendRuntimeSnapshot().catch((error) => {
-      if (import.meta.env.DEV) console.error("Module runtime snapshot publication failed:", error);
-    });
-    return () => { void deactivate(); };
+    let disposed = false;
+    let deactivate: (() => Promise<void>) | null = null;
+    let closeBridge: (() => Promise<void>) | null = null;
+
+    void openModuleMessageBridge(ENABLED_MODULES)
+      .then(async ({ bridge, messagesByModule }) => {
+        if (disposed) {
+          await bridge.close();
+          return;
+        }
+        closeBridge = () => bridge.close();
+        deactivate = activateModulesWithMessages(
+          MODULE_HOST_SERVICES,
+          messagesByModule,
+          ENABLED_MODULES,
+        );
+        await publishFrontendRuntimeSnapshot();
+      })
+      .catch((error) => {
+        if (disposed) return;
+        const modulesWithoutMessages = ENABLED_MODULES.filter(
+          (module) => !("messages" in module),
+        );
+        deactivate = activateModules(MODULE_HOST_SERVICES, modulesWithoutMessages);
+        void publishFrontendRuntimeSnapshot(modulesWithoutMessages);
+        if (import.meta.env.DEV) console.error("Module message bridge initialization failed:", error);
+      });
+
+    return () => {
+      disposed = true;
+      void (async () => {
+        await deactivate?.();
+        await closeBridge?.();
+      })();
+    };
   }, []);
 
   useEffect(() => {

@@ -60,6 +60,31 @@ test("default snapshot reports the actual compiled frontend profile", () => {
   assert(snapshot.modules.some((entry) => entry.contributions.length > 0));
 });
 
+test("host snapshot exposes declarative message contributions", () => {
+  const message = { id: "fixture.value", version: 1 } as const;
+  const withMessages: ShipctlModule = {
+    id: "shipctl.messages",
+    version: "1.0.0",
+    messages: {
+      handles: [{
+        channel: { id: "fixture.directed", message },
+        capacity: 1,
+        requiredGrant: "message.send.fixture.directed",
+        schedulerAllowed: false,
+        handle: () => undefined,
+      }],
+      subscribes: [{
+        topic: { id: "fixture.events", message },
+        handle: () => undefined,
+      }],
+    },
+  };
+  assert.deepEqual(buildFrontendRuntimeSnapshot([withMessages]).modules[0]?.contributions, [
+    { id: "fixture.directed", kind: "message_handler" },
+    { id: "fixture.events", kind: "message_subscription" },
+  ]);
+});
+
 test("host snapshot rejects a contribution claiming another module owner", () => {
   assert.throws(
     () => buildFrontendRuntimeSnapshot([{

@@ -1,0 +1,387 @@
+{
+  "schemaVersion": 1,
+  "valid": {
+    "declarations": {
+      "schemaVersion": 1,
+      "provides": [
+        {
+          "message": {
+            "id": "fixture.agent-wakeup",
+            "version": 1
+          },
+          "schema": {
+            "draft": "https://json-schema.org/draft/2020-12/schema",
+            "root": "schemas/agent-wakeup.json",
+            "resources": {
+              "schemas/agent-id.json": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$id": "shipctl-artifact:///schemas/agent-id.json",
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]+$"
+              },
+              "schemas/agent-wakeup.json": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$id": "shipctl-artifact:///schemas/agent-wakeup.json",
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["agentId", "apiToken"],
+                "properties": {
+                  "agentId": {
+                    "$ref": "agent-id.json"
+                  },
+                  "apiToken": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            },
+            "maxEncodedBytes": 128,
+            "redactedFields": ["/apiToken"],
+            "compatibleVersions": [1]
+          }
+        }
+      ],
+      "handles": [
+        {
+          "endpoint": {
+            "id": "fixture.agent-wakeup",
+            "message": {
+              "id": "fixture.agent-wakeup",
+              "version": 1
+            }
+          },
+          "capacity": 4,
+          "requiredGrant": "message.send.fixture.agent-wakeup",
+          "schedulerAllowed": true
+        }
+      ],
+      "publishes": [],
+      "subscribes": [],
+      "ports": []
+    },
+    "envelope": {
+      "schemaVersion": 1,
+      "endpoint": "fixture.agent-wakeup",
+      "message": {
+        "id": "fixture.agent-wakeup",
+        "version": 1
+      },
+      "payload": {
+        "agentId": "agent-1",
+        "apiToken": "fixture-secret"
+      },
+      "correlationId": "wake-1"
+    },
+    "deliveryReceipt": {
+      "schemaVersion": 1,
+      "endpoint": "fixture.agent-wakeup",
+      "message": {
+        "id": "fixture.agent-wakeup",
+        "version": 1
+      },
+      "routeGeneration": 7
+    },
+    "publishReceipt": {
+      "schemaVersion": 1,
+      "endpoint": "fixture.agent-status",
+      "message": {
+        "id": "fixture.agent-wakeup",
+        "version": 1
+      },
+      "routeGeneration": 7,
+      "subscriberCount": 2
+    },
+    "routeSnapshot": {
+      "schemaVersion": 1,
+      "instanceId": "fixture-instance",
+      "incarnation": "00000000-0000-4000-8000-000000000001",
+      "routeGeneration": 7,
+      "channels": [
+        {
+          "endpoint": {
+            "id": "fixture.agent-wakeup",
+            "message": {
+              "id": "fixture.agent-wakeup",
+              "version": 1
+            }
+          },
+          "ownerActivationId": "fixture-activation-a",
+          "capacity": 4,
+          "schedulerAllowed": true
+        }
+      ],
+      "topics": [
+        {
+          "endpoint": {
+            "id": "fixture.agent-status",
+            "message": {
+              "id": "fixture.agent-wakeup",
+              "version": 1
+            }
+          },
+          "subscriberCount": 2,
+          "capacity": 8,
+          "schedulerAllowed": true
+        }
+      ],
+      "ports": [
+        {
+          "id": "fixture.agent-lookup",
+          "request": {
+            "id": "fixture.agent-wakeup",
+            "version": 1
+          },
+          "response": {
+            "id": "fixture.agent-wakeup",
+            "version": 1
+          },
+          "ownerActivationId": "fixture-activation-a",
+          "capacity": 2,
+          "schedulerAllowed": false
+        }
+      ]
+    },
+    "observation": {
+      "schemaVersion": 1,
+      "code": "message.handler.failed",
+      "endpoint": "fixture.agent-wakeup",
+      "message": {
+        "id": "fixture.agent-wakeup",
+        "version": 1
+      },
+      "routeGeneration": 7,
+      "context": {
+        "fields": {
+          "apiToken": "[redacted]",
+          "activationId": "fixture-activation-a"
+        }
+      }
+    }
+  },
+  "invalid": [
+    {
+      "name": "unknown envelope field",
+      "target": "envelope",
+      "value": {
+        "schemaVersion": 1,
+        "endpoint": "fixture.agent-wakeup",
+        "message": { "id": "fixture.agent-wakeup", "version": 1 },
+        "payload": {},
+        "moduleId": "forged"
+      },
+      "expectedCode": "message.contract.unknown_field"
+    },
+    {
+      "name": "unsupported envelope version",
+      "target": "envelope",
+      "value": {
+        "schemaVersion": 2,
+        "endpoint": "fixture.agent-wakeup",
+        "message": { "id": "fixture.agent-wakeup", "version": 1 },
+        "payload": {}
+      },
+      "expectedCode": "message.contract.schema_version_unsupported"
+    },
+    {
+      "name": "invalid message identifier",
+      "target": "envelope",
+      "value": {
+        "schemaVersion": 1,
+        "endpoint": "fixture.agent-wakeup",
+        "message": { "id": "Fixture Wakeup", "version": 1 },
+        "payload": {}
+      },
+      "expectedCode": "message.contract.identifier.invalid"
+    },
+    {
+      "name": "invalid JSON Schema",
+      "target": "declarations",
+      "value": {
+        "schemaVersion": 1,
+        "provides": [
+          {
+            "message": { "id": "fixture.agent-wakeup", "version": 1 },
+            "schema": {
+              "draft": "https://json-schema.org/draft/2020-12/schema",
+              "root": "schema.json",
+              "resources": {
+                "schema.json": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "$id": "shipctl-artifact:///schema.json",
+                  "type": "not-a-json-type"
+                }
+              },
+              "maxEncodedBytes": 128,
+              "redactedFields": [],
+              "compatibleVersions": [1]
+            }
+          }
+        ],
+        "handles": [], "publishes": [], "subscribes": [], "ports": []
+      },
+      "expectedCode": "message.contract.schema.invalid"
+    },
+    {
+      "name": "escaping schema reference",
+      "target": "declarations",
+      "value": {
+        "schemaVersion": 1,
+        "provides": [
+          {
+            "message": { "id": "fixture.agent-wakeup", "version": 1 },
+            "schema": {
+              "draft": "https://json-schema.org/draft/2020-12/schema",
+              "root": "schemas/root.json",
+              "resources": {
+                "schemas/root.json": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "$id": "shipctl-artifact:///schemas/root.json",
+                  "$ref": "../secret.json"
+                }
+              },
+              "maxEncodedBytes": 128,
+              "redactedFields": [],
+              "compatibleVersions": [1]
+            }
+          }
+        ],
+        "handles": [], "publishes": [], "subscribes": [], "ports": []
+      },
+      "expectedCode": "message.contract.schema.reference_forbidden"
+    },
+    {
+      "name": "network schema reference",
+      "target": "declarations",
+      "value": {
+        "schemaVersion": 1,
+        "provides": [
+          {
+            "message": { "id": "fixture.agent-wakeup", "version": 1 },
+            "schema": {
+              "draft": "https://json-schema.org/draft/2020-12/schema",
+              "root": "schema.json",
+              "resources": {
+                "schema.json": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "$id": "shipctl-artifact:///schema.json",
+                  "$ref": "https://example.com/remote.json"
+                }
+              },
+              "maxEncodedBytes": 128,
+              "redactedFields": [],
+              "compatibleVersions": [1]
+            }
+          }
+        ],
+        "handles": [], "publishes": [], "subscribes": [], "ports": []
+      },
+      "expectedCode": "message.contract.schema.reference_forbidden"
+    },
+    {
+      "name": "missing queue bound",
+      "target": "declarations",
+      "value": {
+        "schemaVersion": 1,
+        "provides": [],
+        "handles": [
+          {
+            "endpoint": {
+              "id": "fixture.agent-wakeup",
+              "message": { "id": "fixture.agent-wakeup", "version": 1 }
+            },
+            "capacity": 0,
+            "requiredGrant": "message.send.fixture.agent-wakeup",
+            "schedulerAllowed": false
+          }
+        ],
+        "publishes": [], "subscribes": [], "ports": []
+      },
+      "expectedCode": "message.contract.bound.required"
+    },
+    {
+      "name": "incompatible contract version",
+      "target": "declarations",
+      "value": {
+        "schemaVersion": 1,
+        "provides": [
+          {
+            "message": { "id": "fixture.agent-wakeup", "version": 1 },
+            "schema": {
+              "draft": "https://json-schema.org/draft/2020-12/schema",
+              "root": "schema.json",
+              "resources": {
+                "schema.json": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "$id": "shipctl-artifact:///schema.json",
+                  "type": "object"
+                }
+              },
+              "maxEncodedBytes": 128,
+              "redactedFields": [],
+              "compatibleVersions": [2]
+            }
+          }
+        ],
+        "handles": [], "publishes": [], "subscribes": [], "ports": []
+      },
+      "expectedCode": "message.contract.version.incompatible"
+    },
+    {
+      "name": "oversized payload",
+      "target": "payload",
+      "value": {
+        "schemaVersion": 1,
+        "endpoint": "fixture.agent-wakeup",
+        "message": { "id": "fixture.agent-wakeup", "version": 1 },
+        "payload": {
+          "agentId": "agent-1",
+          "apiToken": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      },
+      "expectedCode": "message.payload.too_large"
+    },
+    {
+      "name": "invalid payload",
+      "target": "payload",
+      "value": {
+        "schemaVersion": 1,
+        "endpoint": "fixture.agent-wakeup",
+        "message": { "id": "fixture.agent-wakeup", "version": 1 },
+        "payload": { "agentId": 7, "apiToken": "secret" }
+      },
+      "expectedCode": "message.payload.invalid"
+    },
+    {
+      "name": "unknown message contract",
+      "target": "payload",
+      "value": {
+        "schemaVersion": 1,
+        "endpoint": "fixture.agent-wakeup",
+        "message": { "id": "fixture.unknown-message", "version": 1 },
+        "payload": { "agentId": "agent-1", "apiToken": "secret" }
+      },
+      "expectedCode": "message.contract.unknown"
+    },
+    {
+      "name": "unauthorized declaration",
+      "target": "authorization",
+      "value": "message.send.fixture.agent-wakeup",
+      "expectedCode": "message.sender.unauthorized"
+    },
+    {
+      "name": "secret leakage",
+      "target": "observation",
+      "value": {
+        "schemaVersion": 1,
+        "code": "message.handler.failed",
+        "endpoint": "fixture.agent-wakeup",
+        "routeGeneration": 7,
+        "context": {
+          "fields": { "apiToken": "sk-fixture-secret" }
+        }
+      },
+      "expectedCode": "message.diagnostic.secret_leakage"
+    }
+  ]
+}

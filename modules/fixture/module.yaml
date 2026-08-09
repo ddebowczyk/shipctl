@@ -16,6 +16,27 @@ tauri:
   capability_identifier: fixture
   permissions:
     - shipctl-fixture:allow-ping
+messages:
+  provides:
+    - id: fixture.agent-wakeup
+      version: 1
+      schema: modules/fixture/messages/agent-wakeup.schema.json
+      max_encoded_bytes: 128
+      redacted_fields:
+        - /apiToken
+      compatible_versions:
+        - 1
+  handles:
+    - id: fixture.agent-wakeup
+      message:
+        id: fixture.agent-wakeup
+        version: 1
+      capacity: 4
+      required_grant: message.send.fixture.agent-wakeup
+      scheduler_allowed: true
+  publishes: []
+  subscribes: []
+  ports: []
 profile: profiles/fixture/tauri.conf.json
 tests:
   frontend: null

@@ -44,6 +44,11 @@ pub enum Command {
         #[command(subcommand)]
         command: ModulesCommand,
     },
+    /// Inspect or diagnose the in-memory runtime message bus.
+    Messages {
+        #[command(subcommand)]
+        command: MessagesCommand,
+    },
     /// Inspect asynchronous module operations.
     Operations {
         #[command(subcommand)]
@@ -138,6 +143,24 @@ pub enum ModulesCommand {
     Enable(ModuleTransitionArgs),
     /// Request that a running instance disable a module.
     Disable(ModuleTransitionArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MessagesCommand {
+    /// Inspect current contracts, routes, ownership, grants, and queue state.
+    Inspect(MessageTargetArgs),
+    /// Diagnose current message failures, lag, and drain blockers.
+    Diagnose(MessageTargetArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct MessageTargetArgs {
+    /// Exact running instance name or UUID.
+    #[arg(long)]
+    pub instance: String,
+
+    #[command(flatten)]
+    pub runtime: RuntimeRootArgs,
 }
 
 #[derive(Debug, Args)]

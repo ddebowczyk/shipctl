@@ -6,7 +6,12 @@ use serde_json::Value;
 use shipctl_core::instance::{
     ActiveWorkBlocker, ControlError, ControlEventPayload, ControlHandler, ControlResponseResult,
     ControlServer, ControlStream, InstanceContext, InstanceLaunchOptions, InstanceLeases,
-    LaunchProvenance, ModuleCommand,
+    LaunchProvenance, MessageCommand, ModuleCommand,
+};
+use shipctl_core::message_bus::{
+    diagnose_message_runtime, MessageBridgeInspection, MessageBridgeRegistrationObservation,
+    MessageModuleInspection, MessageRouteSnapshot, MessageRuntimeInspection,
+    MESSAGE_CONTRACT_SCHEMA_VERSION,
 };
 use shipctl_core::module_control::{
     Diagnostic, DiagnosticSeverity, ModuleOperation, ModuleOperationPhase, ModuleOperationResult,
@@ -15,6 +20,41 @@ use shipctl_core::module_control::{
 use uuid::Uuid;
 
 struct FixtureHandler;
+
+fn message_inspection() -> MessageRuntimeInspection {
+    let registration = MessageBridgeRegistrationObservation {
+        module_id: "shipctl.fixture".to_string(),
+        activation_id: "shipctl.fixture@digest#activation".to_string(),
+        effective_grants: vec!["message.send.fixture.directed".to_string()],
+        contracts: Vec::new(),
+        handled_channels: vec!["fixture.directed".to_string()],
+        published_topics: Vec::new(),
+        subscribed_topics: Vec::new(),
+        capability_ports: Vec::new(),
+    };
+    MessageRuntimeInspection::new(
+        MessageBridgeInspection {
+            schema_version: MESSAGE_CONTRACT_SCHEMA_VERSION,
+            bridge_count: 1,
+            snapshot: MessageRouteSnapshot {
+                schema_version: MESSAGE_CONTRACT_SCHEMA_VERSION,
+                instance_id: "fixture".to_string(),
+                incarnation: "cli-fixture".to_string(),
+                route_generation: 7,
+                channels: Vec::new(),
+                topics: Vec::new(),
+                ports: Vec::new(),
+            },
+            endpoints: Vec::new(),
+            activations: Vec::new(),
+            registrations: vec![registration.clone()],
+        },
+        vec![MessageModuleInspection {
+            registration,
+            module: None,
+        }],
+    )
+}
 
 impl ControlHandler for FixtureHandler {
     fn active_work(&self) -> Vec<ActiveWorkBlocker> {
@@ -66,6 +106,16 @@ impl ControlHandler for FixtureHandler {
         })
     }
 
+    fn message_control(&self, command: MessageCommand) -> Result<ControlStream, ControlError> {
+        let inspection = message_inspection();
+        Ok(ControlStream::result(match command {
+            MessageCommand::Inspect {} => ControlResponseResult::MessageInspection(inspection),
+            MessageCommand::Diagnose {} => {
+                ControlResponseResult::MessageDiagnostics(diagnose_message_runtime(inspection))
+            }
+        }))
+    }
+
     fn shutdown(&self, _force: bool) -> Result<(), ControlError> {
         Ok(())
     }
@@ -110,7 +160,44 @@ fn cli_renders_complete_native_restart_fixture_stream_as_json_and_toon() {
     assert_eq!(json_value["data"]["kind"], "enable");
     assert_eq!(json_value["data"]["targetRegistryRevision"], 14);
 
+    let message_json = run_message_cli(&context, "inspect", "json");
+    let message_toon = run_message_cli(&context, "inspect", "toon");
+    assert!(message_json.status.success());
+    assert!(message_toon.status.success());
+    let message_json_value: Value = serde_json::from_slice(&message_json.stdout).unwrap();
+    let message_toon_value: Value =
+        toon_format::decode_default(std::str::from_utf8(&message_toon.stdout).unwrap()).unwrap();
+    assert_eq!(message_toon_value, message_json_value);
+    assert_eq!(message_json_value["operation"], "messages.inspect");
+    assert_eq!(message_json_value["code"], "message.runtime.inspected");
+    assert_eq!(
+        message_json_value["data"]["runtime"]["snapshot"]["routeGeneration"],
+        7
+    );
+    assert_eq!(
+        message_json_value["data"]["runtime"]["registrations"][0]["effectiveGrants"][0],
+        "message.send.fixture.directed"
+    );
+    let encoded = String::from_utf8(message_json.stdout).unwrap();
+    assert!(!encoded.contains("payload"));
+    assert!(!encoded.contains("resources"));
+
+    let diagnosis = run_message_cli(&context, "diagnose", "json");
+    assert!(!diagnosis.status.success());
+    let diagnosis: Value = serde_json::from_slice(&diagnosis.stdout).unwrap();
+    assert_eq!(diagnosis["operation"], "messages.diagnose");
+    assert_eq!(diagnosis["code"], "message.runtime.diagnostics_failed");
+    assert_eq!(
+        diagnosis["data"]["diagnostics"][0]["code"],
+        "message.runtime.module_join_unavailable"
+    );
+
     drop(server);
+    let unavailable = run_message_cli(&context, "inspect", "json");
+    assert!(!unavailable.status.success());
+    assert!(unavailable.stdout.is_empty());
+    let unavailable: Value = serde_json::from_slice(&unavailable.stderr).unwrap();
+    assert_eq!(unavailable["code"], "message.runtime.unavailable");
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -136,4 +223,19 @@ fn run_cli(context: &InstanceContext, output: &str) -> std::process::Output {
         String::from_utf8_lossy(&output.stderr)
     );
     output
+}
+
+fn run_message_cli(context: &InstanceContext, command: &str, output: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_shipctl"))
+        .args([
+            "messages",
+            command,
+            "--instance",
+            "fixture",
+            "--runtime-root",
+        ])
+        .arg(&context.runtime_root)
+        .args(["--output", output])
+        .output()
+        .unwrap()
 }

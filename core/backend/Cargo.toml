@@ -11,6 +11,7 @@ name = "shipctl_core"
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+jsonschema = { version = "0.49.8", default-features = false }
 semver = "1.0"
 serde_yaml = "0.9"
 tauri = { version = "2.11.5", features = ["macos-private-api"] }
@@ -30,6 +31,7 @@ shipctl-module-api = { path = "../../modules/api/backend" }
 tar = "0.4"
 rusqlite = { version = "0.40", features = ["backup", "bundled"] }
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "sync"] }
 
 [target.'cfg(windows)'.dependencies]
 widestring = "1"

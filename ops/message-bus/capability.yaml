@@ -1,0 +1,31 @@
+---
+schema_version: 1
+id: message-bus
+provides: message-bus
+description: Prove strict message contracts and the packaged bus-only message workflow.
+status: experimental
+requires:
+  tools: [cargo, just, node, pnpm]
+  capabilities: [instance-control, module-control]
+owns: [ops/message-bus/**]
+reads:
+  - Cargo.toml
+  - Cargo.lock
+  - cli/**
+  - core/**
+  - modules/**
+  - ops/instance-control/**
+  - ops/module-control/**
+  - src-tauri/**
+generates: [target/message-bus/**]
+commands:
+  - name: contract
+    summary: Verify shared message contracts and strict redaction boundaries.
+    lane: slow
+  - name: integration
+    summary: Record bus-only delivery, bridge, inspection, isolation, and zero-persistence evidence.
+    lane: slow
+  - name: all
+    summary: Run contract and packaged bus-only proof evidence together.
+    lane: slow
+skills: []

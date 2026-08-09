@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCcw } from "lucide-react";
-import { listen } from "@tauri-apps/api/event";
 import { getUsageOverview, refreshUsageData } from "./client";
+import { subscribeUsageIngestCompleted } from "./ingestCompleted";
 import type {
   UsageCost,
   UsageBreakdownItem,
@@ -731,12 +731,9 @@ export default function UsagePanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-refresh when background ingest completes
+  // Module-local fan-out follows the activation-owned completion topic.
   useEffect(() => {
-    const unlisten = listen("usage-ingest-complete", () => {
-      void fetchOverview();
-    });
-    return () => { unlisten.then((f) => f()); };
+    return subscribeUsageIngestCompleted(fetchOverview);
   }, [fetchOverview]);
 
   const handleRefresh = useCallback(async () => {

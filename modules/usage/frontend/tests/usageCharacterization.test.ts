@@ -112,9 +112,11 @@ test("snapshot and persisted-settings stores bound success and failure behavior"
   assert.match(settings, /settings: prev,[\s\S]*"Failed to save usage settings"/);
 });
 
-test("Usage remains global across project switches and refreshes on module cadence", () => {
+test("Usage remains global across project switches and refreshes through its declared route", () => {
   const shell = source("../../../../core/frontend/shell/AppShell.tsx");
   const adapter = source("../src/index.ts");
+  const completion = source("../src/ingestCompleted.ts");
+  const panel = source("../src/UsagePanel.tsx");
   const store = source("../src/usageStore.ts");
 
   assert.doesNotMatch(store, /useRepoStore|activeRepoPath|projectPath/);
@@ -123,7 +125,11 @@ test("Usage remains global across project switches and refreshes on module caden
   assert.match(adapter, /schedule: \{ kind: "delay", delayMs: 3_000 \}/);
   assert.match(adapter, /schedule: \{ kind: "interval", intervalMs: 60_000 \}/);
   assert.match(adapter, /await refreshUsageData\(\);[\s\S]*await fetchUsageSnapshots\(\)/);
-  assert.match(adapter, /listen\("usage-ingest-complete", fetchUsageSnapshots\)/);
+  assert.match(adapter, /usage\.ingest-completed/);
+  assert.match(adapter, /publishes:[\s\S]*usage\.ingest-completed/);
+  assert.match(panel, /subscribeUsageIngestCompleted\(fetchOverview\)/);
+  assert.doesNotMatch(adapter, /["']usage-ingest-complete["']/);
+  assert.match(completion, /Promise\.allSettled/);
   assert.match(adapter, /USAGE_SURFACE_ID = "core\.usage"/);
   assert.match(adapter, /surfaceId: USAGE_SURFACE_ID/);
   assert.match(adapter, /slot: "terminal\.after"/);
@@ -167,11 +173,13 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
   assert.doesNotMatch(host, /usage::run_background_ingest\(&db\)/);
   assert.match(
     installer,
-    /shipctl_module_usage::init\([\s\S]*modules::usage::host_services\(workspace\.clone\(\)\)[\s\S]*paths\.usage_database\.clone\(\)/,
+    /shipctl_module_usage::init\([\s\S]*modules::usage::host_services\(workspace\.clone\(\), message_bridges\.clone\(\)\)[\s\S]*paths\.usage_database\.clone\(\)/,
   );
   assert.match(plugin, /plugin::Builder::new\(PLUGIN_NAME\)/);
   assert.match(plugin, /app\.manage\(UsagePluginState/);
-  assert.match(plugin, /spawn_ingest\(state\.db\.clone\(\), app\.clone\(\)\)/);
+  assert.match(plugin, /spawn_ingest\(state\.db\.clone\(\), state\.services\.clone\(\)\)/);
+  assert.match(plugin, /trait UsageIngestNotifier/);
+  assert.doesNotMatch(plugin, /["']usage-ingest-complete["']/);
   assert.match(plugin, /pub fn start_background_ingest<R: Runtime>/);
   assert.match(
     host,

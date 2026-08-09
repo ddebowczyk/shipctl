@@ -12,6 +12,9 @@ use clap::Parser;
 use serde::Serialize;
 use shipctl_core::build_info::BuildIdentity;
 use shipctl_core::instance::ControlError;
+use shipctl_core::message_bus::{
+    RUNTIME_DIAGNOSTICS_FAILED, RUNTIME_HEALTHY, RUNTIME_INSPECTED as MESSAGE_RUNTIME_INSPECTED,
+};
 use shipctl_core::module_control::codes::{
     OPERATION_ACCEPTED, OPERATION_INSPECTED, REGISTRY_INSPECTED, REGISTRY_LISTED,
     RUNTIME_DIAGNOSED, RUNTIME_INSPECTED,
@@ -20,8 +23,8 @@ use shipctl_core::module_control::ModuleOperationKind;
 use shipctl_core::state::archive::inspect_archive;
 
 use args::{
-    Cli, Command as CliCommand, InstancesCommand, ModulesCommand, OperationsCommand, StateCommand,
-    UiCommand,
+    Cli, Command as CliCommand, InstancesCommand, MessagesCommand, ModulesCommand,
+    OperationsCommand, StateCommand, UiCommand,
 };
 use instances::{StartDisposition, StartRequest};
 use output::OutputFormat;
@@ -97,6 +100,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         },
         Some(CliCommand::Instances { command }) => run_instances(command, cli.output),
         Some(CliCommand::Modules { command }) => run_modules(command, cli.output),
+        Some(CliCommand::Messages { command }) => run_messages(command, cli.output),
         Some(CliCommand::Operations { command }) => run_operations(command, cli.output),
         Some(CliCommand::State { command }) => run_state(command, cli.output),
         Some(CliCommand::Version) => {
@@ -109,6 +113,48 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
             "A command is required unless launching the UI with no arguments",
             remaining,
         ),
+    }
+}
+
+fn run_messages(command: MessagesCommand, output: OutputFormat) -> ExitCode {
+    match command {
+        MessagesCommand::Inspect(args) => {
+            match instances::inspect_messages(args.runtime.runtime_root.as_deref(), &args.instance)
+            {
+                Ok(data) => emit_success(
+                    output,
+                    "messages.inspect",
+                    MESSAGE_RUNTIME_INSPECTED,
+                    false,
+                    data,
+                )
+                .unwrap_or_else(|message| emit_render_failure(output, "messages.inspect", message)),
+                Err(error) => emit_failure(output, "messages.inspect", &error, false),
+            }
+        }
+        MessagesCommand::Diagnose(args) => {
+            match instances::diagnose_messages(args.runtime.runtime_root.as_deref(), &args.instance)
+            {
+                Ok(data) => {
+                    let healthy = data.healthy;
+                    emit_outcome(
+                        output,
+                        "messages.diagnose",
+                        if healthy {
+                            RUNTIME_HEALTHY
+                        } else {
+                            RUNTIME_DIAGNOSTICS_FAILED
+                        },
+                        healthy,
+                        data,
+                    )
+                    .unwrap_or_else(|message| {
+                        emit_render_failure(output, "messages.diagnose", message)
+                    })
+                }
+                Err(error) => emit_failure(output, "messages.diagnose", &error, false),
+            }
+        }
     }
 }
 
@@ -495,6 +541,8 @@ fn operation_hint(args: &[OsString]) -> &str {
             ("modules", "verify") => "modules.verify",
             ("modules", "enable") => "modules.enable",
             ("modules", "disable") => "modules.disable",
+            ("messages", "inspect") => "messages.inspect",
+            ("messages", "diagnose") => "messages.diagnose",
             ("operations", "inspect") => "operations.inspect",
             ("state", "save") => "state.save",
             ("state", "inspect") => "state.inspect",
@@ -738,6 +786,37 @@ mod tests {
         };
         assert!(diagnose.offline);
         assert!(diagnose.module_id.is_none());
+    }
+
+    #[test]
+    fn clap_requires_an_explicit_message_runtime_and_has_no_send_surface() {
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "messages",
+            "inspect",
+            "--instance",
+            "fixture",
+            "--runtime-root=/tmp/runtime",
+            "--output=json",
+        ])
+        .unwrap();
+        assert_eq!(parsed.output, OutputFormat::Json);
+        let Some(CliCommand::Messages {
+            command: MessagesCommand::Inspect(inspect),
+        }) = parsed.command
+        else {
+            panic!("expected messages inspect")
+        };
+        assert_eq!(inspect.instance, "fixture");
+        assert_eq!(
+            inspect.runtime.runtime_root.as_deref(),
+            Some(Path::new("/tmp/runtime"))
+        );
+
+        assert!(Cli::try_parse_from(["shipctl", "messages", "inspect"]).is_err());
+        assert!(
+            Cli::try_parse_from(["shipctl", "messages", "send", "--instance", "fixture"]).is_err()
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import type { ModuleHostServices, ShipctlModule } from "@shipctl/module-api";
+import type { ModuleHostServices, ModuleMessages, ShipctlModule } from "@shipctl/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 import type { BuiltinGlobalSurfaceLoaders } from "../builtinGlobalSurfaceAdapters.ts";
@@ -19,6 +19,7 @@ let vite: ViteDevServer;
 let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
 let createEnabledGlobalSurfaceRegistry: ModuleComposition["createEnabledGlobalSurfaceRegistry"];
 let activateModules: ModuleComposition["activateModules"];
+let activateModulesWithMessages: ModuleComposition["activateModulesWithMessages"];
 let moduleProjectNavigationContributions: ModuleComposition["moduleProjectNavigationContributions"];
 let moduleScheduledTasks: ModuleComposition["moduleScheduledTasks"];
 let moduleSidebarContributions: ModuleComposition["moduleSidebarContributions"];
@@ -45,6 +46,7 @@ before(async () => {
   });
   ({
     activateModules,
+    activateModulesWithMessages,
     createEnabledPanelRegistry,
     createEnabledGlobalSurfaceRegistry,
     enabledProjectActionContributions,
@@ -508,6 +510,29 @@ test("partial scheduler registration is rolled back with module activation", asy
 
   assert.deepEqual(cleared, [7]);
   assert.deepEqual(calls, ["deactivate"]);
+});
+
+test("module activation receives only its activation-scoped message facade", async () => {
+  const messages = {} as ModuleMessages;
+  let received: ModuleMessages | undefined;
+  let receivedServices: ModuleHostServices | undefined;
+  const module: ShipctlModule = {
+    id: "shipctl.messages",
+    version: "0",
+    activate: (host) => {
+      received = host.messages;
+      receivedServices = host.services;
+    },
+  };
+  const deactivate = activateModulesWithMessages(
+    services,
+    new Map([[module.id, messages]]),
+    [module],
+  );
+  assert.equal(received, messages);
+  assert.notEqual(receivedServices, services);
+  assert.equal(receivedServices?.panels, services.panels);
+  await deactivate();
 });
 
 test("project rails are optional, ordered, and absent from disabled composition", () => {

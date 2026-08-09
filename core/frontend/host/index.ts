@@ -53,6 +53,7 @@ export type {
 } from "./moduleRuntimeSnapshot.ts";
 export {
   activateModules,
+  activateModulesWithMessages,
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
   discoverRelatedProjectPaths,
@@ -79,6 +80,26 @@ export {
   notifyModulesProjectsChanged,
   selectProjectFactsProvider,
 } from "./moduleComposition.ts";
+export {
+  MessageBusBridge,
+  createModuleMessageActivations,
+  moduleMessageGrants,
+  openModuleMessageBridge,
+} from "./messageBusBridge.ts";
+export type {
+  HostMessageDispatchResult,
+  OpenModuleMessageBridge,
+} from "./messageBusBridge.ts";
+export {
+  createModuleMessages,
+  messageDeclarations,
+  prepareModuleMessageActivation,
+} from "./moduleMessageContext.ts";
+export type {
+  ModuleMessageActivation,
+  ModuleMessageHandlers,
+  PreparedModuleMessageActivation,
+} from "./moduleMessageContext.ts";
 export { bindTerminalSessionDimensions } from "../terminal/terminalSessions.ts";
 export {
   MODULE_ARTIFACT_LOADER_SCHEMA_VERSION,

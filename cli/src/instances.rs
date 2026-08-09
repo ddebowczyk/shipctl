@@ -10,6 +10,9 @@ use shipctl_core::instance::{
     InstanceBuildIdentity, InstanceDiagnosticReport, InstanceDirectory, InstanceRecord,
     StopOutcome,
 };
+use shipctl_core::message_bus::{
+    MessageDiagnosticReport, MessageRuntimeInspection, RUNTIME_UNAVAILABLE,
+};
 use shipctl_core::module_control::{
     Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind,
 };
@@ -313,6 +316,40 @@ pub fn diagnose_module(
     let (runtime_root, _) = resolve_runtime_root(runtime_root)
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
     directory(runtime_root).diagnose_module(effective_selector(selector).as_deref(), module_id)
+}
+
+pub fn inspect_messages(
+    runtime_root: Option<&Path>,
+    selector: &str,
+) -> Result<MessageRuntimeInspection, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root)
+        .inspect_messages(Some(selector))
+        .map_err(|error| message_runtime_error(error, selector))
+}
+
+pub fn diagnose_messages(
+    runtime_root: Option<&Path>,
+    selector: &str,
+) -> Result<MessageDiagnosticReport, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root)
+        .diagnose_messages(Some(selector))
+        .map_err(|error| message_runtime_error(error, selector))
+}
+
+fn message_runtime_error(error: ControlError, selector: &str) -> ControlError {
+    if error.code.as_str() == "control.instance.absent" {
+        ControlError::new(
+            RUNTIME_UNAVAILABLE,
+            "The selected instance is not running; runtime message routes are unavailable",
+        )
+        .with_selector(selector)
+    } else {
+        error
+    }
 }
 
 pub fn transition_module(

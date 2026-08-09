@@ -20,10 +20,12 @@ async function fixture(files) {
       },
     }),
   );
-  for (const moduleName of ["api", "alpha", "beta"]) {
+  for (const moduleName of ["api", "alpha", "beta", "git"]) {
     const frontend = path.join(root, "modules", moduleName, "frontend");
     await mkdir(path.join(frontend, "src"), { recursive: true });
-    const packageName = moduleName === "api" ? "@shipctl/module-api" : `@shipctl/${moduleName}`;
+    const packageName = moduleName === "api"
+      ? "@shipctl/module-api"
+      : moduleName === "git" ? "@shipctl/module-git" : `@shipctl/${moduleName}`;
     await writeFile(path.join(frontend, "package.json"), JSON.stringify({ name: packageName }));
   }
   for (const [relative, contents] of Object.entries(files)) {
@@ -93,4 +95,21 @@ test("rejects capability code in src and application imports into ops", async (t
     diagnostics.map(({ rule }) => rule),
     ["app-ops-import", "src-entry-only", "app-ops-import"],
   );
+});
+
+test("allows classified platform listeners and rejects direct module event escapes", async (t) => {
+  const root = await fixture({
+    "modules/git/frontend/src/index.ts": "import { emit, listen } from '@tauri-apps/api/event'; listen('git-fs-changed', () => undefined); emit('module-escape');",
+    "modules/alpha/frontend/src/index.ts": "import { listen } from '@tauri-apps/api/event'; listen('usage-ingest-complete', () => undefined);",
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const diagnostics = await checkModuleBoundaries(root);
+  assert.deepEqual(diagnostics.map(({ rule, specifier }) => ({ rule, specifier })), [{
+    rule: "module-direct-tauri-event",
+    specifier: "usage-ingest-complete",
+  }, {
+    rule: "module-direct-tauri-event",
+    specifier: "@tauri-apps/api/event#emit",
+  }]);
 });

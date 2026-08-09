@@ -21,6 +21,7 @@ pub mod usage;
 
 use tauri::{AppHandle, Builder, Runtime};
 
+use shipctl_core::message_bus::MessageBusBridgeService;
 use shipctl_core::state::paths::ShipctlPaths;
 use shipctl_core::terminal::manager::PtyManager;
 use shipctl_core::workspace::manager::WorkspaceManager;
@@ -32,6 +33,7 @@ pub fn install<R: Runtime>(
     workspace: WorkspaceManager,
     paths: ShipctlPaths,
     durable_writes: DurableWriteBarrier,
+    message_bridges: MessageBusBridgeService,
 ) -> Builder<R> {
     #[cfg(feature = "fixture-module")]
     let builder = builder.plugin(shipctl_module_fixture::init());
@@ -63,12 +65,18 @@ pub fn install<R: Runtime>(
 
     #[cfg(feature = "usage-module")]
     let builder = builder.plugin(shipctl_module_usage::init(
-        crate::modules::usage::host_services(workspace.clone()),
+        crate::modules::usage::host_services(workspace.clone(), message_bridges.clone()),
         paths.usage_database.clone(),
         durable_writes.clone(),
     ));
 
-    let _ = (pty_manager, workspace, paths, durable_writes);
+    let _ = (
+        pty_manager,
+        workspace,
+        paths,
+        durable_writes,
+        message_bridges,
+    );
 
     builder
 }

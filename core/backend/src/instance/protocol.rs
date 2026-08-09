@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::context::InstanceBuildIdentity;
+use crate::message_bus::{MessageDiagnosticReport, MessageRuntimeInspection};
 use crate::module_control::{Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind};
 use crate::state::archive::StateArchiveInspection;
 
@@ -227,7 +228,15 @@ pub enum ControlOperation {
     SaveState { destination: PathBuf },
     Shutdown { force: bool },
     Modules { command: ModuleCommand },
+    Messages { command: MessageCommand },
     Operations { command: OperationCommand },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type", deny_unknown_fields)]
+pub enum MessageCommand {
+    Inspect {},
+    Diagnose {},
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -284,6 +293,8 @@ pub enum ControlResponseResult {
     ModuleInspection(ModuleInspection),
     ModuleDiagnostics(Vec<Diagnostic>),
     ModuleOperation(ModuleOperation),
+    MessageInspection(MessageRuntimeInspection),
+    MessageDiagnostics(MessageDiagnosticReport),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -359,5 +370,29 @@ impl ControlStream {
             result,
             events: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MessageCommand;
+
+    #[test]
+    fn message_commands_are_strict_and_round_trip() {
+        for command in [MessageCommand::Inspect {}, MessageCommand::Diagnose {}] {
+            let encoded = serde_json::to_value(&command).unwrap();
+            let decoded: MessageCommand = serde_json::from_value(encoded).unwrap();
+            assert!(matches!(
+                (command, decoded),
+                (MessageCommand::Inspect {}, MessageCommand::Inspect {})
+                    | (MessageCommand::Diagnose {}, MessageCommand::Diagnose {})
+            ));
+        }
+
+        assert!(serde_json::from_value::<MessageCommand>(serde_json::json!({
+            "type": "inspect",
+            "unexpected": true
+        }))
+        .is_err());
     }
 }

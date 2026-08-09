@@ -4,7 +4,11 @@
 
 use shipctl_core::instance::{
     ActiveWorkBlocker, ControlError, ControlHandler, ControlResponseResult, ControlStream,
-    ModuleCommand, ModuleControlStatus, OperationCommand,
+    MessageCommand, ModuleCommand, ModuleControlStatus, OperationCommand,
+};
+use shipctl_core::message_bus::{
+    diagnose_message_runtime, MessageBusBridgeService, MessageModuleInspection,
+    MessageRuntimeInspection,
 };
 use shipctl_core::module_control::codes::{CONTROL_CAPABILITY_UNAVAILABLE, MUTATION_UNAVAILABLE};
 use shipctl_core::module_control::live::ModuleControlService;
@@ -34,6 +38,26 @@ impl TauriControlHandler {
                     "This host mode does not provide module control",
                 )
             })
+    }
+
+    fn message_inspection(&self) -> MessageRuntimeInspection {
+        let bridges = self.app.state::<MessageBusBridgeService>().inner().clone();
+        let module_service = self.module_service().ok();
+        tauri::async_runtime::block_on(async move {
+            let runtime = bridges.inspect().await;
+            let modules = runtime
+                .registrations
+                .iter()
+                .cloned()
+                .map(|registration| MessageModuleInspection {
+                    module: module_service
+                        .as_ref()
+                        .and_then(|service| service.inspect(&registration.module_id).ok()),
+                    registration,
+                })
+                .collect();
+            MessageRuntimeInspection::new(runtime, modules)
+        })
     }
 }
 
@@ -97,6 +121,16 @@ impl ControlHandler for TauriControlHandler {
                 "Runtime module mutation is disabled until the reconciler is installed",
             )),
         }
+    }
+
+    fn message_control(&self, command: MessageCommand) -> Result<ControlStream, ControlError> {
+        let inspection = self.message_inspection();
+        Ok(ControlStream::result(match command {
+            MessageCommand::Inspect {} => ControlResponseResult::MessageInspection(inspection),
+            MessageCommand::Diagnose {} => {
+                ControlResponseResult::MessageDiagnostics(diagnose_message_runtime(inspection))
+            }
+        }))
     }
 
     fn operation_control(&self, command: OperationCommand) -> Result<ControlStream, ControlError> {

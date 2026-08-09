@@ -71,6 +71,97 @@ properties:
         items:
           type: string
           pattern: ^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$
+  messages:
+    type: object
+    additionalProperties: false
+    required: [provides, handles, publishes, subscribes, ports]
+    properties:
+      provides:
+        type: array
+        uniqueItems: true
+        items:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - version
+            - schema
+            - max_encoded_bytes
+            - redacted_fields
+            - compatible_versions
+          properties:
+            id:
+              $ref: "#/$defs/scoped_id"
+            version:
+              $ref: "#/$defs/nonzero_integer"
+            schema:
+              type: string
+              pattern: >-
+                ^modules/[a-z0-9-]+/messages/(?:[a-z0-9-]+/)*[a-z0-9-]+\.schema\.json$
+            max_encoded_bytes:
+              $ref: "#/$defs/nonzero_integer"
+            redacted_fields:
+              type: array
+              uniqueItems: true
+              items:
+                type: string
+                pattern: ^/(?:[^~]|~[01])*$
+            compatible_versions:
+              type: array
+              minItems: 1
+              uniqueItems: true
+              items:
+                $ref: "#/$defs/nonzero_integer"
+      handles:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/$defs/directed_endpoint"
+      publishes:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/$defs/broadcast_endpoint"
+      subscribes:
+        type: array
+        uniqueItems: true
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, message, required_grant]
+          properties:
+            id:
+              $ref: "#/$defs/scoped_id"
+            message:
+              $ref: "#/$defs/message_ref"
+            required_grant:
+              $ref: "#/$defs/message_grant"
+      ports:
+        type: array
+        uniqueItems: true
+        items:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - request
+            - response
+            - capacity
+            - required_grant
+            - scheduler_allowed
+          properties:
+            id:
+              $ref: "#/$defs/scoped_id"
+            request:
+              $ref: "#/$defs/message_ref"
+            response:
+              $ref: "#/$defs/message_ref"
+            capacity:
+              $ref: "#/$defs/nonzero_integer"
+            required_grant:
+              $ref: "#/$defs/message_grant"
+            scheduler_allowed:
+              type: boolean
   profile:
     type: [string, "null"]
     pattern: ^profiles/[a-z0-9-]+/tauri\.conf\.json$
@@ -85,3 +176,53 @@ properties:
       backend:
         type: [string, "null"]
         minLength: 1
+$defs:
+  nonzero_integer:
+    type: integer
+    minimum: 1
+  scoped_id:
+    type: string
+    pattern: ^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$
+  message_grant:
+    type: string
+    pattern: >-
+      ^message\.(?:send|publish|request|handle|subscribe)(?:\.[a-z][a-z0-9-]*)+$
+  message_ref:
+    type: object
+    additionalProperties: false
+    required: [id, version]
+    properties:
+      id:
+        $ref: "#/$defs/scoped_id"
+      version:
+        $ref: "#/$defs/nonzero_integer"
+  directed_endpoint:
+    type: object
+    additionalProperties: false
+    required: [id, message, capacity, required_grant, scheduler_allowed]
+    properties:
+      id:
+        $ref: "#/$defs/scoped_id"
+      message:
+        $ref: "#/$defs/message_ref"
+      capacity:
+        $ref: "#/$defs/nonzero_integer"
+      required_grant:
+        $ref: "#/$defs/message_grant"
+      scheduler_allowed:
+        type: boolean
+  broadcast_endpoint:
+    type: object
+    additionalProperties: false
+    required: [id, message, capacity, required_grant, scheduler_allowed]
+    properties:
+      id:
+        $ref: "#/$defs/scoped_id"
+      message:
+        $ref: "#/$defs/message_ref"
+      capacity:
+        $ref: "#/$defs/nonzero_integer"
+      required_grant:
+        $ref: "#/$defs/message_grant"
+      scheduler_allowed:
+        type: boolean

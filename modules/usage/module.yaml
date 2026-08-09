@@ -10,7 +10,7 @@ backend:
   path: modules/usage/backend
   cargo_feature: usage-module
   dependency_alias: shipctl-module-usage
-  plugin_init: "shipctl_module_usage::init(crate::modules::usage::host_services(workspace.clone()), paths.usage_database.clone(), durable_writes.clone())"
+  plugin_init: "shipctl_module_usage::init(crate::modules::usage::host_services(workspace.clone(), message_bridges.clone()), paths.usage_database.clone(), durable_writes.clone())"
   host_glue:
     - src-tauri/src/modules/usage.rs
 tauri:
@@ -22,6 +22,31 @@ tauri:
     - shipctl-usage:allow-get-usage-overview
     - shipctl-usage:allow-get-project-alias-review-queue
     - shipctl-usage:allow-refresh-usage-data
+messages:
+  provides:
+    - id: usage.ingest-completed
+      version: 1
+      schema: modules/usage/messages/ingest-completed.schema.json
+      max_encoded_bytes: 2
+      redacted_fields: []
+      compatible_versions:
+        - 1
+  handles: []
+  publishes:
+    - id: usage.ingest-completed
+      message:
+        id: usage.ingest-completed
+        version: 1
+      capacity: 1
+      required_grant: message.publish.usage.ingest-completed
+      scheduler_allowed: false
+  subscribes:
+    - id: usage.ingest-completed
+      message:
+        id: usage.ingest-completed
+        version: 1
+      required_grant: message.subscribe.usage.ingest-completed
+  ports: []
 profile: profiles/usage-disabled/tauri.conf.json
 tests:
   frontend: modules/usage/frontend/tests

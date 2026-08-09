@@ -5,6 +5,7 @@ import type {
   PanelHostPort,
 } from "./panels";
 import type { ModuleHostServices, ModuleSkillsPort } from "./services";
+import type { ModuleMessageContributions, ModuleMessages } from "./messages";
 import type {
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
@@ -25,6 +26,8 @@ export interface ModuleDeactivation {
 export interface ModuleHost {
   readonly panels: PanelHostPort;
   readonly services: ModuleHostServices;
+  /** Present for activations whose artifact declares message contributions. */
+  readonly messages?: ModuleMessages;
 }
 
 export interface SkillsProviderContribution {
@@ -61,6 +64,7 @@ export interface ShipctlModule {
   readonly skillsProvider?: SkillsProviderContribution;
   readonly projectLifecycle?: ModuleProjectLifecycle;
   readonly scheduledTasks?: readonly ModuleScheduledTask[];
+  readonly messages?: ModuleMessageContributions;
   /** Runs in module registration order before native process shutdown begins. */
   beforeShutdown?(services: ModuleHostServices): void | Promise<void>;
   activate?(host: ModuleHost): void | ModuleDeactivation;

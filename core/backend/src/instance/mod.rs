@@ -16,6 +16,6 @@ pub use protocol::{
     ActiveWorkBlocker, ControlCaller, ControlCompletion, ControlCompletionStatus, ControlError,
     ControlEvent, ControlEventPayload, ControlHello, ControlOperation, ControlRequest,
     ControlResponse, ControlResponseResult, ControlStream, DiscoveryProblem, DiscoveryReport,
-    InstanceDiagnosticReport, InstanceRecord, ModuleCommand, ModuleControlStatus, OperationCommand,
-    StopOutcome, CONTROL_FRAME_SCHEMA_VERSION,
+    InstanceDiagnosticReport, InstanceRecord, MessageCommand, ModuleCommand, ModuleControlStatus,
+    OperationCommand, StopOutcome, CONTROL_FRAME_SCHEMA_VERSION,
 };

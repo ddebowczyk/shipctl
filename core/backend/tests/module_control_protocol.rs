@@ -5,7 +5,12 @@ use std::sync::Arc;
 use shipctl_core::instance::{
     ActiveWorkBlocker, ControlError, ControlEventPayload, ControlHandler, ControlResponseResult,
     ControlServer, ControlStream, InstanceContext, InstanceDirectory, InstanceLaunchOptions,
-    InstanceLeases, LaunchProvenance, ModuleCommand, OperationCommand,
+    InstanceLeases, LaunchProvenance, MessageCommand, ModuleCommand, OperationCommand,
+};
+use shipctl_core::message_bus::{
+    diagnose_message_runtime, MessageBridgeInspection, MessageBridgeRegistrationObservation,
+    MessageModuleInspection, MessageRouteSnapshot, MessageRuntimeInspection,
+    MESSAGE_CONTRACT_SCHEMA_VERSION,
 };
 use shipctl_core::module_control::{
     parse_contract_json, Diagnostic, DiagnosticSeverity, ModuleInspection, ModuleOperation,
@@ -21,6 +26,41 @@ struct FixtureHandler {
 }
 
 impl FixtureHandler {
+    fn message_inspection(&self) -> MessageRuntimeInspection {
+        let registration = MessageBridgeRegistrationObservation {
+            module_id: self.inspection.manifest.id.clone(),
+            activation_id: "shipctl.fixture@digest#activation".to_string(),
+            effective_grants: vec!["message.send.fixture.directed".to_string()],
+            contracts: Vec::new(),
+            handled_channels: vec!["fixture.directed".to_string()],
+            published_topics: Vec::new(),
+            subscribed_topics: Vec::new(),
+            capability_ports: Vec::new(),
+        };
+        MessageRuntimeInspection::new(
+            MessageBridgeInspection {
+                schema_version: MESSAGE_CONTRACT_SCHEMA_VERSION,
+                bridge_count: 1,
+                snapshot: MessageRouteSnapshot {
+                    schema_version: MESSAGE_CONTRACT_SCHEMA_VERSION,
+                    instance_id: "fixture".to_string(),
+                    incarnation: "protocol-fixture".to_string(),
+                    route_generation: 7,
+                    channels: Vec::new(),
+                    topics: Vec::new(),
+                    ports: Vec::new(),
+                },
+                endpoints: Vec::new(),
+                activations: Vec::new(),
+                registrations: vec![registration.clone()],
+            },
+            vec![MessageModuleInspection {
+                registration,
+                module: Some(self.inspection.clone()),
+            }],
+        )
+    }
+
     fn diagnostic(code: &str, summary: &str) -> Diagnostic {
         Diagnostic {
             schema_version: 1,
@@ -140,6 +180,16 @@ impl ControlHandler for FixtureHandler {
         })
     }
 
+    fn message_control(&self, command: MessageCommand) -> Result<ControlStream, ControlError> {
+        let inspection = self.message_inspection();
+        Ok(ControlStream::result(match command {
+            MessageCommand::Inspect {} => ControlResponseResult::MessageInspection(inspection),
+            MessageCommand::Diagnose {} => {
+                ControlResponseResult::MessageDiagnostics(diagnose_message_runtime(inspection))
+            }
+        }))
+    }
+
     fn shutdown(&self, _force: bool) -> Result<(), ControlError> {
         self.stopped.store(true, Ordering::SeqCst);
         Ok(())
@@ -247,6 +297,21 @@ fn named_endpoint_transports_fixture_module_frames_without_runtime_mutation() {
         .unwrap();
     assert_eq!(status.request_id, operation_id);
     assert!(!context.paths().module_registry_database.exists());
+
+    let messages = directory.inspect_messages(Some("fixture")).unwrap();
+    assert_eq!(messages.runtime.snapshot.route_generation, 7);
+    assert_eq!(messages.modules.len(), 1);
+    assert_eq!(
+        messages.modules[0].module.as_ref().unwrap().manifest.id,
+        "shipctl.fixture"
+    );
+    assert_eq!(
+        messages.modules[0].registration.effective_grants,
+        ["message.send.fixture.directed"]
+    );
+    let diagnostics = directory.diagnose_messages(Some("fixture")).unwrap();
+    assert!(diagnostics.healthy);
+    assert!(diagnostics.diagnostics.is_empty());
 
     drop(server);
     assert!(!handler.stopped.load(Ordering::SeqCst));

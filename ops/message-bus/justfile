@@ -1,0 +1,8 @@
+contract:
+    node bin/proof.mjs contract
+
+integration:
+    node bin/proof.mjs integration
+
+all:
+    node bin/proof.mjs all

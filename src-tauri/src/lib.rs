@@ -19,6 +19,7 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use shipctl_core::instance::{
     ControlServer, InstanceContext, InstanceLaunchOptions, InstanceLeases,
 };
+use shipctl_core::message_bus::{MessageBusBridgeService, RuntimeMessageBus};
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::module_control::registry::ModuleRegistrySnapshotProvider;
 use shipctl_core::projects::watcher::GitWatcher;
@@ -106,6 +107,8 @@ pub fn run_with_options_and_loader_probe(
     let pty_manager = PtyManager::new(context.instance_id.to_string());
     let workspace = WorkspaceManager::new_with_barrier(paths.clone(), durable_writes.clone());
     let ui_state = UiStateStore::new_with_barrier(paths.ui_state.clone(), durable_writes.clone());
+    let message_bus = RuntimeMessageBus::new(context.clone());
+    let message_bridges = MessageBusBridgeService::new(message_bus.clone());
     let control_context = context.clone();
     let control_leases = leases.clone();
     let app = modules::install(
@@ -114,6 +117,7 @@ pub fn run_with_options_and_loader_probe(
         workspace.clone(),
         paths.clone(),
         durable_writes,
+        message_bridges.clone(),
     )
     .manage(pty_manager)
     .manage(workspace)
@@ -121,6 +125,8 @@ pub fn run_with_options_and_loader_probe(
     .manage(state_archive)
     .manage(module_loader_probe)
     .manage(module_control)
+    .manage(message_bus)
+    .manage(message_bridges)
     .manage(paths)
     .manage(context)
     .setup(move |app| {
@@ -230,6 +236,15 @@ pub fn run_with_options_and_loader_probe(
         shipctl_core::state::ui::set_last_repo_path,
         shipctl_core::state::ui::save_appearance_state,
         shipctl_core::module_control::live::publish_module_runtime_snapshot,
+        shipctl_core::message_bus::commands::open_runtime_message_bridge,
+        shipctl_core::message_bus::commands::reconcile_runtime_message_bridge,
+        shipctl_core::message_bus::commands::close_runtime_message_bridge,
+        shipctl_core::message_bus::commands::send_runtime_message,
+        shipctl_core::message_bus::commands::publish_runtime_message,
+        shipctl_core::message_bus::commands::request_runtime_message,
+        shipctl_core::message_bus::commands::reply_runtime_message,
+        shipctl_core::message_bus::commands::report_runtime_message_failure,
+        shipctl_core::message_bus::commands::inspect_runtime_messages,
         modules::capability_data::get_global_capability_data,
         modules::capability_data::replace_global_capability_data,
         lifecycle::shutdown_and_quit,

@@ -49,6 +49,17 @@ function owned(
   });
 }
 
+function messageContributions(module: ShipctlModule): FrontendContributionSnapshot[] {
+  const messages = module.messages;
+  return [
+    ...(messages?.provides ?? []).map(({ message }) => ({ id: message.id, kind: "message_contract" })),
+    ...(messages?.handles ?? []).map(({ channel }) => ({ id: channel.id, kind: "message_handler" })),
+    ...(messages?.publishes ?? []).map(({ topic }) => ({ id: topic.id, kind: "message_publisher" })),
+    ...(messages?.subscribes ?? []).map(({ topic }) => ({ id: topic.id, kind: "message_subscription" })),
+    ...(messages?.ports ?? []).map(({ port }) => ({ id: port.id, kind: "message_port" })),
+  ];
+}
+
 export function buildFrontendRuntimeSnapshot(
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): FrontendRuntimeSnapshot {
@@ -81,6 +92,7 @@ export function buildFrontendRuntimeSnapshot(
           module.skillsProvider ? [module.skillsProvider] : [],
         ),
         ...owned(module, "scheduled_task", module.scheduledTasks),
+        ...messageContributions(module),
       ],
     })),
   };

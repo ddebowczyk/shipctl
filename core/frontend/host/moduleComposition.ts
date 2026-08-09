@@ -2,6 +2,7 @@ import type {
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
   ModuleHostServices,
+  ModuleMessages,
   ModuleScheduledTask,
   ModuleSkillsPort,
   PanelContribution,
@@ -226,6 +227,14 @@ function reportModuleFailure(message: string, error: unknown) {
   if (import.meta.env.DEV) console.error(message, error);
 }
 
+function activationScopedServices(services: ModuleHostServices): ModuleHostServices {
+  // Message authority is already bound separately to the exact module
+  // activation. A distinct facade prevents module activation from treating the
+  // process-wide composition object as its own mutable singleton while keeping
+  // existing host ports stable.
+  return Object.freeze({ ...services });
+}
+
 function scheduleModuleTask(
   task: ModuleScheduledTask,
   services: ModuleHostServices,
@@ -269,14 +278,30 @@ export function activateModules(
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
   scheduler: ModuleTaskScheduler = BROWSER_TASK_SCHEDULER,
 ): () => Promise<void> {
+  return activateModulesWithMessages(services, new Map(), modules, scheduler);
+}
+
+export function activateModulesWithMessages(
+  services: ModuleHostServices,
+  messagesByModule: ReadonlyMap<string, ModuleMessages>,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  scheduler: ModuleTaskScheduler = BROWSER_TASK_SCHEDULER,
+): () => Promise<void> {
   const activeModules = modules.flatMap((module) => {
     const scheduledTaskCancellations: Array<() => void> = [];
+    const moduleServices = activationScopedServices(services);
     let deactivation: ReturnType<NonNullable<ShipctlModule["activate"]>> = undefined;
     try {
       const tasks = moduleScheduledTasks([module]);
-      deactivation = module.activate?.({ panels: services.panels, services });
+      deactivation = module.activate?.({
+        panels: moduleServices.panels,
+        services: moduleServices,
+        ...(messagesByModule.has(module.id)
+          ? { messages: messagesByModule.get(module.id) }
+          : {}),
+      });
       for (const task of tasks) {
-        scheduledTaskCancellations.push(scheduleModuleTask(task, services, scheduler));
+        scheduledTaskCancellations.push(scheduleModuleTask(task, moduleServices, scheduler));
       }
       return [{ deactivation, scheduledTaskCancellations }];
     } catch (error) {

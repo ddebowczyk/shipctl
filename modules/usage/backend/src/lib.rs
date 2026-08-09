@@ -9,7 +9,7 @@ use shipctl_module_api::DurableWriteBarrier;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tauri::{plugin::TauriPlugin, Emitter, Manager, Runtime, State};
+use tauri::{plugin::TauriPlugin, Manager, Runtime, State};
 
 pub use snapshot::UsageSnapshotProvider;
 pub use usage::types::{
@@ -80,14 +80,43 @@ pub trait GlobalCapabilityDataAuthority: Send + Sync {
     fn read(&self, capability_id: &str) -> Result<Option<serde_json::Value>, String>;
 }
 
+/// Host-owned delivery of the usage ingestion completion signal.
+///
+/// Usage owns when ingestion is complete; the composition root owns which
+/// runtime transport can publish that fact to the active module routes.
+pub trait UsageIngestNotifier: Send + Sync {
+    fn ingest_completed(&self);
+}
+
+struct NoopUsageIngestNotifier;
+
+impl UsageIngestNotifier for NoopUsageIngestNotifier {
+    fn ingest_completed(&self) {}
+}
+
 #[derive(Clone)]
 pub struct HostServices {
     global_data: Arc<dyn GlobalCapabilityDataAuthority>,
+    ingest_notifier: Arc<dyn UsageIngestNotifier>,
 }
 
 impl HostServices {
     pub fn new(global_data: Arc<dyn GlobalCapabilityDataAuthority>) -> Self {
-        Self { global_data }
+        Self::with_ingest_notifier(global_data, Arc::new(NoopUsageIngestNotifier))
+    }
+
+    pub fn with_ingest_notifier(
+        global_data: Arc<dyn GlobalCapabilityDataAuthority>,
+        ingest_notifier: Arc<dyn UsageIngestNotifier>,
+    ) -> Self {
+        Self {
+            global_data,
+            ingest_notifier,
+        }
+    }
+
+    fn notify_ingest_completed(&self) {
+        self.ingest_notifier.ingest_completed();
     }
 }
 
@@ -149,14 +178,14 @@ async fn get_project_alias_review_queue(
 }
 
 #[tauri::command]
-fn refresh_usage_data<R: Runtime>(state: State<'_, UsagePluginState>, app: tauri::AppHandle<R>) {
-    spawn_ingest(state.db.clone(), app);
+fn refresh_usage_data(state: State<'_, UsagePluginState>) {
+    spawn_ingest(state.db.clone(), state.services.clone());
 }
 
-fn spawn_ingest<R: Runtime>(db: UsageDb, app: tauri::AppHandle<R>) {
+fn spawn_ingest(db: UsageDb, services: HostServices) {
     std::thread::spawn(move || {
         usage::run_background_ingest(&db);
-        let _ = app.emit("usage-ingest-complete", ());
+        services.notify_ingest_completed();
     });
 }
 
@@ -194,15 +223,38 @@ pub fn init<R: Runtime>(
 /// boundary while allowing normal background reconciliation immediately after.
 pub fn start_background_ingest<R: Runtime>(app: &tauri::AppHandle<R>) {
     let state = app.state::<UsagePluginState>();
-    spawn_ingest(state.db.clone(), app.clone());
+    spawn_ingest(state.db.clone(), state.services.clone());
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ProviderVisibility, GET_ALL_USAGE_SNAPSHOTS_COMMAND, PLUGIN_NAME,
-        REFRESH_USAGE_DATA_COMMAND,
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
     };
+
+    use super::{
+        GlobalCapabilityDataAuthority, HostServices, ProviderVisibility, UsageIngestNotifier,
+        GET_ALL_USAGE_SNAPSHOTS_COMMAND, PLUGIN_NAME, REFRESH_USAGE_DATA_COMMAND,
+    };
+
+    #[derive(Default)]
+    struct EmptyGlobalData;
+
+    impl GlobalCapabilityDataAuthority for EmptyGlobalData {
+        fn read(&self, _capability_id: &str) -> Result<Option<serde_json::Value>, String> {
+            Ok(None)
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingIngestNotifier(AtomicUsize);
+
+    impl UsageIngestNotifier for RecordingIngestNotifier {
+        fn ingest_completed(&self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn exposes_namespaced_usage_contract() {
@@ -243,5 +295,16 @@ mod tests {
                 antigravity: true,
             }
         );
+    }
+
+    #[test]
+    fn completion_is_delivered_through_the_host_owned_notifier() {
+        let notifier = Arc::new(RecordingIngestNotifier::default());
+        let services =
+            HostServices::with_ingest_notifier(Arc::new(EmptyGlobalData), notifier.clone());
+
+        services.notify_ingest_completed();
+
+        assert_eq!(notifier.0.load(Ordering::SeqCst), 1);
     }
 }

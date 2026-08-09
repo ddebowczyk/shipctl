@@ -5,6 +5,10 @@ import ts from "typescript";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const MODULE_API_PACKAGE = "@shipctl/module-api";
+const TAURI_EVENT_PACKAGE = "@tauri-apps/api/event";
+const MODULE_PLATFORM_EVENT_LISTENERS = new Map([
+  ["@shipctl/module-git", new Set(["git-fs-changed"])],
+]);
 // The host's own capabilities ship as a workspace package so that node, tsc and
 // Vite resolve them identically. That makes the host reachable by name, so it
 // needs the same treatment as a relative reach into src/.
@@ -74,6 +78,61 @@ function importSpecifiers(sourceFile) {
   }
   visit(sourceFile);
   return imports;
+}
+
+function moduleTauriEventUsage(sourceFile) {
+  const eventAliases = new Map();
+  const namespaceAliases = new Set();
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement)
+      || !ts.isStringLiteralLike(statement.moduleSpecifier)
+      || statement.moduleSpecifier.text !== TAURI_EVENT_PACKAGE
+    ) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const element of bindings.elements) {
+        eventAliases.set(element.name.text, element.propertyName?.text ?? element.name.text);
+      }
+    } else if (bindings && ts.isNamespaceImport(bindings)) {
+      namespaceAliases.add(bindings.name.text);
+    }
+  }
+
+  const listeners = [];
+  const escapes = [];
+  function visit(node) {
+    let eventApi = null;
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      eventApi = eventAliases.get(node.expression.text) ?? null;
+    } else if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression)
+      && namespaceAliases.has(node.expression.expression.text)
+    ) {
+      eventApi = node.expression.name.text;
+    }
+    if (eventApi === "listen") {
+      const argument = node.arguments[0];
+      const position = sourceFile.getLineAndCharacterOfPosition(node.expression.getStart(sourceFile));
+      listeners.push({
+        specifier: argument && ts.isStringLiteralLike(argument) ? argument.text : "<dynamic>",
+        line: position.line + 1,
+        column: position.character + 1,
+      });
+    } else if (eventApi !== null) {
+      const position = sourceFile.getLineAndCharacterOfPosition(node.expression.getStart(sourceFile));
+      escapes.push({
+        specifier: `${TAURI_EVENT_PACKAGE}#${eventApi}`,
+        line: position.line + 1,
+        column: position.character + 1,
+      });
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return { listeners, escapes };
 }
 
 async function modulePackages(root) {
@@ -178,6 +237,31 @@ export async function checkModuleBoundaries(root = process.cwd()) {
       true,
       file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
+    const directTauriUsage = owner ? moduleTauriEventUsage(sourceFile) : { listeners: [], escapes: [] };
+
+    if (owner) {
+      const allowedEvents = MODULE_PLATFORM_EVENT_LISTENERS.get(owner.name) ?? new Set();
+      for (const event of directTauriUsage.listeners) {
+        if (!allowedEvents.has(event.specifier)) {
+          diagnostics.push(diagnostic(
+            file,
+            event,
+            "module-direct-tauri-event",
+            "module communication must use declared message routes; only classified platform events may use Tauri listeners",
+            absoluteRoot,
+          ));
+        }
+      }
+      for (const escape of directTauriUsage.escapes) {
+        diagnostics.push(diagnostic(
+          file,
+          escape,
+          "module-direct-tauri-event",
+          "module communication must use declared message routes; only classified platform events may use Tauri listeners",
+          absoluteRoot,
+        ));
+      }
+    }
 
     for (const entry of importSpecifiers(sourceFile)) {
       const matchedPackage = packageMatch(entry.specifier, packages);
@@ -228,6 +312,21 @@ export async function checkModuleBoundaries(root = process.cwd()) {
       }
 
       if (owner) {
+        if (entry.specifier === TAURI_EVENT_PACKAGE) {
+          if (
+            directTauriUsage.listeners.length === 0
+            && directTauriUsage.escapes.length === 0
+          ) {
+            diagnostics.push(diagnostic(
+              file,
+              entry,
+              "module-direct-tauri-event",
+              "module communication must use declared message routes; only classified platform events may use Tauri listeners",
+              absoluteRoot,
+            ));
+          }
+          continue;
+        }
         if (isRelative) {
           const target = path.resolve(path.dirname(file), entry.specifier);
           if (!isWithin(owner.root, target)) {
