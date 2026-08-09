@@ -87,8 +87,20 @@ export interface ModuleTerminalSessionPresentation {
   readonly badge?: ModuleTerminalSessionBadge;
 }
 
+declare const moduleTerminalIdBrand: unique symbol;
+export type ModuleTerminalId = string & { readonly [moduleTerminalIdBrand]: true };
+
+export type ModuleJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ModuleJsonValue[]
+  | { [key: string]: ModuleJsonValue };
+
 export interface ModuleTerminalSessionLaunchRequest {
   readonly projectPath: string;
+  readonly moduleSessionId: string;
   readonly ownerKey: string;
   readonly command: string;
   readonly arguments?: readonly string[];
@@ -96,32 +108,47 @@ export interface ModuleTerminalSessionLaunchRequest {
   readonly cwd: string;
   readonly label: string;
   /** Passed back to the owner unchanged. Core must not inspect this value. */
-  readonly ownerMetadata?: unknown;
+  readonly ownerMetadata?: ModuleJsonValue;
   readonly presentation?: ModuleTerminalSessionPresentation;
   readonly columns: number;
   readonly rows: number;
 }
 
+export interface ModuleTerminalAgentActivity {
+  readonly revision: number;
+  readonly state: "idle" | "working" | "blocked";
+  readonly message: string | null;
+  readonly updatedAtMs: number;
+  readonly source: {
+    readonly identifier: string;
+    readonly version: string;
+  };
+  readonly attention: {
+    readonly kind: "blocked" | "completed";
+    readonly revision: number;
+  } | null;
+}
+
 export interface ModuleTerminalSession {
   /** Opaque runtime identity. Native PTY and tab identities remain host-owned. */
   readonly id: string;
+  readonly terminalId: ModuleTerminalId;
+  readonly moduleId: string;
   readonly projectPath: string;
   readonly ownerKey: string;
   readonly label: string;
   /** Passed back to the owner unchanged. Core must not inspect this value. */
-  readonly ownerMetadata?: unknown;
+  readonly ownerMetadata?: ModuleJsonValue;
   readonly presentation?: ModuleTerminalSessionPresentation;
+  /** Supplemental agent state reported to the host; process lifecycle is separate. */
+  readonly agentActivity?: ModuleTerminalAgentActivity;
 }
 
 export interface ModuleTerminalSessionUpdate {
   readonly label?: string;
-  readonly ownerMetadata?: unknown;
+  readonly ownerMetadata?: ModuleJsonValue;
   readonly presentation?: ModuleTerminalSessionPresentation;
 }
-
-export type ModuleTerminalOutputEvent =
-  | { readonly type: "data"; readonly data: string }
-  | { readonly type: "exit"; readonly exitCode: number | null };
 
 export interface ModuleTerminalColorTheme {
   readonly foreground: string;
@@ -130,6 +157,7 @@ export interface ModuleTerminalColorTheme {
 }
 
 export interface ModuleManagedTerminalStartContext {
+  readonly moduleSessionId: string;
   readonly columns: number;
   readonly rows: number;
   readonly environment: Readonly<Record<string, string>>;
@@ -138,23 +166,23 @@ export interface ModuleManagedTerminalStartContext {
 
 export interface ModuleManagedTerminalStartResult {
   /** Native terminal identity; interpreted only by the host terminal adapter. */
-  readonly terminalId: number;
-  readonly ownerMetadata?: unknown;
+  readonly terminalId: ModuleTerminalId;
+  readonly ownerMetadata?: ModuleJsonValue;
   readonly presentation?: ModuleTerminalSessionPresentation;
 }
 
 export interface ModuleManagedTerminalSessionLaunchRequest {
   readonly projectPath: string;
+  readonly moduleSessionId: string;
   readonly ownerKey: string;
   readonly cwd: string;
   readonly label: string;
-  readonly ownerMetadata?: unknown;
+  readonly ownerMetadata?: ModuleJsonValue;
   readonly presentation?: ModuleTerminalSessionPresentation;
   readonly columns: number;
   readonly rows: number;
   readonly start: (
     context: ModuleManagedTerminalStartContext,
-    onOutput: (event: ModuleTerminalOutputEvent) => void,
   ) => Promise<ModuleManagedTerminalStartResult>;
 }
 
@@ -170,7 +198,7 @@ export type ModuleTerminalSessionExitReason =
 
 export type ModuleTerminalSessionLifecycleEvent =
   | {
-      readonly type: "started";
+      readonly type: "launched" | "adopted" | "updated";
       readonly session: ModuleTerminalSession;
     }
   | {
@@ -178,6 +206,10 @@ export type ModuleTerminalSessionLifecycleEvent =
       readonly session: ModuleTerminalSession;
       readonly reason: ModuleTerminalSessionExitReason;
       readonly exitCode: number | null;
+    }
+  | {
+      readonly type: "closed";
+      readonly session: ModuleTerminalSession;
     }
   | {
       readonly type: "rename-requested";
@@ -195,8 +227,32 @@ export type ModuleTerminalSessionLifecycleEvent =
       readonly reason: "tab-close" | "project-removal";
     };
 
+/**
+ * An opt-in, detachable observation of a module-owned terminal. Replay is the
+ * host's canonical VT screen state; data contains subsequent process bytes.
+ */
+export type ModuleTerminalSessionObservationEvent =
+  | {
+      readonly type: "replay" | "data";
+      readonly data: readonly number[];
+    }
+  | {
+      readonly type: "exit";
+      readonly exitCode: number | null;
+    }
+  | {
+      readonly type: "resync";
+      readonly reason: string;
+    };
+
+export interface ModuleTerminalSessionObservation {
+  dispose(): Promise<void>;
+}
+
 export interface ModuleTerminalSessionsPort {
   getDimensions(): ModuleTerminalDimensions;
+  /** Current host-derived module sessions; contains no attachment/output state. */
+  list(): readonly ModuleTerminalSession[];
   launch(request: ModuleTerminalSessionLaunchRequest): Promise<ModuleTerminalSession>;
   launchManaged(
     request: ModuleManagedTerminalSessionLaunchRequest,
@@ -205,6 +261,11 @@ export interface ModuleTerminalSessionsPort {
     sessionId: string,
     patch: ModuleTerminalSessionUpdate,
   ): Promise<ModuleTerminalSession>;
+  /** Observe output separately from launch; the returned attachment must be disposed. */
+  observe(
+    sessionId: string,
+    listener: (event: ModuleTerminalSessionObservationEvent) => void,
+  ): Promise<ModuleTerminalSessionObservation>;
   stop(sessionId: string): Promise<void>;
   focus(sessionId: string): Promise<void>;
   subscribe(

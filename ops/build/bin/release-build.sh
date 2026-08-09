@@ -6,7 +6,7 @@
 # - Verifies the Developer ID certificate is actually installed in Keychain
 # - Verifies the updater signing key file exists and exports its contents
 # - Verifies that key matches the public key compiled into the app
-# - Verifies the app version is declared only in tauri.conf.json
+# - Verifies the authoritative YAML product version and Tauri projection agree
 # - Runs pnpm install, pnpm tauri build, post-build-dmg.sh, generate-update-json.sh
 # - Prints a summary of the resulting artifacts
 #
@@ -105,7 +105,7 @@ fi
 
 step "Verifying build tools"
 
-for tool in pnpm jq hdiutil codesign; do
+for tool in pnpm jq yq hdiutil codesign; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     fail "$tool is not on PATH"
   fi
@@ -124,9 +124,9 @@ bash ops/build/bin/verify-updater-key.sh
 
 step "Verifying app version"
 
-just check version || fail "app version is not single-sourced (see drift above)"
+just version check || fail "product version is invalid or its packaging projection has drifted"
 
-VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+VERSION=$(yq -r '.product_version' ops/version/current.yaml)
 ok "building v$VERSION"
 
 # ── Step 8: warn on dirty working tree (don't block) ────────────────

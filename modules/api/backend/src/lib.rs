@@ -7,6 +7,8 @@
 #![forbid(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -129,15 +131,6 @@ pub trait SnapshotProvider: Send + Sync {
     }
 }
 
-#[derive(Clone, Serialize)]
-#[serde(tag = "event", content = "data")]
-pub enum TerminalOutput {
-    #[serde(rename = "data")]
-    Data(String),
-    #[serde(rename = "exit")]
-    Exit { code: i32 },
-}
-
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalColorTheme {
@@ -146,9 +139,64 @@ pub struct TerminalColorTheme {
     pub palette: Vec<String>,
 }
 
+/// Opaque identity of a host-owned terminal exposed to removable modules.
+/// Modules may persist or compare it, but cannot construct host terminal state.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct ModuleTerminalId(String);
+
+impl ModuleTerminalId {
+    pub fn from_host(value: String) -> Result<Self, String> {
+        if value.trim().is_empty() {
+            return Err("The host returned an empty terminal ID".to_string());
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ModuleTerminalId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+/// Safe terminal launch intent shared by a module and its host adapter.
+/// Raw output is deliberately absent: renderers attach independently.
+pub struct ModuleTerminalSpawnRequest {
+    pub module_id: String,
+    pub module_session_id: String,
+    pub command: String,
+    pub arguments: Vec<String>,
+    pub cwd: String,
+    pub project_path: String,
+    pub owner_key: String,
+    pub label: String,
+    pub owner_metadata: serde_json::Value,
+    pub presentation: Option<serde_json::Value>,
+    pub environment: HashMap<String, String>,
+    pub columns: u16,
+    pub rows: u16,
+    pub color_theme: TerminalColorTheme,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ModuleTerminalCloseResult {
+    pub existed: bool,
+}
+
+/// Transport-neutral terminal authority implemented by the Shipctl host.
+pub trait TerminalAuthority: Send + Sync {
+    fn spawn(&self, request: ModuleTerminalSpawnRequest) -> Result<ModuleTerminalId, String>;
+    fn close(&self, terminal_id: &ModuleTerminalId) -> Result<ModuleTerminalCloseResult, String>;
+}
+
 #[cfg(test)]
 mod tests {
-    use super::DurableWriteBarrier;
+    use super::{DurableWriteBarrier, ModuleTerminalId};
 
     #[test]
     fn updates_and_snapshot_freezes_are_mutually_exclusive() {
@@ -163,5 +211,13 @@ mod tests {
 
         assert!(barrier.lock.try_read().is_ok());
         assert!(barrier.lock.try_write().is_ok());
+    }
+
+    #[test]
+    fn terminal_ids_are_opaque_nonempty_strings() {
+        let id = ModuleTerminalId::from_host("host-terminal-id".to_string()).unwrap();
+        assert_eq!(id.as_str(), "host-terminal-id");
+        assert_eq!(serde_json::to_string(&id).unwrap(), "\"host-terminal-id\"");
+        assert!(ModuleTerminalId::from_host("  ".to_string()).is_err());
     }
 }

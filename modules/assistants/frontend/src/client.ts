@@ -1,7 +1,7 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   ModuleManagedTerminalStartContext,
-  ModuleTerminalOutputEvent,
+  ModuleTerminalId,
 } from "@shipctl/module-api";
 
 import type {
@@ -12,12 +12,8 @@ import type {
   SessionMode,
 } from "./types";
 
-type NativePtyOutput =
-  | { readonly event: "data"; readonly data: string }
-  | { readonly event: "exit"; readonly data: { readonly code: number } };
-
 interface SpawnedAssistantSession {
-  readonly ptyId: number;
+  readonly terminalId: ModuleTerminalId;
   readonly record: AssistantSessionRecord;
 }
 
@@ -25,14 +21,6 @@ const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shipctl-assistants|";
 
 function assistantCommand(name: string) {
   return `${ASSISTANTS_COMMAND_NAMESPACE}${name}`;
-}
-
-function outputChannel(onOutput: (event: ModuleTerminalOutputEvent) => void) {
-  const channel = new Channel<NativePtyOutput>();
-  channel.onmessage = (event) => onOutput(event.event === "data"
-    ? { type: "data", data: event.data }
-    : { type: "exit", exitCode: event.data.code });
-  return channel;
 }
 
 export function checkCommandExists(command: string): Promise<boolean> {
@@ -53,11 +41,11 @@ export function spawnAssistantSession(
     readonly model?: string;
   },
   context: ModuleManagedTerminalStartContext,
-  onOutput: (event: ModuleTerminalOutputEvent) => void,
 ): Promise<SpawnedAssistantSession> {
   return invoke(assistantCommand("spawn_assistant_session"), {
     request: {
       ...request,
+      moduleSessionId: context.moduleSessionId,
       env: { ...context.environment },
       cols: context.columns,
       rows: context.rows,
@@ -66,18 +54,17 @@ export function spawnAssistantSession(
         palette: [...context.colorTheme.palette],
       },
     },
-    onData: outputChannel(onOutput),
   });
 }
 
 export function resumeAssistantSession(
   recordId: string,
   context: ModuleManagedTerminalStartContext,
-  onOutput: (event: ModuleTerminalOutputEvent) => void,
 ): Promise<SpawnedAssistantSession> {
   return invoke(assistantCommand("resume_assistant_session"), {
     request: {
       recordId,
+      moduleSessionId: context.moduleSessionId,
       env: { ...context.environment },
       cols: context.columns,
       rows: context.rows,
@@ -86,7 +73,6 @@ export function resumeAssistantSession(
         palette: [...context.colorTheme.palette],
       },
     },
-    onData: outputChannel(onOutput),
   });
 }
 

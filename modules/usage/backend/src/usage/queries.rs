@@ -330,13 +330,17 @@ fn encoded_home_prefixes() -> Vec<String> {
         let encoded_home = home.replace('/', "-");
         prefixes.push(format!("{encoded_home}-dev--shipctl-worktrees-"));
         prefixes.push(format!("{encoded_home}--shipctl-worktrees-"));
-        prefixes.push(format!("{encoded_home}-dev--shep-worktrees-"));
-        prefixes.push(format!("{encoded_home}--shep-worktrees-"));
+        prefixes.push(format!("{encoded_home}-dev--{LEGACY_WORKTREE_NAME}-"));
+        prefixes.push(format!("{encoded_home}--{LEGACY_WORKTREE_NAME}-"));
         prefixes.push(format!("{encoded_home}-dev-"));
         prefixes.push(format!("{encoded_home}-"));
     }
     prefixes
 }
+
+// Historical worktree labels appear in already-recorded usage rows. They are
+// accepted for project resolution only; Shipctl never creates them.
+const LEGACY_WORKTREE_NAME: &str = "shep-worktrees";
 
 fn resolve_project_alias(raw_label: &str) -> ProjectAliasResolution {
     let label = raw_label.trim();

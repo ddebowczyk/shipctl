@@ -1,114 +1,131 @@
-# Phase 3 — artifacts, capabilities, and preflight
+# Phase 3 — module packages, capability contracts, and preflight
 
 ## Outcome
 
-Allow agents to add validated, immutable module artifacts without activating
-them. Establish one capability vocabulary and a preflight result that truthfully
-classifies each requested change as live, live-with-drain, restart-required, or
-unsupported.
+Install an immutable TypeScript module artifact without activating it. The
+artifact may define new versioned capabilities and declare providers and
+consumers for built-in or module-defined capabilities. Agents can inspect all
+of this while the module is disabled.
 
-## Work package 3.1 — module package contract
+## Work package 3.1 — capability meta-contract
 
-Evolve `module.yaml` from repository composition metadata into a versioned
-runtime manifest. Preserve build metadata in an appropriate build section, and
-add runtime declarations for:
+Define one versioned meta-contract for capability definitions. A capability
+declares:
 
-- module identity, version, API range, and runtime kind;
-- frontend entry point and artifact files;
-- declarative contributions and stable contribution ids;
-- requested invoke, subscribe, channel, and host-service grants;
-- configuration schema, secret fields, and supported scopes;
-- resource kinds the module may own; and
-- lifecycle support and restart classification inputs.
+- stable ID, semantic version, and definition digest;
+- typed command and query ports;
+- emitted events and observable topics;
+- dedicated stream contracts where ordered continuous data is required;
+- request, response, event, and stream schemas;
+- provider cardinality and selection rules;
+- supported instance, workspace, or global scopes; and
+- which surfaces agents may inspect, invoke, watch, or attach to.
 
-Create one authoritative capability catalog under `modules/api/`. Generate or
-check the manifest schema, Rust identifiers, TypeScript identifiers, and grant
-documentation from it. Unknown grants fail closed.
+`modules/api` owns this meta-contract and built-in host capability definitions.
+Installed modules may contribute additional definitions. Preflight rejects an
+attempt to reuse the same capability ID and version with different content.
 
-## Work package 3.2 — immutable artifact store
+A module does not receive one universal inbox. It implements capability ports
+and may publish declared events, use directed channels, and expose dedicated
+streams. Every surface is explicit and schema validated.
 
-The add pipeline performs:
+Capability definitions own the public semantic surfaces: ports, events, topics,
+and streams. The artifact manifest separately declares any typed directed
+channels it handles or publishes for coordination and binds them to its
+provider identity. A module is not required to have a channel, and a declared
+channel never grants ambient authority or substitutes for a capability port.
 
-1. copy into an isolated staging directory;
-2. reject path traversal, links escaping the package, and undeclared files;
-3. validate manifest and API compatibility;
-4. calculate and verify the content digest;
-5. validate entry points, contributions, capability requests, and config schema;
-6. atomically publish at an id/version/digest-qualified location; and
-7. commit an installed-but-disabled registry revision.
+## Work package 3.2 — runtime module package
 
-Never overwrite a published digest directory. Re-adding the same artifact is
-idempotent and returns the existing artifact record. A conflicting request id
-or same version with different content is a structured conflict.
+Extend `module.yaml` into a runtime manifest with:
 
-Add:
+- module ID, human-readable name, version, API range, and runtime kind;
+- JavaScript entry point, styles, assets, and integrity metadata;
+- typed message contracts plus declared directed-channel and topic bindings;
+- `capabilities.defines`, `capabilities.implements`, and
+  `capabilities.requires`;
+- UI contributions and stable contribution IDs;
+- requested host grants and native-adapter requirements;
+- configuration schema, secret references, and supported scopes; and
+- live, drain-required, restart-required, or unsupported lifecycle class.
 
-```text
-shipctl modules add <archive-or-directory>
-shipctl modules inspect <module-id> --artifact <digest>
-shipctl modules diagnose <module-id> --artifact <digest>
-```
+Source modules remain normal npm/pnpm packages built with Vite or Rollup. The
+runtime payload is an immutable Shipctl archive containing the manifest,
+JavaScript, chunks, styles, assets, capability/message schemas, and an integrity
+index. React, React DOM, and the Shipctl module API are host peers so a loaded
+module shares the host React singleton.
 
-`add` is noninteractive and does not imply `enable`.
+The archive layout and integrity serialization are canonical: equivalent
+declared runtime content produces the same content identity regardless of its
+source provenance.
 
-## Work package 3.3 — mediated capability ports
+Runtime installation never runs package-manager lifecycle scripts, creates a
+`node_modules` tree, rebuilds Rust, or reloads the webview.
 
-Extend `ModuleHostServices` so every granted operation is a closure bound to an
-exact host-created module instance identity. Module code never passes its own
-module id as authority.
+## Work package 3.3 — immutable artifact store
 
-Keep invoke, subscription, channel, and service grants distinct. Handles
-returned by ports must be registerable in the Phase 4 activation scope.
+The add pipeline:
 
-The trust model remains explicit: frontend ESM in the shared webview is trusted
-code with mediated access, not a sandbox. A package needing untrusted native
-execution requires a supported isolated worker or WASM driver; absent such a
-driver, preflight returns unsupported or restart-required.
+1. stages the archive in an isolated directory;
+2. rejects traversal, escaping links, undeclared files, and digest mismatch;
+3. validates the manifest, capability definitions, bindings, schemas, API
+   compatibility, grants, and lifecycle classification;
+4. calculates the complete content digest;
+5. atomically publishes the artifact under that digest; and
+6. registers it disabled without changing the active runtime snapshot.
 
-## Work package 3.4 — preflight service
+Artifact identity is content-derived. Provenance and source affect trust and
+replacement policy but are not part of identity.
 
-Preflight is a pure, inspectable plan built before desired state changes. It
-reports:
+Phase 3 validates and publishes disabled artifacts only. It does not load
+artifact code, publish runtime routes, or alter frontend composition; provider
+activation and loader attachment begin in Phase 4.
 
-- artifact and manifest checks;
-- host API compatibility;
-- requested, effective, and denied grants;
-- contribution id and route conflicts;
-- runtime-driver availability;
-- CSP and import-policy compatibility;
-- configuration migration requirements; and
-- resource ownership support.
+A disabled artifact exposes only inspectable manifest and capability metadata.
+It publishes no callable port, channel, event topic, or stream; Phase 4 atomic
+snapshot publication is the sole activation point for those surfaces.
 
-New Rust, Tauri command/plugin registration, static shell, or CSP policy changes
-are restart-required. That result leaves the active revision unchanged.
+## Work package 3.4 — preflight and offline inspection
+
+Preflight returns structured results for:
+
+- artifact and manifest integrity;
+- capability-definition conflicts;
+- provider and consumer compatibility;
+- missing or denied grants;
+- host API and peer-dependency compatibility;
+- native-adapter availability; and
+- the truthful lifecycle class.
+
+Offline commands expose installed modules, artifact digests, capability
+definitions, provider requirements, requested grants, and preflight results.
+They read through the repository boundary and do not activate code or edit the
+registry directly.
 
 ## Diagnostic and verification mechanism
 
-Each check emits a stable code, status, redacted evidence, and remediation. The
-preflight response is stored with the operation and can be reproduced by
-`diagnose` without committing.
-
-The artifact integration suite invokes the compiled CLI against an isolated
-registry and covers valid content plus tampering, invalid schema, unknown grant,
-API mismatch, contribution conflict, traversal, interrupted staging, and an
-unsupported runtime kind.
+Use one fixture archive that includes JavaScript, a stylesheet or asset, a new
+capability definition, a typed provider port, an emitted event declaration, a
+UI contribution, and a scheduler-addressable message contract. Create valid A
+and B artifacts plus invalid variants for tampering, incompatible capability
+redefinition, missing grants, and unsupported native requirements.
 
 ## Exit proof
 
-- A valid package is atomically visible by digest and remains disabled.
-- The evaluated file set exactly matches the files covered by its digest.
-- A failed add leaves neither a registry reference nor a published partial
-  directory.
-- Re-adding identical content is idempotent.
-- Every rejected package returns check-level diagnostics through `diagnose`.
-- Restart-required and unsupported requests do not advance desired activation.
-- Capability catalog generation and existing schema/manifests checks are green.
-- Existing repository gates remain green.
+- Fixture A can be built, added disabled, and inspected by module and
+  capability ID.
+- Its new capability is discoverable before a provider is active.
+- The stored artifact digest covers code, styles, assets, and contracts.
+- Repacking identical content yields the same identity regardless of source.
+- Incompatible same-ID/version capability content and tampered files are
+  rejected before publication.
+- Add and preflight do not rebuild the Rust host, reload the webview, or write
+  runtime events.
 
 ## Primary implementation areas
 
-- `ops/modularity/schema/` and module manifests for the evolved package schema;
-- `modules/api/` for capability vocabulary and public module contract;
-- `core/backend/src/module_control/` for staging, hashing, and preflight;
-- `core/frontend/host/` for mediated ports; and
-- `ops/module-control/` for adversarial artifact fixtures.
+- `modules/api/` for the meta-contract and built-in host contracts;
+- `examples/module-fixture/` for the first package and capability definition;
+- `core/backend/src/module_control/` for artifact and preflight services;
+- `core/frontend/host/` for host-peer contract definitions only; and
+- `ops/module-control/` for archive and public inspection proofs.

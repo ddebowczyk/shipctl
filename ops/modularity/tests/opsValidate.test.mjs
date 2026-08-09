@@ -120,6 +120,16 @@ test("rejects unowned root executables and a returned scripts directory", async 
   assert.ok(actual.includes("legacy-scripts-returned"));
 });
 
+test("accepts a root example explicitly owned by one operation capability", async (t) => {
+  const root = await fixture({
+    mutate: ({ manifests }) => manifests.modularity.owns.push("examples/demo/**"),
+    files: { "examples/demo/run.mjs": "export {};" },
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.ok(!(await rules(root)).includes("unowned-root-executables"));
+});
+
 test("rejects dependency, recipe, skill, provider, and peer-bin drift", async (t) => {
   const root = await fixture({
     mutate: ({ manifests, ops }) => {
@@ -136,4 +146,12 @@ test("rejects dependency, recipe, skill, provider, and peer-bin drift", async (t
   for (const expected of ["capability-cycle", "missing-recipe", "missing-skill", "provider-interface", "peer-bin-import"]) {
     assert.ok(actual.includes(expected), `${expected} was not reported`);
   }
+});
+
+test("does not require an empty skills directory", async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await rm(path.join(root, "ops/check/skills"), { recursive: true, force: true });
+
+  assert.ok(!(await rules(root)).includes("missing-skill"));
 });

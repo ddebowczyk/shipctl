@@ -13,8 +13,8 @@ use shipctl_core::module_control::codes::{
     VERIFICATION_EXPECTATION_UNREADABLE, VERIFICATION_MATCHED, VERIFICATION_MISMATCH,
 };
 use shipctl_core::module_control::registry::{
-    diagnose_registry, ModuleRegistry, RegisteredArtifact, RegistryError, RegistrySnapshot,
-    StaticModuleRecord,
+    diagnose_registry, ModuleRegistry, RegisteredArtifact, RegistryError, RegistryMutation,
+    RegistrySnapshot, StaticModuleRecord,
 };
 use shipctl_core::module_control::repository::{
     ArtifactRepository, OfflineArtifactAddReport, OfflineArtifactPreflightReport,
@@ -22,11 +22,23 @@ use shipctl_core::module_control::repository::{
 };
 use shipctl_core::module_control::{
     parse_contract_json, DesiredModuleState, Diagnostic, DiagnosticSeverity, ModuleContract,
-    ModuleContractError, ModuleInspection, ModuleRuntimeKind, ObservedModuleState,
-    RedactedEvidence, VerificationExpectation, VerificationObserved, VerificationResult,
-    MODULE_CONTROL_SCHEMA_VERSION,
+    ModuleContractError, ModuleInspection, ModuleOperation, ModuleOperationKind, ModuleRuntimeKind,
+    ObservedModuleState, RedactedEvidence, VerificationExpectation, VerificationObserved,
+    VerificationResult, MODULE_CONTROL_SCHEMA_VERSION,
 };
 use shipctl_core::state::paths::ShipctlPaths;
+use uuid::Uuid;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OfflineDesiredStateChange {
+    pub schema_version: u32,
+    pub state_root: PathBuf,
+    pub registry_revision: u64,
+    pub restart_required: bool,
+    pub desired: DesiredModuleState,
+    pub operation: ModuleOperation,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -307,6 +319,105 @@ pub fn add(
     writable_artifact_repository(state_root)?
         .add_archive(archive)
         .map_err(|error| error.into_control_error())
+}
+
+/// Change only durable desired state. The running process, if any, is never
+/// discovered or contacted; the caller must restart it explicitly.
+pub fn set_enabled(
+    state_root: Option<&Path>,
+    module_id: &str,
+    enabled: bool,
+) -> Result<OfflineDesiredStateChange, ControlError> {
+    let (state_root, _) = resolve_state_root(state_root)
+        .map_err(|error| ControlError::new(REGISTRY_STATE_ROOT_INVALID, error))?;
+    let paths = ShipctlPaths::new(state_root.clone(), PathBuf::new());
+    let mut registry = ModuleRegistry::open_writable(&paths).map_err(registry_error)?;
+    let snapshot = registry.snapshot().map_err(registry_error)?;
+    let current = snapshot.effective_desired(module_id).ok_or_else(|| {
+        ControlError::new(
+            MODULE_ABSENT,
+            format!("Module {module_id} is absent from the selected registry"),
+        )
+    })?;
+    if current.selected_artifact.is_none() {
+        return Err(ControlError::new(
+            MODULE_ABSENT,
+            format!("Module {module_id} has no selected runtime artifact"),
+        ));
+    }
+    if current.enabled == enabled {
+        return Ok(OfflineDesiredStateChange {
+            schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+            state_root,
+            registry_revision: snapshot.registry_revision,
+            restart_required: true,
+            desired: current,
+            operation: no_op_operation(module_id, enabled, snapshot.registry_revision),
+        });
+    }
+
+    let configuration_revision =
+        current
+            .configuration_revision
+            .checked_add(1)
+            .ok_or_else(|| {
+                ControlError::new(
+                    shipctl_core::module_control::REGISTRY_REVISION_DISCONTINUOUS,
+                    "Desired configuration revision cannot advance beyond u64::MAX",
+                )
+            })?;
+    let desired = DesiredModuleState {
+        enabled,
+        configuration_revision,
+        ..current
+    };
+    let operation = registry
+        .commit(&RegistryMutation {
+            request_id: Uuid::new_v4(),
+            module_id: module_id.to_string(),
+            instance_id: Uuid::nil(),
+            kind: if enabled {
+                ModuleOperationKind::Enable
+            } else {
+                ModuleOperationKind::Disable
+            },
+            artifacts: Vec::new(),
+            desired: Some(desired.clone()),
+            observations: Vec::new(),
+        })
+        .map_err(registry_error)?;
+    Ok(OfflineDesiredStateChange {
+        schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+        state_root,
+        registry_revision: operation.target_registry_revision,
+        restart_required: true,
+        desired,
+        operation,
+    })
+}
+
+fn no_op_operation(module_id: &str, enabled: bool, revision: u64) -> ModuleOperation {
+    use shipctl_core::module_control::{
+        ModuleOperationPhase, ModuleOperationResult, ModuleTransition,
+    };
+    ModuleOperation {
+        schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+        request_id: Uuid::nil(),
+        module_id: module_id.to_string(),
+        instance_id: Uuid::nil(),
+        kind: if enabled {
+            ModuleOperationKind::Enable
+        } else {
+            ModuleOperationKind::Disable
+        },
+        target_registry_revision: revision,
+        transitions: vec![ModuleTransition {
+            phase: ModuleOperationPhase::Completed,
+            registry_revision: Some(revision),
+            diagnostics: Vec::new(),
+        }],
+        result: ModuleOperationResult::Succeeded,
+    }
 }
 
 pub fn inspect(

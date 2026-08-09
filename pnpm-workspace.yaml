@@ -1,6 +1,7 @@
 packages:
   - "core/frontend"
   - "modules/*/frontend"
+  - "examples/module-fixture/frontend"
 
 allowBuilds:
   esbuild: true

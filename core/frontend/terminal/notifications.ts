@@ -5,6 +5,7 @@ import {
   sendNotification as sendNativeNotification,
 } from "@tauri-apps/plugin-notification";
 import { useTerminalStore } from "./useTerminalStore.ts";
+import type { TerminalId } from "./types.ts";
 
 let focused = true;
 let permissionGranted = false;
@@ -32,8 +33,8 @@ async function ensureNotificationPermission() {
   return permissionGranted;
 }
 
-export async function notifyAgent(ptyId: number, message: string) {
-  useTerminalStore.getState().setTabBell(ptyId, message);
+export async function notifyAgent(terminalId: TerminalId, message: string) {
+  useTerminalStore.getState().setTabBell(terminalId, message);
 
   if (focused) {
     return;

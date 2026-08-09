@@ -11,11 +11,14 @@ import {
   setTerminalRendererFactories,
 } from "./terminalRenderer.ts";
 import { browserTerminalRendererFactories } from "./terminalRendererAddons.ts";
-import { writePty, resizePty, openUrl } from "@shipctl/core/platform";
 import {
-  flushPendingOutput,
+  openUrl,
+  type TerminalAttachmentHandle,
+} from "@shipctl/core/platform";
+import {
   registerTerminal,
   unregisterTerminal,
+  writeTerminalOutput,
 } from "./terminalOutputQueue.ts";
 import { TERMINAL_LINE_HEIGHT, buildCSSFontFamily } from "@shipctl/core/appearance";
 import {
@@ -34,9 +37,13 @@ import { notifyAgent } from "./notifications.ts";
 import { KEYBINDING_PRESETS } from "./keybindingPresets.ts";
 import { useKeybindingStore } from "./useKeybindingStore.ts";
 import { useTerminalSettingsStore } from "./useTerminalSettingsStore.ts";
+import type { TerminalEvent, TerminalId, TerminalReplay } from "./types.ts";
+import { TERMINAL_CLIENT_RUNTIME } from "./terminalClientRuntime.ts";
+import { useNoticeStore } from "@shipctl/core/shared";
+import { getErrorMessage } from "@shipctl/core/platform";
 
 interface TerminalViewProps {
-  ptyId: number;
+  terminalId: TerminalId;
   visible: boolean;
 }
 
@@ -48,12 +55,18 @@ setTerminalRendererFactories(browserTerminalRendererFactories);
 
 
 export default function TerminalView({
-  ptyId,
+  terminalId,
   visible,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(false);
   const attachedRef = useRef(false);
+  const attachmentRef = useRef<TerminalAttachmentHandle | null>(null);
+  const attachmentGenerationRef = useRef(0);
+  const reattachingRef = useRef(false);
+  const needsReattachRef = useRef(false);
+  const inputEnabledRef = useRef(false);
+  const sequenceRef = useRef(0);
   // Whether the viewport is following output. Tracked here rather than read
   // from xterm at write time: the queue writes in chunks across frames, so by
   // the time a chunk lands the buffer has already moved.
@@ -61,7 +74,7 @@ export default function TerminalView({
   const columnResizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const getOrCreateTerminal = useCallback(() => {
-    const cached = terminalCache.get(ptyId);
+    const cached = terminalCache.get(terminalId);
     if (cached) return cached;
 
     const termSettings = useTerminalSettingsStore.getState().settings;
@@ -93,27 +106,33 @@ export default function TerminalView({
 
     // Send input to PTY
     term.onData((data) => {
+      if (!attachmentRef.current || !inputEnabledRef.current) return;
       // Typing resumes follow mode; the response to this input is the thing
       // the user is waiting to see.
       pinnedToBottomRef.current = true;
       term.scrollToBottom();
-      writePty(ptyId, data).catch((error) => {
+      TERMINAL_CLIENT_RUNTIME.write(terminalId, data).catch((error) => {
         if (import.meta.env.DEV) {
-          console.error("Failed to write PTY input:", error);
+          console.error("Failed to write terminal input:", error);
         }
+        useNoticeStore.getState().pushNotice({
+          tone: "error",
+          title: "Couldn’t write to terminal",
+          message: getErrorMessage(error),
+        });
       });
     });
 
     // Track terminal bell (attention request)
     term.onBell(() => {
-      void notifyAgent(ptyId, "Terminal bell");
+      void notifyAgent(terminalId, "Terminal bell");
     });
 
     // Intercept OSC 9 notifications from coding agents (Claude Code, Codex, Gemini)
     term.parser.registerOscHandler(9, (data) => {
       const message = data.startsWith("2;") ? data.slice(2) : data;
       if (message) {
-        void notifyAgent(ptyId, message);
+        void notifyAgent(terminalId, message);
       }
       return true;
     });
@@ -124,10 +143,16 @@ export default function TerminalView({
       for (const preset of KEYBINDING_PRESETS) {
         if (settings[preset.id] && preset.match(ev)) {
           if (ev.type === "keydown") {
-            writePty(ptyId, preset.sequence).catch((error) => {
+            if (!attachmentRef.current || !inputEnabledRef.current) return false;
+            TERMINAL_CLIENT_RUNTIME.write(terminalId, preset.sequence).catch((error) => {
               if (import.meta.env.DEV) {
-                console.error("Failed to write PTY keybinding:", error);
+                console.error("Failed to write terminal keybinding:", error);
               }
+              useNoticeStore.getState().pushNotice({
+                tone: "error",
+                title: "Couldn’t write to terminal",
+                message: getErrorMessage(error),
+              });
             });
           }
           return false; // prevent xterm default handling
@@ -139,14 +164,15 @@ export default function TerminalView({
     const entry: TerminalCacheEntry = {
       term,
       fitAddon,
+      attachmentId: null,
       ...createTerminalRendererState(),
     };
-    terminalCache.set(ptyId, entry);
+    terminalCache.set(terminalId, entry);
     return entry;
-  }, [ptyId]);
+  }, [terminalId]);
 
   const applyTerminalSize = useCallback(async (cols: number, rows: number) => {
-    const cached = terminalCache.get(ptyId);
+    const cached = terminalCache.get(terminalId);
     if (!cached) return;
 
     const size = { cols: Math.max(2, cols), rows: Math.max(2, rows) };
@@ -156,15 +182,22 @@ export default function TerminalView({
       cached.term.resize(size.cols, size.rows);
     });
 
-    await resizePty(ptyId, size.cols, size.rows).catch((error) => {
+    const attachment = attachmentRef.current;
+    if (!attachment) return;
+    await TERMINAL_CLIENT_RUNTIME.resize(
+      terminalId,
+      attachment.attachmentId,
+      size.cols,
+      size.rows,
+    ).catch((error) => {
       if (import.meta.env.DEV) {
         console.error("Failed to resize PTY:", error);
       }
     });
-  }, [ptyId]);
+  }, [terminalId]);
 
   const fitAndResize = useCallback(async () => {
-    const cached = terminalCache.get(ptyId);
+    const cached = terminalCache.get(terminalId);
     if (!cached) return;
 
     const proposedSize = cached.fitAddon.proposeDimensions();
@@ -199,7 +232,7 @@ export default function TerminalView({
       columnResizeTimerRef.current = null;
       void applyTerminalSize(nextSize.cols, nextSize.rows);
     }, 100);
-  }, [applyTerminalSize, ptyId]);
+  }, [applyTerminalSize, terminalId]);
 
   useEffect(() => {
     if (!containerRef.current || !visible) return;
@@ -212,7 +245,7 @@ export default function TerminalView({
       mountedRef.current = true;
 
       // Choose the renderer after open() so the addons can reach the DOM.
-      const cached = terminalCache.get(ptyId);
+      const cached = terminalCache.get(terminalId);
       if (cached) {
         reconcileTerminalRenderer(term, cached, useThemeStore.getState().theme);
       }
@@ -252,7 +285,7 @@ export default function TerminalView({
     surface.addEventListener("wheel", handleWheelCapture, { capture: true });
     surface.addEventListener("keydown", handleKeyDownCapture, { capture: true });
 
-    const attachTerminal = async () => {
+    const revealTerminal = async () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       if (disposed) return;
 
@@ -261,7 +294,7 @@ export default function TerminalView({
       // corrupting xterm's scroll state; the renderer was deferred with them,
       // so reconcile it against the theme that is actually being installed.
       const currentTheme = useThemeStore.getState().theme;
-      const rendererEntry = terminalCache.get(ptyId);
+      const rendererEntry = terminalCache.get(terminalId);
       term.options.theme = createTerminalTheme(currentTheme);
       if (rendererEntry) {
         reconcileTerminalRenderer(term, rendererEntry, currentTheme);
@@ -284,7 +317,7 @@ export default function TerminalView({
       term.options.fontFamily = nextCssFont;
       term.options.fontSize = currentTermSettings.fontSize;
 
-      const cachedEntry = terminalCache.get(ptyId);
+      const cachedEntry = terminalCache.get(terminalId);
       if (fontMetricsChanged) {
         cachedEntry?.rendererAddon?.clearTextureAtlas?.();
       }
@@ -304,11 +337,112 @@ export default function TerminalView({
       resyncTerminalViewport(term, terminalBottomOffset(term));
 
       if (!attachedRef.current) {
-        registerTerminal(ptyId, term, () => {
-          if (pinnedToBottomRef.current) term.scrollToBottom();
-        });
-        flushPendingOutput(ptyId);
-        attachedRef.current = true;
+        let attachRenderer: () => Promise<void>;
+        const requestReattach = () => {
+          inputEnabledRef.current = false;
+          needsReattachRef.current = true;
+          queueMicrotask(() => {
+            if (!disposed && !reattachingRef.current && needsReattachRef.current) {
+              void attachRenderer();
+            }
+          });
+        };
+        const installReplay = (replay: TerminalReplay, sequenceBoundary: number) => {
+          inputEnabledRef.current = false;
+          sequenceRef.current = sequenceBoundary;
+          unregisterTerminal(terminalId);
+          term.reset();
+          term.resize(Math.max(2, replay.columns), Math.max(2, replay.rows));
+          registerTerminal(
+            terminalId,
+            term,
+            () => {
+              if (pinnedToBottomRef.current) term.scrollToBottom();
+              const descriptor = TERMINAL_CLIENT_RUNTIME.descriptor(terminalId);
+              inputEnabledRef.current = descriptor?.lifecycle === "running";
+            },
+            requestReattach,
+          );
+          if (replay.bytes.length === 0) {
+            const descriptor = TERMINAL_CLIENT_RUNTIME.descriptor(terminalId);
+            inputEnabledRef.current = descriptor?.lifecycle === "running";
+          } else {
+            writeTerminalOutput(terminalId, replay.bytes);
+          }
+        };
+
+        attachRenderer = async () => {
+          if (disposed || reattachingRef.current) return;
+          reattachingRef.current = true;
+          const generation = ++attachmentGenerationRef.current;
+          const previous = attachmentRef.current;
+          attachmentRef.current = null;
+          attachedRef.current = false;
+          inputEnabledRef.current = false;
+          needsReattachRef.current = false;
+          unregisterTerminal(terminalId);
+          if (previous) {
+            await TERMINAL_CLIENT_RUNTIME.detach(previous.attachmentId).catch(() => undefined);
+          }
+
+          try {
+            const attachment = await TERMINAL_CLIENT_RUNTIME.attach(
+              terminalId,
+              true,
+              (event: TerminalEvent) => {
+                if (disposed || attachmentGenerationRef.current !== generation) return;
+                if (event.sequence !== sequenceRef.current + 1) {
+                  requestReattach();
+                  return;
+                }
+                sequenceRef.current = event.sequence;
+                if (event.event === "output") {
+                  writeTerminalOutput(terminalId, event.data);
+                } else if (event.event === "replay") {
+                  installReplay(event.replay, event.sequence);
+                } else if (
+                  event.event === "resync_required" ||
+                  event.event === "detached"
+                ) {
+                  requestReattach();
+                } else {
+                  if (event.event === "exited") inputEnabledRef.current = false;
+                }
+              },
+            );
+            if (disposed || attachmentGenerationRef.current !== generation) {
+              await TERMINAL_CLIENT_RUNTIME.detach(attachment.attachmentId).catch(() => undefined);
+              return;
+            }
+
+            attachmentRef.current = attachment;
+            const cached = terminalCache.get(terminalId);
+            if (cached) cached.attachmentId = attachment.attachmentId;
+            TERMINAL_CLIENT_RUNTIME.observeDescriptor(attachment.snapshot.descriptor);
+            installReplay(
+              attachment.snapshot.replay,
+              attachment.snapshot.sequenceBoundary,
+            );
+            attachedRef.current = true;
+            attachment.activate();
+          } catch (error) {
+            if (import.meta.env.DEV) {
+              console.error("Failed to attach terminal renderer:", error);
+            }
+            useNoticeStore.getState().pushNotice({
+              tone: "error",
+              title: "Couldn’t attach terminal",
+              message: getErrorMessage(error),
+            });
+          } finally {
+            reattachingRef.current = false;
+            if (needsReattachRef.current && !disposed) queueMicrotask(() => void attachRenderer());
+          }
+        };
+
+        await attachRenderer();
+        if (disposed) return;
+        await fitAndResize();
       }
 
       window.setTimeout(() => {
@@ -343,7 +477,7 @@ export default function TerminalView({
       }
     };
 
-    void attachTerminal();
+    void revealTerminal();
 
     // ResizeObserver for auto-fitting. fitAndResize applies rows immediately
     // and owns the long-buffer column debounce.
@@ -355,6 +489,18 @@ export default function TerminalView({
 
     return () => {
       disposed = true;
+      attachmentGenerationRef.current += 1;
+      reattachingRef.current = false;
+      const attachment = attachmentRef.current;
+      attachmentRef.current = null;
+      const cached = terminalCache.get(terminalId);
+      if (cached) cached.attachmentId = null;
+      attachedRef.current = false;
+      inputEnabledRef.current = false;
+      unregisterTerminal(terminalId);
+      if (attachment) {
+        void TERMINAL_CLIENT_RUNTIME.detach(attachment.attachmentId).catch(() => undefined);
+      }
       observer.disconnect();
       surface.removeEventListener("wheel", handleWheelCapture, { capture: true });
       surface.removeEventListener("keydown", handleKeyDownCapture, { capture: true });
@@ -363,16 +509,16 @@ export default function TerminalView({
         columnResizeTimerRef.current = null;
       }
     };
-  }, [ptyId, visible, getOrCreateTerminal, fitAndResize]);
+  }, [terminalId, visible, getOrCreateTerminal, fitAndResize]);
 
 
   useEffect(() => {
     return () => {
-      const cached = terminalCache.get(ptyId);
+      const cached = terminalCache.get(terminalId);
       if (cached) {
         cached.term.dispose();
-        terminalCache.delete(ptyId);
-        unregisterTerminal(ptyId);
+        terminalCache.delete(terminalId);
+        unregisterTerminal(terminalId);
       }
       mountedRef.current = false;
       attachedRef.current = false;
@@ -382,7 +528,7 @@ export default function TerminalView({
         columnResizeTimerRef.current = null;
       }
     };
-  }, [ptyId]);
+  }, [terminalId]);
 
   return (
     <div

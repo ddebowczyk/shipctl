@@ -1,8 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import * as React from "react";
-
-/** The contract for the one generic, once-built frontend artifact loader. */
-export const MODULE_ARTIFACT_LOADER_SCHEMA_VERSION = 1;
+import type { ShipctlModule } from "@shipctl/module-api";
 
 export type ModuleArtifactLoadPhase = "resolve" | "import" | "validate" | "activate";
 
@@ -10,27 +8,22 @@ export interface ModuleArtifactHost {
   readonly react: typeof React;
 }
 
-export interface ModuleArtifactRuntime {
-  readonly marker: string;
-  readonly react: typeof React;
+interface ShipctlModuleArtifactNamespace {
+  createShipctlModule?(host: ModuleArtifactHost): ShipctlModule;
 }
 
-interface ModuleArtifactNamespace {
-  readonly runtimeMarker?: unknown;
-  activate?(host: ModuleArtifactHost): ModuleArtifactRuntime;
-}
-
-export interface LoadModuleArtifactRequest {
+export interface LoadShipctlModuleArtifactRequest {
   readonly digest: string;
   readonly entryUrl: string;
-  readonly importModule?: (url: string) => Promise<ModuleArtifactNamespace>;
+  readonly expectedModuleId: string;
+  readonly expectedVersion: string;
+  readonly importModule?: (url: string) => Promise<ShipctlModuleArtifactNamespace>;
 }
 
-export interface LoadedModuleArtifact {
+export interface LoadedShipctlModuleArtifact {
   readonly digest: string;
   readonly entryUrl: string;
-  readonly marker: string;
-  readonly runtime: ModuleArtifactRuntime;
+  readonly module: ShipctlModule;
 }
 
 export class ModuleArtifactLoadError extends Error {
@@ -97,40 +90,52 @@ export function moduleArtifactUrl(
   return entryUrl;
 }
 
-export async function loadModuleArtifact({
+const HEADLESS_MODULE_KEYS = new Set([
+  "id",
+  "version",
+  "messages",
+  "activate",
+]);
+
+/** Load the restart-bound runtime slice without mutating the static UI registries. */
+export async function loadShipctlModuleArtifact({
   digest,
   entryUrl,
+  expectedModuleId,
+  expectedVersion,
   importModule = (url) => import(/* @vite-ignore */ url),
-}: LoadModuleArtifactRequest): Promise<LoadedModuleArtifact> {
+}: LoadShipctlModuleArtifactRequest): Promise<LoadedShipctlModuleArtifact> {
   assertDigestQualifiedArtifactUrl(entryUrl, digest);
-
-  let namespace: ModuleArtifactNamespace;
+  let namespace: ShipctlModuleArtifactNamespace;
   try {
     namespace = await importModule(entryUrl);
   } catch (error) {
     throw new ModuleArtifactLoadError("import", "Module artifact import failed", error);
   }
-
-  if (typeof namespace.runtimeMarker !== "string" || typeof namespace.activate !== "function") {
+  if (typeof namespace.createShipctlModule !== "function") {
     throw new ModuleArtifactLoadError(
       "validate",
-      "Module artifact must export a string runtimeMarker and activate(host)",
+      "Module artifact must export createShipctlModule(host)",
     );
   }
-
-  let runtime: ModuleArtifactRuntime;
+  let module: ShipctlModule;
   try {
-    runtime = namespace.activate({ react: React });
+    module = namespace.createShipctlModule({ react: React });
   } catch (error) {
-    throw new ModuleArtifactLoadError("activate", "Module artifact activation failed", error);
+    throw new ModuleArtifactLoadError("activate", "Module artifact factory failed", error);
   }
-
-  if (runtime.marker !== namespace.runtimeMarker || runtime.react !== React) {
+  if (!module || module.id !== expectedModuleId || module.version !== expectedVersion) {
     throw new ModuleArtifactLoadError(
       "validate",
-      "Module artifact did not retain the host React singleton and runtime marker",
+      "Module artifact identity does not match its admitted manifest",
     );
   }
-
-  return { digest, entryUrl, marker: namespace.runtimeMarker, runtime };
+  const unsupported = Object.keys(module).filter((key) => !HEADLESS_MODULE_KEYS.has(key));
+  if (unsupported.length > 0) {
+    throw new ModuleArtifactLoadError(
+      "validate",
+      `Restart-bound modules are headless; unsupported contributions: ${unsupported.join(", ")}`,
+    );
+  }
+  return { digest, entryUrl, module };
 }

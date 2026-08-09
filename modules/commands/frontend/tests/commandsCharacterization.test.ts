@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import type {
   ModuleHostServices,
+  ModuleTerminalSession,
   ModuleTerminalSessionLifecycleEvent,
 } from "@shipctl/module-api";
 import { createServer, type ViteDevServer } from "vite";
@@ -47,10 +48,10 @@ const command = (overrides: Partial<CommandConfig> = {}): CommandConfig => ({
 function fixtureServices(options: {
   readonly data?: unknown;
   readonly calls?: Array<unknown[]>;
+  readonly sessions?: readonly ModuleTerminalSession[];
 } = {}) {
   const calls = options.calls ?? [];
   let listener: ((event: ModuleTerminalSessionLifecycleEvent) => void) | null = null;
-  let sequence = 0;
   const services = {
     panels: {
       open: () => "fixture-panel",
@@ -75,21 +76,27 @@ function fixtureServices(options: {
       },
     },
     terminalSessions: {
+      list: () => options.sessions ?? [],
       getDimensions: () => ({ columns: 132, rows: 42 }),
       launch: async (request) => {
         const session = {
-          id: `session-${++sequence}`,
+          id: request.moduleSessionId,
+          terminalId: "00000000-0000-4000-8000-000000000001" as never,
+          moduleId: "commands",
           projectPath: request.projectPath,
           ownerKey: request.ownerKey,
           label: request.label,
+          ownerMetadata: request.ownerMetadata,
         };
         calls.push(["launch", request]);
-        listener?.({ type: "started", session });
+        listener?.({ type: "launched", session });
         return session;
       },
       launchManaged: async () => { throw new Error("not used"); },
       update: async (sessionId, patch) => ({
         id: sessionId,
+        terminalId: "00000000-0000-4000-8000-000000000001" as never,
+        moduleId: "commands",
         projectPath: "/repo",
         ownerKey: "commands:fixture",
         label: patch.label ?? "fixture",
@@ -155,19 +162,52 @@ test("project load is isolated, first-visit-only, and autostarts sequentially", 
 
   const state = commands.useCommandsStore.getState().projectCommands["/alpha"];
   assert.equal(state[0].status, "running");
-  assert.equal(state[0].sessionId, "session-1");
+  assert.match(state[0].sessionId ?? "", /^commands:/);
   assert.equal(fixture.calls.filter(([kind]) => kind === "read").length, 1);
   const launch = fixture.calls.find(([kind]) => kind === "launch")?.[1] as Record<string, unknown>;
   assert.deepEqual(launch, {
     projectPath: "/alpha",
+    moduleSessionId: launch.moduleSessionId,
     ownerKey: launch.ownerKey,
     command: "pnpm dev",
     environment: { PORT: "3000" },
     cwd: "/alpha/apps/web",
     label: "dev",
+    ownerMetadata: launch.ownerMetadata,
     columns: 132,
     rows: 42,
   });
+});
+
+test("project load adopts a host-owned autostart terminal without launching a duplicate", async () => {
+  const existingSession = {
+    id: "commands:existing",
+    terminalId: "00000000-0000-4000-8000-000000000099" as never,
+    moduleId: "commands",
+    projectPath: "/alpha",
+    ownerKey: "commands:/alpha:dev",
+    label: "dev",
+    ownerMetadata: {
+      projectPath: "/alpha",
+      commandName: "dev",
+      invocationId: "existing-invocation",
+    },
+  } satisfies ModuleTerminalSession;
+  const fixture = fixtureServices({
+    data: [command({ autostart: true })],
+    sessions: [existingSession],
+  });
+
+  await commands.loadProjectCommands("/alpha", fixture.services);
+
+  const state = commands.useCommandsStore.getState().projectCommands["/alpha"][0];
+  assert.equal(state.status, "running");
+  assert.equal(state.sessionId, existingSession.id);
+  assert.equal(fixture.calls.some(([kind]) => kind === "launch"), false);
+
+  fixture.publish({ type: "adopted", session: existingSession });
+  assert.equal(commands.useCommandsStore.getState().projectCommands["/alpha"][0].sessionId, existingSession.id);
+  assert.equal(fixture.calls.some(([kind]) => kind === "launch"), false);
 });
 
 test("create, update, and delete persist before mutating runtime state", async () => {
@@ -202,17 +242,27 @@ test("terminal lifecycle maps zero, nonzero, and manual exits without PTY knowle
   const fixture = fixtureServices();
   commands.useCommandsStore.getState().load("/alpha", [command()]);
   await commands.startCommand("/alpha", "dev", fixture.services);
-  const request = fixture.calls.find(([kind]) => kind === "launch")?.[1] as { ownerKey: string };
+  const request = fixture.calls.find(([kind]) => kind === "launch")?.[1] as {
+    moduleSessionId: string;
+    ownerKey: string;
+    ownerMetadata: Record<string, string>;
+  };
   const session = {
-    id: "session-1",
+    id: request.moduleSessionId,
+    terminalId: "00000000-0000-4000-8000-000000000001" as never,
+    moduleId: "commands",
     projectPath: "/alpha",
     ownerKey: request.ownerKey,
     label: "dev",
+    ownerMetadata: request.ownerMetadata,
   };
 
   fixture.publish({ type: "exited", session, reason: "nonzero-exit", exitCode: 2 });
   assert.equal(commands.useCommandsStore.getState().projectCommands["/alpha"][0].status, "crashed");
-  assert.equal(commands.useCommandsStore.getState().projectCommands["/alpha"][0].sessionId, "session-1");
+  assert.equal(
+    commands.useCommandsStore.getState().projectCommands["/alpha"][0].sessionId,
+    request.moduleSessionId,
+  );
   await commands.stopCommand("/alpha", "dev", fixture.services);
   assert.equal(commands.useCommandsStore.getState().projectCommands["/alpha"][0].status, "stopped");
   assert.equal(commands.useCommandsStore.getState().projectCommands["/alpha"][0].sessionId, null);

@@ -4,8 +4,6 @@ import type {
   RepoGroup,
   RegisteredRepo,
   WorkspaceConfig,
-  PtyColorTheme,
-  PtyOutput,
   ProjectSettings,
   EditorSettings,
   KeybindingSettings,
@@ -16,6 +14,20 @@ import type {
   PreferredEditor,
   UiState,
 } from "./types";
+import type {
+  TerminalAttachment,
+  TerminalAttachmentId,
+  TerminalCloseResult,
+  TerminalColorTheme,
+  TerminalDescriptor,
+  TerminalEvent,
+  TerminalId,
+  TerminalLaunchRequest,
+  TerminalMetadata,
+  TerminalRegistryEvent,
+  TerminalRegistrySubscriptionId,
+  TerminalRuntimeSnapshot,
+} from "@shipctl/core/terminal";
 
 // ── Workspace commands ──────────────────────────────────────────────
 
@@ -154,53 +166,108 @@ export function openUrl(url: string): Promise<void> {
 
 // ── PTY commands ────────────────────────────────────────────────────
 
-export function spawnPty(
-  command: string,
-  args: string[] | null,
-  cwd: string,
-  env: Record<string, string>,
-  cols: number,
-  rows: number,
-  colorTheme: PtyColorTheme,
-  onMessage: (msg: PtyOutput) => void,
-): Promise<number> {
-  const channel = new Channel<PtyOutput>();
-  channel.onmessage = onMessage;
-  return invoke("spawn_pty", {
-    command,
-    args,
-    cwd,
-    env,
-    cols,
-    rows,
-    colorTheme,
-    onData: channel,
+export interface TerminalAttachmentHandle extends TerminalAttachment {
+  /** Release events buffered during the attach invoke after replay is installed. */
+  activate(): void;
+}
+
+export interface TerminalRegistrySubscription {
+  readonly id: TerminalRegistrySubscriptionId;
+  dispose(): Promise<void>;
+}
+
+export function spawnTerminal(request: TerminalLaunchRequest): Promise<TerminalDescriptor> {
+  return invoke("spawn_terminal", { request });
+}
+
+export function listTerminals(): Promise<TerminalDescriptor[]> {
+  return invoke("list_terminals");
+}
+
+export async function subscribeTerminalRegistry(
+  onEvent: (event: TerminalRegistryEvent) => void,
+): Promise<TerminalRegistrySubscription> {
+  const channel = new Channel<TerminalRegistryEvent>();
+  channel.onmessage = onEvent;
+  const id = await invoke<TerminalRegistrySubscriptionId>("subscribe_terminal_registry", {
+    onEvent: channel,
   });
+  return {
+    id,
+    dispose: () => invoke("unsubscribe_terminal_registry", { subscriptionId: id }),
+  };
 }
 
-export function writePty(ptyId: number, data: string): Promise<void> {
-  return invoke("write_pty", { ptyId, data });
+export function getTerminal(terminalId: TerminalId): Promise<TerminalDescriptor> {
+  return invoke("get_terminal", { terminalId });
 }
 
-/** Report parsed output bytes so the host can release its flow-control budget. */
-export function acknowledgePtyOutput(ptyId: number, bytes: number): Promise<void> {
-  return invoke("acknowledge_pty_output", { ptyId, bytes });
+export function getTerminalSnapshot(
+  terminalId: TerminalId,
+): Promise<TerminalRuntimeSnapshot> {
+  return invoke("get_terminal_snapshot", { terminalId });
 }
 
-export function updatePtyColorTheme(colorTheme: PtyColorTheme): Promise<void> {
-  return invoke("update_pty_color_theme", { colorTheme });
+export async function attachTerminal(
+  terminalId: TerminalId,
+  claimsResize: boolean,
+  onEvent: (event: TerminalEvent) => void,
+): Promise<TerminalAttachmentHandle> {
+  const channel = new Channel<TerminalEvent>();
+  const buffered: TerminalEvent[] = [];
+  let active = false;
+  channel.onmessage = (event) => {
+    if (active) onEvent(event);
+    else buffered.push(event);
+  };
+  const attachment = await invoke<TerminalAttachment>("attach_terminal", {
+    terminalId,
+    claimsResize,
+    onEvent: channel,
+  });
+  return {
+    ...attachment,
+    activate() {
+      if (active) return;
+      active = true;
+      for (const event of buffered.splice(0)) onEvent(event);
+    },
+  };
 }
 
-export function resizePty(
-  ptyId: number,
-  cols: number,
+export function detachTerminal(attachmentId: TerminalAttachmentId): Promise<void> {
+  return invoke("detach_terminal", { attachmentId });
+}
+
+const terminalInputEncoder = new TextEncoder();
+
+export function writeTerminal(terminalId: TerminalId, data: string | Uint8Array): Promise<void> {
+  const bytes = typeof data === "string" ? terminalInputEncoder.encode(data) : data;
+  return invoke("write_terminal", { terminalId, data: Array.from(bytes) });
+}
+
+export function updateTerminalColorTheme(colorTheme: TerminalColorTheme): Promise<void> {
+  return invoke("update_terminal_color_theme", { colorTheme });
+}
+
+export function updateTerminalMetadata(
+  terminalId: TerminalId,
+  metadata: TerminalMetadata,
+): Promise<TerminalDescriptor> {
+  return invoke("update_terminal_metadata", { terminalId, metadata });
+}
+
+export function resizeTerminal(
+  terminalId: TerminalId,
+  attachmentId: TerminalAttachmentId,
+  columns: number,
   rows: number,
 ): Promise<void> {
-  return invoke("resize_pty", { ptyId, cols, rows });
+  return invoke("resize_terminal", { terminalId, attachmentId, columns, rows });
 }
 
-export function killPty(ptyId: number): Promise<void> {
-  return invoke("kill_pty", { ptyId });
+export function closeTerminal(terminalId: TerminalId): Promise<TerminalCloseResult> {
+  return invoke("close_terminal", { terminalId });
 }
 
 // ── App lifecycle commands ────────────────────────────────────────

@@ -15,7 +15,7 @@ fast:
     cd ../.. && pnpm exec node --test core/frontend/host/tests/panelRegistry.test.ts core/frontend/host/tests/panelPersistence.test.ts core/frontend/terminal/tests/panelTabs.test.ts
     cd ../.. && pnpm exec node --test modules/ports/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/projectCapabilityData.test.ts core/frontend/host/tests/globalCapabilityData.test.ts
-    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalSessions.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalAgentActivity.test.ts core/frontend/terminal/tests/terminalSessions.test.ts
     cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalRenderer.test.ts core/frontend/terminal/tests/terminalTheme.test.ts core/frontend/terminal/tests/terminalScrollPin.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalOutputQueue.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/projectActions.test.ts

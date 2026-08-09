@@ -2,6 +2,7 @@ mod args;
 mod instances;
 mod offline_modules;
 mod output;
+mod terminals;
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -15,6 +16,9 @@ use shipctl_core::build_info::BuildIdentity;
 use shipctl_core::instance::ControlError;
 use shipctl_core::message_bus::{
     RUNTIME_DIAGNOSTICS_FAILED, RUNTIME_HEALTHY, RUNTIME_INSPECTED as MESSAGE_RUNTIME_INSPECTED,
+};
+use shipctl_core::module_control::agent::{
+    CAPABILITY_RUNTIME_INSPECTED, CAPABILITY_RUNTIME_INVOKED, CAPABILITY_RUNTIME_LISTED,
 };
 use shipctl_core::module_control::codes::{
     ARTIFACT_ADDED, ARTIFACT_PREFLIGHTED, CAPABILITY_INSPECTED, OPERATION_ACCEPTED,
@@ -30,13 +34,14 @@ use shipctl_core::state::archive::inspect_archive;
 use uuid::Uuid;
 
 use args::{
-    Cli, Command as CliCommand, InstancesCommand, MessagesCommand, ModulesCommand,
-    OperationsCommand, ScheduleCommand, StateCommand, UiCommand,
+    CapabilitiesCommand, Cli, Command as CliCommand, InstancesCommand, MessagesCommand,
+    ModulesCommand, OperationsCommand, ScheduleCommand, StateCommand, UiCommand,
 };
 use instances::{StartDisposition, StartRequest};
 use output::OutputFormat;
 
 pub const APP_VERSION: &str = env!("SHIPCTL_APP_VERSION");
+pub const BUILD_ID: &str = env!("SHIPCTL_BUILD_ID");
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,6 +113,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         Some(CliCommand::Instances { command }) => run_instances(command, cli.output),
         Some(CliCommand::Modules { command }) => run_modules(command, cli.output),
         Some(CliCommand::Messages { command }) => run_messages(command, cli.output),
+        Some(CliCommand::Capabilities { command }) => run_capabilities(command, cli.output),
+        Some(CliCommand::Terminals { command }) => terminals::run(command, cli.output),
         Some(CliCommand::Schedule { command }) => run_schedules(command, cli.output, cli.full),
         Some(CliCommand::Operations { command }) => run_operations(command, cli.output),
         Some(CliCommand::State { command }) => run_state(command, cli.output),
@@ -161,6 +168,76 @@ fn run_messages(command: MessagesCommand, output: OutputFormat) -> ExitCode {
                     })
                 }
                 Err(error) => emit_failure(output, "messages.diagnose", &error, false),
+            }
+        }
+    }
+}
+
+fn run_capabilities(command: CapabilitiesCommand, output: OutputFormat) -> ExitCode {
+    match command {
+        CapabilitiesCommand::List(args) => {
+            match instances::list_capabilities(args.runtime.runtime_root.as_deref(), &args.instance)
+            {
+                Ok(data) => emit_success(
+                    output,
+                    "capabilities.list",
+                    CAPABILITY_RUNTIME_LISTED,
+                    data.capabilities.is_empty(),
+                    data,
+                )
+                .unwrap_or_else(|message| {
+                    emit_render_failure(output, "capabilities.list", message)
+                }),
+                Err(error) => emit_failure(output, "capabilities.list", &error, false),
+            }
+        }
+        CapabilitiesCommand::Inspect(args) => {
+            match instances::inspect_capability(
+                args.target.runtime.runtime_root.as_deref(),
+                &args.target.instance,
+                args.capability_id,
+            ) {
+                Ok(data) => emit_success(
+                    output,
+                    "capabilities.inspect",
+                    CAPABILITY_RUNTIME_INSPECTED,
+                    false,
+                    data,
+                )
+                .unwrap_or_else(|message| {
+                    emit_render_failure(output, "capabilities.inspect", message)
+                }),
+                Err(error) => emit_failure(output, "capabilities.inspect", &error, false),
+            }
+        }
+        CapabilitiesCommand::Call(args) => {
+            let operation = "capabilities.call";
+            let payload = match serde_json::from_str::<Value>(&args.input) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    return emit_failure(
+                        output,
+                        operation,
+                        &ControlError::new(
+                            "capability.input.invalid",
+                            format!("--input must be valid JSON: {error}"),
+                        ),
+                        false,
+                    );
+                }
+            };
+            match instances::call_capability(
+                args.target.runtime.runtime_root.as_deref(),
+                &args.target.instance,
+                args.capability_id,
+                args.port_id,
+                payload,
+            ) {
+                Ok(data) => {
+                    emit_success(output, operation, CAPABILITY_RUNTIME_INVOKED, false, data)
+                        .unwrap_or_else(|message| emit_render_failure(output, operation, message))
+                }
+                Err(error) => emit_failure(output, operation, &error, false),
             }
         }
     }
@@ -434,6 +511,17 @@ fn run_module_transition(
     } else {
         "modules.disable"
     };
+    if args.offline {
+        return match offline_modules::set_enabled(
+            args.state_root.as_deref(),
+            &args.module_id,
+            enable,
+        ) {
+            Ok(data) => emit_success(output, operation, OPERATION_ACCEPTED, false, data)
+                .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
+            Err(error) => emit_failure(output, operation, &error, false),
+        };
+    }
     match instances::transition_module(
         args.runtime_root.as_deref(),
         args.instance.as_deref(),
@@ -443,7 +531,8 @@ fn run_module_transition(
         } else {
             ModuleOperationKind::Disable
         },
-        args.target_revision,
+        args.target_revision
+            .expect("clap requires target revision for online transitions"),
     ) {
         Ok(data) => emit_success(output, operation, OPERATION_ACCEPTED, false, data)
             .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
@@ -745,6 +834,12 @@ fn operation_hint(args: &[OsString]) -> &str {
             ("schedule", "refresh") => "schedule.refresh",
             ("schedule", "trigger") => "schedule.trigger",
             ("operations", "inspect") => "operations.inspect",
+            ("terminals", "list") => "terminals.list",
+            ("terminals", "get") => "terminals.get",
+            ("terminals", "attach") => "terminals.attach",
+            ("terminals", "write") => "terminals.write",
+            ("terminals", "report") => "terminals.report",
+            ("terminals", "close") => "terminals.close",
             ("state", "save") => "state.save",
             ("state", "inspect") => "state.inspect",
             ("state", "verify") => "state.verify",
@@ -991,6 +1086,126 @@ mod tests {
     }
 
     #[test]
+    fn clap_parses_typed_terminal_commands() {
+        let terminal_id = "01234567-89ab-4def-8123-456789abcdef";
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
+            "attach",
+            terminal_id,
+            "--instance",
+            "alpha",
+            "--runtime-root=/tmp/runtime",
+            "--raw",
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::Attach(attach),
+        }) = parsed.command
+        else {
+            panic!("expected terminal attach")
+        };
+        assert_eq!(attach.terminal_id.to_string(), terminal_id);
+        assert_eq!(attach.target.instance, "alpha");
+        assert!(attach.raw);
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
+            "write",
+            terminal_id,
+            "--instance=alpha",
+            "--base64=AAEC/w==",
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::Write(write),
+        }) = parsed.command
+        else {
+            panic!("expected terminal write")
+        };
+        assert_eq!(write.base64.as_deref(), Some("AAEC/w=="));
+        assert!(write.data.is_none());
+        assert!(!write.stdin);
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
+            "report",
+            "blocked",
+            "--terminal-id",
+            terminal_id,
+            "--instance=alpha",
+            "--source=codex",
+            "--source-version=1.2.3",
+            "--message=waiting for review",
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::Report(report),
+        }) = parsed.command
+        else {
+            panic!("expected terminal report")
+        };
+        assert_eq!(report.terminal_id.unwrap().to_string(), terminal_id);
+        assert_eq!(report.instance.as_deref(), Some("alpha"));
+        assert!(matches!(
+            report.kind,
+            args::TerminalAgentReportKindArg::Blocked
+        ));
+        assert_eq!(report.source, "codex");
+        assert_eq!(report.source_version, "1.2.3");
+        assert_eq!(report.message.as_deref(), Some("waiting for review"));
+    }
+
+    #[test]
+    fn clap_enforces_terminal_target_identity_and_one_write_source() {
+        let terminal_id = "01234567-89ab-4def-8123-456789abcdef";
+
+        for args in [
+            vec![
+                "shipctl",
+                "terminals",
+                "write",
+                terminal_id,
+                "--instance=alpha",
+            ],
+            vec![
+                "shipctl",
+                "terminals",
+                "write",
+                terminal_id,
+                "--instance=alpha",
+                "--data=hello",
+                "--stdin",
+            ],
+            vec!["shipctl", "terminals", "list"],
+            vec![
+                "shipctl",
+                "terminals",
+                "get",
+                "not-a-terminal",
+                "--instance=alpha",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+
+        for source in ["--data=hello", "--base64=aGVsbG8=", "--stdin"] {
+            assert!(Cli::try_parse_from([
+                "shipctl",
+                "terminals",
+                "write",
+                terminal_id,
+                "--instance=alpha",
+                source,
+            ])
+            .is_ok());
+        }
+    }
+
+    #[test]
     fn clap_parses_state_archive_commands() {
         let parsed = Cli::try_parse_from([
             "shipctl",
@@ -1035,8 +1250,29 @@ mod tests {
             panic!("expected modules enable")
         };
         assert_eq!(module.module_id, "shipctl.fixture");
-        assert_eq!(module.target_revision, 12);
+        assert_eq!(module.target_revision, Some(12));
         assert_eq!(module.instance.as_deref(), Some("fixture"));
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "modules",
+            "enable",
+            "shipctl.fixture",
+            "--offline",
+            "--state-root",
+            "/tmp/state",
+            "--output=json",
+        ])
+        .unwrap();
+        let Some(CliCommand::Modules {
+            command: ModulesCommand::Enable(module),
+        }) = parsed.command
+        else {
+            panic!("expected offline modules enable")
+        };
+        assert!(module.offline);
+        assert_eq!(module.state_root.as_deref(), Some(Path::new("/tmp/state")));
+        assert_eq!(module.target_revision, None);
 
         let parsed = Cli::try_parse_from([
             "shipctl",

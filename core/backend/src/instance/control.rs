@@ -1,14 +1,17 @@
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use interprocess::local_socket::{
     prelude::*, ConnectOptions, GenericNamespaced, Listener, ListenerOptions, Stream,
 };
+use interprocess::TryClone;
 use uuid::Uuid;
 
 use super::context::{InstanceBuildIdentity, InstanceContext};
@@ -16,18 +19,22 @@ use super::leases::{
     create_private_directory, process_start_time, set_private_file, InstanceLeases,
 };
 use super::protocol::{
-    ActiveWorkBlocker, ControlCaller, ControlCompletion, ControlCompletionStatus, ControlError,
-    ControlEvent, ControlEventPayload, ControlHello, ControlOperation, ControlRequest,
-    ControlResponse, ControlResponseResult, ControlStream, DiscoveryProblem,
-    DiscoveryProblemCategory, DiscoveryReport, InstanceDiagnosticReport, InstanceLifecycle,
-    InstanceRecord, MessageCommand, ModuleCommand, ModuleControlStatus, OperationCommand,
-    ScheduleCommand, StopOutcome, StoredDescriptor, CONTROL_FRAME_SCHEMA_VERSION,
+    ActiveWorkBlocker, CapabilityCommand, ControlCaller, ControlCompletion,
+    ControlCompletionStatus, ControlError, ControlEvent, ControlEventPayload, ControlHello,
+    ControlOperation, ControlRequest, ControlResponse, ControlResponseResult, ControlStream,
+    DiscoveryProblem, DiscoveryProblemCategory, DiscoveryReport, InstanceDiagnosticReport,
+    InstanceLifecycle, InstanceRecord, MessageCommand, ModuleCommand, ModuleControlStatus,
+    OperationCommand, ScheduleCommand, StopOutcome, StoredDescriptor, TerminalAgentReportResult,
+    TerminalAttachmentState, TerminalCloseControlResult, TerminalCommand, TerminalControlEvent,
+    TerminalListResult, TerminalReplayFrame, TerminalWriteResult, CONTROL_FRAME_SCHEMA_VERSION,
+    TERMINAL_CONTROL_WRITE_MAX_BYTES,
 };
 use crate::message_bus::{MessageDiagnosticReport, MessageRuntimeInspection, RUNTIME_UNAVAILABLE};
 use crate::module_control::codes::{
     CONTROL_CAPABILITY_UNAVAILABLE, OPERATION_CAPABILITY_UNAVAILABLE,
 };
 use crate::module_control::{
+    agent::{ActiveCapabilityCatalog, ActiveCapabilityInspection, CapabilityInvocation},
     Diagnostic, DiagnosticSeverity, ModuleInspection, ModuleOperation, ModuleOperationKind,
     RedactedEvidence, MODULE_CONTROL_SCHEMA_VERSION,
 };
@@ -36,9 +43,14 @@ use crate::scheduler::{
     ScheduleVerification,
 };
 use crate::state::archive::StateArchiveInspection;
+use crate::terminal::{
+    TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId,
+    TerminalDescriptor, TerminalError, TerminalErrorCode, TerminalEvent, TerminalEventSink,
+    TerminalId,
+};
 
 const DESCRIPTOR_SCHEMA_VERSION: u32 = 1;
-const ENDPOINT_PROTOCOL: &str = "local_socket_json_line_v4";
+const ENDPOINT_PROTOCOL: &str = "local_socket_json_line_v6";
 
 pub trait ControlHandler: Send + Sync + 'static {
     fn active_work(&self) -> Vec<ActiveWorkBlocker>;
@@ -74,6 +86,15 @@ pub trait ControlHandler: Send + Sync + 'static {
             "This instance does not provide runtime message inspection",
         ))
     }
+    fn capability_control(
+        &self,
+        _command: CapabilityCommand,
+    ) -> Result<ControlStream, ControlError> {
+        Err(ControlError::new(
+            "capability.runtime.unavailable",
+            "This instance does not provide agent capability control",
+        ))
+    }
     /// Scheduler commands remain data-only at this endpoint boundary. The
     /// scheduler service owns refresh, manual-delivery, and request-identity
     /// behavior; this adapter only carries an authenticated frame identity to
@@ -94,11 +115,49 @@ pub trait ControlHandler: Send + Sync + 'static {
             "This instance does not provide module-operation fixtures",
         ))
     }
+    fn terminal_list(&self) -> Result<Vec<TerminalDescriptor>, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    fn terminal_get(&self, _id: TerminalId) -> Result<TerminalDescriptor, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    fn terminal_write(&self, _id: TerminalId, _data: Vec<u8>) -> Result<(), ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    fn terminal_report(
+        &self,
+        _report: TerminalAgentReportRequest,
+    ) -> Result<TerminalAgentActivity, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    fn terminal_close(
+        &self,
+        _id: TerminalId,
+    ) -> Result<crate::terminal::TerminalCloseResult, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    fn terminal_attach(
+        &self,
+        _id: TerminalId,
+        _sink: Arc<dyn TerminalEventSink>,
+    ) -> Result<TerminalAttachment, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    fn terminal_detach(&self, _attachment_id: TerminalAttachmentId) -> Result<(), ControlError> {
+        Err(terminal_control_unavailable())
+    }
     fn shutdown(&self, force: bool) -> Result<(), ControlError>;
 }
 
+fn terminal_control_unavailable() -> ControlError {
+    ControlError::new(
+        "terminal.control.unavailable",
+        "This instance does not provide terminal control",
+    )
+}
+
 pub struct ControlServer {
-    stop: Arc<AtomicBool>,
+    signal: Arc<ServerSignal>,
     endpoint: String,
     descriptor_path: PathBuf,
     thread: Option<JoinHandle<()>>,
@@ -136,7 +195,29 @@ impl ControlServer {
             )
             .for_context(context.instance_id, context.state_root.clone())
         })?;
-        let state_fingerprint = handler.state_fingerprint()?;
+        // The fingerprint is discovery metadata, not an application startup
+        // prerequisite. Keep explicit state export fail-closed, but publish a
+        // ready descriptor without a fingerprint when classification or a
+        // provider is temporarily unavailable.
+        let state_fingerprint = match handler.state_fingerprint() {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                if log::log_enabled!(log::Level::Warn) {
+                    log::warn!(
+                        target: "shipctl::instance",
+                        "State fingerprint unavailable during startup: {}: {}",
+                        error.code,
+                        error.message
+                    );
+                } else {
+                    eprintln!(
+                        "State fingerprint warning: {}: {}",
+                        error.code, error.message
+                    );
+                }
+                None
+            }
+        };
         let record = InstanceRecord {
             instance_id: context.instance_id,
             name: context.name.clone(),
@@ -159,9 +240,9 @@ impl ControlServer {
             auth_token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
         };
         let descriptor_path = descriptor_directory.join(format!("{}.json", context.instance_id));
-        let stop = Arc::new(AtomicBool::new(false));
+        let signal = Arc::new(ServerSignal::default());
         let stopping = Arc::new(AtomicBool::new(false));
-        let server_stop = stop.clone();
+        let server_signal = Arc::clone(&signal);
         let server_stopping = stopping.clone();
         let server_descriptor = descriptor.clone();
         let server_descriptor_path = descriptor_path.clone();
@@ -173,8 +254,8 @@ impl ControlServer {
                     &server_descriptor,
                     &server_descriptor_path,
                     handler,
-                    &server_stop,
-                    &server_stopping,
+                    server_signal,
+                    server_stopping,
                 );
             })
             .map_err(|error| {
@@ -186,7 +267,7 @@ impl ControlServer {
             })?;
 
         if let Err(error) = write_descriptor_atomically(&descriptor_path, &descriptor) {
-            stop.store(true, Ordering::SeqCst);
+            signal.stop();
             wake_endpoint(&endpoint);
             let _ = thread.join();
             return Err(ControlError::new(
@@ -197,7 +278,7 @@ impl ControlServer {
         }
 
         Ok(Self {
-            stop,
+            signal,
             endpoint,
             descriptor_path,
             thread: Some(thread),
@@ -212,7 +293,7 @@ impl ControlServer {
 
 impl Drop for ControlServer {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
+        self.signal.stop();
         wake_endpoint(&self.endpoint);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -222,39 +303,104 @@ impl Drop for ControlServer {
     }
 }
 
+#[derive(Default)]
+struct ServerSignal {
+    stopped: AtomicBool,
+    changed: Mutex<()>,
+    wake: Condvar,
+}
+
+impl ServerSignal {
+    fn stop(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        self.notify();
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
+    }
+
+    fn notify(&self) {
+        self.wake.notify_all();
+    }
+
+    fn wait_for_stream(&self, done: &AtomicBool) {
+        let mut guard = self
+            .changed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        while !self.is_stopped() && !done.load(Ordering::SeqCst) {
+            guard = self
+                .wake
+                .wait(guard)
+                .unwrap_or_else(|error| error.into_inner());
+        }
+    }
+}
+
 fn run_server(
     listener: Listener,
     descriptor: &StoredDescriptor,
     descriptor_path: &Path,
     handler: Arc<dyn ControlHandler>,
-    stop: &AtomicBool,
-    stopping: &AtomicBool,
+    signal: Arc<ServerSignal>,
+    stopping: Arc<AtomicBool>,
 ) {
-    let mut committed_shutdown = None;
-    while !stop.load(Ordering::SeqCst) {
+    let committed_shutdown = Arc::new(Mutex::new(None));
+    let mut workers = Vec::new();
+    while !signal.is_stopped() {
         let Ok(stream) = listener.accept() else {
-            if stop.load(Ordering::SeqCst) {
+            if signal.is_stopped() {
                 break;
             }
             continue;
         };
-        match handle_connection(
-            stream,
-            descriptor,
-            descriptor_path,
-            handler.as_ref(),
-            stopping,
-        ) {
-            Ok(Some(force)) => {
-                committed_shutdown = Some(force);
-                break;
-            }
-            Ok(None) | Err(_) => {}
+        if signal.is_stopped() {
+            drop(stream);
+            break;
+        }
+        let worker_descriptor = descriptor.clone();
+        let worker_descriptor_path = descriptor_path.to_path_buf();
+        let worker_handler = Arc::clone(&handler);
+        let worker_signal = Arc::clone(&signal);
+        let worker_stopping = Arc::clone(&stopping);
+        let worker_committed = Arc::clone(&committed_shutdown);
+        let wake_endpoint_name = descriptor.endpoint.clone();
+        let worker = std::thread::Builder::new()
+            .name(format!(
+                "shipctl-control-request-{}",
+                descriptor.instance.instance_id
+            ))
+            .spawn(move || {
+                if let Ok(Some(force)) = handle_connection(
+                    stream,
+                    &worker_descriptor,
+                    &worker_descriptor_path,
+                    worker_handler.as_ref(),
+                    worker_stopping.as_ref(),
+                    Arc::clone(&worker_signal),
+                ) {
+                    *worker_committed
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner()) = Some(force);
+                    worker_signal.stop();
+                    wake_endpoint(&wake_endpoint_name);
+                }
+            });
+        if let Ok(worker) = worker {
+            workers.push(worker);
         }
     }
 
     drop(listener);
+    signal.stop();
+    for worker in workers {
+        let _ = worker.join();
+    }
     remove_endpoint_artifact(&descriptor.endpoint);
+    let committed_shutdown = *committed_shutdown
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     if let Some(force) = committed_shutdown {
         if let Err(error) = handler.shutdown(force) {
             eprintln!("Accepted instance shutdown could not complete: {error}");
@@ -268,6 +414,7 @@ fn handle_connection(
     descriptor_path: &Path,
     handler: &dyn ControlHandler,
     stopping: &AtomicBool,
+    signal: Arc<ServerSignal>,
 ) -> std::io::Result<Option<bool>> {
     if !peer_is_current_user(&stream)? {
         return write_frames(
@@ -310,6 +457,27 @@ fn handle_connection(
         ControlOperation::Shutdown { force } => Some(*force),
         _ => None,
     };
+    if let ControlOperation::Terminals {
+        command: TerminalCommand::Attach { terminal_id },
+    } = request.operation.clone()
+    {
+        if let Err(error) = validate_request(&request, descriptor) {
+            return write_frames(
+                reader.into_inner(),
+                &ControlResponse::failure(request.request_id, error),
+                &[],
+            )
+            .map(|()| None);
+        }
+        return handle_terminal_attachment(
+            reader.into_inner(),
+            request.request_id,
+            terminal_id,
+            handler,
+            signal,
+        )
+        .map(|()| None);
+    }
     let (mut response, events) = dispatch_request(request, descriptor, handler, stopping);
     let mut commit_shutdown = requested_shutdown.filter(|_| {
         matches!(
@@ -353,63 +521,9 @@ fn dispatch_request(
     handler: &dyn ControlHandler,
     stopping: &AtomicBool,
 ) -> (ControlResponse, Vec<ControlEventPayload>) {
-    if request.frame_type != "request" {
+    if let Err(error) = validate_request(&request, descriptor) {
         return (
-            ControlResponse::failure(
-                request.request_id,
-                ControlError::new(
-                    "control.instance.invalid_frame",
-                    "The local control frame must declare frameType request",
-                ),
-            ),
-            Vec::new(),
-        );
-    }
-    if request.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION {
-        return (
-            ControlResponse::failure(
-                request.request_id,
-                ControlError::new(
-                    "control.instance.protocol_incompatible",
-                    "The control frame schema is incompatible",
-                )
-                .with_expected_observed(
-                    CONTROL_FRAME_SCHEMA_VERSION.to_string(),
-                    request.frame_schema_version.to_string(),
-                ),
-            ),
-            Vec::new(),
-        );
-    }
-    if request.control_protocol_version != descriptor.instance.build.control_protocol_version {
-        return (
-            ControlResponse::failure(
-                request.request_id,
-                ControlError::new(
-                    "control.instance.protocol_incompatible",
-                    "The control protocol version is incompatible",
-                )
-                .with_expected_observed(
-                    descriptor
-                        .instance
-                        .build
-                        .control_protocol_version
-                        .to_string(),
-                    request.control_protocol_version.to_string(),
-                ),
-            ),
-            Vec::new(),
-        );
-    }
-    if request.auth_token != descriptor.auth_token {
-        return (
-            ControlResponse::failure(
-                request.request_id,
-                ControlError::new(
-                    "control.instance.unauthorized",
-                    "The local control authentication token is invalid",
-                ),
-            ),
+            ControlResponse::failure(request.request_id, error),
             Vec::new(),
         );
     }
@@ -528,6 +642,19 @@ fn dispatch_request(
                 Vec::new(),
             ),
         },
+        ControlOperation::Capabilities { command } => match handler.capability_control(command) {
+            Ok(stream) => (
+                ControlResponse::success(request.request_id, stream.result),
+                stream.events,
+            ),
+            Err(error) => (
+                ControlResponse::failure(request.request_id, error),
+                Vec::new(),
+            ),
+        },
+        ControlOperation::Terminals { command } => {
+            dispatch_terminal_request(request.request_id, command, handler)
+        }
         ControlOperation::Schedules { command } => {
             match handler.schedule_control(command, request.request_id) {
                 Ok(stream) => (
@@ -551,6 +678,163 @@ fn dispatch_request(
             ),
         },
     }
+}
+
+fn validate_request(
+    request: &ControlRequest,
+    descriptor: &StoredDescriptor,
+) -> Result<(), ControlError> {
+    if request.frame_type != "request" {
+        return Err(ControlError::new(
+            "control.instance.invalid_frame",
+            "The local control frame must declare frameType request",
+        ));
+    }
+    if request.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION {
+        return Err(ControlError::new(
+            "control.instance.protocol_incompatible",
+            "The control frame schema is incompatible",
+        )
+        .with_expected_observed(
+            CONTROL_FRAME_SCHEMA_VERSION.to_string(),
+            request.frame_schema_version.to_string(),
+        ));
+    }
+    if request.control_protocol_version != descriptor.instance.build.control_protocol_version {
+        return Err(ControlError::new(
+            "control.instance.protocol_incompatible",
+            "The control protocol version is incompatible",
+        )
+        .with_expected_observed(
+            descriptor
+                .instance
+                .build
+                .control_protocol_version
+                .to_string(),
+            request.control_protocol_version.to_string(),
+        ));
+    }
+    if request.auth_token != descriptor.auth_token {
+        return Err(ControlError::new(
+            "control.instance.unauthorized",
+            "The local control authentication token is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn dispatch_terminal_request(
+    request_id: Uuid,
+    command: TerminalCommand,
+    handler: &dyn ControlHandler,
+) -> (ControlResponse, Vec<ControlEventPayload>) {
+    let result = match command {
+        TerminalCommand::List {} => handler.terminal_list().map(|terminals| {
+            ControlResponseResult::TerminalList(TerminalListResult {
+                count: terminals.len(),
+                terminals,
+            })
+        }),
+        TerminalCommand::Get { terminal_id } => handler
+            .terminal_get(terminal_id)
+            .map(ControlResponseResult::TerminalDescriptor),
+        TerminalCommand::Write {
+            terminal_id,
+            data_base64,
+        } => decode_terminal_input(&data_base64).and_then(|data| {
+            let accepted_bytes = data.len();
+            handler.terminal_write(terminal_id, data).map(|()| {
+                ControlResponseResult::TerminalWrite(TerminalWriteResult {
+                    terminal_id,
+                    accepted_bytes,
+                })
+            })
+        }),
+        TerminalCommand::Report {
+            terminal_id,
+            kind,
+            source,
+            message,
+        } => handler
+            .terminal_report(TerminalAgentReportRequest {
+                terminal_id,
+                kind,
+                source,
+                message,
+            })
+            .map(|activity| {
+                ControlResponseResult::TerminalAgentReport(TerminalAgentReportResult {
+                    terminal_id,
+                    activity,
+                })
+            }),
+        TerminalCommand::Close { terminal_id } => {
+            handler.terminal_close(terminal_id).map(|closed| {
+                ControlResponseResult::TerminalClose(TerminalCloseControlResult {
+                    terminal_id,
+                    existed: closed.existed,
+                    exit: closed.exit,
+                })
+            })
+        }
+        TerminalCommand::Attach { .. } => Err(ControlError::new(
+            "terminal.attach.invalid_transport",
+            "Terminal attach requires the streaming control path",
+        )),
+    };
+    match result {
+        Ok(result) => (ControlResponse::success(request_id, result), Vec::new()),
+        Err(error) => (ControlResponse::failure(request_id, error), Vec::new()),
+    }
+}
+
+fn decode_terminal_input(data_base64: &str) -> Result<Vec<u8>, ControlError> {
+    let maximum_encoded_bytes = TERMINAL_CONTROL_WRITE_MAX_BYTES.div_ceil(3) * 4;
+    if data_base64.len() > maximum_encoded_bytes {
+        return Err(ControlError::new(
+            "terminal.input.too_large",
+            format!(
+                "Terminal input exceeds the established {TERMINAL_CONTROL_WRITE_MAX_BYTES}-byte flow-control budget"
+            ),
+        )
+        .with_expected_observed(
+            format!("at most {TERMINAL_CONTROL_WRITE_MAX_BYTES} decoded bytes"),
+            format!("{} encoded bytes", data_base64.len()),
+        ));
+    }
+    let data = BASE64_STANDARD.decode(data_base64).map_err(|error| {
+        ControlError::new(
+            "terminal.input.invalid_base64",
+            format!("Terminal input is not valid base64: {error}"),
+        )
+    })?;
+    if data.len() > TERMINAL_CONTROL_WRITE_MAX_BYTES {
+        return Err(ControlError::new(
+            "terminal.input.too_large",
+            format!(
+                "Terminal input exceeds the established {TERMINAL_CONTROL_WRITE_MAX_BYTES}-byte flow-control budget"
+            ),
+        )
+        .with_expected_observed(
+            format!("at most {TERMINAL_CONTROL_WRITE_MAX_BYTES} decoded bytes"),
+            format!("{} decoded bytes", data.len()),
+        ));
+    }
+    Ok(data)
+}
+
+pub fn terminal_control_error(error: TerminalError) -> ControlError {
+    let code = match error.code {
+        TerminalErrorCode::NotFound => "terminal.not_found",
+        TerminalErrorCode::Exited => "terminal.exited",
+        TerminalErrorCode::Closing => "terminal.closing",
+        TerminalErrorCode::ShuttingDown => "terminal.host_shutting_down",
+        TerminalErrorCode::InvalidRequest => "terminal.request.invalid",
+        TerminalErrorCode::StartupFailed => "terminal.startup_failed",
+        TerminalErrorCode::RuntimeStopped => "terminal.runtime_stopped",
+        TerminalErrorCode::Io => "terminal.io",
+    };
+    ControlError::new(code, error.message)
 }
 
 fn current_record(
@@ -623,16 +907,281 @@ fn base_instance_diagnostics(instance: &InstanceRecord) -> Vec<Diagnostic> {
     .collect()
 }
 
+const TERMINAL_REPLAY_FORMAT: &str = "shipctl_vt_replay_v1";
+
+fn handle_terminal_attachment(
+    stream: Stream,
+    request_id: Uuid,
+    terminal_id: TerminalId,
+    handler: &dyn ControlHandler,
+    signal: Arc<ServerSignal>,
+) -> std::io::Result<()> {
+    // The initial response and every live event share this lock. Holding it
+    // across TerminalService::attach means an event racing with attach cannot
+    // overtake the canonical replay state.
+    let writer = Arc::new(Mutex::new(stream));
+    let attachment_id = Arc::new(Mutex::new(None::<TerminalAttachmentId>));
+    let control_sequence = Arc::new(AtomicU64::new(0));
+    let done = Arc::new(AtomicBool::new(false));
+    let closed = Arc::new(AtomicBool::new(false));
+
+    // Attach is server-to-client after the request frame. A dedicated read
+    // observer turns peer EOF (or any unexpected inbound byte) into detach
+    // without polling and without coupling terminal output to socket reads.
+    // It owns no handler/service state, so server shutdown never waits on a
+    // client that keeps an idle connection open.
+    let mut peer_observer = writer
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .try_clone()?;
+    let peer_done = Arc::clone(&done);
+    let peer_signal = Arc::clone(&signal);
+    std::thread::Builder::new()
+        .name(format!("terminal-control-peer-{attachment_id:?}"))
+        .spawn(move || {
+            let mut inbound = [0_u8; 1];
+            let _ = peer_observer.read(&mut inbound);
+            peer_done.store(true, Ordering::SeqCst);
+            peer_signal.notify();
+        })?;
+
+    let sink_writer = Arc::clone(&writer);
+    let sink_attachment_id = Arc::clone(&attachment_id);
+    let sink_sequence = Arc::clone(&control_sequence);
+    let sink_done = Arc::clone(&done);
+    let sink_closed = Arc::clone(&closed);
+    let sink_signal = Arc::clone(&signal);
+    let sink: Arc<dyn TerminalEventSink> = Arc::new(
+        move |event_terminal_id: TerminalId, event: TerminalEvent| -> Result<(), String> {
+            if sink_closed.load(Ordering::SeqCst) {
+                return Err("terminal control stream is closed".to_string());
+            }
+            let mut writer = sink_writer
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if sink_closed.load(Ordering::SeqCst) {
+                return Err("terminal control stream is closed".to_string());
+            }
+            let attachment_id = sink_attachment_id
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .ok_or_else(|| "terminal attachment identity is not installed".to_string())?;
+            let (event, completes_stream) =
+                terminal_event_frame(event_terminal_id, attachment_id, event);
+            let sequence = sink_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+            let result = write_event_frame(
+                &mut writer,
+                &ControlEvent {
+                    frame_type: "event".to_string(),
+                    frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
+                    request_id,
+                    sequence,
+                    event: ControlEventPayload::Terminal(event),
+                },
+            )
+            .map_err(|error| error.to_string());
+            if completes_stream || result.is_err() {
+                sink_done.store(true, Ordering::SeqCst);
+                sink_signal.notify();
+            }
+            result
+        },
+    );
+
+    let mut writer_guard = writer.lock().unwrap_or_else(|error| error.into_inner());
+    let attachment = match handler.terminal_attach(terminal_id, sink) {
+        Ok(attachment) => attachment,
+        Err(error) => {
+            return write_frames_to(
+                &mut writer_guard,
+                &ControlResponse::failure(request_id, error),
+                &[],
+            );
+        }
+    };
+    *attachment_id
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(attachment.attachment_id);
+    let initial = terminal_attachment_state(terminal_id, &attachment);
+    // Attachment writes must never wait on a client receive buffer. The
+    // terminal runtime already supplies the bounded mailbox; a full socket
+    // therefore fails this subscriber instead of adding another queue or
+    // blocking PTY draining.
+    writer_guard.set_nonblocking(true)?;
+    if let Err(error) = write_response_frame(
+        &mut writer_guard,
+        &ControlResponse::success(
+            request_id,
+            ControlResponseResult::TerminalAttachment(initial),
+        ),
+    ) {
+        closed.store(true, Ordering::SeqCst);
+        let _ = handler.terminal_detach(attachment.attachment_id);
+        return Err(error);
+    }
+    if !attachment.live {
+        write_completion_frame(
+            &mut writer_guard,
+            &ControlCompletion {
+                frame_type: "completion".to_string(),
+                frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
+                request_id,
+                status: ControlCompletionStatus::Succeeded,
+                event_count: 0,
+            },
+        )?;
+        return Ok(());
+    }
+    drop(writer_guard);
+
+    signal.wait_for_stream(&done);
+    closed.store(true, Ordering::SeqCst);
+    let _ = handler.terminal_detach(attachment.attachment_id);
+
+    // A disconnected or stalled peer may make this write fail; attachment
+    // cleanup has already happened and never closes the terminal process. A
+    // shutdown completion lets a well-behaved client close its read observer;
+    // nonblocking I/O keeps a stalled peer from delaying server teardown.
+    let mut writer_guard = writer.lock().unwrap_or_else(|error| error.into_inner());
+    write_completion_frame(
+        &mut writer_guard,
+        &ControlCompletion {
+            frame_type: "completion".to_string(),
+            frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
+            request_id,
+            status: ControlCompletionStatus::Succeeded,
+            event_count: control_sequence.load(Ordering::SeqCst),
+        },
+    )
+}
+
+fn terminal_attachment_state(
+    terminal_id: TerminalId,
+    attachment: &TerminalAttachment,
+) -> TerminalAttachmentState {
+    TerminalAttachmentState {
+        terminal_id,
+        attachment_id: attachment.attachment_id,
+        live: attachment.live,
+        descriptor: attachment.snapshot.descriptor.clone(),
+        sequence_boundary: attachment.snapshot.sequence_boundary,
+        replay: terminal_replay_frame(&attachment.snapshot.replay),
+    }
+}
+
+fn terminal_replay_frame(replay: &crate::terminal::TerminalReplay) -> TerminalReplayFrame {
+    TerminalReplayFrame {
+        format: TERMINAL_REPLAY_FORMAT.to_string(),
+        revision: replay.revision,
+        columns: replay.columns,
+        rows: replay.rows,
+        data_base64: BASE64_STANDARD.encode(replay.bytes.as_ref()),
+    }
+}
+
+fn terminal_event_frame(
+    terminal_id: TerminalId,
+    attachment_id: TerminalAttachmentId,
+    event: TerminalEvent,
+) -> (TerminalControlEvent, bool) {
+    match event {
+        TerminalEvent::Output {
+            sequence,
+            revision,
+            data,
+        } => (
+            TerminalControlEvent::Output {
+                terminal_id,
+                attachment_id,
+                sequence,
+                revision,
+                data_base64: BASE64_STANDARD.encode(data.as_ref()),
+            },
+            false,
+        ),
+        TerminalEvent::Replay { sequence, replay } => (
+            TerminalControlEvent::Replay {
+                terminal_id,
+                attachment_id,
+                sequence,
+                replay: terminal_replay_frame(&replay),
+            },
+            false,
+        ),
+        TerminalEvent::MetadataChanged {
+            sequence,
+            descriptor,
+        } => (
+            TerminalControlEvent::MetadataChanged {
+                terminal_id,
+                attachment_id,
+                sequence,
+                descriptor,
+            },
+            false,
+        ),
+        TerminalEvent::AgentActivityChanged {
+            sequence,
+            descriptor,
+        } => (
+            TerminalControlEvent::AgentActivityChanged {
+                terminal_id,
+                attachment_id,
+                sequence,
+                descriptor,
+            },
+            false,
+        ),
+        TerminalEvent::Exited {
+            sequence,
+            descriptor,
+        } => (
+            TerminalControlEvent::Exited {
+                terminal_id,
+                attachment_id,
+                sequence,
+                descriptor,
+            },
+            true,
+        ),
+        TerminalEvent::ResyncRequired { sequence, reason } => (
+            TerminalControlEvent::ResyncRequired {
+                terminal_id,
+                attachment_id,
+                sequence,
+                reason,
+            },
+            true,
+        ),
+        TerminalEvent::Detached { sequence, reason } => (
+            TerminalControlEvent::Detached {
+                terminal_id,
+                attachment_id,
+                sequence,
+                reason,
+            },
+            true,
+        ),
+    }
+}
+
 fn write_frames(
     mut stream: Stream,
     response: &ControlResponse,
     events: &[ControlEventPayload],
 ) -> std::io::Result<()> {
-    serde_json::to_writer(&mut stream, response).map_err(std::io::Error::other)?;
-    stream.write_all(b"\n")?;
+    write_frames_to(&mut stream, response, events)
+}
+
+fn write_frames_to(
+    stream: &mut Stream,
+    response: &ControlResponse,
+    events: &[ControlEventPayload],
+) -> std::io::Result<()> {
+    write_response_frame(stream, response)?;
     for (index, event) in events.iter().enumerate() {
-        serde_json::to_writer(
-            &mut stream,
+        write_event_frame(
+            stream,
             &ControlEvent {
                 frame_type: "event".to_string(),
                 frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
@@ -640,12 +1189,10 @@ fn write_frames(
                 sequence: index as u64 + 1,
                 event: event.clone(),
             },
-        )
-        .map_err(std::io::Error::other)?;
-        stream.write_all(b"\n")?;
+        )?;
     }
-    serde_json::to_writer(
-        &mut stream,
+    write_completion_frame(
+        stream,
         &ControlCompletion {
             frame_type: "completion".to_string(),
             frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
@@ -658,7 +1205,25 @@ fn write_frames(
             event_count: events.len() as u64,
         },
     )
-    .map_err(std::io::Error::other)?;
+}
+
+fn write_response_frame(stream: &mut Stream, response: &ControlResponse) -> std::io::Result<()> {
+    serde_json::to_writer(&mut *stream, response).map_err(std::io::Error::other)?;
+    stream.write_all(b"\n")?;
+    stream.flush()
+}
+
+fn write_event_frame(stream: &mut Stream, event: &ControlEvent) -> std::io::Result<()> {
+    serde_json::to_writer(&mut *stream, event).map_err(std::io::Error::other)?;
+    stream.write_all(b"\n")?;
+    stream.flush()
+}
+
+fn write_completion_frame(
+    stream: &mut Stream,
+    completion: &ControlCompletion,
+) -> std::io::Result<()> {
+    serde_json::to_writer(&mut *stream, completion).map_err(std::io::Error::other)?;
     stream.write_all(b"\n")?;
     stream.flush()
 }
@@ -666,6 +1231,114 @@ fn write_frames(
 pub struct InstanceDirectory {
     runtime_root: PathBuf,
     expected_build: InstanceBuildIdentity,
+}
+
+/// Streaming client for one control-socket terminal attachment. Dropping this
+/// value closes only the socket subscription; it never closes the terminal.
+pub struct TerminalAttachmentClient {
+    state: TerminalAttachmentState,
+    request_id: Uuid,
+    reader: BufReader<Stream>,
+    control_sequence: u64,
+    terminal_sequence: u64,
+    completed: bool,
+}
+
+impl TerminalAttachmentClient {
+    pub fn state(&self) -> &TerminalAttachmentState {
+        &self.state
+    }
+
+    pub fn next_event(&mut self) -> Result<Option<TerminalControlEvent>, ControlError> {
+        if self.completed {
+            return Ok(None);
+        }
+        let mut frame = String::new();
+        let read = self.reader.read_line(&mut frame).map_err(|error| {
+            ControlError::new(
+                "control.instance.handshake_failed",
+                format!("Could not read the terminal attachment stream: {error}"),
+            )
+        })?;
+        if read == 0 {
+            return Err(ControlError::new(
+                "terminal.attach.disconnected",
+                "The terminal attachment ended without a completion frame",
+            ));
+        }
+        let value: serde_json::Value = serde_json::from_str(&frame).map_err(|error| {
+            ControlError::new(
+                "control.instance.handshake_failed",
+                format!("The terminal attachment frame is invalid JSON: {error}"),
+            )
+        })?;
+        match value.get("frameType").and_then(serde_json::Value::as_str) {
+            Some("event") => {
+                let event: ControlEvent = serde_json::from_value(value).map_err(|error| {
+                    ControlError::new(
+                        "control.instance.handshake_failed",
+                        format!("The terminal attachment event is invalid: {error}"),
+                    )
+                })?;
+                let expected_control_sequence = self.control_sequence + 1;
+                if event.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION
+                    || event.request_id != self.request_id
+                    || event.sequence != expected_control_sequence
+                {
+                    return Err(ControlError::new(
+                        "terminal.attach.sequence_invalid",
+                        "The terminal attachment control sequence is invalid",
+                    ));
+                }
+                let ControlEventPayload::Terminal(event) = event.event else {
+                    return Err(ControlError::new(
+                        "terminal.attach.event_invalid",
+                        "The terminal attachment received a non-terminal event",
+                    ));
+                };
+                let (terminal_id, attachment_id, sequence, permits_gap) =
+                    terminal_event_identity(&event);
+                if terminal_id != self.state.terminal_id
+                    || attachment_id != self.state.attachment_id
+                    || (!permits_gap && sequence != self.terminal_sequence + 1)
+                    || sequence <= self.terminal_sequence
+                {
+                    return Err(ControlError::new(
+                        "terminal.attach.sequence_invalid",
+                        "The terminal event identity or sequence is invalid",
+                    ));
+                }
+                self.control_sequence = expected_control_sequence;
+                self.terminal_sequence = sequence;
+                Ok(Some(event))
+            }
+            Some("completion") => {
+                let completion: ControlCompletion =
+                    serde_json::from_value(value).map_err(|error| {
+                        ControlError::new(
+                            "control.instance.handshake_failed",
+                            format!("The terminal completion frame is invalid: {error}"),
+                        )
+                    })?;
+                if completion.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION
+                    || completion.request_id != self.request_id
+                    || completion.status != ControlCompletionStatus::Succeeded
+                    || completion.event_count != self.control_sequence
+                {
+                    return Err(ControlError::new(
+                        "terminal.attach.sequence_invalid",
+                        "The terminal attachment completion is invalid",
+                    ));
+                }
+                self.completed = true;
+                Ok(None)
+            }
+            _ => Err(ControlError::new(
+                "control.instance.handshake_failed",
+                "The terminal attachment contains an unknown frame type",
+            )),
+        }
+    }
 }
 
 impl InstanceDirectory {
@@ -714,6 +1387,101 @@ impl InstanceDirectory {
         let descriptor = select_instance(instances, selector)?;
         request(&descriptor, ControlOperation::SaveState { destination })
             .and_then(expect_state_archive_result)
+    }
+
+    pub fn list_terminals(&self, selector: &str) -> Result<TerminalListResult, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::List {},
+            },
+        )
+        .and_then(expect_terminal_list_result)
+    }
+
+    pub fn get_terminal(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+    ) -> Result<TerminalDescriptor, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::Get { terminal_id },
+            },
+        )
+        .and_then(expect_terminal_descriptor_result)
+    }
+
+    pub fn write_terminal(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+        data: &[u8],
+    ) -> Result<TerminalWriteResult, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::Write {
+                    terminal_id,
+                    data_base64: BASE64_STANDARD.encode(data),
+                },
+            },
+        )
+        .and_then(expect_terminal_write_result)
+    }
+
+    pub fn report_terminal_agent(
+        &self,
+        selector: &str,
+        report: TerminalAgentReportRequest,
+    ) -> Result<TerminalAgentReportResult, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::Report {
+                    terminal_id: report.terminal_id,
+                    kind: report.kind,
+                    source: report.source,
+                    message: report.message,
+                },
+            },
+        )
+        .and_then(expect_terminal_agent_report_result)
+    }
+
+    pub fn close_terminal(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+    ) -> Result<TerminalCloseControlResult, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::Close { terminal_id },
+            },
+        )
+        .and_then(expect_terminal_close_result)
+    }
+
+    pub fn attach_terminal(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+    ) -> Result<TerminalAttachmentClient, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request_terminal_attachment(&descriptor, terminal_id)
     }
 
     pub fn inspect_module(
@@ -776,6 +1544,59 @@ impl InstanceDirectory {
             },
         )
         .and_then(expect_message_diagnostics_result)
+    }
+
+    pub fn list_capabilities(
+        &self,
+        selector: &str,
+    ) -> Result<ActiveCapabilityCatalog, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Capabilities {
+                command: CapabilityCommand::List {},
+            },
+        )
+        .and_then(expect_capability_catalog_result)
+    }
+
+    pub fn inspect_capability(
+        &self,
+        selector: &str,
+        capability_id: String,
+    ) -> Result<ActiveCapabilityInspection, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Capabilities {
+                command: CapabilityCommand::Inspect { capability_id },
+            },
+        )
+        .and_then(expect_capability_inspection_result)
+    }
+
+    pub fn call_capability(
+        &self,
+        selector: &str,
+        capability_id: String,
+        port_id: String,
+        payload: serde_json::Value,
+    ) -> Result<CapabilityInvocation, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Capabilities {
+                command: CapabilityCommand::Call {
+                    capability_id,
+                    port_id,
+                    payload,
+                },
+            },
+        )
+        .and_then(expect_capability_invocation_result)
     }
 
     /// Lists the accepted schedule snapshot for one explicitly selected live
@@ -1077,6 +1898,104 @@ fn request(
     request_with_id(descriptor, operation, Uuid::new_v4())
 }
 
+fn request_terminal_attachment(
+    descriptor: &StoredDescriptor,
+    terminal_id: TerminalId,
+) -> Result<TerminalAttachmentClient, ControlError> {
+    let request_id = Uuid::new_v4();
+    let frame = ControlRequest {
+        frame_type: "request".to_string(),
+        frame_schema_version: CONTROL_FRAME_SCHEMA_VERSION,
+        control_protocol_version: descriptor.instance.build.control_protocol_version,
+        request_id,
+        auth_token: descriptor.auth_token.clone(),
+        caller: ControlCaller {
+            process_id: std::process::id(),
+            executable_role: "shipctl-cli".to_string(),
+            injected_instance_id: std::env::var("SHIPCTL_INSTANCE_ID")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+        },
+        operation: ControlOperation::Terminals {
+            command: TerminalCommand::Attach { terminal_id },
+        },
+    };
+    let mut stream = connect_endpoint(&descriptor.endpoint).map_err(|error| {
+        ControlError::new(
+            "control.instance.handshake_failed",
+            format!("Could not connect to the published local endpoint: {error}"),
+        )
+        .for_context(
+            descriptor.instance.instance_id,
+            descriptor.instance.state_root.clone(),
+        )
+    })?;
+    serde_json::to_writer(&mut stream, &frame).map_err(|error| {
+        ControlError::new(
+            "control.instance.handshake_failed",
+            format!("Could not encode the terminal attachment request: {error}"),
+        )
+    })?;
+    stream
+        .write_all(b"\n")
+        .and_then(|()| stream.flush())
+        .map_err(|error| {
+            ControlError::new(
+                "control.instance.handshake_failed",
+                format!("Could not send the terminal attachment request: {error}"),
+            )
+        })?;
+
+    let mut reader = BufReader::new(stream);
+    let mut response_frame = String::new();
+    reader.read_line(&mut response_frame).map_err(|error| {
+        ControlError::new(
+            "control.instance.handshake_failed",
+            format!("Could not read the terminal attachment response: {error}"),
+        )
+    })?;
+    let response: ControlResponse = serde_json::from_str(&response_frame).map_err(|error| {
+        ControlError::new(
+            "control.instance.handshake_failed",
+            format!("The terminal attachment response is invalid: {error}"),
+        )
+    })?;
+    if response.frame_type != "response"
+        || response.frame_schema_version != CONTROL_FRAME_SCHEMA_VERSION
+        || response.request_id != request_id
+    {
+        return Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The terminal attachment response did not match the request identity or schema",
+        ));
+    }
+    let state = match (response.result, response.error) {
+        (Some(ControlResponseResult::TerminalAttachment(state)), None) => state,
+        (None, Some(error)) => return Err(error),
+        _ => {
+            return Err(ControlError::new(
+                "control.instance.handshake_failed",
+                "The endpoint returned an invalid terminal attachment response",
+            ));
+        }
+    };
+    if state.terminal_id != terminal_id {
+        return Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The terminal attachment response addressed another terminal",
+        ));
+    }
+    let terminal_sequence = state.sequence_boundary;
+    Ok(TerminalAttachmentClient {
+        state,
+        request_id,
+        reader,
+        control_sequence: 0,
+        terminal_sequence,
+        completed: false,
+    })
+}
+
 /// Sends one authenticated request using the caller's stable mutation
 /// identity. Read-only callers use [`request`], while retryable scheduler
 /// refresh and trigger clients reuse this UUID after a lost response.
@@ -1244,6 +2163,113 @@ fn expect_instance_result(stream: ControlStream) -> Result<InstanceRecord, Contr
     }
 }
 
+fn expect_terminal_list_result(stream: ControlStream) -> Result<TerminalListResult, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalList(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-list result for a terminal list request",
+        )),
+    }
+}
+
+fn expect_terminal_descriptor_result(
+    stream: ControlStream,
+) -> Result<TerminalDescriptor, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalDescriptor(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-descriptor result for a terminal get request",
+        )),
+    }
+}
+
+fn expect_terminal_write_result(
+    stream: ControlStream,
+) -> Result<TerminalWriteResult, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalWrite(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-write result for a terminal write request",
+        )),
+    }
+}
+
+fn expect_terminal_agent_report_result(
+    stream: ControlStream,
+) -> Result<TerminalAgentReportResult, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalAgentReport(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-report result for a terminal agent report request",
+        )),
+    }
+}
+
+fn expect_terminal_close_result(
+    stream: ControlStream,
+) -> Result<TerminalCloseControlResult, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalClose(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-close result for a terminal close request",
+        )),
+    }
+}
+
+fn terminal_event_identity(
+    event: &TerminalControlEvent,
+) -> (TerminalId, TerminalAttachmentId, u64, bool) {
+    match event {
+        TerminalControlEvent::Output {
+            terminal_id,
+            attachment_id,
+            sequence,
+            ..
+        }
+        | TerminalControlEvent::Replay {
+            terminal_id,
+            attachment_id,
+            sequence,
+            ..
+        }
+        | TerminalControlEvent::MetadataChanged {
+            terminal_id,
+            attachment_id,
+            sequence,
+            ..
+        }
+        | TerminalControlEvent::AgentActivityChanged {
+            terminal_id,
+            attachment_id,
+            sequence,
+            ..
+        }
+        | TerminalControlEvent::Exited {
+            terminal_id,
+            attachment_id,
+            sequence,
+            ..
+        }
+        | TerminalControlEvent::Detached {
+            terminal_id,
+            attachment_id,
+            sequence,
+            ..
+        } => (*terminal_id, *attachment_id, *sequence, false),
+        TerminalControlEvent::ResyncRequired {
+            terminal_id,
+            attachment_id,
+            sequence,
+            ..
+        } => (*terminal_id, *attachment_id, *sequence, true),
+    }
+}
+
 fn expect_hello_result(stream: ControlStream) -> Result<ControlHello, ControlError> {
     match stream.result {
         ControlResponseResult::Hello(hello) => Ok(hello),
@@ -1332,6 +2358,42 @@ fn expect_message_diagnostics_result(
         _ => Err(ControlError::new(
             "control.instance.handshake_failed",
             "The endpoint returned a non-diagnostic result for a message diagnosis request",
+        )),
+    }
+}
+
+fn expect_capability_catalog_result(
+    stream: ControlStream,
+) -> Result<ActiveCapabilityCatalog, ControlError> {
+    match stream.result {
+        ControlResponseResult::CapabilityCatalog(catalog) => Ok(catalog),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-catalog result for a capability list request",
+        )),
+    }
+}
+
+fn expect_capability_inspection_result(
+    stream: ControlStream,
+) -> Result<ActiveCapabilityInspection, ControlError> {
+    match stream.result {
+        ControlResponseResult::CapabilityInspection(inspection) => Ok(inspection),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-inspection result for a capability inspection request",
+        )),
+    }
+}
+
+fn expect_capability_invocation_result(
+    stream: ControlStream,
+) -> Result<CapabilityInvocation, ControlError> {
+    match stream.result {
+        ControlResponseResult::CapabilityInvocation(invocation) => Ok(invocation),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-invocation result for a capability call request",
         )),
     }
 }
@@ -1544,6 +2606,12 @@ mod tests {
     use crate::instance::context::{InstanceLaunchOptions, LaunchProvenance};
     use crate::scheduler::contracts::{ScheduleDeliveryOutcome, ScheduleDeliverySummary};
     use crate::scheduler::{SCHEDULE_CONTROL_SCHEMA_VERSION, SCHEDULE_INSPECTION_SCHEMA_VERSION};
+    use crate::terminal::{
+        TerminalLaunchRequest, TerminalLaunchTarget, TerminalMetadata, TerminalOwner,
+        TerminalService,
+    };
+    use shipctl_module_api::TerminalColorTheme;
+    use std::collections::HashMap;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Mutex;
 
@@ -1551,6 +2619,27 @@ mod tests {
         active: AtomicUsize,
         shutdown: AtomicBool,
         schedule_requests: Mutex<Vec<(ScheduleCommand, Uuid)>>,
+        terminal_writes: Mutex<Vec<Vec<u8>>>,
+        terminals: TerminalService,
+    }
+
+    struct FingerprintFailureHandler;
+
+    impl ControlHandler for FingerprintFailureHandler {
+        fn active_work(&self) -> Vec<ActiveWorkBlocker> {
+            Vec::new()
+        }
+
+        fn state_fingerprint(&self) -> Result<Option<String>, ControlError> {
+            Err(ControlError::new(
+                "state.snapshot.unclassified_source",
+                "Durable source is not classified: legacy.json",
+            ))
+        }
+
+        fn shutdown(&self, _force: bool) -> Result<(), ControlError> {
+            Ok(())
+        }
     }
 
     impl ControlHandler for FakeHandler {
@@ -1569,7 +2658,59 @@ mod tests {
 
         fn shutdown(&self, _force: bool) -> Result<(), ControlError> {
             self.shutdown.store(true, Ordering::SeqCst);
+            self.terminals.begin_shutdown();
+            self.terminals.shutdown_all();
             Ok(())
+        }
+
+        fn terminal_list(&self) -> Result<Vec<TerminalDescriptor>, ControlError> {
+            Ok(self.terminals.list())
+        }
+
+        fn terminal_get(&self, id: TerminalId) -> Result<TerminalDescriptor, ControlError> {
+            self.terminals.get(id).map_err(terminal_control_error)
+        }
+
+        fn terminal_write(&self, id: TerminalId, data: Vec<u8>) -> Result<(), ControlError> {
+            self.terminal_writes
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(data.clone());
+            self.terminals
+                .write(id, &data)
+                .map_err(terminal_control_error)
+        }
+
+        fn terminal_report(
+            &self,
+            report: TerminalAgentReportRequest,
+        ) -> Result<TerminalAgentActivity, ControlError> {
+            self.terminals
+                .report_agent(report)
+                .map_err(terminal_control_error)
+        }
+
+        fn terminal_close(
+            &self,
+            id: TerminalId,
+        ) -> Result<crate::terminal::TerminalCloseResult, ControlError> {
+            self.terminals.close(id).map_err(terminal_control_error)
+        }
+
+        fn terminal_attach(
+            &self,
+            id: TerminalId,
+            sink: Arc<dyn TerminalEventSink>,
+        ) -> Result<TerminalAttachment, ControlError> {
+            self.terminals
+                .attach(id, sink, false)
+                .map_err(terminal_control_error)
+        }
+
+        fn terminal_detach(&self, attachment_id: TerminalAttachmentId) -> Result<(), ControlError> {
+            self.terminals
+                .detach(attachment_id)
+                .map_err(terminal_control_error)
         }
 
         fn schedule_control(
@@ -1645,6 +2786,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn terminal_input_is_base64_strict_and_uses_the_established_flow_budget() {
+        let accepted = vec![0x5a; TERMINAL_CONTROL_WRITE_MAX_BYTES];
+        assert_eq!(
+            decode_terminal_input(&BASE64_STANDARD.encode(&accepted)).unwrap(),
+            accepted
+        );
+        assert_eq!(
+            decode_terminal_input("not-base64!")
+                .unwrap_err()
+                .code
+                .as_str(),
+            "terminal.input.invalid_base64"
+        );
+        assert_eq!(
+            decode_terminal_input(&BASE64_STANDARD.encode(vec![
+                0_u8;
+                TERMINAL_CONTROL_WRITE_MAX_BYTES
+                    + 1
+            ]))
+            .unwrap_err()
+            .code
+            .as_str(),
+            "terminal.input.too_large"
+        );
+    }
+
     fn fixture(label: &str) -> (InstanceContext, PathBuf) {
         let root = std::env::temp_dir().join(format!(
             "shipctl-control-{label}-{}-{}",
@@ -1665,15 +2833,51 @@ mod tests {
         (context, root)
     }
 
+    fn fake_handler(instance_id: &str, active: usize) -> Arc<FakeHandler> {
+        Arc::new(FakeHandler {
+            active: AtomicUsize::new(active),
+            shutdown: AtomicBool::new(false),
+            schedule_requests: Mutex::new(Vec::new()),
+            terminal_writes: Mutex::new(Vec::new()),
+            terminals: TerminalService::new(instance_id),
+        })
+    }
+
+    #[cfg(unix)]
+    fn terminal_request(source: &str) -> TerminalLaunchRequest {
+        let cwd = PathBuf::from("/tmp");
+        TerminalLaunchRequest {
+            target: TerminalLaunchTarget::Program {
+                program: PathBuf::from("/bin/sh"),
+                argv: vec!["-c".to_string(), source.to_string()],
+            },
+            cwd: cwd.clone(),
+            environment: HashMap::new(),
+            columns: 80,
+            rows: 24,
+            color_theme: TerminalColorTheme {
+                foreground: "#ffffff".to_string(),
+                background: "#000000".to_string(),
+                palette: vec!["#000000".to_string(); 16],
+            },
+            metadata: TerminalMetadata {
+                label: "control terminal".to_string(),
+                cwd,
+                project_path: None,
+                display_command: "sh".to_string(),
+                created_at_ms: 1,
+                owner: TerminalOwner::Core,
+                owner_metadata: None,
+                presentation: None,
+            },
+        }
+    }
+
     #[test]
     fn discovery_requires_handshake_and_shutdown_requires_force_for_active_work() {
         let (context, root) = fixture("live");
         let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
-        let handler = Arc::new(FakeHandler {
-            active: AtomicUsize::new(2),
-            shutdown: AtomicBool::new(false),
-            schedule_requests: Mutex::new(Vec::new()),
-        });
+        let handler = fake_handler("live", 2);
         let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
         let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
 
@@ -1704,14 +2908,27 @@ mod tests {
     }
 
     #[test]
+    fn readiness_survives_an_unavailable_state_fingerprint() {
+        let (context, root) = fixture("fingerprint-degraded");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let server =
+            ControlServer::start(context.clone(), leases, Arc::new(FingerprintFailureHandler))
+                .unwrap();
+
+        let descriptor: StoredDescriptor =
+            serde_json::from_slice(&fs::read(server.descriptor_path()).unwrap()).unwrap();
+        assert_eq!(descriptor.instance.lifecycle, InstanceLifecycle::Ready);
+        assert_eq!(descriptor.instance.state_fingerprint, None);
+
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn authenticated_schedule_dispatch_preserves_the_caller_request_identity() {
         let (context, root) = fixture("schedule-dispatch");
         let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
-        let handler = Arc::new(FakeHandler {
-            active: AtomicUsize::new(0),
-            shutdown: AtomicBool::new(false),
-            schedule_requests: Mutex::new(Vec::new()),
-        });
+        let handler = fake_handler("schedule-dispatch", 0);
         let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
         let descriptor: StoredDescriptor =
             serde_json::from_slice(&fs::read(server.descriptor_path()).unwrap()).unwrap();
@@ -1751,11 +2968,7 @@ mod tests {
     fn schedule_directory_methods_return_typed_results_and_preserve_mutation_ids() {
         let (context, root) = fixture("schedule-directory");
         let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
-        let handler = Arc::new(FakeHandler {
-            active: AtomicUsize::new(0),
-            shutdown: AtomicBool::new(false),
-            schedule_requests: Mutex::new(Vec::new()),
-        });
+        let handler = fake_handler("schedule-directory", 0);
         let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
         let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
         let refresh_request_id = Uuid::new_v4();
@@ -1830,11 +3043,7 @@ mod tests {
     fn schedule_operations_require_current_schema_protocol_and_authentication() {
         let (context, root) = fixture("schedule-authentication");
         let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
-        let handler = Arc::new(FakeHandler {
-            active: AtomicUsize::new(0),
-            shutdown: AtomicBool::new(false),
-            schedule_requests: Mutex::new(Vec::new()),
-        });
+        let handler = fake_handler("schedule-authentication", 0);
         let server = ControlServer::start(context, leases, handler.clone()).unwrap();
         let descriptor: StoredDescriptor =
             serde_json::from_slice(&fs::read(server.descriptor_path()).unwrap()).unwrap();
@@ -1891,6 +3100,295 @@ mod tests {
                 command: ScheduleCommand::List {},
             },
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_attachment_replays_and_stays_concurrent_with_finite_control() {
+        let (context, root) = fixture("terminal-control");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-control", 0);
+        let terminal = handler
+            .terminals
+            .spawn(terminal_request(
+                "stty -echo; printf 'socket-replay\\n'; while IFS= read -r line; do printf 'socket-live:%s\\n' \"$line\"; done",
+            ))
+            .unwrap();
+        loop {
+            let replay = handler
+                .terminals
+                .snapshot(terminal.id)
+                .unwrap()
+                .replay
+                .bytes;
+            if String::from_utf8_lossy(&replay).contains("socket-replay") {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+
+        let listed = directory.list_terminals("terminal-control").unwrap();
+        assert_eq!(listed.count, 1);
+        assert_eq!(listed.terminals[0].id, terminal.id);
+        assert_eq!(
+            directory
+                .get_terminal("terminal-control", terminal.id)
+                .unwrap()
+                .id,
+            terminal.id
+        );
+        let foreign_id = TerminalId::new();
+        let foreign_error = directory
+            .report_terminal_agent(
+                "terminal-control",
+                TerminalAgentReportRequest {
+                    terminal_id: foreign_id,
+                    kind: crate::terminal::TerminalAgentReportKind::Working,
+                    source: crate::terminal::TerminalAgentReportSource {
+                        identifier: "control-test".to_string(),
+                        version: "1".to_string(),
+                    },
+                    message: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(foreign_error.code.as_str(), "terminal.not_found");
+
+        let mut first = directory
+            .attach_terminal("terminal-control", terminal.id)
+            .unwrap();
+        assert!(first.state().live);
+        assert_eq!(first.state().terminal_id, terminal.id);
+        assert_eq!(first.state().replay.format, TERMINAL_REPLAY_FORMAT);
+        assert!(String::from_utf8_lossy(
+            &BASE64_STANDARD
+                .decode(&first.state().replay.data_base64)
+                .unwrap()
+        )
+        .contains("socket-replay"));
+
+        let exact_input = b"first-line\n";
+        let written = directory
+            .write_terminal("terminal-control", terminal.id, exact_input)
+            .unwrap();
+        assert_eq!(written.accepted_bytes, exact_input.len());
+        assert_eq!(
+            handler.terminal_writes.lock().unwrap().last().unwrap(),
+            exact_input
+        );
+        let mut first_output = Vec::new();
+        while !String::from_utf8_lossy(&first_output).contains("socket-live:first-line") {
+            if let Some(TerminalControlEvent::Output { data_base64, .. }) =
+                first.next_event().unwrap()
+            {
+                first_output.extend(BASE64_STANDARD.decode(data_base64).unwrap());
+            }
+        }
+
+        let reported = directory
+            .report_terminal_agent(
+                "terminal-control",
+                TerminalAgentReportRequest {
+                    terminal_id: terminal.id,
+                    kind: crate::terminal::TerminalAgentReportKind::Blocked,
+                    source: crate::terminal::TerminalAgentReportSource {
+                        identifier: "control-test".to_string(),
+                        version: "1".to_string(),
+                    },
+                    message: Some("awaiting input".to_string()),
+                },
+            )
+            .unwrap();
+        assert_eq!(reported.terminal_id, terminal.id);
+        assert_eq!(reported.activity.revision, 1);
+        assert_eq!(
+            directory
+                .get_terminal("terminal-control", terminal.id)
+                .unwrap()
+                .agent_activity,
+            Some(reported.activity.clone())
+        );
+        assert!(matches!(
+            first.next_event().unwrap(),
+            Some(TerminalControlEvent::AgentActivityChanged {
+                terminal_id,
+                descriptor,
+                ..
+            }) if terminal_id == terminal.id
+                && descriptor.agent_activity == Some(reported.activity.clone())
+        ));
+
+        // Dropping an observer leaves the process and registry record alive.
+        drop(first);
+        assert_eq!(
+            directory
+                .get_terminal("terminal-control", terminal.id)
+                .unwrap()
+                .lifecycle,
+            crate::terminal::TerminalLifecycle::Running
+        );
+
+        let mut second = directory
+            .attach_terminal("terminal-control", terminal.id)
+            .unwrap();
+        let second_replay = BASE64_STANDARD
+            .decode(&second.state().replay.data_base64)
+            .unwrap();
+        assert!(String::from_utf8_lossy(&second_replay).contains("socket-live:first-line"));
+        let exact_binary = [0_u8, 1, 2, 0xff, b'\n'];
+        directory
+            .write_terminal("terminal-control", terminal.id, &exact_binary)
+            .unwrap();
+        assert_eq!(
+            handler.terminal_writes.lock().unwrap().last().unwrap(),
+            &exact_binary
+        );
+
+        // A live attachment does not monopolize the endpoint. Closing from a
+        // separate connection terminates only the addressed terminal.
+        assert_eq!(
+            directory.list_terminals("terminal-control").unwrap().count,
+            1
+        );
+        let closed = directory
+            .close_terminal("terminal-control", terminal.id)
+            .unwrap();
+        assert!(closed.existed);
+        loop {
+            match second.next_event().unwrap() {
+                Some(TerminalControlEvent::Exited { terminal_id, .. }) => {
+                    assert_eq!(terminal_id, terminal.id);
+                }
+                Some(_) => continue,
+                None => break,
+            }
+        }
+        assert!(
+            !directory
+                .close_terminal("terminal-control", terminal.id)
+                .unwrap()
+                .existed
+        );
+        assert_eq!(
+            directory.list_terminals("terminal-control").unwrap().count,
+            0
+        );
+
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_terminal_attachment_does_not_block_server_shutdown() {
+        let (context, root) = fixture("terminal-shutdown");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-shutdown", 0);
+        let terminal = handler
+            .terminals
+            .spawn(terminal_request(
+                "trap '' HUP TERM; while :; do sleep 60; done",
+            ))
+            .unwrap();
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+        let attachment = directory
+            .attach_terminal("terminal-shutdown", terminal.id)
+            .unwrap();
+        assert!(attachment.state().live);
+
+        let stopped = directory.stop(Some("terminal-shutdown"), true).unwrap();
+        assert!(stopped.accepted);
+        drop(attachment);
+        drop(server);
+        assert!(handler.shutdown.load(Ordering::SeqCst));
+        assert!(handler.terminals.list().is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stalled_terminal_socket_detaches_without_blocking_terminal_or_control() {
+        let (context, root) = fixture("terminal-stalled-socket");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-stalled-socket", 0);
+        let terminal = handler
+            .terminals
+            .spawn(terminal_request(
+                "stty -echo; read go; while :; do printf 'socket-backpressure-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n'; done",
+            ))
+            .unwrap();
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+        let attachment = directory
+            .attach_terminal("terminal-stalled-socket", terminal.id)
+            .unwrap();
+        assert!(attachment.state().live);
+        assert_eq!(handler.terminals.attachment_count(), 1);
+
+        directory
+            .write_terminal("terminal-stalled-socket", terminal.id, b"go\n")
+            .unwrap();
+        // The unread attachment is on its own nonblocking connection; finite
+        // requests continue while that socket reaches backpressure.
+        assert_eq!(
+            directory
+                .get_terminal("terminal-stalled-socket", terminal.id)
+                .unwrap()
+                .id,
+            terminal.id
+        );
+        while handler.terminals.attachment_count() != 0 {
+            std::thread::yield_now();
+        }
+        assert_eq!(handler.terminals.active_count(), 1);
+        assert!(handler.terminals.snapshot(terminal.id).is_ok());
+
+        handler.terminals.close(terminal.id).unwrap();
+        drop(attachment);
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn idle_socket_disconnect_detaches_and_allows_later_reattach() {
+        let (context, root) = fixture("terminal-disconnect");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-disconnect", 0);
+        let terminal = handler
+            .terminals
+            .spawn(terminal_request(
+                "stty -echo; while IFS= read -r line; do :; done",
+            ))
+            .unwrap();
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+
+        let first = directory
+            .attach_terminal("terminal-disconnect", terminal.id)
+            .unwrap();
+        assert!(first.state().live);
+        assert_eq!(handler.terminals.attachment_count(), 1);
+        drop(first);
+        while handler.terminals.attachment_count() != 0 {
+            std::thread::yield_now();
+        }
+        assert_eq!(handler.terminals.active_count(), 1);
+
+        let second = directory
+            .attach_terminal("terminal-disconnect", terminal.id)
+            .unwrap();
+        assert!(second.state().live);
+        drop(second);
+        while handler.terminals.attachment_count() != 0 {
+            std::thread::yield_now();
+        }
+        handler.terminals.close(terminal.id).unwrap();
+        drop(server);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

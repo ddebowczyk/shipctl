@@ -30,7 +30,7 @@ export default function TerminalItem({
   projectPath,
   onMoveTab,
 }: TerminalItemProps) {
-  const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.ptyId]);
+  const activity: TabActivity | undefined = useTerminalStore((s) => s.tabActivity[tab.terminalId]);
   const repos = useRepoStore((s) => s.repos);
   const groups = useRepoStore((s) => s.groups);
   const projectFacts = useProjectFactsMap(repos);

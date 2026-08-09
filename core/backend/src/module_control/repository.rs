@@ -903,7 +903,7 @@ fn ensure_receipt_matches_candidate(
 /// Read only one known content-addressed or pending-stage directory. This
 /// never walks `modules/` itself and rejects links, special files, and
 /// undeclared entries when `RuntimeArtifactArchive::inspect` checks integrity.
-fn read_artifact_directory(
+pub(super) fn read_artifact_directory(
     directory: &Path,
 ) -> Result<RuntimeArtifactArchive, ArtifactRepositoryError> {
     let metadata = fs::symlink_metadata(directory).map_err(|error| {

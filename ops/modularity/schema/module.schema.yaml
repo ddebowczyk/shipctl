@@ -18,7 +18,8 @@ properties:
         pattern: ^@shipctl/module-[a-z0-9-]+$
       path:
         type: string
-        pattern: ^modules/[a-z0-9-]+/frontend$
+        pattern: >-
+          ^(?:modules/[a-z0-9-]+/frontend|examples/module-fixture/frontend)$
       composition_symbol:
         type: string
         pattern: ^[a-z][A-Za-z0-9]*Module$
@@ -32,7 +33,8 @@ properties:
         pattern: ^[a-z][a-z0-9-]*$
       path:
         type: string
-        pattern: ^modules/[a-z0-9-]+/backend$
+        pattern: >-
+          ^(?:modules/[a-z0-9-]+/backend|examples/module-fixture/backend)$
       cargo_feature:
         type: string
         pattern: ^[a-z][a-z0-9-]*-module$
@@ -97,7 +99,7 @@ properties:
             schema:
               type: string
               pattern: >-
-                ^modules/[a-z0-9-]+/messages/(?:[a-z0-9-]+/)*[a-z0-9-]+\.schema\.json$
+                ^(?:modules/[a-z0-9-]+/messages|examples/module-fixture/messages)/(?:[a-z0-9-]+/)*[a-z0-9-]+\.schema\.json$
             max_encoded_bytes:
               $ref: "#/$defs/nonzero_integer"
             redacted_fields:
@@ -172,7 +174,8 @@ properties:
     properties:
       frontend:
         type: [string, "null"]
-        pattern: ^modules/[a-z0-9-]+/frontend/tests(?:/.*)?$
+        pattern: >-
+          ^(?:modules/[a-z0-9-]+/frontend/tests|examples/module-fixture/tests)(?:/.*)?$
       backend:
         type: [string, "null"]
         minLength: 1

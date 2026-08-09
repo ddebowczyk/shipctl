@@ -2,22 +2,28 @@
 //! the projects watcher and the Tauri app handle at once, so it belongs to the
 //! shell that composes them rather than to any one capability.
 
+use shipctl_core::instance::control::terminal_control_error;
 use shipctl_core::instance::{
-    ActiveWorkBlocker, ControlError, ControlHandler, ControlRequestId, ControlResponseResult,
-    ControlStream, MessageCommand, ModuleCommand, ModuleControlStatus, OperationCommand,
-    ScheduleCommand,
+    ActiveWorkBlocker, CapabilityCommand, ControlError, ControlHandler, ControlRequestId,
+    ControlResponseResult, ControlStream, MessageCommand, ModuleCommand, ModuleControlStatus,
+    OperationCommand, ScheduleCommand,
 };
 use shipctl_core::message_bus::{
     diagnose_message_runtime, MessageBusBridgeService, MessageModuleInspection,
     MessageRuntimeInspection,
 };
-use shipctl_core::module_control::codes::{CONTROL_CAPABILITY_UNAVAILABLE, MUTATION_UNAVAILABLE};
+use shipctl_core::module_control::agent::AgentCapabilityService;
+use shipctl_core::module_control::codes::MUTATION_UNAVAILABLE;
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::projects::watcher::GitWatcher;
 use shipctl_core::scheduler::{SchedulerControlError, SchedulerService};
 use shipctl_core::state::archive::{StateArchiveInspection, StateArchiveService};
-use shipctl_core::terminal::manager::PtyManager;
+use shipctl_core::terminal::{
+    TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId,
+    TerminalCloseResult, TerminalDescriptor, TerminalEventSink, TerminalId, TerminalService,
+};
 use std::path::Path;
+use std::sync::Arc;
 use tauri::Manager;
 
 pub struct TauriControlHandler {
@@ -29,22 +35,13 @@ impl TauriControlHandler {
         Self { app }
     }
 
-    fn module_service(&self) -> Result<ModuleControlService, ControlError> {
-        self.app
-            .state::<Option<ModuleControlService>>()
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| {
-                ControlError::new(
-                    CONTROL_CAPABILITY_UNAVAILABLE,
-                    "This host mode does not provide module control",
-                )
-            })
+    fn module_service(&self) -> ModuleControlService {
+        self.app.state::<ModuleControlService>().inner().clone()
     }
 
     fn message_inspection(&self) -> MessageRuntimeInspection {
         let bridges = self.app.state::<MessageBusBridgeService>().inner().clone();
-        let module_service = self.module_service().ok();
+        let module_service = self.module_service();
         tauri::async_runtime::block_on(async move {
             let runtime = bridges.inspect().await;
             let modules = runtime
@@ -52,9 +49,7 @@ impl TauriControlHandler {
                 .iter()
                 .cloned()
                 .map(|registration| MessageModuleInspection {
-                    module: module_service
-                        .as_ref()
-                        .and_then(|service| service.inspect(&registration.module_id).ok()),
+                    module: module_service.inspect(&registration.module_id).ok(),
                     registration,
                 })
                 .collect();
@@ -65,7 +60,7 @@ impl TauriControlHandler {
 
 impl ControlHandler for TauriControlHandler {
     fn active_work(&self) -> Vec<ActiveWorkBlocker> {
-        let count = self.app.state::<PtyManager>().session_count();
+        let count = self.app.state::<TerminalService>().active_count();
         if count == 0 {
             Vec::new()
         } else {
@@ -98,19 +93,15 @@ impl ControlHandler for TauriControlHandler {
     }
 
     fn module_control_status(&self) -> ModuleControlStatus {
-        self.module_service()
-            .map(|service| service.status())
-            .unwrap_or_default()
+        self.module_service().status()
     }
 
     fn instance_diagnostics(&self) -> Vec<shipctl_core::module_control::Diagnostic> {
-        self.module_service()
-            .map(|service| service.diagnose_instance())
-            .unwrap_or_default()
+        self.module_service().diagnose_instance()
     }
 
     fn module_control(&self, command: ModuleCommand) -> Result<ControlStream, ControlError> {
-        let service = self.module_service()?;
+        let service = self.module_service();
         match command {
             ModuleCommand::Inspect { module_id } => Ok(ControlStream::result(
                 ControlResponseResult::ModuleInspection(service.inspect(&module_id)?),
@@ -133,6 +124,32 @@ impl ControlHandler for TauriControlHandler {
                 ControlResponseResult::MessageDiagnostics(diagnose_message_runtime(inspection))
             }
         }))
+    }
+
+    fn capability_control(
+        &self,
+        command: CapabilityCommand,
+    ) -> Result<ControlStream, ControlError> {
+        let service = self.app.state::<AgentCapabilityService>().inner().clone();
+        match command {
+            CapabilityCommand::List {} => Ok(ControlStream::result(
+                ControlResponseResult::CapabilityCatalog(service.list()?),
+            )),
+            CapabilityCommand::Inspect { capability_id } => Ok(ControlStream::result(
+                ControlResponseResult::CapabilityInspection(service.inspect(&capability_id)?),
+            )),
+            CapabilityCommand::Call {
+                capability_id,
+                port_id,
+                payload,
+            } => tauri::async_runtime::block_on(async move {
+                service
+                    .call(&capability_id, &port_id, payload)
+                    .await
+                    .map(ControlResponseResult::CapabilityInvocation)
+                    .map(ControlStream::result)
+            }),
+        }
     }
 
     fn schedule_control(
@@ -178,11 +195,64 @@ impl ControlHandler for TauriControlHandler {
     }
 
     fn operation_control(&self, command: OperationCommand) -> Result<ControlStream, ControlError> {
-        let service = self.module_service()?;
+        let service = self.module_service();
         let OperationCommand::Inspect { operation_id } = command;
         Ok(ControlStream::result(
             ControlResponseResult::ModuleOperation(service.inspect_operation(operation_id)?),
         ))
+    }
+
+    fn terminal_list(&self) -> Result<Vec<TerminalDescriptor>, ControlError> {
+        Ok(self.app.state::<TerminalService>().list())
+    }
+
+    fn terminal_get(&self, id: TerminalId) -> Result<TerminalDescriptor, ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .get(id)
+            .map_err(terminal_control_error)
+    }
+
+    fn terminal_write(&self, id: TerminalId, data: Vec<u8>) -> Result<(), ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .write(id, &data)
+            .map_err(terminal_control_error)
+    }
+
+    fn terminal_report(
+        &self,
+        report: TerminalAgentReportRequest,
+    ) -> Result<TerminalAgentActivity, ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .report_agent(report)
+            .map_err(terminal_control_error)
+    }
+
+    fn terminal_close(&self, id: TerminalId) -> Result<TerminalCloseResult, ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .close(id)
+            .map_err(terminal_control_error)
+    }
+
+    fn terminal_attach(
+        &self,
+        id: TerminalId,
+        sink: Arc<dyn TerminalEventSink>,
+    ) -> Result<TerminalAttachment, ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .attach(id, sink, false)
+            .map_err(terminal_control_error)
+    }
+
+    fn terminal_detach(&self, attachment_id: TerminalAttachmentId) -> Result<(), ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .detach(attachment_id)
+            .map_err(terminal_control_error)
     }
 
     fn save_state(&self, destination: &Path) -> Result<StateArchiveInspection, ControlError> {
@@ -204,13 +274,13 @@ fn scheduler_control_error(error: SchedulerControlError) -> ControlError {
 }
 
 fn perform_shutdown(app: &tauri::AppHandle) {
-    let pty_manager = app.state::<PtyManager>();
-    if !pty_manager.begin_shutdown() {
+    let terminals = app.state::<TerminalService>();
+    if !terminals.begin_shutdown() {
         return;
     }
     app.state::<SchedulerService>().shutdown();
     app.state::<GitWatcher>().shutdown();
-    pty_manager.kill_all();
+    terminals.shutdown_all();
     app.exit(0);
 }
 

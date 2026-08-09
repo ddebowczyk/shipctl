@@ -59,6 +59,11 @@ open, and inspection. Rust-to-frontend delivery uses one ordered Tauri
 Tauri events. Frames contain route generation, endpoint identity, message type,
 payload, and correlation data required by explicit capability-port replies.
 
+This deliberately follows Tauri's transport conventions: commands and channels
+cross the native/webview boundary, while ordinary Tauri events remain available
+for lightweight shell/UI notification. `RuntimeMessageBus` is the dynamic
+capability-routing layer above that bridge; it does not replace Tauri IPC.
+
 Bridge closure cancels only frontend-owned registrations. Backend-owned
 channels remain available. Reopening the webview obtains the current route
 snapshot and a new bridge; the bus never depends on a webview-created identity

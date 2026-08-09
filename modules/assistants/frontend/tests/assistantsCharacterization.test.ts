@@ -54,11 +54,14 @@ function fixtureServices() {
       replace: async () => undefined,
     },
     terminalSessions: {
+      list: () => [],
       getDimensions: () => ({ columns: 132, rows: 42 }),
       launch: async (request: ModuleTerminalSessionLaunchRequest) => {
         calls.push(["launch", request]);
         return {
-          id: "fixture-terminal",
+          id: request.moduleSessionId,
+          terminalId: "00000000-0000-4000-8000-000000000001" as never,
+          moduleId: "assistants",
           projectPath: request.projectPath,
           ownerKey: request.ownerKey,
           label: request.label,
@@ -69,7 +72,9 @@ function fixtureServices() {
       launchManaged: async (request: ModuleManagedTerminalSessionLaunchRequest) => {
         calls.push(["launch-managed", request]);
         return {
-          id: "fixture-managed-terminal",
+          id: request.moduleSessionId,
+          terminalId: "00000000-0000-4000-8000-000000000002" as never,
+          moduleId: "assistants",
           projectPath: request.projectPath,
           ownerKey: request.ownerKey,
           label: request.label,
@@ -79,6 +84,8 @@ function fixtureServices() {
       },
       update: async (sessionId, update) => ({
         id: sessionId,
+        terminalId: "00000000-0000-4000-8000-000000000001" as never,
+        moduleId: "assistants",
         projectPath: "/repo",
         ownerKey: "assistants:fixture",
         label: update.label ?? "Fixture",
@@ -109,7 +116,11 @@ function fixtureServices() {
     notices: { push: (notice) => calls.push(["notice", notice]) },
     externalLinks: { open: async () => undefined },
   } satisfies ModuleHostServices;
-  return { calls, services };
+  return {
+    calls,
+    services,
+    publish: (event: ModuleTerminalSessionLifecycleEvent) => listener?.(event),
+  };
 }
 
 test("module identity and launcher migration metadata remain stable", () => {
@@ -160,6 +171,7 @@ test("non-restorable providers launch through the generic terminal port", async 
   const request = fixture.calls.find(([kind]) => kind === "launch")?.[1] as ModuleTerminalSessionLaunchRequest;
   assert.deepEqual(request, {
     projectPath: "/repo",
+    moduleSessionId: request.moduleSessionId,
     ownerKey: "assistants:antigravity",
     command: "agy",
     arguments: ["--model", "gemini-3", "--dangerously-skip-permissions"],
@@ -176,6 +188,7 @@ test("non-restorable providers launch through the generic terminal port", async 
     rows: 42,
   });
   assert.equal(request.presentation?.showInSessionList, true);
+  assert.match(request.moduleSessionId, /^assistants:/);
 });
 
 test("Claude and Codex launch only through the managed terminal seam", async () => {
@@ -187,6 +200,7 @@ test("Claude and Codex launch only through the managed terminal seam", async () 
   assert.equal(fixture.calls.some(([kind]) => kind === "launch"), false);
   const request = fixture.calls.find(([kind]) => kind === "launch-managed")?.[1] as ModuleManagedTerminalSessionLaunchRequest;
   assert.equal(request.ownerKey, "assistants:claude");
+  assert.match(request.moduleSessionId, /^assistants:/);
   assert.equal(request.cwd, "/repo");
   assert.equal(request.presentation?.showInSessionList, true);
   assert.equal(request.presentation?.badge?.label, "saving");

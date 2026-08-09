@@ -1,0 +1,11 @@
+[package]
+name = "shipctl-vt-replay-proof"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "72ac98f292879bf9f788fcbb11238c562a1eebe6", default-features = false }
+
+[workspace]
+

@@ -1,98 +1,85 @@
-# Phase 7 — agent development loop
+# Phase 7 — agent module build, pack, and development loop
 
 ## Outcome
 
-Give agents one reliable source-to-runtime workflow that builds immutable
-artifacts, applies them through the public control plane, and verifies the exact
-code and configuration now running.
+Give agents one reliable source-to-runtime workflow for TypeScript modules:
+build and validate an immutable artifact, publish it, apply it to a named
+instance, and verify the exact digest now running.
 
-## Work package 7.1 — development artifact builder
+## Work package 7.1 — deterministic build and pack
 
-Add:
+Source modules are ordinary npm/pnpm packages. Add public commands for the
+Shipctl artifact boundary:
 
 ```text
-shipctl modules dev <source-path> --watch
+shipctl modules build <source-path>
+shipctl modules pack <build-output>
+shipctl modules dev <source-path> --watch --instance <name>
 ```
 
-The command owns source watching and invokes the repository module builder. The
-desktop host remains a loader and reconciler; it never executes half-written
-source trees or embeds TypeScript build policy.
+The builder uses the module's Vite or Rollup configuration, externalizes
+host-owned peers, validates manifests and capability contracts including
+`defines`, `implements`, `requires`, and declared agent surfaces, and produces
+the archive layout from Phase 3. Repeating a build from identical declared
+inputs produces the same runtime content digest.
 
-For each coherent change:
+The runtime host never builds TypeScript, reads a half-written source tree,
+runs package-manager installation, or executes lifecycle scripts.
 
-1. build into a temporary output root;
-2. run manifest, schema, capability, and package validation;
-3. calculate the immutable digest and publish as `development` provenance;
-4. submit an update only after the build and preflight succeed;
-5. observe the resulting operation; and
-6. print the operation, revision, digest, runtime marker, and verification result.
+## Work package 7.2 — validate, publish, and apply
 
-A build failure creates diagnostics but no registry revision. A newer coherent
-build may supersede an uncommitted watch result; committed revisions remain in
-the journal and are never rewritten.
+For each coherent source change the development command:
 
-## Work package 7.2 — expectation-based verification
+1. builds into an isolated output directory;
+2. validates the package, capability definitions, schemas, assets, and grants;
+3. calculates and publishes an immutable development artifact;
+4. submits a replacement operation only after validation succeeds;
+5. observes the operation through the public instance protocol; and
+6. reports the source revision, artifact digest, provider identity, and
+   verification result.
 
-Make `modules verify` suitable for agent scripts. An expectation can assert:
+A failed build or preflight produces diagnostics but no desired-state revision.
+A configuration-only edit invokes reconfigure; it does not synthesize a code
+build.
 
-- module identity, provenance, version, and digest;
-- desired enabled state and configuration revision;
-- observed runtime state and applied registry revision;
-- evaluated runtime marker;
-- contribution ids and effective grants;
-- resource and drain conditions; and
-- required or forbidden diagnostic codes.
+## Work package 7.3 — agent verification
 
-The command emits a field-by-field comparison and returns non-zero for unmet
-expectations or unavailable required evidence. It does not treat warnings as
-failures unless the expectation says so.
+`shipctl modules verify` can assert module identity, selected digest, desired
+and applied revisions, provider health, capability bindings, contributions,
+grants, resources, and expected or forbidden diagnostic codes.
 
-Add a top-level `shipctl diagnose` that aggregates instance, registry,
-supervisor, module, contribution-owner, and resource consistency checks. It is a
-read-only full-application diagnostic, not a repair command.
+`shipctl diagnose` joins named-instance, registry, supervisor, capability,
+provider, bus-route, scheduler, stream, and resource consistency. It is
+read-only and uses public observations rather than private frontend stores.
 
-## Work package 7.3 — reproducible evidence bundles
-
-Every development operation can emit an evidence directory containing:
-
-- normalized command requests and structured responses;
-- operation transitions and registry revisions;
-- artifact manifest, digest, and provenance;
-- redacted inspect, diagnose, and verify results;
-- supervisor transition and catalog ownership snapshots; and
-- relevant redacted host logs correlated by operation id.
-
-The command prints the evidence path. Secrets and raw terminal content are
-excluded by contract. Artifact retention and evidence cleanup remain explicit
-operator policy; this plan does not invent a hidden retention threshold.
+Evidence bundles are opt-in and contain normalized requests, structured
+responses, artifact metadata, redacted diagnostics, and operation correlation.
+They exclude secrets, bus payload history, and ordinary terminal content.
 
 ## Diagnostic and verification mechanism
 
-Test the watcher as a real subprocess against an isolated source fixture and a
-running Shipctl host. The test edits the exported behavior marker, waits on the
-returned operation rather than sleeping, then verifies the exact evaluated
-digest and marker through the CLI.
-
-Failure cases cover compiler failure, schema failure, preflight failure,
-activation failure, supervisor disconnect, and a subsequent successful edit.
-The evidence bundle itself validates against a versioned manifest.
+Drive the watcher as a subprocess against the fixture package and a running
+named instance. Change its exported behavior from A to B and wait on operation
+completion rather than sleeping. Prove the exact digest and callable behavior.
+Then introduce a compiler or preflight failure, prove B remains active, and
+apply a valid subsequent change.
 
 ## Exit proof
 
-- Editing fixture A to B publishes one immutable B only after validation.
-- The running instance reports B's exact digest and evaluated marker.
-- A failed build or activation leaves the last good module active.
+- Build and pack produce a validated artifact containing code, assets, and
+  module-defined capability contracts.
+- Editing A to B publishes and activates B only after validation.
+- A failed build, preflight, or activation leaves the last good provider live.
 - A later valid edit recovers without restarting the watcher or Shipctl.
-- Configuration-only changes use `reconfigure`, not a synthetic code rebuild.
-- `verify` can prove both positive and negative expectations from JSON.
-- The evidence bundle contains correlated, redacted facts sufficient to replay
-  the result without reading private in-memory stores.
-- Existing repository gates remain green.
+- Configuration-only changes do not rebuild source.
+- The host binary and webview remain unchanged throughout the development loop.
+- npm may distribute source or archives, but runtime installation requires only
+  the immutable Shipctl artifact.
 
 ## Primary implementation areas
 
-- `ops/build/` for deterministic module artifact building;
-- `src-tauri/src/` for CLI dev/watch adapter and output rendering;
-- `core/backend/src/module_control/` for evidence correlation;
-- `modules/fixture/` for source-edit fixtures; and
-- `ops/module-control/` for subprocess integration tests.
+- `ops/build/` for deterministic module building and packing;
+- `cli/` for build, pack, dev, and verify commands;
+- `core/backend/src/module_control/` for publication and operation correlation;
+- `examples/module-fixture/` for source-edit scenarios; and
+- `ops/module-control/` for subprocess integration proofs.

@@ -38,7 +38,15 @@ export function validateManifests(root) {
     .filter((entry) => entry.isDirectory())
     .map((entry) => path.join(moduleRoot, entry.name, "module.yaml"))
     .filter(existsSync)
-    .sort();
+    .map((manifestPath) => ({ manifestPath, kind: "product" }));
+  const fixtureManifestPath = path.join(
+    root,
+    "examples/module-fixture/module.yaml",
+  );
+  if (existsSync(fixtureManifestPath)) {
+    manifests.push({ manifestPath: fixtureManifestPath, kind: "fixture" });
+  }
+  manifests.sort((left, right) => left.manifestPath.localeCompare(right.manifestPath));
 
   if (manifests.length === 0) return ["No modules/*/module.yaml manifests found"];
 
@@ -53,11 +61,11 @@ export function validateManifests(root) {
   const tauriPath = path.join(root, "src-tauri/tauri.conf.json");
   const tauri = existsSync(tauriPath) ? readJson(tauriPath) : null;
 
-  for (const manifestPath of manifests) {
+  for (const { manifestPath, kind } of manifests) {
     const manifest = readStructured(manifestPath, "yaml");
     const id = manifest.id ?? path.basename(path.dirname(manifestPath));
     const directoryId = path.basename(path.dirname(manifestPath));
-    if (id !== directoryId) fail(id, `id does not match modules/${directoryId}`);
+    if (kind === "product" && id !== directoryId) fail(id, `id does not match modules/${directoryId}`);
 
     const frontend = manifest.frontend;
     const frontendPackagePath = path.join(root, frontend.path, "package.json");

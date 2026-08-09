@@ -134,9 +134,9 @@ async function handleLifecycle(
   const metadata = metadataBySession.get(event.session.id) ?? metadataOf(event.session);
   if (!metadata) return;
 
-  if (event.type === "started") {
+  if (["launched", "adopted", "updated"].includes(event.type)) {
     metadataBySession.set(event.session.id, metadata);
-    captureCodexSession(event.session, metadata, services);
+    if (event.type !== "updated") captureCodexSession(event.session, metadata, services);
     return;
   }
 
@@ -161,10 +161,17 @@ async function handleLifecycle(
     return;
   }
 
+  if (event.type === "closed") {
+    clearTimer(captureTimers, event.session.id);
+    clearTimer(restoreTimers, event.session.id);
+    metadataBySession.delete(event.session.id);
+    return;
+  }
+
   clearTimer(captureTimers, event.session.id);
   clearTimer(restoreTimers, event.session.id);
   metadataBySession.delete(event.session.id);
-  if (!metadata.record || event.reason === "manual-stop") return;
+  if (!metadata.record) return;
 
   if (metadata.restoring) {
     await rearmSession(metadata.record.recordId);
@@ -198,12 +205,14 @@ export async function launchAssistant(
   };
 
   try {
+    const moduleSessionId = `${OWNER_PREFIX}${crypto.randomUUID()}`;
     if (!provider) {
       const args: string[] = [];
       if (model) args.push(assistant.modelFlag, model);
       if (mode === "yolo" && assistant.yoloFlag) args.push(assistant.yoloFlag);
       await services.terminalSessions.launch({
         projectPath,
+        moduleSessionId,
         ownerKey: `${OWNER_PREFIX}${assistantId}`,
         command: assistant.command,
         arguments: args,
@@ -219,6 +228,7 @@ export async function launchAssistant(
 
     await services.terminalSessions.launchManaged({
       projectPath,
+      moduleSessionId,
       ownerKey: `${OWNER_PREFIX}${assistantId}`,
       cwd: projectPath,
       label: assistant.name,
@@ -226,7 +236,7 @@ export async function launchAssistant(
       presentation: assistantPresentation(assistantId, "pending"),
       columns: dimensions.columns,
       rows: dimensions.rows,
-      start: async (context, onOutput) => {
+      start: async (context) => {
         const spawned = await spawnAssistantSession(
           {
             provider,
@@ -237,10 +247,9 @@ export async function launchAssistant(
             model,
           },
           context,
-          onOutput,
         );
         return {
-          terminalId: spawned.ptyId,
+          terminalId: spawned.terminalId,
           ownerMetadata: { ...metadata, record: spawned.record },
           presentation: assistantPresentation(provider, spawned.record.captureState),
         };
@@ -270,6 +279,7 @@ async function resumeRecord(
   };
   const session = await services.terminalSessions.launchManaged({
     projectPath: record.placementProjectPath,
+    moduleSessionId: `${OWNER_PREFIX}${record.recordId}`,
     ownerKey: `${OWNER_PREFIX}${record.provider}`,
     cwd: record.launchRepoPath,
     label: record.label,
@@ -277,10 +287,10 @@ async function resumeRecord(
     presentation: assistantPresentation(record.provider, record.captureState),
     columns: dimensions.columns,
     rows: dimensions.rows,
-    start: async (context, onOutput) => {
-      const spawned = await resumeAssistantSession(record.recordId, context, onOutput);
+    start: async (context) => {
+      const spawned = await resumeAssistantSession(record.recordId, context);
       return {
-        terminalId: spawned.ptyId,
+        terminalId: spawned.terminalId,
         ownerMetadata: { ...metadata, record: spawned.record },
         presentation: assistantPresentation(spawned.record.provider, spawned.record.captureState),
       };

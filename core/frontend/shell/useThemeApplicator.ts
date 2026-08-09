@@ -4,8 +4,8 @@ import { useThemeStore } from "../appearance/index.ts";
 import { applyThemeToTerminals } from "../terminal/index.ts";
 import { hexLuminance } from "../appearance/index.ts";
 import type { ShipctlTheme } from "../appearance/index.ts";
-import { toPtyColorTheme } from "../terminal/index.ts";
-import { updatePtyColorTheme } from "../platform/index.ts";
+import { toTerminalColorTheme } from "../terminal/index.ts";
+import { updateTerminalColorTheme } from "../platform/index.ts";
 
 const CSS_VAR_MAP: [keyof ShipctlTheme, string][] = [
   ["appBg", "--app-bg"],
@@ -54,7 +54,7 @@ export function useThemeApplicator(): void {
     document.documentElement.dataset.themeTone = isLight ? "light" : "dark";
 
     applyThemeToTerminals(theme);
-    updatePtyColorTheme(toPtyColorTheme(theme)).catch(() => {});
+    updateTerminalColorTheme(toTerminalColorTheme(theme)).catch(() => {});
 
     const win = getCurrentWindow();
     if (theme.isTransparent) {

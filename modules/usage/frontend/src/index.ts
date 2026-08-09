@@ -1,5 +1,6 @@
 import type {
   BroadcastTopic,
+  DirectedChannel,
   MessageTypeContract,
   ShipctlModule,
 } from "@shipctl/module-api";
@@ -17,6 +18,7 @@ import { notifyUsageIngestCompleted } from "./ingestCompleted";
 export const USAGE_SURFACE_ID = "core.usage" as const;
 
 type UsageIngestCompleted = Record<string, never>;
+type UsageRefreshRequest = Record<string, never>;
 
 const USAGE_INGEST_COMPLETED = {
   id: "usage.ingest-completed",
@@ -48,8 +50,43 @@ const USAGE_INGEST_COMPLETED_CONTRACT: MessageTypeContract<UsageIngestCompleted>
   },
 };
 
+const USAGE_REFRESH_REQUEST = {
+  id: "usage.refresh-request",
+  version: 1,
+} as const;
+
+const USAGE_REFRESH_CHANNEL: DirectedChannel<UsageRefreshRequest> = {
+  id: "usage.refresh-request",
+  message: USAGE_REFRESH_REQUEST,
+};
+
+const USAGE_REFRESH_REQUEST_CONTRACT: MessageTypeContract<UsageRefreshRequest> = {
+  message: USAGE_REFRESH_REQUEST,
+  schema: {
+    draft: "https://json-schema.org/draft/2020-12/schema",
+    root: "modules/usage/messages/refresh-request.schema.json",
+    resources: {
+      "modules/usage/messages/refresh-request.schema.json": {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        $id: "shipctl-artifact:///modules/usage/messages/refresh-request.schema.json",
+        type: "object",
+        additionalProperties: false,
+      },
+    },
+    // The only legal compact JSON value is `{}`.
+    maxEncodedBytes: 2,
+    redactedFields: [],
+    compatibleVersions: [1],
+  },
+};
+
 function fetchUsageSnapshots() {
   return useUsageStore.getState().fetchSnapshots();
+}
+
+async function refreshUsageAndSnapshots() {
+  await refreshUsageData();
+  await fetchUsageSnapshots();
 }
 
 export const usageModule = {
@@ -105,14 +142,20 @@ export const usageModule = {
       id: "usage.periodic-refresh",
       moduleId: "shipctl.usage",
       schedule: { kind: "interval", intervalMs: 60_000 },
-      async run() {
-        await refreshUsageData();
-        await fetchUsageSnapshots();
-      },
+      run: refreshUsageAndSnapshots,
     },
   ],
   messages: {
-    provides: [USAGE_INGEST_COMPLETED_CONTRACT],
+    provides: [USAGE_INGEST_COMPLETED_CONTRACT, USAGE_REFRESH_REQUEST_CONTRACT],
+    handles: [{
+      channel: USAGE_REFRESH_CHANNEL,
+      // Provider refresh accepts one in-flight operation, so one pending
+      // request preserves the existing refresh coalescing semantics.
+      capacity: 1,
+      requiredGrant: "message.send.usage.refresh-request",
+      schedulerAllowed: true,
+      handle: refreshUsageAndSnapshots,
+    }],
     publishes: [{
       topic: USAGE_INGEST_COMPLETED_TOPIC,
       // Completion is a coalescible state signal: one pending notification is

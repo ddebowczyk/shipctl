@@ -3,5 +3,13 @@
 //! capability because their payload is bytes written straight to the PTY.
 
 pub mod commands;
-pub mod manager;
-pub mod session;
+pub mod process;
+pub mod record;
+pub mod replay;
+pub mod runtime;
+pub mod service;
+pub mod types;
+
+pub use runtime::{TerminalEventSink, TerminalRuntimeHandle};
+pub use service::TerminalService;
+pub use types::*;

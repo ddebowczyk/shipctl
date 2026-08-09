@@ -39,7 +39,10 @@ store, RPC framework, terminal transport, or cross-process broker.
 - Directed commands use Tokio `mpsc`; request results use `oneshot`.
 - Broadcast notifications use Tokio `broadcast`.
 - Current route and configuration snapshots use Tokio `watch`.
-- Tauri IPC is a bridge between Rust and the webview, not the bus itself.
+- Tauri commands and `Channel`s are the conventional Rust-to-webview bridge.
+  The bus adds only module-domain routing, ownership, and validation above that
+  transport; it is not a competing renderer IPC stack. Small shell/UI lifecycle
+  notifications may still use ordinary Tauri events.
 - PTY bytes remain on dedicated streaming channels. The bus carries only
   lifecycle, availability, and control messages about terminals.
 - Generic request/response capability APIs remain explicit ports. They are not
@@ -49,9 +52,12 @@ store, RPC framework, terminal transport, or cross-process broker.
 
 These choices follow the documented semantics of
 [Tokio synchronization primitives](https://docs.rs/tokio/latest/tokio/sync/)
-and avoid using Tauri's weakly typed event system as an application protocol;
-Tauri recommends channels for ordered streaming data in its
-[IPC guidance](https://v2.tauri.app/develop/calling-frontend/).
+and Tauri's IPC conventions: commands for narrow host calls, channels for
+ordered bridge delivery, and events for lightweight UI notification. The
+domain bus is needed only for dynamic capability routes, schema/version
+validation, grants, activation ownership, and inspection—facts that Tauri
+transport cannot infer. Tauri recommends channels for ordered streaming data
+in its [IPC guidance](https://v2.tauri.app/develop/calling-frontend/).
 
 ## Relationship to the module-control plan
 

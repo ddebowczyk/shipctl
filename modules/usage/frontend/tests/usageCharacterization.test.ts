@@ -135,6 +135,42 @@ test("Usage remains global across project switches and refreshes through its dec
   assert.match(adapter, /slot: "terminal\.after"/);
 });
 
+test("usage refresh exposes a strict, bounded scheduler-directed message contract", () => {
+  const adapter = source("../src/index.ts");
+  const manifest = source("../../module.yaml");
+  const schema = JSON.parse(
+    source("../../messages/refresh-request.schema.json"),
+  ) as Record<string, unknown>;
+
+  assert.match(adapter, /USAGE_REFRESH_CHANNEL: DirectedChannel<UsageRefreshRequest>/);
+  assert.match(adapter, /id: "usage\.refresh-request"/);
+  assert.match(adapter, /provides: \[USAGE_INGEST_COMPLETED_CONTRACT, USAGE_REFRESH_REQUEST_CONTRACT\]/);
+  assert.match(
+    adapter,
+    /handles: \[\{[\s\S]*channel: USAGE_REFRESH_CHANNEL,[\s\S]*capacity: 1,[\s\S]*requiredGrant: "message\.send\.usage\.refresh-request",[\s\S]*schedulerAllowed: true,[\s\S]*handle: refreshUsageAndSnapshots,/,
+  );
+  assert.match(
+    adapter,
+    /async function refreshUsageAndSnapshots\(\) \{\s*await refreshUsageData\(\);\s*await fetchUsageSnapshots\(\);\s*\}/,
+  );
+  assert.match(adapter, /one pending[\s\S]*refresh coalescing semantics/);
+
+  assert.deepEqual(schema, {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    $id: "shipctl-artifact:///modules/usage/messages/refresh-request.schema.json",
+    type: "object",
+    additionalProperties: false,
+  });
+  assert.match(
+    manifest,
+    /- id: usage\.refresh-request\n      version: 1\n      schema: modules\/usage\/messages\/refresh-request\.schema\.json\n      max_encoded_bytes: 2\n      redacted_fields: \[\]\n      compatible_versions:\n        - 1/,
+  );
+  assert.match(
+    manifest,
+    /handles:\n    - id: usage\.refresh-request\n      message:\n        id: usage\.refresh-request\n        version: 1\n      capacity: 1\n      required_grant: message\.send\.usage\.refresh-request\n      scheduler_allowed: true/,
+  );
+});
+
 test("native cache, unavailable states, and capability-owned config remain bounded", () => {
   const usage = source("../../backend/src/usage/mod.rs");
   const config = source("../../../../core/backend/src/workspace/config.rs");

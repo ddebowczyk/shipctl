@@ -1,0 +1,12 @@
+show:
+    node bin/version.mjs show
+
+check:
+    node bin/version.mjs check
+
+next part:
+    node bin/version.mjs next {{part}}
+
+set version:
+    node bin/version.mjs set {{version}}
+

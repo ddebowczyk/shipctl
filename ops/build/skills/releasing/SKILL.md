@@ -48,16 +48,18 @@ machine.
 
 ## Version
 
-`src-tauri/tauri.conf.json > version` is the single source. Every other manifest
-carries a `0.0.0` placeholder, and `just check version` enforces that.
+`ops/version/current.yaml > product_version` is the product-version authority.
+Tauri's JSON version is a required packaging projection, while internal npm and
+Cargo manifests carry `0.0.0` placeholders. `just version check` enforces the
+boundary and `just version set` updates the authority and projection together.
 
 ```bash
-just build bump <new-version>
+just version set <new-version>
 ```
 
-That rewrites the one file, re-runs the check, and commits. Do not edit versions
-by hand — `package.json` and the `Cargo.toml` files are deliberately not the
-source and changing them only reintroduces drift.
+That changes local files only; it never stages, commits, tags, pushes, or
+publishes. Do not edit package or Cargo versions by hand: they are deliberately
+not the product-version source.
 
 ## Cutting the release
 

@@ -187,6 +187,7 @@ const services = {
     replace: async () => undefined,
   },
   terminalSessions: {
+    list: () => [],
     getDimensions: () => ({ columns: 80, rows: 24 }),
     launch: async (request) => ({
       id: "fixture-session",

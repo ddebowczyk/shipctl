@@ -2,12 +2,12 @@
 schema_version: 1
 id: module-control
 provides: module-control
-description: Verify module-control contracts and loader boundaries.
+description: Verify module-control contracts and public boundaries.
 status: experimental
 requires:
   tools: [bash, cargo, just, node, pnpm]
   capabilities: []
-owns: [ops/module-control/**]
+owns: [examples/rapid-terminal-probe/**, ops/module-control/**]
 reads:
   - Cargo.toml
   - Cargo.lock
@@ -22,11 +22,11 @@ reads:
 generates:
   - target/**
 commands:
-  - name: build-loader-probe-host
-    summary: Build the host required by the packaged loader probe.
+  - name: offline-cli
+    summary: Verify offline runtime artifact admission through the public CLI.
     lane: slow
-  - name: loader-tripwire
-    summary: Verify frontend artifact swaps and failed-import retention.
+  - name: integration
+    summary: Verify the live module-control boundary.
     lane: slow
     args: [args]
 skills: []

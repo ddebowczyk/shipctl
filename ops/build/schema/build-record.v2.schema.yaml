@@ -1,0 +1,126 @@
+---
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - build_id
+  - created_at
+  - product_version
+  - version_record
+  - target
+  - mode
+  - source
+  - command
+  - toolchain
+  - artifacts
+  - provenance
+properties:
+  schema_version:
+    const: 2
+  build_id:
+    type: string
+    pattern: '^b\d{8}T\d{6}\.\d{3}Z-g[\da-f]{12}-[tw][\da-f]{12}-[\w.-]+$'
+  created_at:
+    type: string
+    pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$
+  product_version:
+    type: string
+    pattern: ^[0-9]+\.[0-9]+\.[0-9]+$
+  version_record:
+    type: object
+    additionalProperties: false
+    required: [path, sha256]
+    properties:
+      path:
+        const: version.yaml
+      sha256:
+        type: string
+        pattern: ^[0-9a-f]{64}$
+  target:
+    type: string
+    pattern: ^[A-Za-z0-9._-]+$
+  mode:
+    const: build
+  source:
+    type: object
+    additionalProperties: false
+    required:
+      - schema_version
+      - commit
+      - tree
+      - dirty
+      - fingerprint_algorithm
+      - fingerprint
+    properties:
+      schema_version:
+        const: 1
+      commit:
+        type: string
+        pattern: ^[0-9a-f]{40}$
+      tree:
+        type: string
+        pattern: ^[0-9a-f]{40,64}$
+      dirty:
+        type: boolean
+      fingerprint_algorithm:
+        const: sha256
+      fingerprint:
+        type: string
+        pattern: ^[0-9a-f]{64}$
+  command:
+    type: array
+    minItems: 1
+    items:
+      type: string
+      minLength: 1
+  toolchain:
+    type: object
+    additionalProperties: false
+    required: [rustc, pnpm, tauri_cli]
+    properties:
+      rustc:
+        type: string
+        minLength: 1
+      pnpm:
+        type: string
+        minLength: 1
+      tauri_cli:
+        type: string
+        minLength: 1
+  artifacts:
+    type: array
+    minItems: 4
+    items:
+      type: object
+      additionalProperties: false
+      required: [kind, path, digest]
+      properties:
+        kind:
+          enum: [app-bundle, ui-executable, cli-executable, dmg]
+        path:
+          type: string
+          minLength: 1
+        size_bytes:
+          type: integer
+          minimum: 0
+        digest:
+          type: object
+          additionalProperties: false
+          required: [algorithm, scope, value]
+          properties:
+            algorithm:
+              const: sha256
+            scope:
+              enum: [file, tree]
+            value:
+              type: string
+              pattern: ^[0-9a-f]{64}$
+  provenance:
+    type: object
+    additionalProperties: false
+    required: [status, source_unchanged_during_build]
+    properties:
+      status:
+        const: verified
+      source_unchanged_during_build:
+        const: true

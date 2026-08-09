@@ -1,129 +1,104 @@
-# Phase 5 — generic lifecycle and reconfiguration
+# Phase 5 — lifecycle and agent capability operations
 
 ## Outcome
 
-Complete one module-agnostic lifecycle for add, enable, update, disable, remove,
-rollback, and reconfigure. An operation is successful only when its durable and
-runtime results are both inspectable and consistent.
+Complete the generic module lifecycle and let external agents discover and use
+the capability surfaces of an exact running Shipctl instance.
 
-## Work package 5.1 — lifecycle command surface
+## Work package 5.1 — lifecycle operations
 
-Add commands over the same registry service:
+Implement add, enable, disable, replace, reconfigure, rollback, and remove as
+idempotent operations with expected-revision or expected-digest preconditions.
+Every request receives a stable operation identity and an observable terminal
+result. Reconciliation may cross the registry, backend, frontend host, and more
+than one instance, so operation observation remains durable even when the
+in-process activation itself is fast.
+
+`add` retains Phase 3's disabled-admission semantics: it may validate and
+record an artifact, but it does not load code, publish a route, or attach a
+native adapter. An enabled desired state becomes public only through Phase 4's
+supervisor reconciliation.
+
+Persist only facts needed across restarts: desired state, non-secret effective
+configuration, secret references, selected artifact digests, operation state,
+and per-instance reconciliation observations. Do not persist bus traffic,
+terminal bytes, schedule ticks, or routine internal events. Optional logger
+modules own any requested event history.
+
+## Work package 5.2 — agent capability API
+
+Expose the activated catalog over the existing same-user local instance
+protocol. The CLI supports exact instance targeting:
 
 ```text
-shipctl modules enable <module-id> [--artifact <digest>]
-shipctl modules disable <module-id>
-shipctl modules remove <module-id> [--artifact <digest>]
-shipctl modules rollback <module-id> --artifact <digest>
-shipctl modules reconfigure <module-id> --patch <json-or-file> --scope <scope>
-shipctl operations inspect <operation-id>
-shipctl operations watch <operation-id>
-shipctl modules events --after <registry-revision>
+shipctl capabilities list --instance <name>
+shipctl capabilities inspect <capability-id> --instance <name>
+shipctl capabilities providers <capability-id> --instance <name>
+shipctl capabilities call <capability-id> <port-id> --instance <name> --input <json-or-file>
+shipctl events watch <topic-id> --instance <name>
+shipctl streams attach <stream-id> --instance <name>
 ```
 
-Every mutation accepts a request id for safe retries and an expected revision
-or digest for optimistic concurrency when the caller needs compare-and-swap
-semantics. A conflict returns current facts; it never overwrites newer work.
+CLI commands resolve only declared, explicitly agent-accessible surfaces. They
+validate inputs and outputs against the capability schemas. Rust binds caller
+identity and grants at the control boundary; agents cannot claim a module
+identity, inject arbitrary bus messages, or invoke private implementation
+routes.
 
-Submission returns an operation and target registry revision. `operations
-watch` streams the same durable transitions until a terminal result or caller
-disconnect. The operation continues if the observing CLI disconnects.
+## Work package 5.3 — provider selection and configuration
 
-## Work package 5.2 — lifecycle semantics
+Support capability-level provider inspection and selection. Exclusive
+capabilities expose one selected provider per supported scope. Multi-provider
+capabilities expose deterministic selection metadata and explicit targeting.
 
-Apply these generic rules:
+Configuration is versioned by the scopes declared in its schema. A live-safe
+configuration change reconciles the running provider without rebuilding code.
+A change requiring a new native registration is classified restart-required
+before commit.
 
-<!-- markdownlint-disable MD013 -->
+## Work package 5.4 — resources, streams, and drain
 
-| Operation | Durable commit | Runtime behavior |
-| --- | --- | --- |
-| Add | Record validated disabled artifact | None |
-| Enable | Select installed digest | Validate declaration and publish host-owned catalog entries |
-| Update | Select B while A remains observed | Validate B, swap catalog, retain leased resources |
-| Disable | Select no active digest | Unpublish catalog entries and route no new work |
-| Remove | Drop desired/install reference | Disable semantics, then collect artifact |
-| Rollback | Select retained digest A | Same validate-and-swap path |
-| Reconfigure | Commit validated config revision | Apply live or reject before commit |
+Host-owned native resources survive frontend module replacement when their
+contract requires continuity. Track their owner, observers, leases, and drain
+blockers. New work stops routing to a draining provider; existing leases either
+finish under their original owner or are transferred only when the capability
+contract explicitly supports it.
 
-<!-- markdownlint-enable MD013 -->
-
-Logical removal completes when public behavior and new-work routing disappear.
-Physical removal completes after host-owned leases attributed to the old
-instance release and no registry or operation references require the artifact.
-Both states are visible.
-
-Do not add a generic force-close shortcut. A host resource adapter lacking safe
-retention or transfer semantics is restart-required before desired state
-changes.
-
-## Work package 5.3 — configuration contract
-
-Each module owns a versioned configuration schema. The manifest declares
-supported scopes and classifies fields as:
-
-- live apply;
-- live apply with resource drain;
-- restart-required; or
-- secret, whose value is never returned by inspection.
-
-The CLI target instance and configuration scope remain separate. A global
-registry change can be reconciled by every running instance; a workspace-scoped
-change is keyed by stable workspace identity and only applies where relevant.
-
-Validate and prepare configuration before committing its revision. The module
-receives an immutable effective snapshot and either atomically accepts it or
-keeps its prior configuration. Inspection shows schema version, scope,
-configuration revision, redacted effective values, and last apply result.
-
-## Work package 5.4 — generic resource leases
-
-Define a host resource adapter contract:
-
-- acquire with exact `ModuleInstanceId` owner;
-- route later actions to that owner;
-- transfer only when the resource type explicitly supports it;
-- release on natural completion; and
-- report identity and drain state without exposing secrets.
-
-Convert terminal-session action delivery from global broadcast to exact host
-resource routing. A terminal requested by A is owned by the host and remains
-attributed to A while B handles new work. PTY output continues through the
-unchanged host transport; lifecycle operations must not kill it to complete
-quickly.
-
-Apply the same contract to jobs, watchers, streams, and background tasks as each
-kind enters a module manifest.
+Stream identity is independent of a webview-created channel. A consumer may
+attach, detach, and reconnect by stable resource identity. Backpressure,
+ordering, and any bounded in-memory replay are defined by each stream contract,
+not by the general event bus.
 
 ## Diagnostic and verification mechanism
 
-Operation inspection exposes requested intent, preconditions, preflight,
-durable revision, per-instance observations, transitions, blockers, rollback,
-and result. Module verification can assert expected enabled state, digest,
-configuration revision, applied registry revision, and absence or presence of
-drain blockers.
+`inspect`, `diagnose`, operation watch, capability call, event watch, and stream
+attach all use the production local-IPC boundary and emit versioned structured
+results. Verification joins desired revision, applied revision, provider
+identity, selected digest, effective configuration, public routes, resources,
+leases, and stable diagnostic codes.
 
-The integration matrix exercises each lifecycle operation through the compiled
-CLI against a running host. It includes idempotent replay, stale revision,
-activation failure, configuration failure, disconnect during watch, draining
-resource, natural release, and artifact collection.
+Use the Phase 3 fixture to prove lifecycle and agent access. Include duplicate
+requests, stale preconditions, invalid call payloads, denied private routes,
+activation failure, drain, and cleanup.
 
 ## Exit proof
 
-- Every command changes only the requested module and scope.
-- Success returns the exact desired revision and matching observed evidence.
-- Failed prepare or configuration leaves the prior active digest/config public.
-- Disable and remove immediately stop new work without breaking leased work.
-- Physical removal waits for the observed lease inventory to empty.
-- Concurrent stale requests fail with current revision evidence.
-- Replayed request ids do not duplicate mutations or activation.
-- Settings UI mutations, when added, call the same service and produce the same
-  operation records as CLI mutations.
-- Existing repository gates remain green.
+- An external agent can target a named instance, discover the fixture's new
+  capability, invoke its typed port, and watch its declared event.
+- Authorized stream attachment works by stable resource identity and does not
+  consume another subscriber's data.
+- Add, enable, replace, reconfigure, rollback, disable, and remove converge to
+  inspectable terminal operation results.
+- Retrying the same request is idempotent; stale preconditions fail without
+  changing desired state.
+- Disabled or removed providers have no public routes or unleased resources.
+- No lifecycle path rebuilds Rust, reloads the webview, or stores ephemeral bus
+  and stream traffic in the registry.
 
 ## Primary implementation areas
 
-- `core/backend/src/module_control/` for operations and configuration storage;
-- `core/frontend/host/` for reconciliation, config application, and leases;
-- `core/frontend/terminal/terminalSessions.ts` for exact owner routing;
-- `modules/api/` for resource and configuration contracts; and
-- `ops/module-control/` for the generic lifecycle matrix.
+- `core/backend/src/module_control/` for operations and reconciliation;
+- `core/backend/src/instance/` and `cli/` for the public local-IPC surface;
+- `core/frontend/host/` for provider and resource coordination;
+- `modules/api/` for agent-accessible schemas; and
+- `ops/module-control/` for lifecycle and external-agent integration proofs.

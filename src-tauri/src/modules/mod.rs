@@ -23,13 +23,13 @@ use tauri::{AppHandle, Builder, Runtime};
 
 use shipctl_core::message_bus::MessageBusBridgeService;
 use shipctl_core::state::paths::ShipctlPaths;
-use shipctl_core::terminal::manager::PtyManager;
+use shipctl_core::terminal::TerminalService;
 use shipctl_core::workspace::manager::WorkspaceManager;
 use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
 
 pub fn install<R: Runtime>(
     builder: Builder<R>,
-    pty_manager: PtyManager,
+    terminals: TerminalService,
     workspace: WorkspaceManager,
     paths: ShipctlPaths,
     durable_writes: DurableWriteBarrier,
@@ -58,7 +58,7 @@ pub fn install<R: Runtime>(
 
     #[cfg(feature = "assistants-module")]
     let builder = builder.plugin(shipctl_module_assistants::init(
-        crate::modules::assistants::host_services(pty_manager.clone()),
+        crate::modules::assistants::host_services(terminals.clone()),
         paths.assistant_sessions.clone(),
         durable_writes.clone(),
     ));
@@ -70,13 +70,7 @@ pub fn install<R: Runtime>(
         durable_writes.clone(),
     ));
 
-    let _ = (
-        pty_manager,
-        workspace,
-        paths,
-        durable_writes,
-        message_bridges,
-    );
+    let _ = (terminals, workspace, paths, durable_writes, message_bridges);
 
     builder
 }

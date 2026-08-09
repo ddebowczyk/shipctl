@@ -10,13 +10,17 @@ import {
   bindTerminalSessionDimensions,
   bindTerminalSessionsRuntime,
   MODULE_TERMINAL_SESSIONS,
-  publishTerminalSessionEvent,
+  publishTerminalClosed,
+  publishTerminalDescriptor,
   requestTerminalSessionOwnerAction,
+  terminalSessionFromDescriptor,
   terminalSessionExitReason,
 } from "../terminalSessions.ts";
+import type { TerminalDescriptor, TerminalId } from "../types.ts";
 
 const request: ModuleTerminalSessionLaunchRequest = {
   projectPath: "/repo",
+  moduleSessionId: "commands:invocation-one",
   ownerKey: "commands:dev",
   command: "pnpm",
   arguments: ["run", "dev"],
@@ -25,7 +29,7 @@ const request: ModuleTerminalSessionLaunchRequest = {
   label: "dev",
   ownerMetadata: { commandName: "dev" },
   presentation: {
-    role: "terminal",
+    showInSessionList: true,
     icon: { src: "module://commands.svg", alt: "Command" },
   },
   columns: 132,
@@ -33,7 +37,9 @@ const request: ModuleTerminalSessionLaunchRequest = {
 };
 
 const session: ModuleTerminalSession = {
-  id: "opaque-session",
+  id: request.moduleSessionId,
+  terminalId: "00000000-0000-4000-8000-000000000001" as ModuleTerminalSession["terminalId"],
+  moduleId: "commands",
   projectPath: request.projectPath,
   ownerKey: request.ownerKey,
   label: request.label,
@@ -41,8 +47,42 @@ const session: ModuleTerminalSession = {
   presentation: request.presentation,
 };
 
+function descriptor(
+  lifecycle: TerminalDescriptor["lifecycle"] = "running",
+  exitCode: number | null = null,
+): TerminalDescriptor {
+  return {
+    id: session.terminalId as unknown as TerminalId,
+    revision: lifecycle === "exited" ? 2 : 1,
+    lifecycle,
+    exit: lifecycle === "exited"
+      ? { code: exitCode, reason: "process_exit", observedAtMs: 2 }
+      : null,
+    metadata: {
+      label: session.label,
+      cwd: "/repo/apps/web",
+      projectPath: session.projectPath,
+      displayCommand: "pnpm",
+      createdAtMs: 1,
+      owner: {
+        type: "module",
+        moduleId: session.moduleId,
+        ownerKey: session.ownerKey,
+        moduleSessionId: session.id,
+      },
+      ownerMetadata: request.ownerMetadata ?? null,
+      presentation: request.presentation ?? null,
+    },
+    columns: 132,
+    rows: 42,
+    lastOutputAtMs: null,
+    agentActivity: null,
+  };
+}
+
 test("the stable port forwards complete launch, stop, and focus requests", async () => {
   const calls: unknown[] = [];
+  const observation = { dispose: async () => undefined };
   const unbind = bindTerminalSessionsRuntime({
     launch: async (received) => {
       calls.push(["launch", received]);
@@ -53,26 +93,40 @@ test("the stable port forwards complete launch, stop, and focus requests", async
       calls.push(["update", sessionId, patch]);
       return { ...session, ...patch };
     },
+    observe: async (sessionId, listener) => {
+      calls.push(["observe", sessionId]);
+      listener({ type: "replay", data: [65] });
+      return observation;
+    },
     stop: async (sessionId) => {
       calls.push(["stop", sessionId]);
     },
     focus: async (sessionId) => {
       calls.push(["focus", sessionId]);
     },
+    list: () => [],
   });
 
   assert.equal(await MODULE_TERMINAL_SESSIONS.launch(request), session);
+  assert.deepEqual(MODULE_TERMINAL_SESSIONS.list(), []);
   const patch = { label: "web", ownerMetadata: { commandName: "web" } };
   assert.equal((await MODULE_TERMINAL_SESSIONS.update(session.id, patch)).label, "web");
+  const observed: unknown[] = [];
+  assert.equal(
+    await MODULE_TERMINAL_SESSIONS.observe(session.id, (event) => observed.push(event)),
+    observation,
+  );
   await MODULE_TERMINAL_SESSIONS.focus(session.id);
   await MODULE_TERMINAL_SESSIONS.stop(session.id);
 
   assert.deepEqual(calls, [
     ["launch", request],
     ["update", session.id, patch],
+    ["observe", session.id],
     ["focus", session.id],
     ["stop", session.id],
   ]);
+  assert.deepEqual(observed, [{ type: "replay", data: [65] }]);
   unbind();
 });
 
@@ -134,28 +188,50 @@ test("terminal dimensions are host-supplied and reset to safe defaults", () => {
   });
 });
 
-test("lifecycle subscriptions preserve opaque session ownership and unsubscribe", () => {
+test("host descriptors reconstruct module sessions without renderer-owned identity", () => {
+  assert.deepEqual(terminalSessionFromDescriptor(descriptor()), session);
+
+  const agentActivity = {
+    revision: 3,
+    state: "working" as const,
+    message: "reviewing",
+    updatedAtMs: 4,
+    source: { identifier: "codex", version: "1" },
+    attention: null,
+  };
+  assert.deepEqual(
+    terminalSessionFromDescriptor({ ...descriptor(), agentActivity }),
+    { ...session, agentActivity },
+  );
+});
+
+test("lifecycle subscriptions adopt inventory and distinguish exit from close", () => {
   const received: ModuleTerminalSessionLifecycleEvent[] = [];
+  const unbind = bindTerminalSessionsRuntime({
+    launch: async () => session,
+    launchManaged: async () => session,
+    update: async () => session,
+    observe: async () => ({ dispose: async () => undefined }),
+    stop: async () => undefined,
+    focus: async () => undefined,
+    list: () => [session],
+  });
   const unsubscribe = MODULE_TERMINAL_SESSIONS.subscribe((event) => {
     received.push(event);
   });
-  const started: ModuleTerminalSessionLifecycleEvent = {
-    type: "started",
-    session,
-  };
-  const exited: ModuleTerminalSessionLifecycleEvent = {
-    type: "exited",
-    session,
-    reason: "nonzero-exit",
-    exitCode: 2,
-  };
-
-  publishTerminalSessionEvent(started);
-  publishTerminalSessionEvent(exited);
+  publishTerminalDescriptor(descriptor(), "updated");
+  publishTerminalDescriptor(descriptor("exited", 2), "updated");
+  publishTerminalClosed(descriptor("exited", 2));
   unsubscribe();
-  publishTerminalSessionEvent(started);
+  publishTerminalDescriptor(descriptor(), "updated");
+  unbind();
 
-  assert.deepEqual(received, [started, exited]);
+  assert.deepEqual(received.map((event) => event.type), [
+    "adopted",
+    "updated",
+    "exited",
+    "closed",
+  ]);
 });
 
 test("exit classification distinguishes manual, zero, and nonzero outcomes", () => {
@@ -170,15 +246,19 @@ test("a stale React cleanup cannot unbind a newer runtime", async () => {
     launch: async () => ({ ...session, id: "first" }),
     launchManaged: async () => ({ ...session, id: "first" }),
     update: async () => ({ ...session, id: "first" }),
+    observe: async () => ({ dispose: async () => undefined }),
     stop: async () => undefined,
     focus: async () => undefined,
+    list: () => [],
   });
   const secondCleanup = bindTerminalSessionsRuntime({
     launch: async () => ({ ...session, id: "second" }),
     launchManaged: async () => ({ ...session, id: "second" }),
     update: async () => ({ ...session, id: "second" }),
+    observe: async () => ({ dispose: async () => undefined }),
     stop: async () => undefined,
     focus: async () => undefined,
+    list: () => [],
   });
 
   firstCleanup();

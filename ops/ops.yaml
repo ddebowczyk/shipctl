@@ -10,3 +10,4 @@ active:
   message-bus: message-bus
   module-control: module-control
   upstream: upstream
+  version: version

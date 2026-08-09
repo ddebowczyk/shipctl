@@ -74,21 +74,21 @@ test("resume preserves provider identity, placement, and quick-exit recovery", (
 
 test("tab close and natural exit retain the current restore-record semantics", () => {
   const runtime = source("../src/runtime.ts");
-  const pty = source("../../../../core/frontend/terminal/usePty.ts");
+  const terminalActions = source("../../../../core/frontend/terminal/useTerminalActions.ts");
 
   assert.match(runtime, /event\.type === "stop-requested"[\s\S]*if \(metadata\.record\) await discardSession\(metadata\.record\.recordId\)/s);
-  assert.match(runtime, /if \(!metadata\.record \|\| event\.reason === "manual-stop"\) return/);
+  assert.match(runtime, /event\.type === "closed"[\s\S]*metadataBySession\.delete\(event\.session\.id\)/s);
   assert.match(runtime, /await discardSession\(metadata\.record\.recordId\)\.catch/);
   assert.match(
-    pty,
-    /if \(owned\.state === "exited"\) \{\s*await stopTerminalSession\(tab\.moduleSessionId\);\s*return;\s*\}[\s\S]*await requestTerminalSessionOwnerAction\(\{/s,
+    terminalActions,
+    /if \(session\) \{\s*await requestTerminalSessionOwnerAction\(\{[\s\S]*reason: "tab-close",[\s\S]*await TERMINAL_CLIENT_RUNTIME\.close\(tab\.terminalId\)/s,
   );
   assert.match(
-    pty,
-    /if \(owned\.state === "running"\) \{\s*await requestTerminalSessionOwnerAction\(\{[\s\S]*reason: "project-removal",[\s\S]*\}\);\s*\}\s*await stopTerminalSession\(tab\.moduleSessionId\)/s,
+    terminalActions,
+    /if \(session\) \{\s*await requestTerminalSessionOwnerAction\(\{[\s\S]*reason: "project-removal",[\s\S]*await TERMINAL_CLIENT_RUNTIME\.close\(tab\.terminalId\)/s,
   );
-  assert.match(pty, /type: "stop-requested"/);
-  assert.doesNotMatch(pty, /discardAssistantSession|rearmAssistantSession|failAssistantSessionCapture/);
+  assert.match(terminalActions, /type: "stop-requested"/);
+  assert.doesNotMatch(terminalActions, /discardAssistantSession|rearmAssistantSession|failAssistantSessionCapture/);
 });
 
 test("startup restore and recovery are module-owned", () => {
@@ -109,7 +109,7 @@ test("startup restore and recovery are module-owned", () => {
   assert.doesNotMatch(shell, /listRestorableAssistantSessions|resumeAssistantSession|AssistantSessionRecord/);
 });
 
-test("normal shutdown freezes ready records before PTYs receive signals", () => {
+test("normal shutdown freezes ready records before terminals receive signals", () => {
   const shell = source("../../../../core/frontend/shell/AppShell.tsx");
   const moduleEntry = source("../src/index.ts");
   const client = source("../src/client.ts");
@@ -123,7 +123,7 @@ test("normal shutdown freezes ready records before PTYs receive signals", () => 
   assert.match(backend, /retain\(\|record\| \{\s*record\.capture_state == CaptureState::Ready\s*&& record\.provider_session_id\.is_some\(\)/);
   assert.match(backend, /record\.restore_on_next_launch = true/);
   assert.match(backend, /state\.preserving_shutdown = true/);
-  assert.match(commands, /pty_manager\.kill_all\(\)/);
+  assert.match(commands, /terminals\.shutdown_all\(\)/);
   assert.doesNotMatch(commands, /AssistantSessionRegistry|try_capture_pending_codex_sessions|begin_preserving_shutdown/);
 });
 
@@ -145,7 +145,7 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   const moduleEntry = source("../src/index.ts");
   const composition = source("../../../../core/frontend/host/enabledModules.ts");
   const shell = source("../../../../core/frontend/shell/AppShell.tsx");
-  const pty = source("../../../../core/frontend/terminal/usePty.ts");
+  const terminalActions = source("../../../../core/frontend/terminal/useTerminalActions.ts");
   const nativeHost = source("../../../../src-tauri/src/lib.rs");
   const nativeComposition = source("../../../../src-tauri/src/modules/mod.rs");
   const terminalAdapter = source("../../../../src-tauri/src/modules/assistants.rs");
@@ -158,14 +158,16 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   assert.match(moduleEntry, /activateAssistantRuntime/);
   assert.match(composition, /import \{ assistantsModule \} from "@shipctl\/module-assistants"/);
   assert.doesNotMatch(shell, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|listRestorableAssistantSessions/);
-  assert.doesNotMatch(pty, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|CODEX_CAPTURE_RETRY_MS|RESTORE_PROBATION_MS/);
+  assert.doesNotMatch(terminalActions, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|CODEX_CAPTURE_RETRY_MS|RESTORE_PROBATION_MS/);
   assert.doesNotMatch(nativeHost, /AssistantSessionRegistry|commands::spawn_assistant_session|commands::begin_assistant_session_preserving_shutdown/);
   assert.match(nativeComposition, /shipctl_module_assistants::init\(/);
   assert.match(terminalAdapter, /impl TerminalAuthority for HostTerminalAuthority/);
-  // The PTY is the only thing this module cannot own. pi's own config —
+  // Terminal execution is the only thing this module cannot own. pi's own config —
   // ~/.pi/agent and its Keychain entries — is module business and stays in the
   // module crate; the host adapter must not grow a second authority for it.
-  assert.match(terminalAdapter, /HostServices::new\(Arc::new\(HostTerminalAuthority \{ manager \}\)\)/);
+  assert.match(terminalAdapter, /HostServices::new\(Arc::new\(HostTerminalAuthority \{ terminals \}\)\)/);
+  assert.doesNotMatch(terminalAdapter, /Channel|TerminalOutput|TerminalEventSink/);
+  assert.doesNotMatch(backend, /Channel<TerminalOutput>|on_data/);
   assert.doesNotMatch(terminalAdapter, /PiConfig|pi_config/);
   assert.doesNotMatch(backend, /trait PiConfigAuthority/);
   assert.match(backend, /fn get_pi_config\(\) -> Result<PiConfig, String> \{\s*pi_config::get_pi_config\(\)/);

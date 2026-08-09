@@ -1174,6 +1174,82 @@ impl RuntimeMessageBus {
         }
     }
 
+    /// Invoke a capability port after the host's agent-capability boundary has
+    /// resolved and authorized it. This deliberately bypasses module grants;
+    /// it is crate-private so no generic external message-send surface exists.
+    pub(crate) async fn request_from_agent(
+        &self,
+        envelope: MessageEnvelope,
+    ) -> Result<MessageEnvelope, MessageContractError> {
+        let table = self.inner.routes.borrow().clone();
+        let result = async {
+            let route = table.ports.get(&envelope.endpoint).ok_or_else(|| {
+                MessageContractError::new(
+                    NO_ACTIVE_CHANNEL_OWNER,
+                    format!(
+                        "Capability port {:?} has no active owner",
+                        envelope.endpoint
+                    ),
+                )
+            })?;
+            validate_message(
+                &route.registration,
+                &route.route.declaration.request,
+                &envelope,
+            )?;
+            if route.registration.is_withdrawn() {
+                return Err(MessageContractError::new(
+                    HANDLER_UNAVAILABLE,
+                    format!("Capability port {:?} is withdrawn", envelope.endpoint),
+                ));
+            }
+            let (reply, response) = oneshot::channel();
+            route
+                .route
+                .sender
+                .send(PortRequest {
+                    envelope: envelope.clone(),
+                    route_generation: table.public.route_generation,
+                    reply,
+                })
+                .await
+                .map_err(|_| {
+                    MessageContractError::new(
+                        HANDLER_UNAVAILABLE,
+                        format!("Capability port {:?} is unavailable", envelope.endpoint),
+                    )
+                })?;
+            let response = response.await.map_err(|_| {
+                MessageContractError::new(
+                    HANDLER_UNAVAILABLE,
+                    format!(
+                        "Capability port {:?} reply was cancelled",
+                        envelope.endpoint
+                    ),
+                )
+            })??;
+            validate_message(
+                &route.registration,
+                &route.route.declaration.response,
+                &response,
+            )?;
+            Ok(response)
+        }
+        .await;
+        match result {
+            Ok(response) => {
+                self.inner.observations.accepted(&envelope.endpoint);
+                Ok(response)
+            }
+            Err(error) => {
+                self.inner
+                    .observations
+                    .rejected(&error, &envelope, table.public.route_generation);
+                Err(error)
+            }
+        }
+    }
+
     pub async fn inspect_endpoints(&self) -> Vec<EndpointRuntimeObservation> {
         let table = self.inner.routes.borrow().clone();
         let counters = self

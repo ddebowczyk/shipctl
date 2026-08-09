@@ -2,7 +2,7 @@ import type { ITheme } from "@xterm/xterm";
 import { hexLuminance } from "@shipctl/core/appearance";
 import type { ShipctlTheme } from "@shipctl/core/appearance";
 import type { TerminalSettings } from "@shipctl/core/platform";
-import { resizePty } from "@shipctl/core/platform";
+import { resizeTerminal } from "@shipctl/core/platform";
 import { terminalCache } from "./terminalCache.ts";
 import { buildCSSFontFamily } from "@shipctl/core/appearance";
 import { preserveTerminalViewport } from "./terminalViewport.ts";
@@ -108,7 +108,7 @@ export function applyThemeToTerminals(theme: ShipctlTheme): void {
 export function applyTerminalSettings(settings: TerminalSettings): void {
   const cssFont = buildCSSFontFamily(settings.fontFamily);
 
-  for (const [ptyId, entry] of terminalCache) {
+  for (const [terminalId, entry] of terminalCache) {
     const fontMetricsChanged =
       entry.term.options.fontFamily !== cssFont ||
       entry.term.options.fontSize !== settings.fontSize;
@@ -130,7 +130,13 @@ export function applyTerminalSettings(settings: TerminalSettings): void {
       entry.fitAddon.fit();
     });
     entry.term.refresh(0, entry.term.rows - 1);
-    resizePty(ptyId, entry.term.cols, entry.term.rows).catch((error) => {
+    if (!entry.attachmentId) continue;
+    resizeTerminal(
+      terminalId,
+      entry.attachmentId,
+      entry.term.cols,
+      entry.term.rows,
+    ).catch((error: unknown) => {
       if (import.meta.env.DEV) {
         console.error("Failed to resize PTY after terminal settings change:", error);
       }

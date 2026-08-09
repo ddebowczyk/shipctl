@@ -15,9 +15,25 @@ export interface FrontendModuleRuntimeSnapshot {
   readonly contributions: readonly FrontendContributionSnapshot[];
 }
 
+export type StartupModulePhase =
+  | "descriptor"
+  | "resolve"
+  | "import"
+  | "validate"
+  | "bridge"
+  | "activation"
+  | "active";
+
+export interface StartupModuleRuntimeSnapshot {
+  readonly moduleId: string;
+  readonly status: "active" | "failed";
+  readonly phase: StartupModulePhase;
+}
+
 export interface FrontendRuntimeSnapshot {
   readonly schemaVersion: number;
   readonly modules: readonly FrontendModuleRuntimeSnapshot[];
+  readonly startupModules: readonly StartupModuleRuntimeSnapshot[];
 }
 
 export interface RuntimeSnapshotReceipt {
@@ -62,6 +78,7 @@ function messageContributions(module: ShipctlModule): FrontendContributionSnapsh
 
 export function buildFrontendRuntimeSnapshot(
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  startupModules: readonly StartupModuleRuntimeSnapshot[] = [],
 ): FrontendRuntimeSnapshot {
   return {
     schemaVersion: MODULE_CONTROL_SCHEMA_VERSION,
@@ -95,13 +112,15 @@ export function buildFrontendRuntimeSnapshot(
         ...messageContributions(module),
       ],
     })),
+    startupModules,
   };
 }
 
 export function publishFrontendRuntimeSnapshot(
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  startupModules: readonly StartupModuleRuntimeSnapshot[] = [],
 ): Promise<RuntimeSnapshotReceipt> {
   return invoke("publish_module_runtime_snapshot", {
-    snapshot: buildFrontendRuntimeSnapshot(modules),
+    snapshot: buildFrontendRuntimeSnapshot(modules, startupModules),
   });
 }

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use shipctl_core::terminal::{TerminalAgentReportKind, TerminalId};
 use uuid::Uuid;
 
 use crate::output::OutputFormat;
@@ -19,7 +20,7 @@ pub struct Cli {
     #[arg(short = 'V', long)]
     pub version: bool,
 
-    /// Select compact TOON output or JSON.
+    /// Select compact TOON or JSON output for finite commands.
     #[arg(long, global = true, value_enum, default_value_t)]
     pub output: OutputFormat,
 
@@ -53,6 +54,16 @@ pub enum Command {
         #[command(subcommand)]
         command: MessagesCommand,
     },
+    /// Discover and invoke agent-visible capabilities on one running instance.
+    Capabilities {
+        #[command(subcommand)]
+        command: CapabilitiesCommand,
+    },
+    /// List, inspect, attach to, write to, report activity for, or close host-owned terminals.
+    Terminals {
+        #[command(subcommand)]
+        command: TerminalsCommand,
+    },
     /// Inspect, verify, refresh, or trigger schedules in a running instance.
     Schedule {
         #[command(subcommand)]
@@ -70,6 +81,130 @@ pub enum Command {
     },
     /// Print the Shipctl and control-protocol versions.
     Version,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TerminalsCommand {
+    /// List terminals owned by one running instance.
+    List(TerminalTargetArgs),
+    /// Get the complete redacted descriptor for one terminal.
+    Get(TerminalIdArgs),
+    /// Stream canonical replay followed by ordered live terminal events.
+    Attach(TerminalAttachArgs),
+    /// Write exact bytes to one running terminal.
+    Write(TerminalWriteArgs),
+    /// Report supplemental agent activity for one terminal.
+    Report(TerminalReportArgs),
+    /// Close one terminal; repeated close is a successful no-op.
+    Close(TerminalIdArgs),
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum TerminalAgentReportKindArg {
+    Idle,
+    Working,
+    Blocked,
+    Completed,
+}
+
+impl From<TerminalAgentReportKindArg> for TerminalAgentReportKind {
+    fn from(value: TerminalAgentReportKindArg) -> Self {
+        match value {
+            TerminalAgentReportKindArg::Idle => Self::Idle,
+            TerminalAgentReportKindArg::Working => Self::Working,
+            TerminalAgentReportKindArg::Blocked => Self::Blocked,
+            TerminalAgentReportKindArg::Completed => Self::Completed,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct TerminalReportArgs {
+    /// Agent state or attention transition to report.
+    #[arg(value_enum)]
+    pub kind: TerminalAgentReportKindArg,
+
+    /// Terminal UUID; defaults to SHIPCTL_TERMINAL_ID inside a hosted terminal.
+    #[arg(long)]
+    pub terminal_id: Option<TerminalId>,
+
+    /// Instance name or UUID; defaults to SHIPCTL_INSTANCE_ID inside a hosted terminal.
+    #[arg(long)]
+    pub instance: Option<String>,
+
+    /// Stable identifier for the reporting integration.
+    #[arg(long, default_value = "shipctl-cli")]
+    pub source: String,
+
+    /// Version of the reporting integration.
+    #[arg(long, default_value = APP_VERSION)]
+    pub source_version: String,
+
+    /// Optional human-readable activity detail.
+    #[arg(long)]
+    pub message: Option<String>,
+
+    #[command(flatten)]
+    pub runtime: RuntimeRootArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct TerminalTargetArgs {
+    /// Exact running instance name or UUID.
+    #[arg(long)]
+    pub instance: String,
+
+    #[command(flatten)]
+    pub runtime: RuntimeRootArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct TerminalIdArgs {
+    /// Opaque terminal UUID returned by `terminals list`.
+    pub terminal_id: TerminalId,
+
+    #[command(flatten)]
+    pub target: TerminalTargetArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct TerminalAttachArgs {
+    /// Opaque terminal UUID returned by `terminals list`.
+    pub terminal_id: TerminalId,
+
+    /// Write replay and live terminal bytes directly to stdout.
+    #[arg(long)]
+    pub raw: bool,
+
+    #[command(flatten)]
+    pub target: TerminalTargetArgs,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("terminal_input")
+        .required(true)
+        .multiple(false)
+        .args(["data", "base64", "stdin"])
+))]
+pub struct TerminalWriteArgs {
+    /// Opaque terminal UUID returned by `terminals list`.
+    pub terminal_id: TerminalId,
+
+    /// Write these literal UTF-8 bytes without interpreting escapes.
+    #[arg(long, value_name = "TEXT")]
+    pub data: Option<String>,
+
+    /// Decode and write arbitrary bytes from standard base64.
+    #[arg(long, value_name = "BASE64")]
+    pub base64: Option<String>,
+
+    /// Read bytes from stdin to EOF; never prompts.
+    #[arg(long)]
+    pub stdin: bool,
+
+    #[command(flatten)]
+    pub target: TerminalTargetArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -166,6 +301,47 @@ pub enum MessagesCommand {
     Inspect(MessageTargetArgs),
     /// Diagnose current message failures, lag, and drain blockers.
     Diagnose(MessageTargetArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CapabilitiesCommand {
+    /// List active agent-visible capabilities.
+    List(CapabilityTargetArgs),
+    /// Inspect one active capability definition and its provider.
+    Inspect(CapabilityInspectArgs),
+    /// Invoke one explicitly agent-callable typed port.
+    Call(CapabilityCallArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CapabilityTargetArgs {
+    /// Running instance name or UUID.
+    #[arg(long)]
+    pub instance: String,
+
+    #[command(flatten)]
+    pub runtime: RuntimeRootArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct CapabilityInspectArgs {
+    pub capability_id: String,
+
+    #[command(flatten)]
+    pub target: CapabilityTargetArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct CapabilityCallArgs {
+    pub capability_id: String,
+    pub port_id: String,
+
+    /// JSON request payload validated against the port contract.
+    #[arg(long, value_name = "JSON")]
+    pub input: String,
+
+    #[command(flatten)]
+    pub target: CapabilityTargetArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -353,16 +529,24 @@ pub struct OnlineTargetArgs {
 pub struct ModuleTransitionArgs {
     pub module_id: String,
 
-    /// Registry revision the caller expects to replace.
-    #[arg(long)]
-    pub target_revision: u64,
+    /// Change durable desired state without contacting or restarting a runtime.
+    #[arg(long, conflicts_with_all = ["instance", "runtime_root"])]
+    pub offline: bool,
+
+    /// Override the offline state root.
+    #[arg(long, value_name = "PATH", requires = "offline")]
+    pub state_root: Option<PathBuf>,
+
+    /// Registry revision the online caller expects to replace.
+    #[arg(long, required_unless_present = "offline")]
+    pub target_revision: Option<u64>,
 
     /// Running instance name or UUID.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "offline")]
     pub instance: Option<String>,
 
     /// Override the local instance discovery directory.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", conflicts_with = "offline")]
     pub runtime_root: Option<PathBuf>,
 }
 

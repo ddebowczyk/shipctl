@@ -59,8 +59,8 @@ function recordAssertion(name, passed, details = {}) {
   if (!passed) throw new Error(`Assertion failed: ${name}`);
 }
 
-function parseDocument(stdout, stderr, exitCode, label) {
-  const source = (exitCode === 0 ? stdout : stderr).trim();
+function parseDocument(stdout, stderr, label) {
+  const source = stdout.trim() || stderr.trim();
   if (!source) throw new Error(`${label} returned no structured response`);
   try {
     return JSON.parse(source);
@@ -81,7 +81,7 @@ function runCommand(executable, args, label, expectedExit = 0) {
   });
   if (result.error) throw result.error;
   const exitCode = result.status ?? 1;
-  const document = parseDocument(result.stdout ?? "", result.stderr ?? "", exitCode, label);
+  const document = parseDocument(result.stdout ?? "", result.stderr ?? "", label);
   evidence.operations.push({
     label,
     executable: path.relative(repositoryRoot, executable),
@@ -161,6 +161,9 @@ function verifyProviderAccounting(manifest) {
     "assistants.continuity",
     "host.ui",
     "host.workspace",
+    "modules.artifacts",
+    "modules.registry",
+    "scheduler.configuration",
     "usage.database",
   ];
   const observed = manifest.providers.map((provider) => provider.id);
@@ -228,6 +231,22 @@ function publicContract() {
     code: idempotent.code,
     instanceId: idempotent.data.instanceId,
   });
+  const alphaTerminals = runShipctl(
+    ["terminals", "list", "--instance", names.alpha, "--runtime-root", runtimeRoot],
+    "terminals.alpha.list.empty",
+  );
+  const bravoTerminals = runShipctl(
+    ["terminals", "list", "--instance", names.bravo, "--runtime-root", runtimeRoot],
+    "terminals.bravo.list.empty",
+  );
+  recordAssertion(
+    "terminals.instances.are_independent",
+    alphaTerminals.data.count === 0 &&
+      alphaTerminals.data.terminals.length === 0 &&
+      bravoTerminals.data.count === 0 &&
+      bravoTerminals.data.terminals.length === 0,
+    { alpha: alphaTerminals.data, bravo: bravoTerminals.data },
+  );
   const nameConflict = start(names.alpha, roots.conflict, "instance.name.conflict", [], 1);
   recordAssertion("instance.name.conflict.code", nameConflict.code === "control.instance.name_in_use", {
     code: nameConflict.code,

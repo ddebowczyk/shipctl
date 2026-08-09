@@ -1,247 +1,126 @@
 import type { Terminal } from "@xterm/xterm";
-import { acknowledgePtyOutput } from "@shipctl/core/platform";
+import type { TerminalId } from "./types.ts";
 
-// The terminal output seam: everything between a PTY data event arriving and
-// xterm having parsed it.
-//
-// Three jobs, all of which the previous animation-frame batcher left open:
-//
-//   1. Submit bounded chunks and wait for xterm's write callback, so a large
-//      redraw cannot block the main thread in one parse.
-//   2. Acknowledge parsed bytes back to the host, which is what releases the
-//      backend's flow-control budget and stops it running ahead of the parser.
-//   3. Bound the buffer used while no terminal is attached, so output produced
-//      before a tab is mounted cannot grow without limit.
-
-/** The slice of a terminal this queue drives. */
+/** The slice of xterm driven by the terminal output queue. */
 export type OutputTerminal = Pick<Terminal, "write">;
 
-export type OutputAcknowledger = (ptyId: number, bytes: number) => Promise<void>;
-
-// Sizes adopted from upstream 59e8fc7 rather than chosen here.
-//
-// The acknowledgement interval matches the backend's low watermark, so a single
-// acknowledgement is always large enough to move a paused reader back under it.
-const MAX_WRITE_CHUNK_CHARS = 64 * 1024;
-const MAX_PENDING_OUTPUT_CHARS = 1024 * 1024;
-const OUTPUT_ACK_INTERVAL_BYTES = 5_000;
-const OUTPUT_ACK_RETRY_MS = 250;
-const OUTPUT_TRUNCATED_MARKER = "\r\n[output truncated while terminal was unavailable]\r\n";
-
-const outputEncoder = new TextEncoder();
+// Preserve the renderer-side limits already used by Shipctl. Host flow control
+// is now per-attachment; exceeding this local parser budget requests a replay
+// instead of truncating output or stalling the process.
+const MAX_WRITE_CHUNK_BYTES = 64 * 1024;
+const MAX_PENDING_OUTPUT_BYTES = 1024 * 1024;
 
 interface TerminalRegistration {
   term: OutputTerminal;
-  afterWrite: (() => void) | null;
-}
-
-interface BufferedOutput {
-  chunks: string[];
-  length: number;
-  truncatedChars: number;
+  afterDrain: (() => void) | null;
+  onOverflow: (() => void) | null;
 }
 
 interface WriteQueue {
-  chunks: string[];
+  chunks: Uint8Array[];
   length: number;
   writing: boolean;
+  overflowed: boolean;
 }
 
-interface OutputAckState {
-  pendingBytes: number;
-  sending: boolean;
-  retryTimer: ReturnType<typeof setTimeout> | null;
-}
-
-const terminalInstances = new Map<number, TerminalRegistration>();
-const pendingOutput = new Map<number, BufferedOutput>();
-const writeQueues = new Map<number, WriteQueue>();
-const outputAckStates = new Map<number, OutputAckState>();
-
-let acknowledgeOutput: OutputAcknowledger = acknowledgePtyOutput;
-
-/**
- * Replace the acknowledgement transport. The default invokes the host command;
- * tests substitute their own so the queue can be exercised without a host.
- */
-export function setOutputAcknowledger(acknowledger: OutputAcknowledger): void {
-  acknowledgeOutput = acknowledger;
-}
+const terminalInstances = new Map<TerminalId, TerminalRegistration>();
+const writeQueues = new Map<TerminalId, WriteQueue>();
 
 export function registerTerminal(
-  ptyId: number,
+  terminalId: TerminalId,
   term: OutputTerminal,
-  afterWrite: (() => void) | null = null,
-) {
-  terminalInstances.set(ptyId, { term, afterWrite });
+  afterDrain: (() => void) | null = null,
+  onOverflow: (() => void) | null = null,
+): void {
+  terminalInstances.set(terminalId, { term, afterDrain, onOverflow });
+  writeQueues.set(terminalId, {
+    chunks: [],
+    length: 0,
+    writing: false,
+    overflowed: false,
+  });
 }
 
-export function unregisterTerminal(ptyId: number) {
-  terminalInstances.delete(ptyId);
-  pendingOutput.delete(ptyId);
-  writeQueues.delete(ptyId);
-  const ackState = outputAckStates.get(ptyId);
-  if (ackState?.retryTimer) clearTimeout(ackState.retryTimer);
-  outputAckStates.delete(ptyId);
+export function unregisterTerminal(terminalId: TerminalId): void {
+  terminalInstances.delete(terminalId);
+  writeQueues.delete(terminalId);
 }
 
-/* ── acknowledgement ───────────────────────────────────── */
+function takeWriteChunk(queue: WriteQueue): Uint8Array {
+  const length = Math.min(queue.length, MAX_WRITE_CHUNK_BYTES);
+  const result = new Uint8Array(length);
+  let offset = 0;
 
-function acknowledgeCompletedWrite(ptyId: number, chunk: string): void {
-  let state = outputAckStates.get(ptyId);
-  if (!state) {
-    state = { pendingBytes: 0, sending: false, retryTimer: null };
-    outputAckStates.set(ptyId, state);
-  }
-  // The host counts the bytes it dispatched, so acknowledge in those units
-  // rather than in UTF-16 code units.
-  state.pendingBytes += outputEncoder.encode(chunk).byteLength;
-  flushOutputAcknowledgement(ptyId, state);
-}
-
-function flushOutputAcknowledgement(ptyId: number, state: OutputAckState): void {
-  if (state.sending || state.retryTimer || state.pendingBytes < OUTPUT_ACK_INTERVAL_BYTES) {
-    return;
-  }
-
-  const bytes = state.pendingBytes;
-  state.pendingBytes = 0;
-  state.sending = true;
-  void acknowledgeOutput(ptyId, bytes)
-    .then(() => {
-      if (outputAckStates.get(ptyId) !== state) return;
-      state.sending = false;
-      flushOutputAcknowledgement(ptyId, state);
-    })
-    .catch((error) => {
-      if (outputAckStates.get(ptyId) !== state) return;
-      // Put the bytes back: dropping them would strand the backend's budget
-      // and stall the session permanently.
-      state.pendingBytes += bytes;
-      state.sending = false;
-      state.retryTimer = setTimeout(() => {
-        if (outputAckStates.get(ptyId) !== state) return;
-        state.retryTimer = null;
-        flushOutputAcknowledgement(ptyId, state);
-      }, OUTPUT_ACK_RETRY_MS);
-      if (import.meta.env?.DEV) {
-        console.warn("Failed to acknowledge terminal output:", error);
-      }
-    });
-}
-
-/* ── write queue ───────────────────────────────────────── */
-
-function takeWriteChunk(queue: WriteQueue): string {
-  const parts: string[] = [];
-  let remaining = MAX_WRITE_CHUNK_CHARS;
-
-  while (remaining > 0 && queue.chunks.length > 0) {
+  while (offset < length && queue.chunks.length > 0) {
     const first = queue.chunks[0];
-    let take = Math.min(remaining, first.length);
-    // Never split a UTF-16 surrogate pair across two writes: xterm would parse
-    // the halves as separate replacement characters.
-    if (take < first.length && take > 0) {
-      const lastCodeUnit = first.charCodeAt(take - 1);
-      if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) take -= 1;
-    }
-
-    if (take === 0) break;
-    parts.push(first.slice(0, take));
+    const take = Math.min(length - offset, first.byteLength);
+    result.set(first.subarray(0, take), offset);
+    offset += take;
     queue.length -= take;
-    remaining -= take;
-    if (take === first.length) queue.chunks.shift();
+    if (take === first.byteLength) queue.chunks.shift();
     else queue.chunks[0] = first.slice(take);
   }
 
-  return parts.join("");
+  return result;
 }
 
-function drainWriteQueue(ptyId: number): void {
-  const registration = terminalInstances.get(ptyId);
-  const queue = writeQueues.get(ptyId);
-  if (!registration || !queue || queue.writing || queue.length === 0) return;
+function requestReplay(
+  registration: TerminalRegistration,
+  queue: WriteQueue,
+): void {
+  if (queue.overflowed) return;
+  queue.overflowed = true;
+  queue.chunks = [];
+  queue.length = 0;
+  registration.onOverflow?.();
+}
+
+function drainWriteQueue(terminalId: TerminalId): void {
+  const registration = terminalInstances.get(terminalId);
+  const queue = writeQueues.get(terminalId);
+  if (!registration || !queue || queue.writing || queue.length === 0 || queue.overflowed) {
+    return;
+  }
 
   const chunk = takeWriteChunk(queue);
-  if (chunk.length === 0) return;
+  if (chunk.byteLength === 0) return;
   queue.writing = true;
 
   try {
     registration.term.write(chunk, () => {
-      const currentQueue = writeQueues.get(ptyId);
-      const currentRegistration = terminalInstances.get(ptyId);
-      // The terminal may have been replaced while the parser was running.
+      const currentQueue = writeQueues.get(terminalId);
+      const currentRegistration = terminalInstances.get(terminalId);
       if (!currentQueue || currentRegistration !== registration) return;
 
       currentQueue.writing = false;
-      acknowledgeCompletedWrite(ptyId, chunk);
-      registration.afterWrite?.();
-      drainWriteQueue(ptyId);
+      if (currentQueue.length === 0) registration.afterDrain?.();
+      drainWriteQueue(terminalId);
     });
   } catch (error) {
     queue.writing = false;
+    requestReplay(registration, queue);
     if (import.meta.env?.DEV) {
       console.error("Failed to write terminal output:", error);
     }
   }
 }
 
-function enqueueTerminalOutput(ptyId: number, data: string): void {
-  if (data.length === 0) return;
-  let queue = writeQueues.get(ptyId);
-  if (!queue) {
-    queue = { chunks: [], length: 0, writing: false };
-    writeQueues.set(ptyId, queue);
-  }
-  queue.chunks.push(data);
-  queue.length += data.length;
-  drainWriteQueue(ptyId);
-}
+/** Queue exact PTY bytes for the mounted xterm parser. */
+export function writeTerminalOutput(
+  terminalId: TerminalId,
+  data: readonly number[] | Uint8Array,
+): void {
+  const registration = terminalInstances.get(terminalId);
+  const queue = writeQueues.get(terminalId);
+  if (!registration || !queue || queue.overflowed || data.length === 0) return;
 
-/* ── pre-attach buffer ─────────────────────────────────── */
-
-function appendPendingOutput(ptyId: number, data: string): void {
-  let buffer = pendingOutput.get(ptyId);
-  if (!buffer) {
-    buffer = { chunks: [], length: 0, truncatedChars: 0 };
-    pendingOutput.set(ptyId, buffer);
+  const bytes = data instanceof Uint8Array ? data.slice() : Uint8Array.from(data);
+  if (queue.length + bytes.byteLength > MAX_PENDING_OUTPUT_BYTES) {
+    requestReplay(registration, queue);
+    return;
   }
 
-  buffer.chunks.push(data);
-  buffer.length += data.length;
-
-  // Drop from the front: the newest output is the part a user returning to the
-  // tab actually needs.
-  while (buffer.length > MAX_PENDING_OUTPUT_CHARS && buffer.chunks.length > 0) {
-    const excess = buffer.length - MAX_PENDING_OUTPUT_CHARS;
-    const first = buffer.chunks[0];
-    let drop = Math.min(excess, first.length);
-    if (drop < first.length) {
-      const nextCodeUnit = first.charCodeAt(drop);
-      if (nextCodeUnit >= 0xdc00 && nextCodeUnit <= 0xdfff) drop += 1;
-    }
-    buffer.truncatedChars += drop;
-    buffer.length -= drop;
-    if (drop === first.length) buffer.chunks.shift();
-    else buffer.chunks[0] = first.slice(drop);
-  }
-}
-
-export function flushPendingOutput(ptyId: number) {
-  if (!terminalInstances.has(ptyId)) return;
-
-  const buffered = pendingOutput.get(ptyId);
-  if (!buffered) return;
-
-  pendingOutput.delete(ptyId);
-  if (buffered.truncatedChars > 0) {
-    enqueueTerminalOutput(ptyId, OUTPUT_TRUNCATED_MARKER);
-  }
-  for (const chunk of buffered.chunks) enqueueTerminalOutput(ptyId, chunk);
-}
-
-/** Route one PTY data event to the attached terminal, or hold it until one is. */
-export function writeTerminalOutput(ptyId: number, data: string): void {
-  if (terminalInstances.has(ptyId)) enqueueTerminalOutput(ptyId, data);
-  else appendPendingOutput(ptyId, data);
+  queue.chunks.push(bytes);
+  queue.length += bytes.byteLength;
+  drainWriteQueue(terminalId);
 }

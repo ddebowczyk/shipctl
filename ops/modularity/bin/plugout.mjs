@@ -19,7 +19,10 @@ import {
 const repositoryRoot = path.resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 
 export function readManifest(root, id) {
-  const file = path.join(root, "modules", id, "module.yaml");
+  const file = path.join(
+    root,
+    id === "fixture" ? "examples/module-fixture/module.yaml" : `modules/${id}/module.yaml`,
+  );
   if (!existsSync(file)) throw new Error(`Unknown module: ${id}`);
   return JSON.parse(execFileSync("yq", ["-o=json", ".", file], { encoding: "utf8" }));
 }
@@ -383,7 +386,7 @@ export function prepareSourceAbsent(root, manifest) {
     }
   }
 
-  rmSync(path.join(root, "modules", manifest.id), { recursive: true, force: true });
+  rmSync(path.join(root, path.dirname(manifest.frontend.path)), { recursive: true, force: true });
   if (manifest.profile && !manifest.profile.includes("-disabled/")) {
     rmSync(path.join(root, "ops/modularity/fixtures/module-fixture"), { recursive: true, force: true });
   }

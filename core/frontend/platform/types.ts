@@ -1,4 +1,10 @@
 import type { ModuleTerminalSessionPresentation } from "@shipctl/module-api";
+import type {
+  TerminalId,
+  TerminalLifecycle,
+  TerminalRevision,
+  TerminalViewId,
+} from "@shipctl/core/terminal";
 
 // ── Config types (match Rust structs) ────────────────────────────────
 
@@ -102,10 +108,13 @@ interface TabBase {
 }
 
 export interface TerminalTabData extends TabBase {
+  id: TerminalViewId;
   kind: "terminal";
-  ptyId: number;
+  terminalId: TerminalId;
   repoPath: string;
   commandName: string | null;
+  terminalRevision: TerminalRevision;
+  lifecycle: TerminalLifecycle;
   /** Opaque module session identity; native PTY identity stays host-owned. */
   moduleSessionId?: string;
   modulePresentation?: ModuleTerminalSessionPresentation;
@@ -135,16 +144,10 @@ export interface TabActivity {
   lastOutputAt: number | null;
   lastAttentionAt: number | null;
   lastNotificationMessage: string | null;
-}
-
-// ── PTY output ──────────────────────────────────────────────────────
-
-export type PtyOutput =
-  | { event: "data"; data: string }
-  | { event: "exit"; data: { code: number } };
-
-export interface PtyColorTheme {
-  foreground: string;
-  background: string;
-  palette: string[];
+  agentState: "idle" | "working" | "blocked" | null;
+  agentAttention: "blocked" | "completed" | null;
+  agentRevision: number | null;
+  agentUpdatedAt: number | null;
+  agentSource: string | null;
+  agentMessage: string | null;
 }

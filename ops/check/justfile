@@ -18,7 +18,7 @@ manifests:
     node bin/check-manifests.mjs
 
 version:
-    node bin/check-version.mjs
+    just --justfile ../version/justfile check
 
 instance-paths:
     node bin/check-instance-paths.mjs

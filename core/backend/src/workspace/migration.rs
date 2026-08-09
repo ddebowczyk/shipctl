@@ -1,8 +1,7 @@
-//! One-time copy of pre-rename state from `~/.shep` into `~/.shipctl`.
+//! One-time copy of legacy state into the current application profile.
 //!
-//! This is a **copy**, not a move. The old `shep` build stays installed and
-//! keeps its own state directory intact, so both apps continue to work; they
-//! simply diverge from the moment the copy is taken.
+//! This is a **copy**, not a move. The legacy profile remains intact, so an
+//! earlier installation can keep using it independently after migration.
 //!
 //! The copy runs once. `~/.shipctl` existing is itself the "already migrated"
 //! marker, so there is no separate state file to keep honest.
@@ -10,7 +9,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Directory the previous `shep` builds stored state in.
+/// Directory name used by the predecessor application. Keep this value only
+/// for one-way state import; no current Shipctl state is written beneath it.
 pub const LEGACY_DIR_NAME: &str = ".shep";
 /// Directory this build stores state in.
 pub const HOME_DIR_NAME: &str = ".shipctl";
@@ -24,7 +24,7 @@ const SKIP_SUFFIXES: &[&str] = &["-shm"];
 pub enum Outcome {
     /// `~/.shipctl` already present; nothing to do.
     AlreadyPresent,
-    /// No `~/.shep` to copy from — a clean install.
+    /// No legacy profile to copy from — a clean install.
     NoLegacyState,
     /// Copied this many files out of the legacy directory.
     Copied(usize),
@@ -34,7 +34,7 @@ fn home() -> Result<PathBuf, String> {
     dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())
 }
 
-/// Copy `~/.shep` to `~/.shipctl` if and only if the latter does not exist yet.
+/// Copy the legacy home profile if and only if the current profile is absent.
 pub fn migrate_home_state() -> Result<Outcome, String> {
     let home = home()?;
     copy_tree_once(&home.join(LEGACY_DIR_NAME), &home.join(HOME_DIR_NAME))
@@ -50,7 +50,7 @@ pub fn migrate_home_state_to(target: &Path) -> Result<Outcome, String> {
     copy_tree_into_empty(&home.join(LEGACY_DIR_NAME), target)
 }
 
-/// Copy `<repo>/.shep` to `<repo>/.shipctl` under the same once-only rule.
+/// Copy a legacy project profile under the same once-only rule.
 ///
 /// Per-repo state is local — the app writes a `.gitignore` of `*` into the
 /// directory — so this only ever touches files the user does not track.
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn copies_legacy_state_and_leaves_the_original_in_place() {
         let root = temp_dir("copy");
-        let legacy = root.join(".shep");
+        let legacy = root.join(LEGACY_DIR_NAME);
         fs::create_dir_all(legacy.join("session-recovery")).unwrap();
         fs::write(legacy.join("config.yml"), "theme: dark").unwrap();
         fs::write(legacy.join("session-recovery/a.json"), "{}").unwrap();
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn skips_sqlite_shm_but_copies_the_wal() {
         let root = temp_dir("sqlite");
-        let legacy = root.join(".shep");
+        let legacy = root.join(LEGACY_DIR_NAME);
         fs::create_dir_all(&legacy).unwrap();
         fs::write(legacy.join("usage.sqlite3"), "db").unwrap();
         fs::write(legacy.join("usage.sqlite3-wal"), "wal").unwrap();
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn runs_once_and_never_overwrites_existing_state() {
         let root = temp_dir("once");
-        let legacy = root.join(".shep");
+        let legacy = root.join(LEGACY_DIR_NAME);
         fs::create_dir_all(&legacy).unwrap();
         fs::write(legacy.join("config.yml"), "old").unwrap();
 
@@ -255,7 +255,7 @@ mod tests {
     fn a_clean_install_is_not_an_error() {
         let root = temp_dir("clean");
         assert_eq!(
-            copy_tree_once(&root.join(".shep"), &root.join(".shipctl")).unwrap(),
+            copy_tree_once(&root.join(LEGACY_DIR_NAME), &root.join(HOME_DIR_NAME)).unwrap(),
             Outcome::NoLegacyState
         );
         assert!(!root.join(".shipctl").exists());
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn leaves_no_staging_directory_behind() {
         let root = temp_dir("staging");
-        let legacy = root.join(".shep");
+        let legacy = root.join(LEGACY_DIR_NAME);
         fs::create_dir_all(&legacy).unwrap();
         fs::write(legacy.join("config.yml"), "x").unwrap();
 
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn resolved_empty_target_can_receive_legacy_state() {
         let root = temp_dir("resolved");
-        let legacy = root.join(".shep");
+        let legacy = root.join(LEGACY_DIR_NAME);
         let target = root.join(".shipctl");
         fs::create_dir_all(&legacy).unwrap();
         fs::create_dir_all(&target).unwrap();

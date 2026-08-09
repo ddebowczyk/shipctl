@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 const SIZE = 1024;
 const PADDING = 180; // breathing room around the logo
 const CORNER_RADIUS = 220;
-const LOGO_PATH = new URL("../../../assets/shipctl.svg", import.meta.url);
+const LOGO_PATH = new URL("../../../assets/shipctl-color.svg", import.meta.url);
 const OUTPUT_PATH = new URL("../../../assets/icon-1024.png", import.meta.url).pathname;
 
 function extractViewBox(svg) {

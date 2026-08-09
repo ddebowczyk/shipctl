@@ -23,8 +23,5 @@ dmg:
 icon:
     node bin/generate-icon.mjs
 
-bump version *args:
-    bash bin/bump-version.sh {{version}} {{args}}
-
 update-json:
     bash bin/generate-update-json.sh

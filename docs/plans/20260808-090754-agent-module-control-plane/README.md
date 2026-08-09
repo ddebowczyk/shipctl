@@ -1,149 +1,147 @@
-# Agent-operated capability module control plane
+# Agent-operated capability runtime
 
-**Status:** Draft for implementation review. **Recorded:** 2026-08-08.
+**Status:** Revised for implementation. **Revised:** 2026-08-09.
 
 ## Goal
 
-Let agents add, remove, enable, disable, inspect, diagnose, verify, update, and
-reconfigure any supported Shipctl capability module while Shipctl is running.
-Every operation must expose enough structured evidence for the same agent to
-prove the requested result at mechanism level and in the full application.
+Let agents manage and use Shipctl capabilities in a running named instance.
+Agents must be able to add, remove, enable, disable, replace, configure,
+inspect, diagnose, and verify modules without rebuilding Rust or reloading the
+webview. They must also be able to discover capability providers, invoke their
+declared ports, watch their events, and attach to authorized streams.
 
-The groundwork is an independently addressable application process: agents can
-start, list, inspect, save, restore, and stop named `shipctl-ui` instances with
-isolated state roots before the first module-control mechanism is introduced.
+The Rust host is a minimal, slowly changing kernel. TypeScript modules own
+feature behavior and UI and use stable APIs exposed by that kernel.
 
-This is a generic module lifecycle. `terminal` and `assistants` are continuity
-stress cases, not the architecture's center.
+## Core model
 
-## Contract
+Three concepts stay separate:
 
-The plan is complete when it provides an ordered, implementation-ready path in
-which:
+- A **capability contract** defines a stable, versioned semantic API: ports,
+  events, streams, schemas, scopes, declared agent access, and
+  provider-selection rules.
+- A **module artifact** packages one or more TypeScript implementations with
+  their contracts, JavaScript, styles, and assets.
+- A **provider binding** connects one activated module instance to a capability
+  contract in one named Shipctl instance.
 
-- supported module changes never reload the webview;
-- `shipctl` is an agent CLI, `shipctl-ui` is the actual Tauri process, and
-  `shipctl ui` launches a named, handshake-verified instance;
-- multiple live named instances use explicit state roots, while state archives
-  can clone restorable state into a new isolated root;
-- one Rust service owns artifacts, desired state, revisions, operations, and
-  diagnostics for both the UI and CLI;
-- the CLI reaches selected running Shipctl instances over same-user local IPC,
-  not a TCP or REST listener;
-- immutable module versions are prepared before one atomic catalog swap;
-- resource ownership makes disable, remove, update, and rollback truthful;
-- every phase adds a production diagnostic and an integration proof using that
-  diagnostic;
-- the final packaged-app test proves that the originating agent terminal stays
-  interactive through success, failure, reconfiguration, and rollback.
+Modules may define new versioned capabilities as well as implement built-in
+ones. `modules/api` owns the meta-contract and built-in host contracts; it is
+not an exhaustive central catalog.
 
 ## Target shape
 
 ```text
-shipctl CLI --launches--> shipctl-ui (named instance + explicit state root)
-     |                         ^
-     +------ local IPC --------+
-                               |
-settings UI --- Tauri adapter -+--> ModuleRegistry service
-                                      | durable desired state + journal
-                                      v
-                               revision notifications
-                                      |
-                                      v
-                               ModuleSupervisor
-                                      |
-                             atomic CatalogSnapshot
-                                      |
-                        panels / commands / providers / jobs
-
-inspect / diagnose / verify <--- joined desired + observed + lease state
+shipctl CLI -------- same-user local IPC --------> named shipctl-ui instance
+                                                     |
+                       +-----------------------------+------------------+
+                       |                             |                  |
+                ModuleRegistry              ModuleSupervisor     Scheduler
+               desired state and             atomic runtime       file-defined
+             durable operations only           snapshot             triggers
+                       |                             |
+                       +---------------------- RuntimeMessageBus
+                                                     |
+                                      ports / events / channels / streams
+                                                     |
+                                    activated TypeScript capability modules
 ```
 
-The CLI transport and Tauri commands are adapters. Neither contains lifecycle
-policy or edits registry files directly.
+The message bus is ephemeral. It routes live commands, messages, and events; it
+does not persist them. A logger module may subscribe and persist selected data
+when explicitly configured. Continuous data such as PTY bytes uses dedicated
+host-owned streams rather than the general bus.
 
-## Diagnostic-first rule
+## Rust kernel boundary
 
-A phase does not exit merely because its new code path works once. It exits
-only when it also provides:
+Rust owns only mechanisms that need native authority or process durability:
 
-1. a versioned structured observation of the behavior;
-2. a deterministic check with stable diagnostic codes;
-3. an integration test through the production boundary available in that
-   phase; and
-4. machine-readable evidence showing the expected and observed outcome.
+- the Tauri shell and same-user local instance protocol;
+- named-instance identity, state-root isolation, and process discovery;
+- artifact integrity, grants, and native resource adapters;
+- the in-process message bus and per-instance scheduler;
+- stable resource registries such as PTY processes and stream fan-out; and
+- durable desired state, configuration, operation identity, and reconciliation
+  observations.
 
-Unit tests may prove internals, but they cannot substitute for the phase's
-integration proof. Test fixtures may isolate state; they may not introduce a
-second lifecycle API that production agents cannot call.
+Rust does not encode feature membership or ordinary feature behavior. New
+native Rust or Tauri registrations remain release- and restart-bound and must
+not be presented as live-loadable.
+
+## Module packaging
+
+Source modules are normal npm/pnpm packages built with Vite or Rollup. Runtime
+installation consumes an immutable Shipctl artifact, not a source checkout or
+`node_modules` tree:
+
+```text
+module.yaml
+module.mjs
+chunks/*
+styles/*
+assets/*
+capabilities/*
+messages/*
+integrity.json
+```
+
+Adding or replacing an artifact never runs `npm install`, lifecycle scripts, a
+Rust build, or a webview reload. An npm registry may later distribute archives;
+it is not part of runtime activation.
 
 ## Phase map
 
 | Phase | Capability unlocked | Exit evidence |
 | --- | --- | --- |
-| [0A](00a-named-instance-spec.md) | Named process, path, discovery, and shutdown contract | Reviewable process specification |
-| [0B](00b-saved-instance-state-spec.md) | Save, inspect, verify, and restore contract | Reviewable state specification |
-| [0C](00c-named-instance-foundation-implementation.md) | Launch/list/inspect/save/load/stop automation foundation | Packaged black-box proof |
-| [0D](00-foundation-contracts-and-test-kernel.md) | Module contracts and loader feasibility tripwires | Schemas and loader proofs |
-| [1](01-durable-registry-and-offline-inspection.md) | Durable read model and offline agent inspection | Registry recovery proof |
-| [2](02-running-instance-control-plane.md) | Module inspection over exact running-instance access | Multi-instance module IPC proof |
-| [3](03-artifacts-capabilities-and-preflight.md) | Safe artifact add and preflight | Tamper and compatibility proof |
-| [4](04-live-runtime-supervisor.md) | Live A-to-B activation and atomic UI state | Rollback and cleanup proof |
-| [5](05-generic-lifecycle-and-reconfiguration.md) | Full generic lifecycle and configuration | Operation and drain proof |
-| [6](06-current-module-migration.md) | All current feature modules use the runtime path | Per-module conformance matrix |
-| [7](07-agent-development-loop.md) | Edit-build-apply-diagnose loop | Source-to-runtime marker proof |
-| [8](08-full-application-verification.md) | Packaged application integration gate | Success and failure evidence bundle |
+| [0A](00a-named-instance-spec.md) | Named process and state-root contract | Reviewable process specification |
+| [0B](00b-saved-instance-state-spec.md) | Save and restore contract | Reviewable state specification |
+| [0C](00c-named-instance-foundation-implementation.md) | Launch, list, inspect, save, load, and stop | Packaged black-box proof |
+| [0D](00-foundation-contracts-and-test-kernel.md) | Module contracts and loader seam | Contract and packaged loader proofs |
+| [1](01-durable-registry-and-offline-inspection.md) | Durable desired state and offline inspection | Registry recovery proof |
+| [2](02-running-instance-control-plane.md) | Exact running-instance access | Multi-instance local-IPC proof |
+| [3](03-artifacts-capabilities-and-preflight.md) | Packages, capability contracts, and preflight | Disabled fixture is installable and inspectable |
+| [4](04-live-runtime-supervisor.md) | Live capability providers and atomic replacement | A-to-B activation with C rollback proof |
+| [5](05-generic-lifecycle-and-reconfiguration.md) | Lifecycle plus agent capability operations | Call, watch, attach, drain, and cleanup proof |
+| [6](06-current-module-migration.md) | Terminal, agents, projects, and feature capabilities | Production-module conformance proofs |
+| [7](07-agent-development-loop.md) | Build, pack, apply, and watch workflow | Source-to-runtime digest proof |
+| [8](08-full-application-verification.md) | Packaged end-to-end agent operability | Success, failure, and continuity bundle |
 
-The task template, dependency gates, and merge order are in
+The implementation order and lean task contract are in
 [Execution order and task contract](09-execution-order-and-task-contract.md).
 
-## Design commitments
+## First cross-phase working milestone
 
-- `shipctl` never hosts a webview. `shipctl-ui` is the packaged application;
-  `shipctl ui` resolves and launches the matching UI executable.
-- Runtime identity, user-visible name, durable state root, project workspaces,
-  and the per-user discovery root are separate concepts. Step 0 permits one
-  writer per state root and supports concurrent instances through distinct
-  roots.
-- SQLite backs the global module registry and operation journal because the
-  lifecycle requires atomic revisions, crash recovery, and safe multi-process
-  reads. Existing YAML configuration remains for unrelated Shipctl settings.
-- Artifacts are content-addressed and immutable. Desired state points at a
-  digest; it never relies on overwriting a stable ESM URL.
-- The first live runtime is trusted frontend ESM using mediated host ports.
-  Statically linked native adapters remain inert host capabilities when their
-  module is absent; adding new native code is restart-required.
-- A manifest declares its runtime kind and supported lifecycle. Future isolated
-  worker or WASM drivers can join the same registry without changing the agent
-  contract.
-- Target instance and configuration scope are separate. `--instance` selects
-  the process handling a request; `--scope` selects the durable configuration
-  affected by a schema that supports scopes.
-- JSON is the canonical wire and assertion model. CLI output defaults to
-  [TOON](https://toonformat.dev/reference/spec) for compact shell use and
-  supports `--output json` for integration tests. Pin the encoder and validate
-  golden outputs because the specification is still evolving.
+The first meaningful milestone uses one fixture archive that defines a new
+capability, implements a typed port, emits an event, exposes a UI contribution,
+and accepts a scheduler message. Through public commands an agent must be able
+to install it disabled, enable it, discover and call it, watch its event,
+refresh and trigger its schedule, replace A with B, reject invalid C while B
+remains active, then disable and remove it. The host binary and webview remain
+unchanged throughout.
 
-## Planned verification entry points
+Phase 3 proves only disabled artifact publication: dynamic capability
+definitions, binding and selection validation, declared agent surfaces, and
+offline inspection. Activation and replacement belong to Phase 4; discovery,
+calling, and watching belong to Phase 5.
 
-These recipes are deliverables of the plan; they do not exist yet:
+## Diagnostics and persistence
 
-```text
-just instance-control contract
-just instance-control integration
-just module-control contract
-just module-control integration
-just module-control e2e
-just module-control all
-```
+Every phase adds the smallest production inspection or verification surface
+needed to prove its new behavior. Durable storage is limited to desired state,
+configuration, immutable artifact references, operation identity and state,
+and reconciliation observations needed across restarts. Bus events, terminal
+bytes, schedule ticks, and routine internal activity are not written to the
+registry.
 
-They belong under `ops/module-control/`. Application code must not import that
-test and repository-operations layer.
+JSON is the canonical wire and assertion format. The CLI may render compact
+TOON by default and supports JSON for integration tests. Instance access uses
+same-user local IPC; Shipctl does not expose a REST listener.
 
 ## Prior decisions superseded here
 
-This plan implements the accepted
+This revision incorporates
+[revision 2](revision-2/revised-plan.md) and the accepted
 [live-reconciliation feedback](../20260808-072927-ext-plus-thin-core/feedback-round-2/README.md).
-It supersedes reload-first lifecycle steps in the parent plan. Reload-safe PTY
-reattachment remains separate resilience work; it is not required to make
-planned module operations safe.
+It replaces the former catalog-centered model and the reload-first lifecycle.
+PTY reattachment is now part of terminal capability migration because terminal
+continuity is a required runtime property, not a reason to reload safely.

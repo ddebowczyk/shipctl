@@ -10,8 +10,14 @@ use shipctl_core::instance::{
     InstanceBuildIdentity, InstanceDiagnosticReport, InstanceDirectory, InstanceRecord,
     StopOutcome,
 };
+use shipctl_core::instance::{
+    TerminalAttachmentClient, TerminalCloseControlResult, TerminalListResult, TerminalWriteResult,
+};
 use shipctl_core::message_bus::{
     MessageDiagnosticReport, MessageRuntimeInspection, RUNTIME_UNAVAILABLE,
+};
+use shipctl_core::module_control::agent::{
+    ActiveCapabilityCatalog, ActiveCapabilityInspection, CapabilityInvocation,
 };
 use shipctl_core::module_control::{
     Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind,
@@ -22,6 +28,7 @@ use shipctl_core::scheduler::{
 };
 use shipctl_core::state::archive::inspect_archive;
 use shipctl_core::state::archive::StateArchiveInspection;
+use shipctl_core::terminal::{TerminalDescriptor, TerminalId};
 use uuid::Uuid;
 
 use crate::APP_VERSION;
@@ -398,6 +405,37 @@ pub fn diagnose_messages(
         .map_err(|error| message_runtime_error(error, selector))
 }
 
+pub fn list_capabilities(
+    runtime_root: Option<&Path>,
+    selector: &str,
+) -> Result<ActiveCapabilityCatalog, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).list_capabilities(selector)
+}
+
+pub fn inspect_capability(
+    runtime_root: Option<&Path>,
+    selector: &str,
+    capability_id: String,
+) -> Result<ActiveCapabilityInspection, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).inspect_capability(selector, capability_id)
+}
+
+pub fn call_capability(
+    runtime_root: Option<&Path>,
+    selector: &str,
+    capability_id: String,
+    port_id: String,
+    payload: serde_json::Value,
+) -> Result<CapabilityInvocation, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).call_capability(selector, capability_id, port_id, payload)
+}
+
 fn message_runtime_error(error: ControlError, selector: &str) -> ControlError {
     if error.code.as_str() == "control.instance.absent" {
         ControlError::new(
@@ -566,6 +604,66 @@ pub fn trigger_schedule(
     let (runtime_root, _) = resolve_runtime_root(runtime_root)
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
     directory(runtime_root).trigger_schedule_with_request_id(selector, schedule_id, request_id)
+}
+
+pub fn list_terminals(
+    runtime_root: Option<&Path>,
+    selector: &str,
+) -> Result<TerminalListResult, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).list_terminals(selector)
+}
+
+pub fn get_terminal(
+    runtime_root: Option<&Path>,
+    selector: &str,
+    terminal_id: TerminalId,
+) -> Result<TerminalDescriptor, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).get_terminal(selector, terminal_id)
+}
+
+pub fn attach_terminal(
+    runtime_root: Option<&Path>,
+    selector: &str,
+    terminal_id: TerminalId,
+) -> Result<TerminalAttachmentClient, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).attach_terminal(selector, terminal_id)
+}
+
+pub fn write_terminal(
+    runtime_root: Option<&Path>,
+    selector: &str,
+    terminal_id: TerminalId,
+    data: &[u8],
+) -> Result<TerminalWriteResult, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).write_terminal(selector, terminal_id, data)
+}
+
+pub fn report_terminal_agent(
+    runtime_root: Option<&Path>,
+    selector: &str,
+    report: shipctl_core::terminal::TerminalAgentReportRequest,
+) -> Result<shipctl_core::instance::TerminalAgentReportResult, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).report_terminal_agent(selector, report)
+}
+
+pub fn close_terminal(
+    runtime_root: Option<&Path>,
+    selector: &str,
+    terminal_id: TerminalId,
+) -> Result<TerminalCloseControlResult, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).close_terminal(selector, terminal_id)
 }
 
 fn existing_disposition(

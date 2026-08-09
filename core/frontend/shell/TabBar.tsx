@@ -258,7 +258,7 @@ export default function TabBar({
     setActiveTab(activeProjectPath, tabId);
     const tab = tabs.find((t) => t.id === tabId);
     if (tab?.kind === "terminal") {
-      useTerminalStore.getState().clearTabBell(tab.ptyId);
+      useTerminalStore.getState().clearTabBell(tab.terminalId);
     }
   };
 

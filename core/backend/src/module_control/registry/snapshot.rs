@@ -99,7 +99,11 @@ impl SnapshotProvider for ModuleRegistrySnapshotProvider {
         if entry_id != "database" {
             return Err(format!("Unknown modules.registry payload {entry_id}"));
         }
-        let snapshot = Self::validated_snapshot(payload)?;
+        let mut snapshot = Self::validated_snapshot(payload)?;
+        // The validation database path is process-local evidence, not module
+        // registry state. Excluding it makes the canonical digest portable
+        // across capture, archive verification, and restore staging.
+        snapshot.registry_path = PathBuf::new();
         serde_json::to_vec(&snapshot)
             .map_err(|error| format!("Could not canonicalize module registry: {error}"))
     }
@@ -125,9 +129,12 @@ mod tests {
         let capture = provider.capture().unwrap().pop().unwrap();
         let payload = capture.payload.unwrap();
         provider.validate_payload("database", &payload).unwrap();
-        assert!(!provider
-            .canonical_payload("database", &payload)
-            .unwrap()
-            .is_empty());
+        let canonical = provider.canonical_payload("database", &payload).unwrap();
+        assert!(!canonical.is_empty());
+        assert_eq!(
+            canonical,
+            provider.canonical_payload("database", &payload).unwrap(),
+            "canonical state cannot contain the random validation path"
+        );
     }
 }

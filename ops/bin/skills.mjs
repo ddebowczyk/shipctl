@@ -22,6 +22,7 @@ export async function inventorySkills(root = defaultRoot) {
   for (const capability of capabilities.filter((entry) => entry.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
     if (!await exists(path.join(opsRoot, capability.name, "capability.yaml"))) continue;
     const skillsRoot = path.join(opsRoot, capability.name, "skills");
+    if (!await exists(skillsRoot)) continue;
     const skills = await readdir(skillsRoot, { withFileTypes: true });
     for (const skill of skills.filter((entry) => entry.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
       const skillFile = path.join(skillsRoot, skill.name, "SKILL.md");

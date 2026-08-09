@@ -1,9 +1,11 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use shipctl_module_api::{
     CapturedSnapshotEntry, SnapshotClassification, SnapshotEntryDeclaration, SnapshotProvider,
 };
+
+const LEGACY_SESSION_RECOVERY_ROOT: &str = "session-recovery";
 
 pub struct WorkspaceSnapshotProvider {
     config_path: PathBuf,
@@ -55,6 +57,50 @@ impl SnapshotProvider for WorkspaceSnapshotProvider {
         serde_yaml::from_slice::<serde_yaml::Value>(payload)
             .map(|_| ())
             .map_err(|error| format!("Host workspace config is invalid YAML: {error}"))
+    }
+}
+
+/// Classifies recovery exports copied from the predecessor profile.
+///
+/// Shipctl does not consume these files and must not silently include them in
+/// a portable snapshot, but migration deliberately preserves them in-place.
+/// Claiming the directory as reference-only keeps classification complete
+/// without turning an obsolete recovery artifact into live application state.
+pub struct LegacyStateSnapshotProvider;
+
+impl SnapshotProvider for LegacyStateSnapshotProvider {
+    fn id(&self) -> &'static str {
+        "host.legacy_state"
+    }
+
+    fn schema_version(&self) -> u32 {
+        1
+    }
+
+    fn entries(&self) -> Vec<SnapshotEntryDeclaration> {
+        vec![SnapshotEntryDeclaration {
+            id: "session_recovery",
+            classification: SnapshotClassification::ReferenceOnly,
+            source_paths: vec![PathBuf::from(LEGACY_SESSION_RECOVERY_ROOT)],
+            target_path: None,
+            redaction: "legacy recovery exports remain in the source profile and are not restored",
+        }]
+    }
+
+    fn capture(&self) -> Result<Vec<CapturedSnapshotEntry>, String> {
+        Ok(vec![excluded_capture("session_recovery")])
+    }
+
+    fn validate_payload(&self, entry_id: &str, _payload: &[u8]) -> Result<(), String> {
+        Err(format!(
+            "Legacy state entry {entry_id} is excluded and cannot carry a payload"
+        ))
+    }
+
+    fn owns_source_path(&self, source_path: &Path) -> bool {
+        source_path
+            .strip_prefix(LEGACY_SESSION_RECOVERY_ROOT)
+            .is_ok()
     }
 }
 
@@ -146,5 +192,33 @@ fn excluded_capture(id: &'static str) -> CapturedSnapshotEntry {
         id,
         payload: None,
         decision: "excluded_by_classification".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_session_recovery_is_classified_but_excluded() {
+        let provider = LegacyStateSnapshotProvider;
+
+        assert!(provider.owns_source_path(Path::new("session-recovery/live-agent-sessions.json")));
+        assert!(!provider.owns_source_path(Path::new("unknown.cache")));
+
+        let declaration = provider.entries().remove(0);
+        assert_eq!(
+            declaration.classification,
+            SnapshotClassification::ReferenceOnly
+        );
+        assert_eq!(
+            declaration.source_paths,
+            vec![PathBuf::from(LEGACY_SESSION_RECOVERY_ROOT)]
+        );
+        assert!(declaration.target_path.is_none());
+
+        let capture = provider.capture().unwrap().remove(0);
+        assert!(capture.payload.is_none());
+        assert_eq!(capture.decision, "excluded_by_classification");
     }
 }

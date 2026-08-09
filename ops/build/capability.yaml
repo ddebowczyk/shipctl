@@ -5,10 +5,27 @@ provides: build
 description: Build and package application artifacts.
 status: supported
 requires:
-  tools: [bash, ditto, git, jq, just, pnpm, shasum, ys]
-  capabilities: [check, modularity]
+  tools:
+    - bash
+    - ditto
+    - git
+    - jq
+    - just
+    - node
+    - pnpm
+    - rustc
+    - shasum
+    - yamllint
+    - yq
+    - ys
+  capabilities: [check, modularity, version]
 owns: [ops/build/**]
-reads: [core/**, modules/**, src/**, src-tauri/**]
+reads:
+  - core/**
+  - examples/module-fixture/**
+  - modules/**
+  - src/**
+  - src-tauri/**
 generates: [dist/**, builds/**, target/**]
 commands:
   - name: app
@@ -33,13 +50,10 @@ commands:
   - name: icon
     summary: Generate the application icon asset.
     lane: slow
-  - name: bump
-    summary: Bump and commit the application version.
-    lane: slow
-    args: [version]
   - name: update-json
     summary: Generate Tauri updater metadata.
     lane: slow
 skills:
   - name: releasing
-    summary: Cut a signed, notarized release and publish an update clients accept.
+    summary: >-
+      Cut a signed, notarized release and publish an update clients accept.

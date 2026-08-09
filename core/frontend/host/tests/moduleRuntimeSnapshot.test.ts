@@ -50,6 +50,7 @@ test("host snapshot contains only module identity and declared contribution fact
         { id: "fixture.refresh", kind: "scheduled_task" },
       ],
     }],
+    startupModules: [],
   });
 });
 

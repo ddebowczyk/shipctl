@@ -9,5 +9,7 @@ provider CLI catalog probes. It depends on the host only through the narrow
 infrastructure.
 
 Frontend calls use the `plugin:shipctl-assistants|...` namespace and explicit
-generated permissions, including `get_models_for_provider`. The restore manifest remains at
-`~/.shep/assistant-sessions.json` with its existing schema and semantics.
+generated permissions, including `get_models_for_provider`. The restore manifest
+lives under the Shipctl state root, normally
+`~/.shipctl/assistant-sessions.json`; existing predecessor state is imported
+once without changing its original files.

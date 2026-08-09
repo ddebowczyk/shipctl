@@ -1,76 +1,160 @@
-use std::collections::HashMap;
 use std::process::Command;
+use std::sync::Arc;
+
+use shipctl_module_api::TerminalColorTheme;
 use tauri::ipc::Channel;
 use tauri::State;
 
-use crate::terminal::manager::PtyManager;
-use crate::terminal::session::{PtyColorTheme, PtyOutput};
+use crate::terminal::runtime::TerminalEventSink;
+use crate::terminal::service::{TerminalRegistryEventSink, TerminalService};
+use crate::terminal::types::{
+    TerminalAttachment, TerminalAttachmentId, TerminalCloseResult, TerminalDescriptor,
+    TerminalEvent, TerminalId, TerminalLaunchRequest, TerminalMetadata, TerminalRegistryEvent,
+    TerminalRegistrySubscriptionId, TerminalRuntimeSnapshot,
+};
 use crate::workspace::config::{normalize_terminal_settings, TerminalSettings};
 use crate::workspace::manager::WorkspaceManager;
 
+/// Final explicit spawn surface. It returns durable host state and does not
+/// require a renderer channel; callers attach independently.
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub fn spawn_pty(
-    command: &str,
-    args: Option<Vec<String>>,
-    cwd: &str,
-    env: HashMap<String, String>,
-    cols: u16,
+pub fn spawn_terminal(
+    request: TerminalLaunchRequest,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalDescriptor, String> {
+    terminals.spawn(request).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_terminals(terminals: State<'_, TerminalService>) -> Vec<TerminalDescriptor> {
+    terminals.list()
+}
+
+#[tauri::command]
+pub fn get_terminal(
+    terminal_id: TerminalId,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalDescriptor, String> {
+    terminals
+        .get(terminal_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn get_terminal_snapshot(
+    terminal_id: TerminalId,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalRuntimeSnapshot, String> {
+    terminals
+        .snapshot(terminal_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn write_terminal(
+    terminal_id: TerminalId,
+    data: Vec<u8>,
+    terminals: State<'_, TerminalService>,
+) -> Result<(), String> {
+    terminals
+        .write(terminal_id, &data)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn resize_terminal(
+    terminal_id: TerminalId,
+    attachment_id: TerminalAttachmentId,
+    columns: u16,
     rows: u16,
-    color_theme: PtyColorTheme,
-    on_data: Channel<PtyOutput>,
-    pty_manager: State<'_, PtyManager>,
-) -> Result<u32, String> {
-    pty_manager.spawn(command, args, cwd, env, cols, rows, color_theme, on_data)
-}
-
-#[tauri::command]
-pub fn write_pty(
-    pty_id: u32,
-    data: &str,
-    pty_manager: State<'_, PtyManager>,
+    terminals: State<'_, TerminalService>,
 ) -> Result<(), String> {
-    pty_manager.write(pty_id, data.as_bytes())
+    terminals
+        .resize(terminal_id, attachment_id, columns, rows)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn acknowledge_pty_output(
-    pty_id: u32,
-    bytes: usize,
-    pty_manager: State<'_, PtyManager>,
+pub fn close_terminal(
+    terminal_id: TerminalId,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalCloseResult, String> {
+    terminals
+        .close(terminal_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn attach_terminal(
+    terminal_id: TerminalId,
+    claims_resize: bool,
+    on_event: Channel<TerminalEvent>,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalAttachment, String> {
+    let sink: Arc<dyn TerminalEventSink> = Arc::new(move |_id, event| {
+        on_event
+            .send(event)
+            .map_err(|error| format!("Terminal attachment channel closed: {error}"))
+    });
+    terminals
+        .attach(terminal_id, sink, claims_resize)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn detach_terminal(
+    attachment_id: TerminalAttachmentId,
+    terminals: State<'_, TerminalService>,
 ) -> Result<(), String> {
-    pty_manager.acknowledge_output(pty_id, bytes)
+    terminals
+        .detach(attachment_id)
+        .map_err(|error| error.to_string())
+}
+
+/// Subscribe before listing to close the create/exit race during renderer
+/// reconciliation. The feed is inventory state only; terminal bytes continue
+/// to use independently detachable output attachments.
+#[tauri::command]
+pub fn subscribe_terminal_registry(
+    on_event: Channel<TerminalRegistryEvent>,
+    terminals: State<'_, TerminalService>,
+) -> TerminalRegistrySubscriptionId {
+    let sink: Arc<dyn TerminalRegistryEventSink> = Arc::new(move |event| {
+        on_event
+            .send(event)
+            .map_err(|error| format!("Terminal registry channel closed: {error}"))
+    });
+    terminals.subscribe_registry(sink)
 }
 
 #[tauri::command]
-pub fn update_pty_color_theme(
-    color_theme: PtyColorTheme,
-    pty_manager: State<'_, PtyManager>,
+pub fn unsubscribe_terminal_registry(
+    subscription_id: TerminalRegistrySubscriptionId,
+    terminals: State<'_, TerminalService>,
+) {
+    terminals.unsubscribe_registry(subscription_id);
+}
+
+#[tauri::command]
+pub fn update_terminal_color_theme(
+    color_theme: TerminalColorTheme,
+    terminals: State<'_, TerminalService>,
 ) -> Result<(), String> {
-    pty_manager.set_color_theme(color_theme)
+    terminals
+        .set_color_theme(color_theme)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn resize_pty(
-    pty_id: u32,
-    cols: u16,
-    rows: u16,
-    pty_manager: State<'_, PtyManager>,
-) -> Result<(), String> {
-    pty_manager.resize(pty_id, cols, rows)
+pub fn update_terminal_metadata(
+    terminal_id: TerminalId,
+    metadata: TerminalMetadata,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalDescriptor, String> {
+    terminals
+        .update_metadata(terminal_id, metadata)
+        .map_err(|error| error.to_string())
 }
-
-#[tauri::command]
-pub fn kill_pty(pty_id: u32, pty_manager: State<'_, PtyManager>) -> Result<(), String> {
-    pty_manager.kill(pty_id)
-}
-
-#[tauri::command]
-pub fn get_pty_session_count(pty_manager: State<'_, PtyManager>) -> usize {
-    pty_manager.session_count()
-}
-
-// ── Terminal settings ──────────────────────────────────────────────
 
 #[tauri::command]
 pub fn get_terminal_settings(
@@ -90,57 +174,46 @@ pub fn save_terminal_settings(
     workspace.save_terminal_settings(&settings)
 }
 
-// ── Memory diagnostics (dev only) ──────────────────────────────────
-
 #[derive(serde::Serialize)]
 pub struct MemoryStats {
-    /// Shipctl (Rust backend) resident memory in bytes
     pub app_rss: u64,
-    /// Total resident memory of all child processes (CLI tools) in bytes
     pub children_rss: u64,
 }
 
 #[tauri::command]
-pub async fn get_memory_stats(pty_manager: State<'_, PtyManager>) -> Result<MemoryStats, String> {
-    let app_pid = std::process::id() as i32;
-    let app_rss = rss_for_pid(app_pid);
-
-    // Sum RSS of all child process trees
-    let child_pids = pty_manager.child_pids();
-    let mut children_rss: u64 = 0;
-    for pid in child_pids {
+pub async fn get_memory_stats(
+    terminals: State<'_, TerminalService>,
+) -> Result<MemoryStats, String> {
+    let app_rss = rss_for_pid(std::process::id() as i32);
+    let mut children_rss = 0;
+    for pid in terminals.child_pids() {
         let pid = pid as i32;
-        // The direct child + its descendants
         children_rss += rss_for_pid(pid);
         if let Ok(output) = Command::new("pgrep")
             .arg("-P")
             .arg(pid.to_string())
             .output()
         {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
                 if let Ok(child) = line.trim().parse::<i32>() {
                     children_rss += rss_for_pid(child);
                 }
             }
         }
     }
-
     Ok(MemoryStats {
         app_rss,
         children_rss,
     })
 }
 
-/// Get resident set size (RSS) for a single PID using `ps`.
 fn rss_for_pid(pid: i32) -> u64 {
-    // ps -o rss= returns RSS in kilobytes
     Command::new("ps")
         .args(["-o", "rss=", "-p", &pid.to_string()])
         .output()
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .map(|kb| kb * 1024)
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|kilobytes| kilobytes * 1024)
         .unwrap_or(0)
 }

@@ -9,7 +9,6 @@ pub mod build_info;
 
 mod lifecycle;
 mod menu;
-mod module_loader_probe;
 mod modules;
 
 use std::sync::Arc;
@@ -25,9 +24,11 @@ use shipctl_core::module_control::registry::ModuleRegistrySnapshotProvider;
 use shipctl_core::projects::watcher::GitWatcher;
 use shipctl_core::scheduler::{SchedulerService, SchedulerSnapshotProvider};
 use shipctl_core::state::archive::StateArchiveService;
-use shipctl_core::state::providers::{UiSnapshotProvider, WorkspaceSnapshotProvider};
+use shipctl_core::state::providers::{
+    LegacyStateSnapshotProvider, UiSnapshotProvider, WorkspaceSnapshotProvider,
+};
 use shipctl_core::state::ui::UiStateStore;
-use shipctl_core::terminal::manager::PtyManager;
+use shipctl_core::terminal::TerminalService;
 use shipctl_core::workspace::manager::WorkspaceManager;
 use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
 
@@ -37,13 +38,6 @@ pub fn run() {
 }
 
 pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
-    run_with_options_and_loader_probe(options, None)
-}
-
-pub fn run_with_options_and_loader_probe(
-    options: InstanceLaunchOptions,
-    module_loader_probe_request: Option<std::path::PathBuf>,
-) -> Result<(), String> {
     let _ = fix_path_env::fix();
 
     let load_state = options.load_state.clone();
@@ -51,11 +45,6 @@ pub fn run_with_options_and_loader_probe(
     let context = InstanceContext::resolve(options, build_info::APP_VERSION)?;
     let paths = context.paths();
     let module_artifact_root = paths.module_artifact_root.clone();
-    let module_loader_probe = module_loader_probe::ModuleLoaderProbe::from_request(
-        module_loader_probe_request.as_deref(),
-        &paths,
-    )?;
-    let module_loader_probe_enabled = module_loader_probe.is_enabled();
     let leases = Arc::new(InstanceLeases::acquire(&context).map_err(|error| error.to_string())?);
     let durable_writes = DurableWriteBarrier::default();
     let snapshot_providers = snapshot_providers(&paths);
@@ -66,10 +55,9 @@ pub fn run_with_options_and_loader_probe(
         snapshot_providers,
     );
 
-    // Copy pre-rename state from `~/.shep` before anything opens a file under
-    // `~/.shipctl`. Module plugins install below and may touch their own state
-    // eagerly, so this cannot wait for `setup()`. The original is left in
-    // place: an installed `shep` build keeps its own state and keeps working.
+    // Copy legacy state before anything opens a file under `~/.shipctl`.
+    // Module plugins install below and may touch their own state eagerly, so
+    // this cannot wait for `setup()`. The original data remains untouched.
     let migration = if let Some(archive) = load_state.as_deref() {
         state_archive
             .restore(archive)
@@ -82,34 +70,30 @@ pub fn run_with_options_and_loader_probe(
     };
     match migration {
         Ok(shipctl_core::workspace::migration::Outcome::Copied(n)) => {
-            eprintln!("Migrated {n} file(s) from ~/.shep into ~/.shipctl");
+            eprintln!("Migrated {n} file(s) from legacy application data");
         }
         Ok(_) => {}
         Err(e) => eprintln!("State migration warning: {e}"),
     }
 
-    if !module_loader_probe_enabled {
-        modules::inventory::seed_current_build(&paths)?;
-    }
-    let module_control = if module_loader_probe_enabled {
-        None
-    } else {
-        Some(
-            ModuleControlService::initialize(paths.clone(), context.instance_id)
-                .map_err(|error| error.to_string())?,
-        )
-    };
+    modules::inventory::seed_current_build(&paths)?;
+    let module_control = ModuleControlService::initialize(paths.clone(), context.instance_id)
+        .map_err(|error| error.to_string())?;
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
-    let pty_manager = PtyManager::new(context.instance_id.to_string());
+    let terminals = TerminalService::new(context.instance_id.to_string());
     let workspace = WorkspaceManager::new_with_barrier(paths.clone(), durable_writes.clone());
     let ui_state = UiStateStore::new_with_barrier(paths.ui_state.clone(), durable_writes.clone());
     let message_bus = RuntimeMessageBus::new(context.clone());
     let message_bridges = MessageBusBridgeService::new(message_bus.clone());
+    let agent_capabilities = shipctl_core::module_control::agent::AgentCapabilityService::new(
+        module_control.clone(),
+        message_bus.clone(),
+    );
     let scheduler = SchedulerService::new(
         context.clone(),
         paths.schedule_root.clone(),
@@ -121,18 +105,18 @@ pub fn run_with_options_and_loader_probe(
     let control_leases = leases.clone();
     let app = modules::install(
         builder,
-        pty_manager.clone(),
+        terminals.clone(),
         workspace.clone(),
         paths.clone(),
         durable_writes,
         message_bridges.clone(),
     )
-    .manage(pty_manager)
+    .manage(terminals)
     .manage(workspace)
     .manage(ui_state)
     .manage(state_archive)
-    .manage(module_loader_probe)
     .manage(module_control)
+    .manage(agent_capabilities)
     .manage(message_bus)
     .manage(message_bridges)
     .manage(scheduler)
@@ -146,18 +130,12 @@ pub fn run_with_options_and_loader_probe(
         app.state::<tauri::scope::Scopes>()
             .allow_directory(&module_artifact_root, true)?;
 
-        // A probe is a disposable host-only verification run. It deliberately
-        // does not acquire a control socket, watcher, or background work that
-        // could touch ordinary user/PTY state while the packaged webview loads
-        // the immutable artifacts.
-        if module_loader_probe_enabled {
-            return Ok(());
-        }
-
         // The frontend opens its bridge after setup. The scheduler retains its
         // initial candidate until that first route publication so it never
         // accepts schedules against generation zero.
-        scheduler_startup.start_initial_route_refresh();
+        tauri::async_runtime::spawn(async move {
+            scheduler_startup.start_initial_route_refresh();
+        });
 
         // Run migration from old project-based config
         let workspace = app.state::<WorkspaceManager>();
@@ -171,15 +149,24 @@ pub fn run_with_options_and_loader_probe(
         // Start file system watcher for git status updates
         app.manage(GitWatcher::new(app.handle().clone()));
 
-        menu::setup(app.handle())?;
-
-        if cfg!(debug_assertions) {
-            app.handle().plugin(
-                tauri_plugin_log::Builder::default()
-                    .level(log::LevelFilter::Info)
-                    .build(),
-            )?;
+        // Release builds need the same file-backed diagnostics as development
+        // builds. Logging is best-effort so an unavailable log directory can
+        // never become another startup failure.
+        if let Err(error) = app.handle().plugin(
+            tauri_plugin_log::Builder::default()
+                .level(configured_log_level())
+                .build(),
+        ) {
+            eprintln!("Logging warning: {error}");
         }
+        log::info!(
+            target: "shipctl::startup",
+            "Shipctl UI starting: version={}, build_id={}",
+            build_info::APP_VERSION,
+            build_info::BUILD_ID,
+        );
+
+        menu::setup(app.handle())?;
 
         let control = ControlServer::start(
             control_context.clone(),
@@ -193,11 +180,11 @@ pub fn run_with_options_and_loader_probe(
     })
     .on_window_event(|window, event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
-            let pty = window.state::<PtyManager>();
-            if pty.is_shutting_down() {
+            let terminals = window.state::<TerminalService>();
+            if terminals.is_shutting_down() {
                 return;
             }
-            let count = pty.session_count();
+            let count = terminals.active_count();
             // Never let a window-close bypass the confirmation dialog.
             // With no PTYs it is still easy to lose the active workspace
             // by accidentally pressing Cmd+Q or the red window button.
@@ -226,16 +213,22 @@ pub fn run_with_options_and_loader_probe(
         shipctl_core::settings::commands::save_keybinding_settings,
         shipctl_core::settings::commands::get_sidebar_settings,
         shipctl_core::settings::commands::open_in_editor,
-        shipctl_core::terminal::commands::spawn_pty,
-        shipctl_core::terminal::commands::write_pty,
-        shipctl_core::terminal::commands::acknowledge_pty_output,
-        shipctl_core::terminal::commands::update_pty_color_theme,
-        shipctl_core::terminal::commands::resize_pty,
-        shipctl_core::terminal::commands::kill_pty,
-        shipctl_core::terminal::commands::get_pty_session_count,
         shipctl_core::terminal::commands::get_terminal_settings,
         shipctl_core::terminal::commands::save_terminal_settings,
         shipctl_core::terminal::commands::get_memory_stats,
+        shipctl_core::terminal::commands::spawn_terminal,
+        shipctl_core::terminal::commands::list_terminals,
+        shipctl_core::terminal::commands::get_terminal,
+        shipctl_core::terminal::commands::get_terminal_snapshot,
+        shipctl_core::terminal::commands::attach_terminal,
+        shipctl_core::terminal::commands::detach_terminal,
+        shipctl_core::terminal::commands::subscribe_terminal_registry,
+        shipctl_core::terminal::commands::unsubscribe_terminal_registry,
+        shipctl_core::terminal::commands::write_terminal,
+        shipctl_core::terminal::commands::resize_terminal,
+        shipctl_core::terminal::commands::close_terminal,
+        shipctl_core::terminal::commands::update_terminal_color_theme,
+        shipctl_core::terminal::commands::update_terminal_metadata,
         shipctl_core::appearance::commands::list_monospace_families,
         shipctl_core::appearance::commands::load_font_family,
         shipctl_core::platform::commands::get_username,
@@ -250,6 +243,7 @@ pub fn run_with_options_and_loader_probe(
         shipctl_core::state::ui::set_last_repo_path,
         shipctl_core::state::ui::save_appearance_state,
         shipctl_core::module_control::live::publish_module_runtime_snapshot,
+        shipctl_core::module_control::live::list_startup_modules,
         shipctl_core::message_bus::commands::open_runtime_message_bridge,
         shipctl_core::message_bus::commands::reconcile_runtime_message_bridge,
         shipctl_core::message_bus::commands::close_runtime_message_bridge,
@@ -262,25 +256,17 @@ pub fn run_with_options_and_loader_probe(
         modules::capability_data::get_global_capability_data,
         modules::capability_data::replace_global_capability_data,
         lifecycle::shutdown_and_quit,
-        module_loader_probe::take_module_loader_probe,
-        module_loader_probe::complete_module_loader_probe,
     ])
     .build(tauri::generate_context!())
     .map_err(|error| format!("error while building Tauri application: {error}"))?;
 
     app.run(|app_handle, event| {
         if let RunEvent::ExitRequested { api, .. } = &event {
-            if app_handle
-                .state::<module_loader_probe::ModuleLoaderProbe>()
-                .is_enabled()
-            {
+            let terminals = app_handle.state::<TerminalService>();
+            if terminals.is_shutting_down() {
                 return;
             }
-            let pty = app_handle.state::<PtyManager>();
-            if pty.is_shutting_down() {
-                return;
-            }
-            let count = pty.session_count();
+            let count = terminals.active_count();
             // Cmd+Q must use the same explicit confirmation as a window close,
             // regardless of whether a PTY happens to be active right now.
             api.prevent_exit();
@@ -295,12 +281,50 @@ fn snapshot_providers(
 ) -> Vec<Arc<dyn SnapshotProvider>> {
     let mut providers: Vec<Arc<dyn SnapshotProvider>> = vec![
         Arc::new(WorkspaceSnapshotProvider::new(paths.global_config.clone())),
+        Arc::new(LegacyStateSnapshotProvider),
         Arc::new(UiSnapshotProvider::new(paths.ui_state.clone())),
         Arc::new(ModuleRegistrySnapshotProvider::new(
             paths.module_registry_database.clone(),
         )),
+        Arc::new(
+            shipctl_core::module_control::artifact_snapshot::ModuleArtifactSnapshotProvider::new(
+                paths.module_artifact_root.clone(),
+            ),
+        ),
         Arc::new(SchedulerSnapshotProvider::new(paths.schedule_root.clone())),
     ];
     modules::extend_snapshot_providers(paths, &mut providers);
     providers
+}
+
+fn configured_log_level() -> log::LevelFilter {
+    std::env::var("SHIPCTL_LOG")
+        .ok()
+        .as_deref()
+        .and_then(parse_log_level)
+        .unwrap_or(log::LevelFilter::Info)
+}
+
+fn parse_log_level(value: &str) -> Option<log::LevelFilter> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" => Some(log::LevelFilter::Off),
+        "error" => Some(log::LevelFilter::Error),
+        "warn" => Some(log::LevelFilter::Warn),
+        "info" => Some(log::LevelFilter::Info),
+        "debug" => Some(log::LevelFilter::Debug),
+        "trace" => Some(log::LevelFilter::Trace),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_supported_log_levels_without_making_invalid_configuration_fatal() {
+        assert_eq!(parse_log_level("trace"), Some(log::LevelFilter::Trace));
+        assert_eq!(parse_log_level(" DEBUG "), Some(log::LevelFilter::Debug));
+        assert_eq!(parse_log_level("verbose"), None);
+    }
 }

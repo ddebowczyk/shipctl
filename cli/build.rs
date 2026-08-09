@@ -1,6 +1,13 @@
 use std::path::Path;
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=SHIPCTL_BUILD_ID");
+    let build_id = std::env::var("SHIPCTL_BUILD_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "development-unrecorded".to_string());
+    println!("cargo:rustc-env=SHIPCTL_BUILD_ID={build_id}");
+
     let config_path = Path::new("../src-tauri/tauri.conf.json");
     println!("cargo:rerun-if-changed={}", config_path.display());
 

@@ -75,9 +75,9 @@ export default function Sidebar({
   // unrelated tabActivity fields change.
   const activityKey = useTerminalStore((s) => {
     const parts: string[] = [];
-    for (const [ptyId, a] of Object.entries(s.tabActivity)) {
+    for (const [terminalId, a] of Object.entries(s.tabActivity)) {
       if (a.active || a.bell || !a.alive) {
-        parts.push(`${ptyId}:${a.active ? "a" : ""}${a.bell ? "b" : ""}${!a.alive ? `x${a.exitCode}` : ""}`);
+        parts.push(`${terminalId}:${a.active ? "a" : ""}${a.bell ? "b" : ""}${!a.alive ? `x${a.exitCode}` : ""}`);
       }
     }
     return parts.join(",");
@@ -95,7 +95,7 @@ export default function Sidebar({
       let liveTerminalCount = 0;
       for (const tab of repoTabs) {
         if (tab.kind !== "terminal") continue;
-        const a = tabActivity[tab.ptyId];
+        const a = tabActivity[tab.terminalId];
         if (a) {
           if (a.bell) hasAttention = true;
           if (a.active) hasActive = true;
@@ -122,7 +122,7 @@ export default function Sidebar({
       const branchName = projectFacts[repoPath]?.revision?.label.trim() || null;
       for (const tab of state.tabs) {
         if (tab.kind !== "terminal" || !tab.modulePresentation?.showInSessionList) continue;
-        const activity = tabActivity[tab.ptyId];
+        const activity = tabActivity[tab.terminalId];
         if (activity && !activity.alive && activity.exitCode === 0) continue;
         sessions.push({ tab, projectPath: repoPath, projectName, branchName });
       }
@@ -133,8 +133,8 @@ export default function Sidebar({
       const bIsActive = b.projectPath === activeRepoPath && b.tab.id === activeTabId;
       if (aIsActive !== bIsActive) return aIsActive ? -1 : 1;
 
-      const aActivity = tabActivity[a.tab.ptyId];
-      const bActivity = tabActivity[b.tab.ptyId];
+      const aActivity = tabActivity[a.tab.terminalId];
+      const bActivity = tabActivity[b.tab.terminalId];
       const aNeedsAttention = Boolean(aActivity?.bell || (aActivity && !aActivity.alive && aActivity.exitCode !== 0));
       const bNeedsAttention = Boolean(bActivity?.bell || (bActivity && !bActivity.alive && bActivity.exitCode !== 0));
       if (aNeedsAttention !== bNeedsAttention) return aNeedsAttention ? -1 : 1;

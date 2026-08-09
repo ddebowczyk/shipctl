@@ -1,11 +1,15 @@
-use tauri::menu::{AboutMetadataBuilder, MenuBuilder, MenuItem, SubmenuBuilder, HELP_SUBMENU_ID};
+use tauri::menu::{
+    AboutMetadata, AboutMetadataBuilder, MenuBuilder, MenuItem, SubmenuBuilder, HELP_SUBMENU_ID,
+};
 use tauri::{AppHandle, Emitter, Wry};
+
+use crate::build_info::BUILD_ID;
 
 pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let version = app.config().version.clone();
 
     // -- App (Shipctl) submenu --
-    let about_meta = AboutMetadataBuilder::new().version(version).build();
+    let about_meta = about_metadata(version);
     let check_updates = MenuItem::with_id(
         app,
         "check_updates",
@@ -137,4 +141,27 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
     });
 
     Ok(())
+}
+
+fn about_metadata(version: Option<String>) -> AboutMetadata<'static> {
+    AboutMetadataBuilder::new()
+        .version(version)
+        .short_version(Some(format!("Build ID: {BUILD_ID}")))
+        .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn about_metadata_shows_product_version_and_build_id() {
+        let metadata = about_metadata(Some("0.1.0".into()));
+
+        assert_eq!(metadata.version.as_deref(), Some("0.1.0"));
+        assert_eq!(
+            metadata.short_version,
+            Some(format!("Build ID: {BUILD_ID}"))
+        );
+    }
 }

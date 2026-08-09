@@ -46,10 +46,16 @@ async function schemaTargets(root) {
   const capabilityFiles = await filesUnder(path.join(root, "ops"), (file) => path.basename(file) === "capability.yaml");
   for (const file of capabilityFiles) targets.push([file, capabilitySchema]);
   targets.push([path.join(root, "ops/ops.yaml"), path.join(root, "ops/schema/ops.schema.yaml")]);
+  targets.push([
+    path.join(root, "ops/version/current.yaml"),
+    path.join(root, "ops/version/schema/current.v1.schema.yaml"),
+  ]);
   targets.push([path.join(root, "ops/upstream/state.yaml"), path.join(root, "ops/upstream/schema/state.schema.yaml")]);
   targets.push([path.join(root, "ops/upstream/path-map.yaml"), path.join(root, "ops/upstream/schema/path-map.schema.yaml")]);
 
   const moduleFiles = await filesUnder(path.join(root, "modules"), (file) => path.basename(file) === "module.yaml");
+  const fixtureManifest = path.join(root, "examples/module-fixture/module.yaml");
+  if (await exists(fixtureManifest)) moduleFiles.push(fixtureManifest);
   if (moduleFiles.length) {
     const moduleSchema = path.join(root, "ops/modularity/schema/module.schema.yaml");
     if (!await exists(moduleSchema)) throw new Error("module.yaml files exist without ops/modularity/schema/module.schema.yaml");
@@ -64,6 +70,7 @@ export async function checkSchemas(root = defaultRoot) {
   const yamlFiles = [
     ...await filesUnder(path.join(root, "ops"), (file) => /\.ya?ml$/.test(file)),
     ...await filesUnder(path.join(root, "modules"), (file) => path.basename(file) === "module.yaml"),
+    ...await filesUnder(path.join(root, "examples/module-fixture"), (file) => /\.ya?ml$/.test(file)),
   ];
   if (yamlFiles.length) await exec("yamllint", yamlFiles);
 

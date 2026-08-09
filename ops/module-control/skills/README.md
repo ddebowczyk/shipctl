@@ -1,4 +1,4 @@
 # Module-control procedures
 
-No separate procedure is required. Use `just module-control loader-tripwire`
-with an already-built host; it records the packaged-webview evidence path.
+Use `just module-control offline-cli` for the offline artifact admission
+boundary and `just module-control integration` for the live control boundary.

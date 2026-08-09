@@ -5,19 +5,31 @@ use uuid::Uuid;
 
 use super::context::InstanceBuildIdentity;
 use crate::message_bus::{MessageDiagnosticReport, MessageRuntimeInspection};
-use crate::module_control::{Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind};
+use crate::module_control::{
+    agent::{ActiveCapabilityCatalog, ActiveCapabilityInspection, CapabilityInvocation},
+    Diagnostic, ModuleInspection, ModuleOperation, ModuleOperationKind,
+};
 use crate::scheduler::{
     ScheduleDiagnosticReport, ScheduleInspection, ScheduleRefreshReport, ScheduleTriggerReport,
     ScheduleVerification,
 };
 use crate::state::archive::StateArchiveInspection;
+use crate::terminal::{
+    TerminalAgentActivity, TerminalAgentReportKind, TerminalAgentReportSource,
+    TerminalAttachmentId, TerminalDescriptor, TerminalExit, TerminalId, TerminalRevision,
+};
 
 /// The JSON-line envelope version for the authenticated local endpoint.
 ///
-/// Version four adds strict scheduler commands and results. The build
-/// control-protocol version remains the compatibility check between executable
-/// roles; this version only describes the wire envelope.
-pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 4;
+/// Version seven adds explicit host-owned terminal agent reports and activity
+/// events. The build control-protocol version remains the compatibility check
+/// between executable roles; this version only describes the wire envelope.
+pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 7;
+
+/// Maximum raw bytes accepted by one terminal control write. This preserves
+/// the replaced terminal ACK path's established 100,000-byte flow-control
+/// budget; it is not a new guessed transport quota.
+pub const TERMINAL_CONTROL_WRITE_MAX_BYTES: usize = 100_000;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -232,8 +244,149 @@ pub enum ControlOperation {
     Shutdown { force: bool },
     Modules { command: ModuleCommand },
     Messages { command: MessageCommand },
+    Capabilities { command: CapabilityCommand },
+    Terminals { command: TerminalCommand },
     Schedules { command: ScheduleCommand },
     Operations { command: OperationCommand },
+}
+
+/// Commands against the host-owned terminal registry. `Attach` is the only
+/// long-lived operation; every other command produces a finite response.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type",
+    deny_unknown_fields
+)]
+pub enum TerminalCommand {
+    List {},
+    Get {
+        terminal_id: TerminalId,
+    },
+    Attach {
+        terminal_id: TerminalId,
+    },
+    Write {
+        terminal_id: TerminalId,
+        data_base64: String,
+    },
+    Report {
+        terminal_id: TerminalId,
+        kind: TerminalAgentReportKind,
+        source: TerminalAgentReportSource,
+        message: Option<String>,
+    },
+    Close {
+        terminal_id: TerminalId,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalListResult {
+    pub count: usize,
+    pub terminals: Vec<TerminalDescriptor>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalWriteResult {
+    pub terminal_id: TerminalId,
+    pub accepted_bytes: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalAgentReportResult {
+    pub terminal_id: TerminalId,
+    pub activity: TerminalAgentActivity,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalCloseControlResult {
+    pub terminal_id: TerminalId,
+    pub existed: bool,
+    pub exit: Option<TerminalExit>,
+}
+
+/// Transport representation of canonical VT replay. Bytes are base64 because
+/// control frames are JSONL and must preserve arbitrary terminal bytes.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalReplayFrame {
+    pub format: String,
+    pub revision: TerminalRevision,
+    pub columns: u16,
+    pub rows: u16,
+    pub data_base64: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalAttachmentState {
+    pub terminal_id: TerminalId,
+    pub attachment_id: TerminalAttachmentId,
+    pub live: bool,
+    pub descriptor: TerminalDescriptor,
+    pub sequence_boundary: u64,
+    pub replay: TerminalReplayFrame,
+}
+
+/// One event from a detachable terminal subscription. The terminal sequence
+/// is independent from the outer control-stream sequence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type",
+    deny_unknown_fields
+)]
+pub enum TerminalControlEvent {
+    Output {
+        terminal_id: TerminalId,
+        attachment_id: TerminalAttachmentId,
+        sequence: u64,
+        revision: TerminalRevision,
+        data_base64: String,
+    },
+    Replay {
+        terminal_id: TerminalId,
+        attachment_id: TerminalAttachmentId,
+        sequence: u64,
+        replay: TerminalReplayFrame,
+    },
+    MetadataChanged {
+        terminal_id: TerminalId,
+        attachment_id: TerminalAttachmentId,
+        sequence: u64,
+        descriptor: TerminalDescriptor,
+    },
+    AgentActivityChanged {
+        terminal_id: TerminalId,
+        attachment_id: TerminalAttachmentId,
+        sequence: u64,
+        descriptor: TerminalDescriptor,
+    },
+    Exited {
+        terminal_id: TerminalId,
+        attachment_id: TerminalAttachmentId,
+        sequence: u64,
+        descriptor: TerminalDescriptor,
+    },
+    ResyncRequired {
+        terminal_id: TerminalId,
+        attachment_id: TerminalAttachmentId,
+        sequence: u64,
+        reason: String,
+    },
+    Detached {
+        terminal_id: TerminalId,
+        attachment_id: TerminalAttachmentId,
+        sequence: u64,
+        reason: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -241,6 +394,25 @@ pub enum ControlOperation {
 pub enum MessageCommand {
     Inspect {},
     Diagnose {},
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    tag = "type",
+    deny_unknown_fields
+)]
+pub enum CapabilityCommand {
+    List {},
+    Inspect {
+        capability_id: String,
+    },
+    Call {
+        capability_id: String,
+        port_id: String,
+        payload: serde_json::Value,
+    },
 }
 
 /// Scheduler commands carried by the authenticated running-instance endpoint.
@@ -326,6 +498,15 @@ pub enum ControlResponseResult {
     ModuleOperation(ModuleOperation),
     MessageInspection(MessageRuntimeInspection),
     MessageDiagnostics(MessageDiagnosticReport),
+    CapabilityCatalog(ActiveCapabilityCatalog),
+    CapabilityInspection(ActiveCapabilityInspection),
+    CapabilityInvocation(CapabilityInvocation),
+    TerminalList(TerminalListResult),
+    TerminalDescriptor(TerminalDescriptor),
+    TerminalWrite(TerminalWriteResult),
+    TerminalAgentReport(TerminalAgentReportResult),
+    TerminalClose(TerminalCloseControlResult),
+    TerminalAttachment(TerminalAttachmentState),
     ScheduleInspection(ScheduleInspection),
     ScheduleDiagnostics(ScheduleDiagnosticReport),
     ScheduleVerification(ScheduleVerification),
@@ -348,6 +529,7 @@ pub struct ControlEvent {
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum ControlEventPayload {
     ModuleOperation(ModuleOperation),
+    Terminal(TerminalControlEvent),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -411,8 +593,12 @@ impl ControlStream {
 
 #[cfg(test)]
 mod tests {
-    use super::{ControlOperation, ControlResponseResult, MessageCommand, ScheduleCommand};
+    use super::{
+        ControlOperation, ControlResponseResult, MessageCommand, ScheduleCommand, TerminalCommand,
+    };
     use crate::scheduler::{ScheduleInspection, SCHEDULE_INSPECTION_SCHEMA_VERSION};
+    use crate::terminal::{TerminalAgentReportKind, TerminalAgentReportSource, TerminalId};
+    use std::str::FromStr;
 
     fn schedule_inspection() -> ScheduleInspection {
         ScheduleInspection {
@@ -444,6 +630,51 @@ mod tests {
             "unexpected": true
         }))
         .is_err());
+    }
+
+    #[test]
+    fn terminal_commands_are_typed_strict_and_round_trip() {
+        let terminal_id = TerminalId::from_str("01234567-89ab-4def-8123-456789abcdef").unwrap();
+        for command in [
+            TerminalCommand::List {},
+            TerminalCommand::Get { terminal_id },
+            TerminalCommand::Attach { terminal_id },
+            TerminalCommand::Write {
+                terminal_id,
+                data_base64: "AAEC/w==".to_string(),
+            },
+            TerminalCommand::Report {
+                terminal_id,
+                kind: TerminalAgentReportKind::Blocked,
+                source: TerminalAgentReportSource {
+                    identifier: "test-agent".to_string(),
+                    version: "1.0.0".to_string(),
+                },
+                message: Some("waiting for review".to_string()),
+            },
+            TerminalCommand::Close { terminal_id },
+        ] {
+            let encoded = serde_json::to_value(&command).unwrap();
+            let decoded: TerminalCommand = serde_json::from_value(encoded).unwrap();
+            assert_eq!(decoded, command);
+        }
+
+        assert!(
+            serde_json::from_value::<TerminalCommand>(serde_json::json!({
+                "type": "get",
+                "terminalId": terminal_id,
+                "unexpected": true
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<TerminalCommand>(serde_json::json!({
+                "type": "write",
+                "terminalId": "not-a-uuid",
+                "dataBase64": "AA=="
+            }))
+            .is_err()
+        );
     }
 
     #[test]

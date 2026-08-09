@@ -1,9 +1,3 @@
-build-loader-probe-host:
-    cd ../.. && pnpm tauri build --debug --no-bundle
-
-loader-tripwire *args:
-    node bin/loader-tripwire.mjs {{args}}
-
 offline-cli:
     cd ../.. && cargo test -p shipctl-cli --test offline_modules_cli
 

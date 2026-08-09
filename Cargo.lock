@@ -2279,6 +2279,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "int-enum"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e366a1634cccc76b4cfd3e7580de9b605e4d93f1edac48d786c1f867c0def495"
+dependencies = [
+ "proc-macro2",
+ "proc-macro2-diagnostics",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "interprocess"
 version = "2.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2588,6 +2600,21 @@ checksum = "328c4789d42200f1eeec05bd86c9c13c7f091d2ba9a6ea35acdf51f31bc0f043"
 dependencies = [
  "pkg-config",
 ]
+
+[[package]]
+name = "libghostty-vt"
+version = "0.2.1"
+source = "git+https://github.com/uzaaft/libghostty-rs?rev=72ac98f292879bf9f788fcbb11238c562a1eebe6#72ac98f292879bf9f788fcbb11238c562a1eebe6"
+dependencies = [
+ "bitflags 2.11.0",
+ "int-enum",
+ "libghostty-vt-sys",
+]
+
+[[package]]
+name = "libghostty-vt-sys"
+version = "0.2.1"
+source = "git+https://github.com/uzaaft/libghostty-rs?rev=72ac98f292879bf9f788fcbb11238c562a1eebe6#72ac98f292879bf9f788fcbb11238c562a1eebe6"
 
 [[package]]
 name = "libloading"
@@ -3733,6 +3760,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro2-diagnostics"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+ "version_check",
+]
+
+[[package]]
 name = "ptr_meta"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4657,6 +4696,7 @@ checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 name = "shipctl-cli"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "notify",
  "serde",
@@ -4674,14 +4714,18 @@ dependencies = [
 name = "shipctl-core"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "core-foundation",
  "core-text",
  "cronexpr",
+ "crossbeam-channel",
  "dirs",
  "fs4",
  "interprocess",
  "jsonschema",
  "libc",
+ "libghostty-vt",
+ "log",
  "notify",
  "portable-pty",
  "rusqlite",
@@ -4706,6 +4750,18 @@ name = "shipctl-module-api"
 version = "0.0.0"
 dependencies = [
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "shipctl-rapid-terminal-probe"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "shipctl-core",
+ "tar",
 ]
 
 [[package]]

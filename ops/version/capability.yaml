@@ -1,0 +1,38 @@
+---
+schema_version: 1
+id: version
+provides: version
+description: Own and validate the independent Shipctl product version.
+status: supported
+requires:
+  tools: [node, yq, ys]
+  capabilities: []
+owns: [ops/version/**]
+reads:
+  - package.json
+  - Cargo.toml
+  - cli/Cargo.toml
+  - core/**/Cargo.toml
+  - examples/**/Cargo.toml
+  - examples/**/package.json
+  - modules/**/Cargo.toml
+  - modules/**/package.json
+  - profiles/**/tauri.conf.json
+  - src-tauri/Cargo.toml
+generates: [src-tauri/tauri.conf.json]
+commands:
+  - name: show
+    summary: Show the authoritative product version and packaging projection.
+    lane: fast
+  - name: check
+    summary: Validate the version record and every required projection.
+    lane: fast
+  - name: next
+    summary: Preview a patch, minor, or major product version.
+    lane: fast
+    args: [part]
+  - name: set
+    summary: Set the product version without staging, committing, or publishing.
+    lane: fast
+    args: [version]
+skills: []

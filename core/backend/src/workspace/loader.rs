@@ -35,11 +35,10 @@ impl GlobalStore {
 
 // ── Paths ───────────────────────────────────────────────────────────
 //
-// State lives in `~/.shipctl` and `<repo>/.shipctl`. Pre-rename state in the
-// matching `.shep` directories is *copied* across once on startup by
-// `workspace::migration`, never moved, so an installed `shep` build keeps its
-// own state and keeps working. Reads fall back to the legacy path so a repo
-// that has not been migrated yet still opens.
+// State lives in `~/.shipctl` and `<repo>/.shipctl`. Matching predecessor
+// profiles are copied once on startup by `workspace::migration`, never moved.
+// Reads fall back to the legacy path so a repository not yet migrated still
+// opens.
 
 fn repo_shipctl_dir(repo_path: &str) -> std::path::PathBuf {
     Path::new(repo_path).join(super::migration::HOME_DIR_NAME)
@@ -50,8 +49,8 @@ fn repo_workspace_file(repo_path: &str) -> std::path::PathBuf {
 }
 
 /// Where to *read* a repo's workspace from: the current path if it exists,
-/// otherwise the pre-rename one. Writes always go to the current path, which
-/// leaves the legacy file intact for an installed `shep` build to keep using.
+/// otherwise the legacy one. Writes always go to the current path and leave
+/// the predecessor file intact.
 fn repo_workspace_read_path(repo_path: &str) -> std::path::PathBuf {
     let current = repo_workspace_file(repo_path);
     if current.exists() {
@@ -537,9 +536,9 @@ fn slug_from_name(name: &str) -> String {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 fn ensure_repo_shipctl_dir(repo_path: &str) -> Result<(), String> {
-    // Copy a pre-rename `<repo>/.shep` across first, so the new directory
-    // starts from the project's existing state rather than a blank default.
-    // The legacy directory is left in place for an installed `shep` build.
+    // Copy predecessor state first, so the new directory starts from the
+    // project's existing state rather than a blank default. The legacy
+    // directory remains untouched.
     let _ = super::migration::migrate_repo_state(repo_path);
 
     let shipctl_dir = repo_shipctl_dir(repo_path);

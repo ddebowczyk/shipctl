@@ -50,10 +50,13 @@ export type {
   FrontendModuleRuntimeSnapshot,
   FrontendRuntimeSnapshot,
   RuntimeSnapshotReceipt,
+  StartupModulePhase,
+  StartupModuleRuntimeSnapshot,
 } from "./moduleRuntimeSnapshot.ts";
 export {
   activateModules,
   activateModulesWithMessages,
+  activateModulesWithMessagesObserved,
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
   discoverRelatedProjectPaths,
@@ -80,6 +83,10 @@ export {
   notifyModulesProjectsChanged,
   selectProjectFactsProvider,
 } from "./moduleComposition.ts";
+export type {
+  ModuleActivationFailure,
+  ObservedModuleActivation,
+} from "./moduleComposition.ts";
 export {
   MessageBusBridge,
   createModuleMessageActivations,
@@ -102,20 +109,26 @@ export type {
 } from "./moduleMessageContext.ts";
 export { bindTerminalSessionDimensions } from "../terminal/terminalSessions.ts";
 export {
-  MODULE_ARTIFACT_LOADER_SCHEMA_VERSION,
   ModuleArtifactLoadError,
   assertDigestQualifiedArtifactUrl,
-  loadModuleArtifact,
+  loadShipctlModuleArtifact,
   moduleArtifactUrl,
 } from "./moduleArtifactLoader.ts";
 export type {
-  LoadModuleArtifactRequest,
-  LoadedModuleArtifact,
-  ModuleArtifactHost,
+  LoadedShipctlModuleArtifact,
+  LoadShipctlModuleArtifactRequest,
   ModuleArtifactLoadPhase,
-  ModuleArtifactRuntime,
 } from "./moduleArtifactLoader.ts";
-export { runModuleLoaderProbeIfRequested } from "./moduleLoaderProbe.ts";
+export {
+  getStartupModuleCatalog,
+  loadRestartBoundModules,
+} from "./restartBoundModules.ts";
+export type {
+  RestartBoundModuleFailure,
+  RestartBoundModules,
+  StartupModuleCatalog,
+  StartupModuleDescriptor,
+} from "./restartBoundModules.ts";
 export type {
   HydratedPanelReference,
   HydratePanelReferenceOptions,

@@ -1,0 +1,9 @@
+---
+schema_version: 1
+product: shipctl
+product_version: 0.1.0
+channel: development
+milestone: rapid-time-to-value
+description: >-
+  First independently versioned Shipctl build line. This repository has
+  diverged from its former upstream and does not inherit upstream versions.

@@ -287,6 +287,37 @@ export function activateModulesWithMessages(
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
   scheduler: ModuleTaskScheduler = BROWSER_TASK_SCHEDULER,
 ): () => Promise<void> {
+  return activateModulesWithMessagesObserved(
+    services,
+    messagesByModule,
+    modules,
+    scheduler,
+  ).deactivate;
+}
+
+export interface ModuleActivationFailure {
+  readonly moduleId: string;
+}
+
+export interface ObservedModuleActivation {
+  readonly activeModuleIds: ReadonlySet<string>;
+  readonly failures: readonly ModuleActivationFailure[];
+  readonly deactivate: () => Promise<void>;
+}
+
+/**
+ * Activate one restart-bound composition and retain only redacted per-module
+ * outcomes. The backend joins these identities with admitted registry truth;
+ * arbitrary frontend exception text never crosses the IPC boundary.
+ */
+export function activateModulesWithMessagesObserved(
+  services: ModuleHostServices,
+  messagesByModule: ReadonlyMap<string, ModuleMessages>,
+  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  scheduler: ModuleTaskScheduler = BROWSER_TASK_SCHEDULER,
+): ObservedModuleActivation {
+  const activeModuleIds = new Set<string>();
+  const failures: ModuleActivationFailure[] = [];
   const activeModules = modules.flatMap((module) => {
     const scheduledTaskCancellations: Array<() => void> = [];
     const moduleServices = activationScopedServices(services);
@@ -303,6 +334,7 @@ export function activateModulesWithMessages(
       for (const task of tasks) {
         scheduledTaskCancellations.push(scheduleModuleTask(task, moduleServices, scheduler));
       }
+      activeModuleIds.add(module.id);
       return [{ deactivation, scheduledTaskCancellations }];
     } catch (error) {
       for (const cancel of [...scheduledTaskCancellations].reverse()) cancel();
@@ -311,10 +343,11 @@ export function activateModulesWithMessages(
           reportModuleFailure(`Module ${module.id} cleanup failed:`, cleanupError));
       }
       reportModuleFailure(`Module ${module.id} activation failed:`, error);
+      failures.push({ moduleId: module.id });
       return [];
     }
   });
-  return async () => {
+  const deactivate = async () => {
     for (const { scheduledTaskCancellations } of [...activeModules].reverse()) {
       for (const cancel of [...scheduledTaskCancellations].reverse()) cancel();
     }
@@ -323,6 +356,7 @@ export function activateModulesWithMessages(
         deactivation ? [deactivation.deactivate()] : []),
     );
   };
+  return { activeModuleIds, failures, deactivate };
 }
 
 /**

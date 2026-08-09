@@ -1,0 +1,21 @@
+[package]
+name = "tauri-plugin-shipctl-fixture"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+links = "tauri-plugin-shipctl-fixture"
+
+[lib]
+name = "shipctl_module_fixture"
+path = "src/lib.rs"
+
+[dependencies]
+shipctl-module-api = { path = "../../../modules/api/backend" }
+tauri = { version = "2.11.5", default-features = false }
+
+[build-dependencies]
+tauri-plugin = { version = "2.5.4", features = ["build"] }
+
+[dev-dependencies]
+tauri = { version = "2.11.5", default-features = false, features = ["test"] }

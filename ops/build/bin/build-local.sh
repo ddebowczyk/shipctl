@@ -4,18 +4,18 @@ set -euo pipefail
 
 usage() {
   printf '%s\n' \
-    'usage: just build local [--target <triple>] [--archive-only]' \
+    'usage: just build local [--target <triple>]' \
     '' \
-    'Builds an unsigned macOS app and DMG, then archives both under builds/.' \
+    'Builds an unsigned macOS app and DMG. Every successful invocation creates' \
+    'a unique builds/<build-id>/ directory with build.yaml and version.yaml.' \
     '' \
     'options:' \
     '  --target TRIPLE  Rust target triple (default: aarch64-apple-darwin).' \
-    '  --archive-only  Archive the current Tauri output without rebuilding.' \
-    '  -h, --help      Show this help.'
+    '  -h, --help       Show this help.'
 }
 
 fail() {
-  printf 'error: %s\n' "$1"
+  printf 'error: %s\n' "$1" >&2
   exit "${2:-1}"
 }
 
@@ -27,13 +27,11 @@ if [ "${1:-}" = '--' ]; then
   shift
 fi
 
-mode='build'
 target='aarch64-apple-darwin'
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --archive-only)
-      mode='archive-only'
-      shift
+      fail '--archive-only cannot prove which source produced existing target output; run a full build' 2
       ;;
     --target)
       [ "$#" -ge 2 ] || fail '--target requires a target triple' 2
@@ -45,120 +43,172 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     *)
-      printf 'error: unknown option: %s\n' "$1"
-      usage
+      printf 'error: unknown option: %s\n' "$1" >&2
+      usage >&2
       exit 2
       ;;
   esac
 done
 
+if ! printf '%s' "$target" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+  fail "target contains characters that are unsafe in a build identifier: $target" 2
+fi
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../../.." && pwd)"
 cd "$repo_root"
 
-require_command git
-require_command jq
-require_command ditto
-require_command shasum
-require_command ys
-if [ "$mode" = 'build' ]; then
-  require_command pnpm
+for tool in ditto git jq node pnpm rustc shasum yamllint yq ys; do
+  require_command "$tool"
+done
+
+just version check || fail 'product version is invalid or its packaging projection has drifted'
+ys -f ops/version/schema/current.v1.schema.yaml ops/version/current.yaml \
+  || fail 'authoritative version record failed schema validation'
+
+version="$(yq -r '.product_version' ops/version/current.yaml)"
+source_start="$(node ops/build/bin/source-identity.mjs)" \
+  || fail 'could not capture source identity before the build'
+git_commit="$(jq -r '.commit' <<<"$source_start")"
+git_short="${git_commit:0:12}"
+source_dirty="$(jq -r '.dirty' <<<"$source_start")"
+source_fingerprint="$(jq -r '.fingerprint' <<<"$source_start")"
+source_token="${source_fingerprint:0:12}"
+source_prefix='t'
+if [ "$source_dirty" = true ]; then
+  source_prefix='w'
 fi
 
-# src-tauri/tauri.conf.json is the single source of the app version, and it is
-# what Tauri names the bundle from. Every other manifest carries a 0.0.0
-# placeholder, so reading one of those finds no matching artifact.
-version="$(jq -er '.version | strings | select(length > 0)' src-tauri/tauri.conf.json)" \
-  || fail 'could not read a non-empty version from src-tauri/tauri.conf.json'
+mkdir -p "$repo_root/builds"
+while true; do
+  clock="$(node -e 'const value = new Date().toISOString(); process.stdout.write(JSON.stringify({ createdAt: value, token: value.replace(/[-:]/g, "") }))')"
+  created_at="$(jq -r '.createdAt' <<<"$clock")"
+  timestamp="$(jq -r '.token' <<<"$clock")"
+  build_id="b${timestamp}-g${git_short}-${source_prefix}${source_token}-${target}"
+  archive_dir="${repo_root}/builds/${build_id}"
+  if mkdir "$archive_dir" 2>/dev/null; then
+    break
+  fi
+done
+
+staging_dir=''
+completed=false
+cleanup() {
+  if [ "$completed" != true ]; then
+    if [ -n "$staging_dir" ] && [ -d "$staging_dir" ]; then
+      rm -rf -- "$staging_dir"
+    fi
+    rmdir "$archive_dir" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+build_command=(pnpm tauri build --target "$target" --bundles app,dmg --no-sign)
+printf 'build_id: %s\n' "$build_id" >&2
+printf 'build: %s\n' "${build_command[*]}" >&2
+SHIPCTL_BUILD_ID="$build_id" "${build_command[@]}"
+
+source_end="$(node ops/build/bin/source-identity.mjs)" \
+  || fail 'could not capture source identity after the build'
+if [ "$source_start" != "$source_end" ]; then
+  fail 'source state changed during the build; refusing to issue a false build record'
+fi
+if [ "$(yq -r '.product_version' ops/version/current.yaml)" != "$version" ]; then
+  fail 'product version changed during the build'
+fi
+
 bundle_root="target/${target}/release/bundle"
 app_source="${bundle_root}/macos/shipctl.app"
-
-if [ "$mode" = 'build' ]; then
-  printf 'build: pnpm tauri build --target %s --bundles app,dmg --no-sign\n' "$target" >&2
-  pnpm tauri build --target "$target" --bundles app,dmg --no-sign
-fi
-
 [ -d "$app_source" ] || fail "app artifact not found: $app_source"
 shopt -s nullglob
 dmg_matches=("${bundle_root}/dmg/shipctl_${version}_"*.dmg)
 shopt -u nullglob
 [ "${#dmg_matches[@]}" -eq 1 ] \
-  || fail "expected exactly one DMG artifact under ${bundle_root}/dmg for version ${version}; found ${#dmg_matches[@]}"
+  || fail "expected exactly one DMG for version ${version}; found ${#dmg_matches[@]}"
 dmg_source="${dmg_matches[0]}"
 dmg_name="$(basename "$dmg_source")"
 
-git_commit="$(git rev-parse HEAD)" || fail 'could not determine the current Git commit'
-git_short="${git_commit:0:12}"
-git_dirty=false
-if [ -n "$(git status --porcelain)" ]; then
-  git_dirty=true
-fi
-git_state='clean'
-if [ "$git_dirty" = true ]; then
-  git_state='dirty'
-fi
+staging_dir="$(mktemp -d "${repo_root}/builds/.${build_id}.XXXXXX")"
+ditto "$app_source" "${staging_dir}/shipctl.app" \
+  || fail 'could not copy the app bundle into the build directory'
+cp -p "$dmg_source" "${staging_dir}/${dmg_name}" \
+  || fail 'could not copy the DMG into the build directory'
+cp -p ops/version/current.yaml "${staging_dir}/version.yaml" \
+  || fail 'could not copy the authoritative version record'
 
-timestamp="$(date '+%Y%m%d-%H%M%S')"
-archive_dir="${repo_root}/builds/${timestamp}-${target}-g${git_short}-${git_state}"
-if [ -e "$archive_dir" ]; then
-  fail "archive already exists: $archive_dir"
-fi
+ui_path='shipctl.app/Contents/MacOS/shipctl-ui'
+cli_path='shipctl.app/Contents/MacOS/shipctl'
+app_sha256="$(node ops/build/bin/hash-tree.mjs "${staging_dir}/shipctl.app")"
+ui_sha256="$(shasum -a 256 "${staging_dir}/${ui_path}" | awk '{print $1}')"
+cli_sha256="$(shasum -a 256 "${staging_dir}/${cli_path}" | awk '{print $1}')"
+dmg_sha256="$(shasum -a 256 "${staging_dir}/${dmg_name}" | awk '{print $1}')"
+version_sha256="$(shasum -a 256 "${staging_dir}/version.yaml" | awk '{print $1}')"
+ui_size="$(wc -c < "${staging_dir}/${ui_path}" | tr -d ' ')"
+cli_size="$(wc -c < "${staging_dir}/${cli_path}" | tr -d ' ')"
+dmg_size="$(wc -c < "${staging_dir}/${dmg_name}" | tr -d ' ')"
+rustc_version="$(rustc --version)"
+pnpm_version="$(pnpm --version)"
+tauri_version="$(pnpm exec tauri --version)"
 
-mkdir -p "$archive_dir" || fail "could not create archive directory: $archive_dir"
-ditto "$app_source" "${archive_dir}/shipctl.app" \
-  || fail 'could not copy the app bundle into the archive'
-cp -p "$dmg_source" "${archive_dir}/${dmg_name}" \
-  || fail 'could not copy the DMG into the archive'
-
-ui_sha256="$(shasum -a 256 "${archive_dir}/shipctl.app/Contents/MacOS/shipctl-ui" | awk '{print $1}')" \
-  || fail 'could not checksum the archived UI executable'
-cli_sha256="$(shasum -a 256 "${archive_dir}/shipctl.app/Contents/MacOS/shipctl" | awk '{print $1}')" \
-  || fail 'could not checksum the archived CLI executable'
-dmg_sha256="$(shasum -a 256 "${archive_dir}/${dmg_name}" | awk '{print $1}')" \
-  || fail 'could not checksum the archived DMG'
-created_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-
+printf '%s\n' '---' > "${staging_dir}/build.yaml" \
+  || fail 'could not start the build record'
 jq -n \
+  --arg build_id "$build_id" \
   --arg created_at "$created_at" \
-  --arg mode "$mode" \
-  --arg version "$version" \
+  --arg product_version "$version" \
+  --arg version_sha256 "$version_sha256" \
   --arg target "$target" \
-  --arg git_commit "$git_commit" \
-  --argjson git_dirty "$git_dirty" \
+  --argjson source "$source_start" \
+  --arg rustc "$rustc_version" \
+  --arg pnpm "$pnpm_version" \
+  --arg tauri_cli "$tauri_version" \
+  --arg app_sha256 "$app_sha256" \
+  --arg ui_path "$ui_path" \
   --arg ui_sha256 "$ui_sha256" \
+  --argjson ui_size "$ui_size" \
+  --arg cli_path "$cli_path" \
   --arg cli_sha256 "$cli_sha256" \
+  --argjson cli_size "$cli_size" \
   --arg dmg_name "$dmg_name" \
   --arg dmg_sha256 "$dmg_sha256" \
-  --arg build_command "pnpm tauri build --target ${target} --bundles app,dmg --no-sign" \
+  --argjson dmg_size "$dmg_size" \
   '{
-    schema_version: 1,
+    schema_version: 2,
+    build_id: $build_id,
     created_at: $created_at,
-    archive_mode: $mode,
-    version: $version,
+    product_version: $product_version,
+    version_record: { path: "version.yaml", sha256: $version_sha256 },
     target: $target,
-    git_commit: $git_commit,
-    git_dirty: $git_dirty,
-    build_command: $build_command,
-    artifacts: {
-      app: {
-        path: "shipctl.app",
-        ui_executable: "Contents/MacOS/shipctl-ui",
-        ui_executable_sha256: $ui_sha256,
-        cli_executable: "Contents/MacOS/shipctl",
-        cli_executable_sha256: $cli_sha256
-      },
-      dmg: { path: $dmg_name, sha256: $dmg_sha256 }
-    }
-  }' > "${archive_dir}/build.json" \
-  || fail 'could not write the archive manifest'
+    mode: "build",
+    source: $source,
+    command: ["pnpm", "tauri", "build", "--target", $target, "--bundles", "app,dmg", "--no-sign"],
+    toolchain: { rustc: $rustc, pnpm: $pnpm, tauri_cli: $tauri_cli },
+    artifacts: [
+      { kind: "app-bundle", path: "shipctl.app", digest: { algorithm: "sha256", scope: "tree", value: $app_sha256 } },
+      { kind: "ui-executable", path: $ui_path, size_bytes: $ui_size, digest: { algorithm: "sha256", scope: "file", value: $ui_sha256 } },
+      { kind: "cli-executable", path: $cli_path, size_bytes: $cli_size, digest: { algorithm: "sha256", scope: "file", value: $cli_sha256 } },
+      { kind: "dmg", path: $dmg_name, size_bytes: $dmg_size, digest: { algorithm: "sha256", scope: "file", value: $dmg_sha256 } }
+    ],
+    provenance: { status: "verified", source_unchanged_during_build: true }
+  }' | yq -P -p=json -o=yaml '.' >> "${staging_dir}/build.yaml" \
+  || fail 'could not write the build record'
 
-ys -f ops/build/schema/build-manifest.schema.yaml "${archive_dir}/build.json" \
-  || fail 'archive manifest failed schema validation'
+ys -f ops/build/schema/build-record.v2.schema.yaml "${staging_dir}/build.yaml" \
+  || fail 'build record failed schema validation'
+yamllint "${staging_dir}/build.yaml" "${staging_dir}/version.yaml" \
+  || fail 'build metadata failed YAML linting'
+
+rmdir "$archive_dir" || fail 'could not finalize reserved build directory'
+mv "$staging_dir" "$archive_dir" || fail 'could not publish the complete build directory'
+staging_dir=''
+completed=true
 
 printf '%s\n' \
-  "archive: ${archive_dir}" \
+  "build_id: ${build_id}" \
+  "build: ${archive_dir}" \
   "app: ${archive_dir}/shipctl.app" \
   "dmg: ${archive_dir}/${dmg_name}" \
-  "manifest: ${archive_dir}/build.json" \
-  "git_commit: ${git_commit}" \
-  "git_dirty: ${git_dirty}"
+  "record: ${archive_dir}/build.yaml" \
+  "version_record: ${archive_dir}/version.yaml" \
+  "product_version: ${version}" \
+  "source_fingerprint: ${source_fingerprint}"

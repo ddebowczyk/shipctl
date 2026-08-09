@@ -1,135 +1,108 @@
-# Execution order and task contract
+# Execution order and lean task contract
 
-## Critical path
+## Remaining critical path
 
 ```text
-Step 0A named-instance contract
-  -> Step 0B saved-state contract
-  -> Step 0C packaged launch/list/inspect/save/load/stop foundation
-  -> Step 0D module contracts + loader tripwires
-  -> Phase 1 durable registry
-  -> Phase 2 module inspection over exact running-instance access
-  -> Phase 3 immutable artifact and preflight
-  -> Phase 4 supervisor + atomic snapshot + scopes
-  -> Phase 5 generic lifecycle + config + leases
-  -> Phase 6 all current module migrations
-  -> Phase 7 source-to-runtime agent loop
-  -> Phase 8 packaged full-application proof
+Phase 3 packages + capability contracts
+  -> Phase 4 live capability provider runtime
+  -> Phase 5 lifecycle + agent call/watch/attach
+  -> scheduler live-module delivery + Phase 6 production migrations
+  -> Phase 7 build/pack/dev loop
+  -> Phase 8 packaged agent-operability proof
 ```
 
-Step 0C is the implementation starting point. Do not begin module registry,
-broad migration, settings UI, or developer-watch UX while executable packaging,
-named identity, path isolation, state round-trip, and the public automation gate
-are unresolved.
+The message-bus epic and scheduler S1–S4 are closed foundations. Scheduler S5
+delivery to activated module endpoints waits for the Phase 4 snapshot. Terminal
+migration starts as soon as the Phase 5 agent surface exists because it proves
+the hardest native-resource and stream boundary.
 
 ## Gate dependencies
 
 <!-- markdownlint-disable MD013 -->
 
-| Work | May proceed when | Must not claim yet |
+| Work | Requires | Proves |
 | --- | --- | --- |
-| Named-instance foundation | Steps 0A and 0B are approved | Module lifecycle |
-| Module contract and loader work | Step 0C public automation gate passes | Runtime module lifecycle |
-| Registry repository | Step 0D contracts are stable | Live module observation |
-| IPC adapters | Registry read model exists | Mutation support |
-| Artifact pipeline | Loader tripwires pass | Live enable/update |
-| Fixture supervisor | Artifact and IPC diagnostics exist | All-module support |
-| Generic lifecycle | Fixture A/B/failure/rollback is proven | Current modules migrated |
-| Module migrations | Generic matrix passes for fixture | Packaged mission complete |
-| Watcher and UI management | Public lifecycle contract is stable | Release readiness |
-| Packaged E2E | Every in-scope module matrix passes | None after proof passes |
+| Phase 3 package and contracts | loader seam, registry, local IPC, bus contracts, scheduler S4 control surface | disabled artifact can define an inspectable capability |
+| Phase 4 provider runtime | Phase 3 artifact and preflight | atomic A-to-B routing and C rollback |
+| Phase 5 agent operations | Phase 4 snapshot and observations | lifecycle plus capability call, event watch, and stream attach |
+| Scheduler live delivery | scheduler core and Phase 4 routes | file refresh reaches exact module endpoint |
+| Phase 6 terminal migration | Phase 5 APIs and stream contract | PTY continuity through provider replacement |
+| Remaining Phase 6 migrations | fixture and terminal conformance | production capabilities are replaceable and agent-operable |
+| Phase 7 development loop | stable Phase 3–6 public contracts | deterministic source-to-running-digest workflow |
+| Phase 8 packaged proof | required production migrations and dev loop | release-level agent operability |
 
 <!-- markdownlint-enable MD013 -->
 
-## Implementation task template
+## Lean execution rule
 
-Create one task per work package in the phase chapters. Each task description
-must contain:
+Work the smallest coherent vertical slice that closes the phase outcome and
+prove it at the public boundary.
 
-```markdown
-### Outcome
-One observable behavior this task adds.
+- Do not create mandatory action-plan files, one task per document, or a
+  discovery-tool checklist.
+- Create a child issue only when it represents independently verifiable work
+  that cannot be completed coherently in the parent subepic.
+- Use repository tools because they answer a necessary question, not to satisfy
+  ceremony.
+- Add the production diagnostic with the behavior it proves.
+- Reuse one integration fixture across contracts, activation, lifecycle,
+  scheduler, and packaged proof.
+- Run focused checks for the changed contract. Run the larger packaged gate only
+  when its boundary changes or when closing the dependent phase.
+- Do not rerun an already proven unchanged gate.
 
-### Depends on
-Exact prior contract, task, or file-level interface required.
+Durable operations and watchers remain because reconciliation crosses durable
+state and running processes. Their vocabulary should stay as small as observed
+behavior permits. The message bus remains ephemeral and is not an operation
+journal.
 
-### Production change
-Smallest code and schema changes needed for the outcome.
+## Cross-phase fixture mission
 
-### Diagnostic change
-New or extended inspect, diagnose, operation, or verification evidence.
+One fixture carries the contract through the next phases:
 
-### Mechanism integration test
-Test through the production boundary available at this phase.
+1. Phase 3 defines a new capability, validates its provider and consumer
+   bindings, selection rules, and declared agent surfaces, installs its
+   artifact disabled, and exposes that metadata through offline inspection.
+2. Phase 4 activates its typed port, event, UI asset, and scheduler endpoint,
+   replaces A with B atomically, rejects invalid C while B remains the selected
+   active provider, and disables or removes it.
+3. Phase 5 lets an external agent discover and invoke it and watch its declared
+   event against a named instance.
 
-### Acceptance evidence
-Command, expected structured fields/codes, and invariants that prove completion.
+This is a cross-phase proof, not the Phase 3 exit criterion. Phase 3 closes at
+the disabled artifact and preflight boundary; do not pull live lifecycle or
+agent operations into it, nor expand Phase 4 into a general distributed
+orchestrator.
 
-### Non-goals
-Nearby claims that fail the mission-necessity test.
-```
+## Verification policy
 
-A task cannot defer its diagnostic or integration test to a later observability
-task. Schema and golden-fixture changes land before or with their first producer.
+Evidence is sized to the claim:
 
-## Verification ladder
+1. schema or unit proof for local invariants;
+2. compiled-service or running-instance proof for a changed mechanism;
+3. public CLI proof for agent-visible behavior; and
+4. packaged end-to-end proof when runtime, native-resource, packaging, or
+   continuity boundaries change.
 
-Run only the evidence necessary for the changed contract, then its containing
-gate:
-
-1. focused unit and schema fixtures;
-2. phase-specific compiled-binary or running-host integration test;
-3. `just module-control contract` and the affected integration matrix;
-4. existing `just check all` and `just test full`; and
-5. `just module-control e2e` when a runtime, lifecycle, resource, module, or
-   packaging claim changes.
-
-`just module-control all` composes the established module-control gates. It
-must not duplicate test logic or turn a generated metric into an arbitrary
-threshold.
-
-## Review checkpoints
-
-Human review is required at these contract boundaries before dependent work is
-scheduled:
-
-- after Steps 0A and 0B: executable roles, naming, state-root isolation,
-  shutdown, and saved-state semantics;
-- after Step 0C: packaged launch, IPC framing, selector behavior, state-provider
-  coverage, and black-box automation evidence;
-- after Step 0D: schema ownership, SQLite registry shape, and loader tripwires;
-- after Phase 3: manifest v2, capability catalog, artifact trust policy, and
-  preflight classification;
-- after Phase 4: atomic snapshot, activation scope, observation model, and
-  fixture failure proof;
-- after Phase 5: lifecycle semantics, configuration scopes, drain behavior, and
-  CLI contract; and
-- after Phase 8: evidence sufficiency for the product claim.
-
-This document pack is the review artifact. It does not create Beads tasks; after
-approval, convert its work packages into an epic without changing their
-dependencies or acceptance evidence.
+Each fact has one authoritative diagnostic. Generated evidence may compose
+those diagnostics but must not duplicate application state or become a second
+control plane.
 
 ## Explicitly rejected claims
 
-- Reload-safe PTY reattachment is useful resilience work, but deleting planned
-  reloads is the direct prerequisite for module lifecycle safety.
-- A REST listener is unnecessary; same-user local IPC provides instance access
-  without opening a network service.
-- Statically linked Tauri plugins are not runtime-installable modules. New native
-  registrations remain restart-required until an isolated runtime driver exists.
-- Desired state alone does not prove runtime success. Verification must join
-  registry and per-instance observed state by revision and digest.
-- Terminal and assistants behavior cannot define a generic lifecycle. They are
-  high-risk conformance cases for the same ownership contracts used elsewhere.
-- Observability is not a late phase. Each phase produces its own diagnostics and
-  integration evidence before dependent behavior starts.
-
-## First implementation slice
-
-Begin with Step 0C work packages 0C.1 and 0C.2 together: split `shipctl` from
-`shipctl-ui`, create immutable `InstanceContext` and `ShipctlPaths`, inject them
-before initialization, and package both executables. Then add leases and the
-ready handshake so the first vertical proof can start, list, inspect, and stop
-one named isolated instance. State snapshot providers and the complete
-two-instance black-box gate close Step 0C before module contracts begin.
+- A central exhaustive capability catalog is unnecessary; modules may define
+  versioned capabilities under the host meta-contract.
+- Runtime npm installation is unnecessary; npm/pnpm is a source and optional
+  distribution tool, while Shipctl installs immutable artifacts.
+- A REST listener is unnecessary; exact instance access uses same-user local
+  IPC.
+- Use Tauri commands and channels conventionally at the native/webview boundary;
+  ordinary Tauri events remain appropriate for lightweight shell/UI
+  notifications. Dynamic capability routing still needs the application bus for
+  schema, grants, activation ownership, and inspection.
+- Persisting bus events, terminal bytes, or schedule ticks in the core registry
+  is unnecessary and risks unbounded writes.
+- Compile-time Cargo features cannot prove runtime module lifecycle.
+- Reload-safe PTY transport is not a substitute for live reconciliation;
+  terminal migration gives sessions stable identity and attachable streams.
+- New native Rust or Tauri registrations are not live-loadable.

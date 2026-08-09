@@ -7,7 +7,6 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const modularityRoot = fileURLToPath(new URL("..", import.meta.url));
-const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const schema = join(modularityRoot, "schema", "module.schema.yaml");
 const fixtures = join(modularityRoot, "tests", "fixtures", "module-manifests");
 
@@ -18,23 +17,6 @@ test("simple and host-glue module manifests satisfy the schema", () => {
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   }
-});
-
-test("a fixture module declares a bounded message contract as artifact data", async () => {
-  const manifest = join(repositoryRoot, "modules", "fixture", "module.yaml");
-  const result = spawnSync("ys", ["--json", "-f", schema, manifest], {
-    encoding: "utf8",
-  });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-
-  const payloadSchema = JSON.parse(
-    await readFile(
-      join(repositoryRoot, "modules", "fixture", "messages", "agent-wakeup.schema.json"),
-      "utf8",
-    ),
-  );
-  assert.equal(payloadSchema.$schema, "https://json-schema.org/draft/2020-12/schema");
-  assert.equal(payloadSchema.additionalProperties, false);
 });
 
 test("the module schema rejects undeclared escape hatches", async (t) => {

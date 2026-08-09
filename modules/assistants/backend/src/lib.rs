@@ -14,14 +14,17 @@ pub mod providers;
 mod snapshot;
 
 use serde::{Deserialize, Serialize};
-use shipctl_module_api::{DurableWriteBarrier, TerminalColorTheme, TerminalOutput};
+use shipctl_module_api::{
+    DurableWriteBarrier, ModuleTerminalId, ModuleTerminalSpawnRequest, TerminalAuthority,
+    TerminalColorTheme,
+};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{ipc::Channel, plugin::TauriPlugin, Manager, Runtime, State};
+use tauri::{plugin::TauriPlugin, Manager, Runtime, State};
 use uuid::Uuid;
 
 pub use capture::{parse_claude_session_metadata, parse_codex_session_metadata};
@@ -67,20 +70,6 @@ pub const SAVE_PI_SETTINGS_COMMAND: &str = "plugin:shipctl-assistants|save_pi_se
 pub const SAVE_PI_API_KEY_COMMAND: &str = "plugin:shipctl-assistants|save_pi_api_key";
 pub const DELETE_PI_API_KEY_COMMAND: &str = "plugin:shipctl-assistants|delete_pi_api_key";
 
-/// The only host authority required by the Assistant provider module.
-///
-/// Provider command and argv policy remain inside this crate. The host merely
-/// starts or stops an already-authorized process through its generic PTY
-/// infrastructure.
-pub trait TerminalAuthority: Send + Sync {
-    fn spawn(
-        &self,
-        request: TerminalLaunchRequest,
-        on_data: Channel<TerminalOutput>,
-    ) -> Result<u32, String>;
-    fn kill(&self, terminal_id: u32) -> Result<(), String>;
-}
-
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PiSettings {
@@ -97,16 +86,6 @@ pub struct PiSettings {
 pub struct PiConfig {
     pub settings: PiSettings,
     pub configured_providers: Vec<String>,
-}
-
-pub struct TerminalLaunchRequest {
-    pub command: String,
-    pub arguments: Vec<String>,
-    pub cwd: String,
-    pub environment: HashMap<String, String>,
-    pub columns: u16,
-    pub rows: u16,
-    pub color_theme: TerminalColorTheme,
 }
 
 /// What this module needs from the host and cannot own itself.
@@ -372,7 +351,7 @@ impl AssistantSessionRegistry {
                 .sessions
                 .retain(|record| record.record_id != record_id);
             if state.manifest.sessions.len() == previous_len {
-                return Err("Assistant session restore record was not found".to_string());
+                return Ok(());
             }
             state.pending_codex_transcripts.remove(record_id);
             Ok(())
@@ -604,6 +583,7 @@ struct AssistantPluginState {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SpawnAssistantSessionRequest {
+    module_session_id: String,
     provider: AssistantProvider,
     launch_repo_path: String,
     placement_project_path: String,
@@ -619,7 +599,7 @@ struct SpawnAssistantSessionRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SpawnedAssistantSession {
-    pty_id: u32,
+    terminal_id: ModuleTerminalId,
     record: AssistantSessionRecord,
 }
 
@@ -627,6 +607,7 @@ struct SpawnedAssistantSession {
 #[serde(rename_all = "camelCase")]
 struct ResumeAssistantSessionRequest {
     record_id: String,
+    module_session_id: String,
     env: HashMap<String, String>,
     cols: u16,
     rows: u16,
@@ -661,10 +642,16 @@ fn provider_spawn_error(provider: AssistantProvider, spawn_error: String) -> Str
     }
 }
 
+fn terminal_owner_key(provider: AssistantProvider) -> &'static str {
+    match provider {
+        AssistantProvider::Claude => "assistants:claude",
+        AssistantProvider::Codex => "assistants:codex",
+    }
+}
+
 #[tauri::command]
 fn spawn_assistant_session(
     request: SpawnAssistantSessionRequest,
-    on_data: Channel<TerminalOutput>,
     state: State<'_, AssistantPluginState>,
 ) -> Result<SpawnedAssistantSession, String> {
     let prepared = state.registry.prepare(PrepareAssistantSession {
@@ -681,19 +668,24 @@ fn spawn_assistant_session(
         prepared.model.as_deref(),
         prepared.provider_session_id.as_deref(),
     )?;
-    let pty_id = match state.services.terminal.spawn(
-        TerminalLaunchRequest {
-            command: launch.command,
-            arguments: launch.args,
-            cwd: prepared.launch_repo_path.clone(),
-            environment: request.env,
-            columns: request.cols,
-            rows: request.rows,
-            color_theme: request.color_theme,
-        },
-        on_data,
-    ) {
-        Ok(pty_id) => pty_id,
+    let terminal_id = match state.services.terminal.spawn(ModuleTerminalSpawnRequest {
+        module_id: "assistants".to_string(),
+        module_session_id: request.module_session_id,
+        command: launch.command,
+        arguments: launch.args,
+        cwd: prepared.launch_repo_path.clone(),
+        project_path: prepared.placement_project_path.clone(),
+        owner_key: terminal_owner_key(prepared.provider).to_string(),
+        label: prepared.label.clone(),
+        owner_metadata: serde_json::to_value(&prepared)
+            .expect("assistant session records are serializable"),
+        presentation: None,
+        environment: request.env,
+        columns: request.cols,
+        rows: request.rows,
+        color_theme: request.color_theme,
+    }) {
+        Ok(terminal_id) => terminal_id,
         Err(error) => {
             let _ = state.registry.discard(&prepared.record_id);
             return Err(provider_spawn_error(prepared.provider, error));
@@ -711,7 +703,7 @@ fn spawn_assistant_session(
         {
             Ok(record) => record,
             Err(error) => {
-                let _ = state.services.terminal.kill(pty_id);
+                let _ = state.services.terminal.close(&terminal_id);
                 let _ = state.registry.discard(&prepared.record_id);
                 return Err(error);
             }
@@ -720,13 +712,15 @@ fn spawn_assistant_session(
         prepared
     };
 
-    Ok(SpawnedAssistantSession { pty_id, record })
+    Ok(SpawnedAssistantSession {
+        terminal_id,
+        record,
+    })
 }
 
 #[tauri::command]
 fn resume_assistant_session(
     request: ResumeAssistantSessionRequest,
-    on_data: Channel<TerminalOutput>,
     state: State<'_, AssistantPluginState>,
 ) -> Result<SpawnedAssistantSession, String> {
     let candidate = state.registry.get_restorable(&request.record_id)?;
@@ -741,19 +735,24 @@ fn resume_assistant_session(
         candidate.model.as_deref(),
     )?;
     let record = state.registry.claim_for_restore(&request.record_id)?;
-    let pty_id = match state.services.terminal.spawn(
-        TerminalLaunchRequest {
-            command: launch.command,
-            arguments: launch.args,
-            cwd: record.launch_repo_path.clone(),
-            environment: request.env,
-            columns: request.cols,
-            rows: request.rows,
-            color_theme: request.color_theme,
-        },
-        on_data,
-    ) {
-        Ok(pty_id) => pty_id,
+    let terminal_id = match state.services.terminal.spawn(ModuleTerminalSpawnRequest {
+        module_id: "assistants".to_string(),
+        module_session_id: request.module_session_id,
+        command: launch.command,
+        arguments: launch.args,
+        cwd: record.launch_repo_path.clone(),
+        project_path: record.placement_project_path.clone(),
+        owner_key: terminal_owner_key(record.provider).to_string(),
+        label: record.label.clone(),
+        owner_metadata: serde_json::to_value(&record)
+            .expect("assistant session records are serializable"),
+        presentation: None,
+        environment: request.env,
+        columns: request.cols,
+        rows: request.rows,
+        color_theme: request.color_theme,
+    }) {
+        Ok(terminal_id) => terminal_id,
         Err(error) => {
             if let Err(rearm_error) = state.registry.rearm_for_restore(&record.record_id) {
                 return Err(format!(
@@ -765,7 +764,10 @@ fn resume_assistant_session(
         }
     };
 
-    Ok(SpawnedAssistantSession { pty_id, record })
+    Ok(SpawnedAssistantSession {
+        terminal_id,
+        record,
+    })
 }
 
 #[tauri::command]
@@ -1262,6 +1264,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(renamed.label, "Keep running");
+        assert!(registry.discard(&pending.record_id).is_ok());
         assert!(registry.discard(&pending.record_id).is_ok());
         let _ = fs::remove_dir_all(directory);
     }

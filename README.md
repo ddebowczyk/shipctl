@@ -7,20 +7,14 @@ Claude Code, Antigravity CLI), saved commands, git-aware views, and usage
 tracking — instead of a pile of shell tabs and half-remembered commands.
 
 <p align="center">
-  <img src="assets/shipctl.svg" alt="Shipctl" width="200" height="200" />
+  <img src="assets/shipctl-color.svg" alt="Shipctl" width="200" height="200" />
 </p>
 
-## This is a fork
+## Architecture
 
-This repository is a fork of [stumptowndoug/shep](https://github.com/stumptowndoug/shep).
-
-We forked it because we needed a more modular codebase and a stronger ops
-harness for fast-paced development: the host is split into capability-owned
-frontend and backend directories, features live in removable modules, and
-repository operations run through `ops/`.
-
-**stumptowndoug continues to maintain the original, and it is likely the more
-stable choice for users — see <https://shep.tools>.**
+Shipctl is organized as a capability-owned host with independently removable
+modules. Frontend and backend capabilities live under `core/`, modules live
+under `modules/`, and repository operations live under `ops/`.
 
 ## Requirements
 
@@ -41,8 +35,8 @@ Run `just` for repository commands and `just ops skills` for procedures; see
 
 ## Configuration
 
-- Per project: `<repo>/.shep/workspace.yml`
-- Machine-wide: `~/.shep/config.yml`
+- Per project: `<repo>/.shipctl/workspace.yml`
+- Machine-wide: `~/.shipctl/config.yml`
 
 ## Project structure
 

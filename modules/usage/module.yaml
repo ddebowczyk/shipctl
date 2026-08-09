@@ -31,7 +31,21 @@ messages:
       redacted_fields: []
       compatible_versions:
         - 1
-  handles: []
+    - id: usage.refresh-request
+      version: 1
+      schema: modules/usage/messages/refresh-request.schema.json
+      max_encoded_bytes: 2
+      redacted_fields: []
+      compatible_versions:
+        - 1
+  handles:
+    - id: usage.refresh-request
+      message:
+        id: usage.refresh-request
+        version: 1
+      capacity: 1
+      required_grant: message.send.usage.refresh-request
+      scheduler_allowed: true
   publishes:
     - id: usage.ingest-completed
       message:

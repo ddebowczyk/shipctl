@@ -15,7 +15,7 @@ see `../backend/README.md`.
 | `platform/` | Tauri IPC bindings, the types those calls exchange with Rust, error extraction | nothing |
 | `shared/` | building blocks that more than one capability already imports: notices, UI state, `ContextMenu`, `a11y`, tab-kind metadata, well-known surface ids | `platform` |
 | `appearance/` | themes, custom themes, fonts (`fonts/`), `globals.css`, terminal colour derivation | `platform` |
-| `terminal/` | PTY lifecycle, xterm views, terminal + keybinding stores, session registry | `platform`, `shared`, `appearance` |
+| `terminal/` | host terminal projection, xterm views/replay, terminal + keybinding stores, module session adoption | `platform`, `shared`, `appearance` |
 | `settings/` | user preferences not owned by another capability: editor choice and its logos (`logos/`) | `platform` |
 | `projects/` | repositories, grouping for the navigation, per-project settings, module-contributed project facts | `platform`, `shared` |
 | `host/` | module activation and composition, `ModuleHostServices`, panel and global-surface registries, module session chrome | every capability above |

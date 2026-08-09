@@ -8,13 +8,21 @@ requires:
   tools: [cargo, git, node, pnpm, rg, yq]
   capabilities: []
 owns:
+  - examples/module-fixture/**
   - ops/modularity/**
   - ops/schema/**
   - ops/bin/**
   - ops/ops.yaml
   - ops/README.md
   - ops/justfile
-reads: [core/**, modules/**, profiles/fixture/**, src/**, src-tauri/**, package.json, pnpm-workspace.yaml]
+reads:
+  - core/**
+  - modules/**
+  - profiles/fixture/**
+  - src/**
+  - src-tauri/**
+  - package.json
+  - pnpm-workspace.yaml
 generates: [profiles/*-disabled/tauri.conf.json]
 commands:
   - name: validate
@@ -30,22 +38,30 @@ commands:
     lane: fast
     aggregate: check
   - name: profiles-sync
-    summary: Regenerate committed disabled-module profiles from module manifests.
+    summary: >-
+      Regenerate committed disabled-module profiles from module manifests.
     lane: slow
   - name: plugout
-    summary: Verify static enabled, disabled, and source-absent module contracts without rebuilding.
+    summary: >-
+      Verify static enabled, disabled, and source-absent module contracts
+      without rebuilding.
     lane: fast
     args: [module]
   - name: frontend-disabled
-    summary: Verify a module's frontend-disabled composition contract without rebuilding.
+    summary: >-
+      Verify a module's frontend-disabled composition contract without
+      rebuilding.
     lane: fast
     args: [module]
   - name: native-disabled
-    summary: Verify legacy native-disabled declaration consistency without rebuilding.
+    summary: >-
+      Verify legacy native-disabled declaration consistency without rebuilding.
     lane: fast
     args: [module]
   - name: all
-    summary: Run static modularity contracts for every pluggable module without rebuilding.
+    summary: >-
+      Run static modularity contracts for every pluggable module without
+      rebuilding.
     lane: fast
   - name: smoke
     summary: Run a named modularity smoke fixture.

@@ -211,7 +211,7 @@ async function validateCommandsAndSkills(root, capabilities) {
 
     const skillsRoot = path.join(capability.root, "skills");
     const declared = new Set(capability.manifest.skills.map(({ name }) => name));
-    const entries = await readdir(skillsRoot, { withFileTypes: true });
+    const entries = await exists(skillsRoot) ? await readdir(skillsRoot, { withFileTypes: true }) : [];
     const directories = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
     for (const name of directories) {
       if (!declared.has(name)) diagnostics.push(diagnostic("undeclared-skill", `${capability.manifest.id}:${name} is not declared`));
@@ -268,13 +268,27 @@ async function validateBuildIsolation(root) {
   return diagnostics;
 }
 
-async function validateRootExecutables(root) {
+async function validateRootExecutables(root, capabilities) {
   const diagnostics = [];
+  const claims = capabilities.flatMap((capability) =>
+    capability.manifest.owns.map((pattern) => ({ capability: capability.manifest.id, pattern }))
+  );
   const entries = await readdir(root, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isDirectory() || SUBJECT_ROOTS.has(entry.name)) continue;
-    const executable = (await filesUnder(path.join(root, entry.name))).some((file) => EXECUTABLE_EXTENSIONS.has(path.extname(file)));
-    if (executable) diagnostics.push(diagnostic("unowned-root-executables", `${entry.name}/ contains repository executables without a capability owner`));
+    const executables = (await filesUnder(path.join(root, entry.name)))
+      .filter((file) => EXECUTABLE_EXTENSIONS.has(path.extname(file)));
+    for (const file of executables) {
+      const relative = path.relative(root, file).split(path.sep).join("/");
+      const owners = claims.filter(({ pattern }) => matches(pattern, relative));
+      if (owners.length !== 1) {
+        diagnostics.push(diagnostic(
+          "unowned-root-executables",
+          `${relative} has ${owners.length} capability owners`,
+          relative,
+        ));
+      }
+    }
   }
   if (await exists(path.join(root, "scripts"))) {
     diagnostics.push(diagnostic("legacy-scripts-returned", "scripts/ is retired; move repository operations into their owning ops capability"));
@@ -311,7 +325,7 @@ export async function validateInvariants(root, capabilities = null) {
     ...await validateBuildIsolation(root),
     ...validateOwnership(root, capabilities, opsFiles),
     ...await validateLiteralWrites(root, capabilities),
-    ...await validateRootExecutables(root),
+    ...await validateRootExecutables(root, capabilities),
     ...validateCycles(capabilities),
     ...await validateCommandsAndSkills(root, capabilities),
     ...await validateActiveProviders(root, capabilities),

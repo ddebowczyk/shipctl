@@ -1,5 +1,12 @@
 [workspace]
-members = ["cli", "src-tauri", "core/backend", "modules/*/backend"]
+members = [
+    "cli",
+    "src-tauri",
+    "core/backend",
+    "modules/*/backend",
+    "examples/module-fixture/backend",
+    "examples/rapid-terminal-probe",
+]
 resolver = "2"
 
 [workspace.package]

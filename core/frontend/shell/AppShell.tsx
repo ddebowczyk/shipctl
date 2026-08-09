@@ -6,11 +6,11 @@ import { TerminalView, TerminalErrorBoundary } from "../terminal/views.ts";
 import { NoticeCenter } from "../shared/views.ts";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useRepoStore } from "../projects/index.ts";
-import { useTerminalStore } from "../terminal/index.ts";
+import { TERMINAL_CLIENT_RUNTIME, useTerminalStore } from "../terminal/index.ts";
 import { BUILTIN_GLOBAL_SURFACE_IDS } from "../shared/index.ts";
 import { useUIStore } from "../shared/index.ts";
 import { useShallow } from "zustand/shallow";
-import { usePty } from "../terminal/index.ts";
+import { useTerminalActions } from "../terminal/index.ts";
 import { useThemeApplicator } from "./useThemeApplicator.ts";
 import { useProjectWatcher } from "../projects/index.ts";
 import { computeTerminalSize } from "../terminal/index.ts";
@@ -34,7 +34,7 @@ import { getErrorMessage } from "../platform/index.ts";
 import { useNoticeStore } from "../shared/index.ts";
 import {
   activateModules,
-  activateModulesWithMessages,
+  activateModulesWithMessagesObserved,
   bindTerminalSessionDimensions,
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
@@ -46,7 +46,9 @@ import {
   notifyModulesProjectsChanged,
   panelIdForTab,
   openModuleMessageBridge,
+  loadRestartBoundModules,
   publishFrontendRuntimeSnapshot,
+  type StartupModuleRuntimeSnapshot,
 } from "../host/index.ts";
 import {
   GlobalSurfaceHost,
@@ -113,10 +115,26 @@ export default function AppShell() {
   const {
     spawnBlankShell,
     closeTab,
-    killProjectPtys,
+    closeProjectTerminals,
     requestTerminalSessionPlacement,
     requestTerminalSessionRename,
-  } = usePty(activeRepoPath, handleSelectRepo);
+  } = useTerminalActions(activeRepoPath, handleSelectRepo);
+
+  useEffect(() => {
+    let cancelled = false;
+    void TERMINAL_CLIENT_RUNTIME.startRegistry().catch((error) => {
+      if (cancelled) return;
+      pushNotice({
+        tone: "error",
+        title: "Couldn’t restore terminals",
+        message: getErrorMessage(error),
+      });
+    });
+    return () => {
+      cancelled = true;
+      void TERMINAL_CLIENT_RUNTIME.stopRegistry();
+    };
+  }, [pushNotice]);
 
   const cycleTabs = useCallback((direction: TabCycleDirection) => {
     // Native menu accelerators and the renderer fallback can both receive the
@@ -169,7 +187,9 @@ export default function AppShell() {
     // Keep terminal DOM order stable even when the visible tab order changes.
     // xterm renderers can fail to repaint cleanly when their mounted nodes are
     // shuffled around in the document during tab drag/reorder operations.
-    return all.sort((a, b) => a.tab.ptyId - b.tab.ptyId || a.tab.id.localeCompare(b.tab.id));
+    return all.sort((a, b) =>
+      a.tab.terminalId.localeCompare(b.tab.terminalId) || a.tab.id.localeCompare(b.tab.id),
+    );
   }, [projectState]);
 
   const { setActiveTab } = useTerminalStore.getState();
@@ -190,29 +210,108 @@ export default function AppShell() {
     let deactivate: (() => Promise<void>) | null = null;
     let closeBridge: (() => Promise<void>) | null = null;
 
-    void openModuleMessageBridge(ENABLED_MODULES)
-      .then(async ({ bridge, messagesByModule }) => {
-        if (disposed) {
-          await bridge.close();
-          return;
-        }
-        closeBridge = () => bridge.close();
-        deactivate = activateModulesWithMessages(
-          MODULE_HOST_SERVICES,
-          messagesByModule,
-          ENABLED_MODULES,
-        );
-        await publishFrontendRuntimeSnapshot();
-      })
-      .catch((error) => {
+    void (async () => {
+      const restartBound = await loadRestartBoundModules();
+      const startupResults = new Map<string, StartupModuleRuntimeSnapshot>();
+      for (const failure of restartBound.failures) {
+        startupResults.set(failure.moduleId, {
+          moduleId: failure.moduleId,
+          status: "failed",
+          phase: failure.phase,
+        });
+        pushNotice({
+          tone: "error",
+          title: `Module ${failure.moduleId} did not start`,
+          message: `${failure.code}: ${failure.message}`,
+        });
+      }
+      const modules = [...ENABLED_MODULES, ...restartBound.modules];
+      let opened: Awaited<ReturnType<typeof openModuleMessageBridge>>;
+      try {
+        opened = await openModuleMessageBridge(modules);
+      } catch (error) {
         if (disposed) return;
-        const modulesWithoutMessages = ENABLED_MODULES.filter(
+        const modulesWithoutMessages = modules.filter(
           (module) => !("messages" in module),
         );
-        deactivate = activateModules(MODULE_HOST_SERVICES, modulesWithoutMessages);
-        void publishFrontendRuntimeSnapshot(modulesWithoutMessages);
-        if (import.meta.env.DEV) console.error("Module message bridge initialization failed:", error);
+        const activation = activateModulesWithMessagesObserved(
+          MODULE_HOST_SERVICES,
+          new Map(),
+          modulesWithoutMessages,
+        );
+        deactivate = activation.deactivate;
+        const activeModules = modulesWithoutMessages.filter(
+          (module) => activation.activeModuleIds.has(module.id),
+        );
+        for (const descriptor of restartBound.catalog.modules) {
+          if (!startupResults.has(descriptor.moduleId)) {
+            startupResults.set(descriptor.moduleId, {
+              moduleId: descriptor.moduleId,
+              status: "failed",
+              phase: "bridge",
+            });
+          }
+        }
+        await publishFrontendRuntimeSnapshot(
+          activeModules,
+          restartBound.catalog.modules.map(({ moduleId }) =>
+            startupResults.get(moduleId) ?? {
+              moduleId,
+              status: "failed",
+              phase: "bridge",
+            }),
+        );
+        if (import.meta.env.DEV) {
+          console.error("Module message bridge initialization failed:", error);
+        }
+        return;
+      }
+      if (disposed) {
+        await opened.bridge.close();
+        return;
+      }
+      closeBridge = () => opened.bridge.close();
+      const activation = activateModulesWithMessagesObserved(
+        MODULE_HOST_SERVICES,
+        opened.messagesByModule,
+        modules,
+      );
+      deactivate = activation.deactivate;
+      const activeModules = modules.filter(
+        (module) => activation.activeModuleIds.has(module.id),
+      );
+      const activationFailures = new Set(
+        activation.failures.map(({ moduleId }) => moduleId),
+      );
+      for (const descriptor of restartBound.catalog.modules) {
+        if (startupResults.has(descriptor.moduleId)) continue;
+        const active = activation.activeModuleIds.has(descriptor.moduleId)
+          && !activationFailures.has(descriptor.moduleId);
+        startupResults.set(descriptor.moduleId, {
+          moduleId: descriptor.moduleId,
+          status: active ? "active" : "failed",
+          phase: active ? "active" : "activation",
+        });
+      }
+      await publishFrontendRuntimeSnapshot(
+        activeModules,
+        restartBound.catalog.modules.map(({ moduleId }) =>
+          startupResults.get(moduleId) ?? {
+            moduleId,
+            status: "failed",
+            phase: "activation",
+          }),
+      );
+    })().catch((error) => {
+      if (disposed) return;
+      deactivate = activateModules(MODULE_HOST_SERVICES, ENABLED_MODULES);
+      void publishFrontendRuntimeSnapshot(ENABLED_MODULES);
+      pushNotice({
+        tone: "error",
+        title: "Runtime modules could not be inspected",
+        message: getErrorMessage(error),
       });
+    });
 
     return () => {
       disposed = true;
@@ -354,7 +453,7 @@ export default function AppShell() {
       );
       if (!confirmed) return;
       try {
-        await killProjectPtys(repoPath);
+        await closeProjectTerminals(repoPath);
         await removeRepo(repoPath);
         useTerminalStore.getState().removeProject(repoPath);
         await notifyModulesProjectRemoved(repoPath, MODULE_HOST_SERVICES);
@@ -366,7 +465,7 @@ export default function AppShell() {
         });
       }
     },
-    [killProjectPtys, pushNotice, removeRepo],
+    [closeProjectTerminals, pushNotice, removeRepo],
   );
 
   const handleRenameGroup = useCallback(
@@ -429,7 +528,7 @@ export default function AppShell() {
     const allTabs = activeRepoPath ? store.getAllProjectTabs(activeRepoPath) : [];
     const tab = allTabs.find((t) => t.id === tabId);
     if (tab?.kind === "terminal") {
-      store.clearTabBell(tab.ptyId);
+      store.clearTabBell(tab.terminalId);
     }
   }, [setActiveTab, activeRepoPath]);
 
@@ -443,7 +542,7 @@ export default function AppShell() {
     store.setActiveTab(repoPath, tabId);
     const tab = store.projectState[repoPath]?.tabs.find((entry) => entry.id === tabId);
     if (tab?.kind === "terminal") {
-      store.clearTabBell(tab.ptyId);
+      store.clearTabBell(tab.terminalId);
     }
   }, [activeRepoPath, handleSelectRepo]);
 
@@ -788,7 +887,7 @@ export default function AppShell() {
               >
                 <TerminalErrorBoundary>
                   <TerminalView
-                    ptyId={tab.ptyId}
+                    terminalId={tab.terminalId}
                     visible={!showGlobalSurface && projectPath === activeRepoPath && tab.id === activeTabId}
                   />
                 </TerminalErrorBoundary>

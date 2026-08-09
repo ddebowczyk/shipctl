@@ -10,14 +10,17 @@ pub use context::{
     InstanceBuildIdentity, InstanceContext, InstanceInspection, InstanceLaunchOptions,
     LaunchProvenance, RootSource,
 };
-pub use control::{ControlHandler, ControlServer, InstanceDirectory};
+pub use control::{ControlHandler, ControlServer, InstanceDirectory, TerminalAttachmentClient};
 pub use leases::InstanceLeases;
 pub use protocol::{
-    ActiveWorkBlocker, ControlCaller, ControlCompletion, ControlCompletionStatus, ControlError,
-    ControlEvent, ControlEventPayload, ControlHello, ControlOperation, ControlRequest,
-    ControlResponse, ControlResponseResult, ControlStream, DiscoveryProblem, DiscoveryReport,
-    InstanceDiagnosticReport, InstanceRecord, MessageCommand, ModuleCommand, ModuleControlStatus,
-    OperationCommand, ScheduleCommand, StopOutcome, CONTROL_FRAME_SCHEMA_VERSION,
+    ActiveWorkBlocker, CapabilityCommand, ControlCaller, ControlCompletion,
+    ControlCompletionStatus, ControlError, ControlEvent, ControlEventPayload, ControlHello,
+    ControlOperation, ControlRequest, ControlResponse, ControlResponseResult, ControlStream,
+    DiscoveryProblem, DiscoveryReport, InstanceDiagnosticReport, InstanceRecord, MessageCommand,
+    ModuleCommand, ModuleControlStatus, OperationCommand, ScheduleCommand, StopOutcome,
+    TerminalAgentReportResult, TerminalAttachmentState, TerminalCloseControlResult,
+    TerminalCommand, TerminalControlEvent, TerminalListResult, TerminalReplayFrame,
+    TerminalWriteResult, CONTROL_FRAME_SCHEMA_VERSION, TERMINAL_CONTROL_WRITE_MAX_BYTES,
 };
 /// Caller-owned identity for retryable running-instance mutations.
 pub use uuid::Uuid as ControlRequestId;

@@ -8,7 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@shipctl/module-fixture": fileURLToPath(
-        new URL("../../../../modules/fixture/frontend/src/index.ts", import.meta.url),
+        new URL("../../../../examples/module-fixture/frontend/src/index.ts", import.meta.url),
       ),
     },
   },

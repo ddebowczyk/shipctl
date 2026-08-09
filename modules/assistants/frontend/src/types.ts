@@ -12,7 +12,7 @@ export interface CodingAssistant {
   readonly modelFlag: string;
 }
 
-export interface AssistantSessionRecord {
+export interface AssistantSessionRecord extends Readonly<Record<string, ModuleJsonValue>> {
   readonly recordId: string;
   readonly provider: RestorableAssistantProvider;
   readonly providerSessionId: string | null;
@@ -38,9 +38,10 @@ export interface PiConfig {
   readonly configuredProviders: readonly string[];
 }
 
-export interface AssistantOwnerMetadata {
+export interface AssistantOwnerMetadata extends Readonly<Record<string, ModuleJsonValue>> {
   readonly provider: string;
   readonly mode: SessionMode;
   readonly record: AssistantSessionRecord | null;
   readonly restoring: boolean;
 }
+import type { ModuleJsonValue } from "@shipctl/module-api";

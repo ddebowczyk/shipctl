@@ -1,118 +1,105 @@
-# Phase 8 — full-application verification
+# Phase 8 — packaged agent-operability verification
 
 ## Outcome
 
-Prove the complete agent-operated lifecycle in a packaged Shipctl application,
-including the mission-critical invariant that the terminal performing the change
-survives and remains interactive.
+Prove through a packaged Shipctl application that agents can manage modules and
+operate their capabilities while the host binary, webview, running terminals,
+and unrelated providers remain intact.
 
-## Work package 8.1 — packaged-app driver
+## Work package 8.1 — public packaged driver
 
-Add an application integration driver under `ops/module-control/` that:
+Drive only shipped boundaries:
 
-- launches named packaged instances through `shipctl ui start` with isolated
-  state roots and explicit project workspaces;
-- discovers and stops them through the Step 0 public instance protocol;
-- loads a saved baseline state when the scenario requires reproducible setup;
-- uses application UI automation to open a real Shipctl terminal;
-- runs the installed `shipctl` CLI inside that terminal, exercising injected
-  `SHIPCTL_INSTANCE_ID` selection;
-- observes operations through revision events rather than fixed sleeps; and
-- captures redacted evidence using the Phase 7 bundle contract.
+- launch named instances with isolated state roots and workspaces;
+- use `shipctl` over the same-user local instance protocol;
+- install immutable module artifacts;
+- inspect modules, capabilities, providers, scheduler state, and streams;
+- invoke typed ports, watch declared events, and attach to authorized streams;
+- observe operation completion rather than sleeping; and
+- stop instances through the public CLI.
 
-The driver may control test fixtures and process lifetime. It may not invoke a
-private lifecycle endpoint, mutate the registry database, or read frontend
-stores as its success oracle.
+The driver may control fixture inputs and process lifetime. It may not mutate
+the registry, invoke private endpoints, read frontend stores, or treat a source
+file change as proof that code was evaluated.
 
-## Work package 8.2 — successful mission scenario
+## Work package 8.2 — fixture vertical mission
 
-Run this sequence with a generic fixture capability and at least one migrated
-resource-owning module:
+Using one unchanged packaged host binary:
 
-1. Start Shipctl with fixture A active and open the originating terminal.
-2. Prove the terminal accepts a nonce command and returns the matching output.
-3. Add and enable immutable fixture B through the CLI.
-4. Verify B's evaluated marker, contributions, digest, and applied revision.
-5. Reconfigure B and verify the effective redacted configuration revision.
-6. Disable B and prove its public contributions disappear.
-7. Re-enable B and prove a fresh instance identity owns its contributions.
-8. Roll back to A and prove A's immutable marker is evaluated again.
-9. Remove the unreferenced B artifact and verify logical and physical state.
-10. After every committed transition, send a new nonce through the originating
-    terminal and prove its ordered response.
+1. start a named instance;
+2. add fixture A disabled and inspect its module-defined capability;
+3. enable A and discover its active provider;
+4. call its typed port and watch its declared event;
+5. refresh its schedule file and trigger the schedule-addressable endpoint;
+6. replace A with B and prove new calls route to B;
+7. submit invalid C and prove B remains the selected active provider, public,
+   and callable;
+8. reconfigure B without rebuilding code;
+9. disable and remove B and prove its routes and contributions disappear; and
+10. verify the host binary digest, webview identity, and unrelated runtime state
+    did not change.
 
-The resource-owning case also starts work under A, updates to B, proves new work
-routes to B, and proves A continues serving its leased resource until natural
-release.
+The proof also confirms that routine bus messages, events, schedule ticks, and
+stream payloads were not persisted by the core runtime.
 
-## Work package 8.3 — failure and recovery mission scenario
+## Work package 8.3 — production capability mission
 
-From the last good active version:
+Run the same public-boundary proof against migrated production capabilities:
 
-1. Submit an artifact that fails preflight and prove no desired activation
-   revision changes.
-2. Submit C that passes preflight but fails activation.
-3. Verify the last good version and catalog remain public.
-4. Verify C owns no public contribution and leaks no unleased handle.
-5. Verify the operation reports its exact failed phase and remediation.
-6. Submit a valid subsequent version and prove the instance recovers live.
-7. Prove the originating terminal remains interactive throughout.
+- attach the UI and an external agent to one terminal stream;
+- replace the TypeScript terminal provider while the PTY remains alive and
+  ordered output continues to both observers;
+- use an assistant or agent-session capability that consumes terminal APIs;
+- inspect and operate project-browser capability state; and
+- prove disabling or replacing one provider does not alter unrelated providers.
 
-Also submit a restart-required change and prove it is rejected before commit;
-the test must not accept a webview reload as recovery.
+Failure cases cover stale preconditions, denied private routes, invalid input,
+preflight rejection, activation failure, drain blockers, and subsequent live
+recovery.
 
-## Work package 8.4 — multiple running instances
+## Work package 8.4 — multiple named instances
 
-Launch two named running instances with distinct writable state roots. Once the
-transactional module registry supports an explicitly shared service root, point
-both at that one deliberate test registry while retaining distinct instance
-profiles and runtime endpoints. Prove:
+Launch two named instances with distinct state roots and workspaces. Prove:
 
-- untargeted CLI commands fail as ambiguous;
-- explicit and injected instance selection query the correct observed state;
-- a global desired revision is independently observed by both supervisors;
-- one instance can lag or disconnect without falsifying the other's result; and
-- per-instance observations remain distinct in inspection and operations.
+- untargeted commands fail when selection is ambiguous;
+- `--instance` and injected instance identity select the correct process;
+- module, capability, schedule, event, and stream observations remain
+  instance-specific;
+- one instance can be stopped or lag reconciliation without falsifying the
+  other's state; and
+- state save and load do not merge process identity or runtime endpoints.
 
-Where a module supports workspace configuration, use distinct workspace
-identities to prove the scope is not inferred from target instance.
-
-The driver must also prove `instances list` shows both names, and must stop both
-through the CLI. Test cleanup must not signal descriptor PIDs or touch the
-production `main` state root.
+If a later shared registry mode exists, test its global desired state separately
+from per-instance observed state. It is not required for ordinary multi-instance
+support.
 
 ## Diagnostic and verification mechanism
 
-`shipctl diagnose --output json` is the final application oracle. It aggregates
-registry integrity, instance handshake, revision convergence, catalog ownership,
-module checks, effective grants, activation scopes, leases, and correlated
-operation failures.
+`shipctl diagnose --output json` is the final consistency oracle. It joins
+instance handshake, registry integrity, desired and applied revisions, module
+artifacts, capability definitions and providers, catalog ownership, bus routes,
+scheduler generation, streams, resources, leases, and operation failures.
 
-The evidence bundle includes expectation results for every transition and the
-terminal nonce transcript limited to the generated test nonces. It excludes
-ordinary user terminal content.
-
-Planned entry point:
-
-```text
-just module-control e2e --output json
-```
+The evidence bundle contains only the structured facts and generated test
+nonces necessary to reproduce the result. It excludes secrets and ordinary
+terminal content.
 
 ## Exit proof
 
-- Both success and failure scenarios pass through the packaged application.
-- Every expected outcome is proven by public CLI diagnostics or UI observation,
-  not internal store access.
-- Runtime markers prove evaluated code identity rather than changed files.
-- The originating terminal's webview, session, and PTY remain usable across all
-  live lifecycle operations.
-- Desired and observed states converge by revision in each selected instance.
-- The final full diagnostic has no failed consistency checks.
-- The generated evidence bundle validates and contains no configured secrets.
-- `just module-control all`, `just check all`, and `just test full` pass.
+- The complete fixture mission passes through the packaged CLI and UI runtime.
+- Terminal, assistant/session, and project-browser capability proofs pass
+  through public agent surfaces.
+- A, B, C, configuration, schedule, and lifecycle transitions require no Rust
+  rebuild or webview reload.
+- The originating terminal PTY and both authorized observers remain usable.
+- Two named instances are independently targetable and inspectable.
+- Every failure leaves the last good snapshot usable and produces a stable
+  diagnostic.
+- The final full diagnostic reports no failed consistency check and no core
+  persistence of ephemeral traffic.
 
 ## Release tripwire
 
-Do not claim live agent reconfiguration for a runtime kind, module, or packaged
-platform unless its corresponding full-application lane produces this proof.
-A unit, browser fixture, dev server, or settings-UI demonstration is insufficient.
+Do not claim live agent operability for a capability or runtime kind until its
+packaged lane proves management, invocation or observation, failure recovery,
+and continuity through the public instance protocol.

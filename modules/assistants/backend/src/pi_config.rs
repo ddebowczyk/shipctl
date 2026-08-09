@@ -128,10 +128,9 @@ pub fn save_pi_settings(settings: PiSettings) -> Result<(), String> {
 
 // Keychain identity for stored provider API keys.
 //
-// Pre-rename keys live under `shep-pi`. They are *copied* to `shipctl-pi` on
-// demand and the originals are left in place, so an installed `shep` build
-// keeps working with its own credentials. Nothing here ever deletes a legacy
-// entry — only `delete_pi_api_key`, acting on an explicit user request,
+// Legacy keys are copied to the current account on demand; their originals
+// stay intact for a predecessor installation. Nothing here ever deletes a
+// legacy entry — only `delete_pi_api_key`, acting on an explicit user request,
 // removes anything, and then only the current-name entry.
 const KEYCHAIN_ACCOUNT: &str = "shipctl-pi";
 const LEGACY_KEYCHAIN_ACCOUNT: &str = "shep-pi";

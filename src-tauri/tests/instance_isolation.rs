@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use shipctl_core::instance::{InstanceContext, InstanceLaunchOptions};
 use shipctl_core::state::ui::UiStateStore;
-use shipctl_core::terminal::manager::PtyManager;
+use shipctl_core::terminal::{TerminalId, TerminalService};
 use shipctl_core::workspace::config::EditorSettings;
 use shipctl_core::workspace::manager::WorkspaceManager;
 use shipctl_module_assistants::{
@@ -41,7 +41,7 @@ fn context(root: &std::path::Path, name: &str) -> InstanceContext {
 }
 
 #[test]
-fn two_backend_compositions_isolate_every_registered_durable_source_and_pty_identity() {
+fn two_backend_compositions_isolate_every_registered_durable_source_and_terminal_identity() {
     let root = test_root();
     let repo = root.join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -124,12 +124,12 @@ fn two_backend_compositions_isolate_every_registered_durable_source_and_pty_iden
         })
         .is_err());
 
-    let first_pty = PtyManager::new(first.instance_id.to_string());
-    let second_pty = PtyManager::new(second.instance_id.to_string());
+    let first_terminals = TerminalService::new(first.instance_id.to_string());
+    let second_terminals = TerminalService::new(second.instance_id.to_string());
     let mut first_environment = HashMap::new();
     let mut second_environment = HashMap::new();
-    first_pty.inject_instance_environment(&mut first_environment);
-    second_pty.inject_instance_environment(&mut second_environment);
+    first_terminals.inject_host_environment(TerminalId::new(), &mut first_environment);
+    second_terminals.inject_host_environment(TerminalId::new(), &mut second_environment);
     assert_eq!(
         first_environment.get("SHIPCTL_INSTANCE_ID"),
         Some(&first.instance_id.to_string())

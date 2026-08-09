@@ -3,7 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
-      "@shipctl/module-fixture": ["../../../../modules/fixture/frontend/src/index.ts"]
+      "@shipctl/module-fixture": ["../../../../examples/module-fixture/frontend/src/index.ts"]
     }
   },
   "include": ["main.tsx", "enabledModules.ts", "../../../../src/vite-env.d.ts"]

@@ -19,6 +19,7 @@ pub const SNAPSHOT_UNAVAILABLE: &str = "module.runtime.snapshot.unavailable";
 pub const SNAPSHOT_AVAILABLE: &str = "module.runtime.snapshot.available";
 pub const MODULE_UNOBSERVED: &str = "module.runtime.module.unobserved";
 pub const MODULE_ACTIVE: &str = "module.runtime.module.active";
+pub const MODULE_STARTUP_FAILED: &str = "module.runtime.startup.failed";
 pub const REVISION_LAG: &str = "module.runtime.revision.lag";
 pub const REVISION_INVALID: &str = "module.runtime.revision.invalid";
 pub const SNAPSHOT_INVALID: &str = "module.runtime.snapshot.invalid";
@@ -88,6 +89,7 @@ mod tests {
             super::SNAPSHOT_AVAILABLE,
             super::MODULE_UNOBSERVED,
             super::MODULE_ACTIVE,
+            super::MODULE_STARTUP_FAILED,
             super::REVISION_LAG,
             super::REVISION_INVALID,
             super::SNAPSHOT_INVALID,

@@ -69,6 +69,8 @@ for (const id of ["todos", "ports", "skills", "git", "commands", "assistants", "
   test(`manifest removes the ${id} module from every declaration site`, async (t) => {
     const root = await mkdtemp(path.join(tmpdir(), `shipctl-${id}-transform-`));
     t.after(() => rm(root, { recursive: true, force: true }));
+    const manifest = readManifest(repositoryRoot, id);
+    const moduleSourceRoot = path.dirname(manifest.frontend.path);
     for (const directory of [
       "core/frontend/host",
       "src-tauri/src/modules",
@@ -85,13 +87,12 @@ for (const id of ["todos", "ports", "skills", "git", "commands", "assistants", "
       "src-tauri/src/modules/mod.rs",
       "src-tauri/tauri.conf.json",
       "profiles",
-      `modules/${id}`,
+      moduleSourceRoot,
       "package.json",
       "ops/modularity/fixtures/panel-host/main.tsx",
     ]) {
       copy(root, relativePath);
     }
-    const manifest = readManifest(repositoryRoot, id);
     const packageStem = manifest.frontend.package.split("/").at(-1);
     copy(root, `scripts/verify-${packageStem}-plugout.mjs`);
     if (manifest.profile && !manifest.profile.includes("-disabled/")) {
@@ -102,7 +103,7 @@ for (const id of ["todos", "ports", "skills", "git", "commands", "assistants", "
     prepareSourceAbsent(root, manifest);
     assertSourceAbsent(root, manifest);
 
-    assert.equal(existsSync(path.join(root, `modules/${id}`)), false);
+    assert.equal(existsSync(path.join(root, moduleSourceRoot)), false);
     if (manifest.profile) {
       assert.equal(existsSync(path.join(root, path.dirname(manifest.profile))), false);
     }

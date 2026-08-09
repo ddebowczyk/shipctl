@@ -6,11 +6,12 @@ description: Run non-executing correctness checks.
 status: supported
 requires:
   tools: [cargo, just, node, pnpm, yamllint, yq, ys]
-  capabilities: [modularity]
+  capabilities: [modularity, version]
 owns: [ops/check/**]
 reads:
   - Cargo.toml
   - core/**
+  - examples/module-fixture/**
   - modules/**
   - src/**
   - src-tauri/**
@@ -22,6 +23,9 @@ reads:
   - ops/schema/**
   - ops/*/capability.yaml
   - ops/upstream/**
+  - ops/version/current.yaml
+  - ops/version/justfile
+  - ops/version/schema/**
 generates: []
 commands:
   - name: types
@@ -48,7 +52,7 @@ commands:
     lane: fast
     aggregate: check
   - name: version
-    summary: Verify the app version is declared only in the Tauri config.
+    summary: Delegate product-version validation to the version capability.
     lane: fast
     aggregate: check
   - name: instance-paths

@@ -8,6 +8,7 @@ mod modularity 'ops/modularity/justfile'
 mod ops 'ops/justfile'
 mod test 'ops/test/justfile'
 mod upstream 'ops/upstream/justfile'
+mod version 'ops/version/justfile'
 
 default:
     @just --list --list-submodules

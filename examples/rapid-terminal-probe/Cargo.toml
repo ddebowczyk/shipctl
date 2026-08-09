@@ -1,0 +1,17 @@
+[package]
+name = "shipctl-rapid-terminal-probe"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "build-rapid-demo"
+path = "package.rs"
+
+[dependencies]
+serde_json = "1.0"
+serde_yaml = "0.9"
+sha2 = "0.10"
+shipctl-core = { path = "../../core/backend" }
+tar = "0.4"

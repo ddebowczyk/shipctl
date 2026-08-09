@@ -163,11 +163,11 @@ importers:
         specifier: ^5.0.14
         version: 5.0.14(@types/react@19.2.18)(react@19.2.8)
 
-  modules/fixture/frontend:
+  examples/module-fixture/frontend:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../modules/api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1

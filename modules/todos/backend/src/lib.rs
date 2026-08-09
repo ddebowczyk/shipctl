@@ -23,10 +23,12 @@ const IGNORED_DIRS: &[&str] = &[
     "__pycache__",
     "vendor",
     ".shipctl-worktrees",
-    // Worktrees created before the rename are still registered in git and
-    // still on disk, so they stay ignored too.
-    ".shep-worktrees",
+    LEGACY_WORKTREE_DIR,
 ];
+
+// Worktrees created by the predecessor are still registered in git and may
+// remain on disk, so they stay ignored without becoming current product state.
+const LEGACY_WORKTREE_DIR: &str = ".shep-worktrees";
 
 /// Filenames (lowercased) recognized as todo files.
 const TODO_FILENAMES: &[&str] = &["todo.md", "todos.md"];

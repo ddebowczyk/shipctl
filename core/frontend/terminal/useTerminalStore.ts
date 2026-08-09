@@ -8,6 +8,13 @@ import type {
 } from "@shipctl/core/platform";
 import { contributedPanelTabId } from "@shipctl/core/platform";
 import { useUIStore } from "@shipctl/core/shared";
+import type { TerminalDescriptor, TerminalId } from "./types.ts";
+import {
+  reconcileTerminalProjection,
+  removeTerminalProjection,
+  upsertTerminalProjection,
+} from "./terminalProjection.ts";
+import { tabActivityFromDescriptor } from "./terminalAgentActivity.ts";
 
 interface ProjectTerminalState {
   tabs: UnifiedTab[];
@@ -16,12 +23,16 @@ interface ProjectTerminalState {
 
 type TerminalTabPatch = Partial<Pick<
   TerminalTabData,
-  "label" | "modulePresentation"
+  "label" | "moduleSessionId" | "modulePresentation"
 >>;
 
 interface TerminalStore {
   projectState: Record<string, ProjectTerminalState>;
-  tabActivity: Record<number, TabActivity>;
+  tabActivity: Record<TerminalId, TabActivity>;
+  reconciliationReady: boolean;
+  reconcileTerminalDescriptors: (descriptors: readonly TerminalDescriptor[]) => void;
+  upsertTerminalDescriptor: (descriptor: TerminalDescriptor) => void;
+  removeTerminalDescriptor: (terminalId: TerminalId) => void;
   removeProject: (repoPath: string) => void;
   addTabToProject: (repoPath: string, tab: UnifiedTab) => void;
   removeTab: (repoPath: string, id: string) => void;
@@ -34,13 +45,13 @@ interface TerminalStore {
   removeTabFromProject: (repoPath: string, id: string) => void;
   addContributedPanelTab: (repoPath: string, panelId: `${string}.${string}`, label: string) => void;
   findTabByCommandForProject: (repoPath: string, commandName: string) => TerminalTabData | undefined;
-  findTabByPtyId: (ptyId: number) => TerminalTabData | undefined;
-  initActivity: (ptyId: number) => void;
-  setTabActive: (ptyId: number, active: boolean) => void;
-  setTabExited: (ptyId: number, exitCode: number) => void;
-  setTabBell: (ptyId: number, message?: string) => void;
-  clearTabBell: (ptyId: number) => void;
-  removeActivity: (ptyId: number) => void;
+  findTabByTerminalId: (terminalId: TerminalId) => TerminalTabData | undefined;
+  initActivity: (terminalId: TerminalId) => void;
+  setTabActive: (terminalId: TerminalId, active: boolean) => void;
+  setTabExited: (terminalId: TerminalId, exitCode: number) => void;
+  setTabBell: (terminalId: TerminalId, message?: string) => void;
+  clearTabBell: (terminalId: TerminalId) => void;
+  removeActivity: (terminalId: TerminalId) => void;
   getAllProjectTabs: (repoPath: string) => UnifiedTab[];
 }
 
@@ -48,14 +59,53 @@ function emptyState(): ProjectTerminalState {
   return { tabs: [], activeTabId: null };
 }
 
-let tabCounter = 0;
-export function nextTabId(): string {
-  return `tab-${++tabCounter}`;
-}
-
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
   projectState: {},
   tabActivity: {},
+  reconciliationReady: false,
+
+  reconcileTerminalDescriptors: (descriptors) => {
+    set((state) => {
+      const hostIds = new Set(descriptors.map((descriptor) => descriptor.id));
+      const tabActivity = Object.fromEntries(
+        Object.entries(state.tabActivity).filter(([terminalId]) => hostIds.has(terminalId as TerminalId)),
+      ) as Record<TerminalId, TabActivity>;
+      for (const descriptor of descriptors) {
+        tabActivity[descriptor.id] = tabActivityFromDescriptor(
+          descriptor,
+          tabActivity[descriptor.id],
+        );
+      }
+      return {
+        projectState: reconcileTerminalProjection(state.projectState, descriptors),
+        tabActivity,
+        reconciliationReady: true,
+      };
+    });
+  },
+
+  upsertTerminalDescriptor: (descriptor) => {
+    set((state) => {
+      const previous = state.tabActivity[descriptor.id];
+      return {
+        projectState: upsertTerminalProjection(state.projectState, descriptor),
+        tabActivity: {
+          ...state.tabActivity,
+          [descriptor.id]: tabActivityFromDescriptor(descriptor, previous),
+        },
+      };
+    });
+  },
+
+  removeTerminalDescriptor: (terminalId) => {
+    set((state) => {
+      const { [terminalId]: _, ...tabActivity } = state.tabActivity;
+      return {
+        projectState: removeTerminalProjection(state.projectState, terminalId),
+        tabActivity,
+      };
+    });
+  },
 
   removeProject: (repoPath: string) => {
     set((state) => {
@@ -67,7 +117,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       if (project) {
         for (const tab of project.tabs) {
           if (tab.kind === "terminal") {
-            delete tabActivity[tab.ptyId];
+            delete tabActivity[tab.terminalId];
           }
         }
       }
@@ -155,7 +205,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const project = state.projectState[repoPath];
     const tab = project?.tabs.find((entry) => entry.id === project.activeTabId);
     if (tab?.kind === "terminal") {
-      state.clearTabBell(tab.ptyId);
+      state.clearTabBell(tab.terminalId);
     }
   },
 
@@ -301,22 +351,22 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 
-  findTabByPtyId: (ptyId: number) => {
+  findTabByTerminalId: (terminalId: TerminalId) => {
     for (const project of Object.values(get().projectState)) {
       const tab = project.tabs.find(
         (t): t is TerminalTabData =>
-          t.kind === "terminal" && t.ptyId === ptyId,
+          t.kind === "terminal" && t.terminalId === terminalId,
       );
       if (tab) return tab;
     }
     return undefined;
   },
 
-  initActivity: (ptyId: number) => {
+  initActivity: (terminalId: TerminalId) => {
     set((state) => ({
       tabActivity: {
         ...state.tabActivity,
-        [ptyId]: {
+        [terminalId]: {
           alive: true,
           active: true,
           exitCode: null,
@@ -324,19 +374,25 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
           lastOutputAt: Date.now(),
           lastAttentionAt: null,
           lastNotificationMessage: null,
+          agentState: null,
+          agentAttention: null,
+          agentRevision: null,
+          agentUpdatedAt: null,
+          agentSource: null,
+          agentMessage: null,
         },
       },
     }));
   },
 
-  setTabActive: (ptyId: number, active: boolean) => {
+  setTabActive: (terminalId: TerminalId, active: boolean) => {
     set((state) => {
-      const prev = state.tabActivity[ptyId];
+      const prev = state.tabActivity[terminalId];
       if (!prev || prev.active === active) return state;
       return {
         tabActivity: {
           ...state.tabActivity,
-          [ptyId]: {
+          [terminalId]: {
             ...prev,
             active,
             lastOutputAt: active ? Date.now() : prev.lastOutputAt,
@@ -346,22 +402,22 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 
-  setTabExited: (ptyId: number, exitCode: number) => {
+  setTabExited: (terminalId: TerminalId, exitCode: number) => {
     set((state) => {
-      const prev = state.tabActivity[ptyId];
+      const prev = state.tabActivity[terminalId];
       if (!prev) return state;
-      return { tabActivity: { ...state.tabActivity, [ptyId]: { ...prev, alive: false, exitCode } } };
+      return { tabActivity: { ...state.tabActivity, [terminalId]: { ...prev, alive: false, exitCode } } };
     });
   },
 
-  setTabBell: (ptyId: number, message?: string) => {
+  setTabBell: (terminalId: TerminalId, message?: string) => {
     set((state) => {
-      const prev = state.tabActivity[ptyId];
+      const prev = state.tabActivity[terminalId];
       if (!prev) return state;
       return {
         tabActivity: {
           ...state.tabActivity,
-          [ptyId]: {
+          [terminalId]: {
             ...prev,
             bell: true,
             lastAttentionAt: Date.now(),
@@ -372,17 +428,17 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     });
   },
 
-  clearTabBell: (ptyId: number) => {
+  clearTabBell: (terminalId: TerminalId) => {
     set((state) => {
-      const prev = state.tabActivity[ptyId];
+      const prev = state.tabActivity[terminalId];
       if (!prev) return state;
-      return { tabActivity: { ...state.tabActivity, [ptyId]: { ...prev, bell: false } } };
+      return { tabActivity: { ...state.tabActivity, [terminalId]: { ...prev, bell: false } } };
     });
   },
 
-  removeActivity: (ptyId: number) => {
+  removeActivity: (terminalId: TerminalId) => {
     set((state) => {
-      const { [ptyId]: _, ...rest } = state.tabActivity;
+      const { [terminalId]: _, ...rest } = state.tabActivity;
       return { tabActivity: rest };
     });
   },

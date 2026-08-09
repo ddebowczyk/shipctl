@@ -11,7 +11,8 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../../.." && pwd)"
 cd "$repo_root"
 
-VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+just version check
+VERSION=$(yq -r '.product_version' ops/version/current.yaml)
 
 # Locate the signed update artifact
 BUNDLE_DIR="target/release/bundle/macos"
