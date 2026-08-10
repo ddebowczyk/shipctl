@@ -150,9 +150,13 @@ not only by comparing serialized bytes.
 
 ### 4. Preserve effects and history semantics
 
-Occurrence effects such as bell, notification, clipboard, reply, and exit have
+Client occurrence effects such as bell, notification, clipboard, and exit have
 identity and ordering independent of screen coalescing. A later screen delta
 cannot replace or erase an earlier occurrence.
+
+Parser-generated PTY replies are not protocol effects. The backend actor writes
+them only to the child, and exhaustive protocol fixtures must prove they do not
+appear in Tauri, control-socket, CLI, or module event streams.
 
 History windows define:
 

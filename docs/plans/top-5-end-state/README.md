@@ -137,8 +137,10 @@ The webview presentation path consumes area 03. The CLI painter consumes area
 - The webview cannot submit arbitrary PTY bytes. Key, composed text, paste,
   mouse, focus, selection, and application actions are semantic commands that
   the host encodes using current terminal modes.
-- Occurrence effects such as bell, notification, clipboard, reply, and exit
+- Client occurrence effects such as bell, notification, clipboard, and exit
   remain ordered with cell mutations and cannot disappear through coalescing.
+- Parser-generated PTY replies remain ordered actor-to-child work. They never
+  enter the semantic client protocol or any Tauri, control, or CLI stream.
 - Control-socket base64 is allowed only as an encoding of semantic payloads.
   It may never contain child output or replay ANSI.
 - The CLI may generate ANSI locally to paint semantic cells in the caller's

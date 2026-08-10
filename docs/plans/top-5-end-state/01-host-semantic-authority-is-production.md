@@ -127,8 +127,10 @@ Create Shipctl-owned values for:
 - per-cell links and semantic prompt metadata;
 - selection anchors, kinds, extension state, and selected content;
 - dirty regions and full-invalidation reasons; and
-- ordered occurrence effects such as title, working directory, bell,
-  notification, clipboard, terminal reply, and exit.
+- ordered client occurrence effects such as title, working directory, bell,
+  notification, clipboard, and exit; and
+- parser-generated PTY replies that remain actor-internal and are written only
+  back to the child.
 
 Every value crossing the projection boundary must own its data. It cannot hold
 a Ghostty grid reference, borrowed selection, borrowed title, or borrowed
@@ -143,6 +145,9 @@ mutations, dirty regions, occurrence effects, replies, and lifecycle changes.
 The actor assigns a monotonic semantic state revision to mutations. Area 02
 defines subscriber base revisions and their lossless wire representation; this
 area defines when the underlying state changes.
+
+Parser-generated PTY replies stay ordered with the parser mutation and are
+written directly back to the child. They are not projected as client effects.
 
 Use dirty information where the pinned API exposes it. When exact damage cannot
 be proved, publish an explicit full invalidation rather than inferring a partial
@@ -172,8 +177,8 @@ Define semantic commands for:
 - named application actions and presets.
 
 `RuntimeActor` uses current Ghostty modes to encode required PTY bytes and keeps
-those writes ordered with parser replies and lifecycle. The webview does not
-retain an arbitrary raw-write command on the semantic path.
+those writes ordered with actor-internal parser replies and lifecycle. The
+webview does not retain an arbitrary raw-write command on the semantic path.
 
 Selection semantics must cover wrapped rows and retained history as well as the
 existing compatibility fixtures. Browser pointer handling belongs to area 04;
@@ -224,8 +229,18 @@ This area does not:
    the area-05 switch.
 4. Resize and theme tests prove ordered semantic transitions, host reflow, and
    preservation of child-authored palette/default state without reconstruction.
-5. Interleaved input, output, terminal replies, effects, and exit preserve
-   actor order. Occurrence effects are not collapsed into screen state.
+5. Interleaved input, output, actor-internal PTY replies, client effects, and
+   exit preserve actor order. Occurrence effects are not collapsed into screen
+   state, and PTY replies do not enter any client event stream. The actor has
+   two reply producers, not one, and both must be covered:
+
+   ```sh
+   rg -n 'write_response' core/backend/src/terminal/runtime.rs
+   ```
+
+   Three hits: the definition, a call in `handle_output`, and a call in
+   `set_theme`. Ghostty answers a theme change as well as child output. A test
+   written against the output path alone satisfies half of this criterion.
 6. Key, composed text, paste, mouse, focus, and application commands are encoded
    from active Ghostty modes and reach the PTY without browser-generated VT.
 7. Selection tests cover gesture extension, autoscroll, wrapping, alternate
@@ -253,9 +268,20 @@ just modularity boundaries
 
 Add production actor scenarios for active and alternate screen, resize, theme,
 history eviction, Unicode occupancy, input modes, selection, ordered effects,
-OSC 9, replies, and exit. A green test that calls only `compat.rs` does not prove
-this gate; at least one assertion for every required fact must traverse the live
-runtime projection.
+OSC 9, actor-to-child replies, and exit. A green test that calls only
+`compat.rs` does not prove this gate; at least one assertion for every required
+fact must traverse the live runtime projection. Capture the client stream in
+both reply scenarios and prove the reply is absent from each.
+
+Build the actor harness first, because nothing in the repository has one.
+`runtime.rs` holds exactly two tests and both cover `resolve_launch_command`.
+Nothing drives `handle_output`, the actor's `resize`, or the actor's
+`set_theme`. The engine below the actor is well covered and the actor itself is
+not covered at all, so every present claim about what the actor publishes rests
+on reading. One harness that drives the actor with a recorded PTY trace settles
+criterion 5 on both producer paths and supplies the missing evidence for
+criteria 3 and 4 at the same time. It is the cheapest work in this area and it
+should come before the projection change it exists to protect.
 
 Capture projection cost and retained-memory behavior under representative
 traces. Report measurements without inventing an acceptance threshold. Any gate
