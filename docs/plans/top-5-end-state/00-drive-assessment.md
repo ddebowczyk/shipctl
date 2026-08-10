@@ -128,8 +128,10 @@ against and will appear to require a second frontend toolchain. Sequencing area
 
 ## The execution order the evidence supports
 
-1. **Actor harness** — no dependencies, closes four claims plus criterion 5 on
-   both paths. Backend, small, immediate.
+1. **Actor seam, then actor harness** — closes four claims plus criterion 5 on
+   both paths. The seam comes first: the actor is private and is only
+   constructible by spawning a real PTY, so the tests cannot be written until
+   the publication decisions are reachable without a child process.
 2. **Area 03 extraction, continuously** — proven pattern, already half done, and
    it is what makes every later frontend claim testable in the existing lane.
 3. **Area 04 falsification probes, in parallel from now** — the only surviving

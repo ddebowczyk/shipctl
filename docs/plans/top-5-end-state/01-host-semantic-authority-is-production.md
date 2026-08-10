@@ -290,11 +290,33 @@ ast-grep outline core/backend/src/terminal
 ```
 
 `runtime.rs` lists `TerminalRuntimeHandle` and `TerminalEventSink` and no
-actor. `RuntimeActor` is private, so no external test can construct or drive
-one. The harness therefore belongs in `runtime.rs`'s own `mod tests`, or the
-actor gains deliberate test visibility as the first change of this area. That
-is a decision to make once and record, not to rediscover while writing the
-first assertion.
+actor. `RuntimeActor` is private, so no external test can name one, and the
+harness has to sit in `runtime.rs`'s own `mod tests`.
+
+Visibility is the smaller half. The actor has one constructor:
+
+```sh
+rg -n 'fn initialize|RuntimeActor::' core/backend/src/terminal/runtime.rs
+```
+
+`RuntimeActor::initialize` is called from exactly one place, the thread spawned
+inside `start`. It takes a `TerminalLaunchRequest`, calls `native_pty_system()`,
+allocates a PTY and spawns a child. A test in `mod tests` can reach the private
+fields and hand-build a struct literal over all seventeen, but that is a
+liability rather than a harness: it compiles against the field list and breaks
+whenever the actor gains state.
+
+So the first work in this area is a seam decision, not a test. Either inject the
+PTY-side values at the `initialize` boundary, or lift the publication decisions
+into pure functions the actor calls. Prefer the second, because it is the move
+that already worked at the other end of the same problem: `installReplay` reset
+the viewport for want of a decision that could be tested apart from the
+machinery, and `resolveViewportDrainAction` now carries that decision with no
+xterm, no DOM and no terminal behind it. What the actor publishes is a decision;
+the PTY is machinery. Separate them and the four uncovered claims become
+ordinary unit tests.
+
+Record which seam is chosen before writing the first assertion.
 
 Capture projection cost and retained-memory behavior under representative
 traces. Report measurements without inventing an acceptance threshold. Any gate
