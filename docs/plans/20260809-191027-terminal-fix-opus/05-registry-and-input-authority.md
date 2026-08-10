@@ -48,16 +48,24 @@ rejects on `descriptor.lifecycle !== "running"`.
   while a snapshot is installing or the stream is recovering. Owned by the
   phase-04 controller.
 
-  **State the real reason for this gate.** It is not transport safety: the
-  host PTY has no dependency on renderer parse state, so a write during
-  install reaches the child correctly and its echo arrives in-stream. The
-  reason is **encoding** — xterm owns application-cursor-key, mouse and
-  bracketed-paste mode state, and that state is unreliable while a snapshot is
-  installing, so an arrow key can encode `\x1b[A` where the child expects
-  `\x1bOA`. Because the reason is encoding and not safety, the correct
-  handling is to **hold input until install completes and then encode and
-  send it**, not to drop it. Dropping is the only option that loses what the
-  user typed, and nothing here requires it.
+  **State the real reason for this gate.** It is not transport safety. The
+  host PTY does not depend on renderer parse state, so a write during install
+  reaches the child correctly and its echo arrives in-stream. The reason is
+  **encoding**: xterm owns application-cursor-key, mouse and bracketed-paste
+  mode state. That state is unreliable while a snapshot installs, so an arrow
+  key can encode `\x1b[A` where the child expects `\x1bOA`.
+
+  **Buffering the bytes does not fix this.** An earlier draft of this phase
+  said to hold input and encode it after install. That is not possible through
+  the seam shipctl uses: `onData` delivers bytes xterm has *already* encoded
+  against the mode state of the moment. Holding them holds the stale encoding.
+  Deferred encoding needs the pre-encoding intent — the raw `KeyboardEvent`
+  — which is a different seam (`attachCustomKeyEventHandler`, or `onKey`'s
+  `domEvent`) and an unproven one. So the seam is a hypothesis (H5.6), not an
+  assumption. If no supported seam exists, input is **visibly suppressed**
+  during recovery rather than silently dropped: the user must see that the
+  terminal is not accepting input, because a keystroke that vanishes without a
+  trace is the worst of the three outcomes.
 - *Semantic write eligibility* — does this terminal's lifecycle accept input
   at all? Owned by `TerminalClientRuntime` from the registry descriptor, and
   re-confirmed by the host at the PTY boundary.
@@ -65,6 +73,16 @@ rejects on `descriptor.lifecycle !== "running"`.
 The defect is that `TerminalView` derives the *lifecycle* fact into a ref of
 its own, giving one fact two owners. The fix is to delete the view's copy and
 name the two facts separately — not to merge them into one.
+
+**One authority is necessary but not sufficient — it must be re-read after
+every suspension point.** herdr keeps a single input gate,
+`UserWriteGate { accepting: bool }`, and `write_user_input`
+(`src/pty/actor/unix.rs:102-131`) checks it **twice**: once before awaiting a
+channel permit, and again after the await completes, immediately before
+sending. The gate can close while the write is parked. shipctl's write path has
+the same structure — an `await` on the Tauri invoke sits between the eligibility
+check and the byte reaching the PTY — so a single owner that is consulted once
+still admits the race it was created to close.
 
 ## Hypotheses to verify
 
@@ -94,6 +112,16 @@ Method: drive the controller into the window between attach and the first
 Falsifier: they cannot disagree in any reachable state, in which case S2 is a
 clarity fix — still worth doing, but do not claim a bug fix.
 
+**H5.6 — a pre-encoding input seam exists that can defer encoding safely.**
+Method: capture the raw `KeyboardEvent` before xterm encodes it
+(`attachCustomKeyEventHandler` returning false, or `onKey`'s `domEvent`), hold
+it across an install, then produce the encoding the post-install mode state
+implies. Assert the bytes the child receives for one mode-sensitive key
+(arrow or keypad) across a mode change spanning the install.
+Falsifier: no supported seam reproduces xterm's own encoding, or re-injection
+is unreliable. Then the answer is visible suppression during recovery, and
+this phase says so plainly instead of promising deferred delivery.
+
 **H5.5 — lifecycle rejection is distinguishable from transport failure.**
 Method: race a backend exit against a write and inspect the adapter result.
 Falsifier: Tauri collapses both into one indistinguishable string, in which
@@ -118,11 +146,11 @@ case the typed result must be established at the command boundary instead.
    and produces no error notice; malformed protocol, authority violations and
    real transport failures stay typed and visible.
 8. Route keyboard, paste and mouse input through that one call site.
-9. Hold input during install and recovery rather than discarding it, and
-   encode it against post-install mode state. Bound the hold by the install
-   itself — it ends when the snapshot is installed, so no duration is
-   invented. If the attachment is disposed instead of completing, the held
-   input is discarded with the generation.
+9. Settle H5.6 before choosing the recovery-window behaviour. If a seam
+   exists, hold the intent — not the encoded bytes — and encode after install;
+   the hold is bounded by the install itself, so no duration is invented, and
+   a disposed attachment discards its held intent with the generation. If no
+   seam exists, suppress input visibly for the window and say so in the UI.
 10. Prove a disposed or superseded generation can never write again, and that
     its held input is discarded with it.
 
@@ -135,14 +163,18 @@ case the typed result must be established at the command boundary instead.
   `Removed` arrives twice; a failed close yields none.
 - Reconciliation still admits terminals created after an older list began.
 - `TerminalView` holds no lifecycle-derived input flag.
-- Input typed during attach, replay install or recovery is delivered once
-  after install, encoded against post-install mode state — not dropped and not
-  duplicated. Input is refused outright only when the lifecycle does not
-  accept it.
-- A test types during install and asserts the exact bytes the child receives,
-  including one mode-sensitive key (arrow or keypad).
+- The recovery-window behaviour follows H5.6 and is one of exactly two: input
+  is held as intent and delivered once after install with post-install
+  encoding, or it is suppressed visibly. Silent loss is not an outcome.
+- If input is held, a test types during install and asserts the exact bytes
+  the child receives, including one mode-sensitive key across a mode change.
+- If input is suppressed, a test asserts the user-visible signal appears and
+  clears with the window.
 - An exit racing a keystroke produces `unavailable` and no user-facing error;
   a genuine transport failure still surfaces once.
+- Eligibility is re-read after every suspension point on the write path, not
+  only on entry. A test closes the terminal while a write is parked mid-`await`
+  and asserts the byte does not reach the PTY.
 
 ## Validation
 

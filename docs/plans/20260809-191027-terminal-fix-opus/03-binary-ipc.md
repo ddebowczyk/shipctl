@@ -58,6 +58,19 @@ order and break gap detection for anything that counts consecutive sequences.
 If some kind is genuinely outside the order, that is a contract change with
 its own justification and test — not a side effect of designing a header.
 
+**A note on what *not* to import from comparable protocols.** herdr frames the
+same kind of traffic as a u32 little-endian length prefix plus a bincode
+payload, and adds a `PROTOCOL_VERSION` handshake that refuses older *and* newer
+peers, a `MAX_FRAME_SIZE`, and a larger separate cap for graphics
+(`src/protocol/wire.rs:16-31,910-1021`). The framing choice corroborates this
+phase. The handshake and the caps do not transfer: herdr's peers are separately
+updatable binaries meeting over a socket, possibly across ssh, while shipctl's
+are one app bundle's backend and its own webview, shipped and versioned
+together. A header version field with an unknown-version negative fixture
+already covers what shipctl can actually encounter. Do not add a frame-size cap
+here on the strength of the comparison — a cap needs an authority, and a
+same-bundle IPC path supplies none.
+
 One more constraint the frame design must respect: the sequence is a `u64`.
 Above `2^53 - 1` a JavaScript `number` loses precision and gap detection
 breaks silently — decode it as `bigint`, and encode any `u64` in a JSON

@@ -14,6 +14,12 @@ its viewport.
 later reveal attaches and calls `term.reset()`. The renderer object survives,
 but its content continuity does not.
 
+Herdr supplies the useful invariant: hidden panes still parse output, but must
+not trigger presentation work merely to keep terminal state current. In this
+phase both host Ghostty and attached xterm remain stream consumers because raw
+PTY output is non-replaceable. Visibility may suppress only focus, layout,
+paint/addon work proven unnecessary, and other DOM-facing work.
+
 ## Hypotheses to verify
 
 ### H3.1 — Hidden parsing
@@ -34,12 +40,20 @@ A hidden queue overflow can become one pending recovery instead of repeated
 hidden reattach. Inject overflow while hidden, then reveal. Falsifier: multiple
 recoveries occur or stale frames install.
 
-### H3.4 — First reveal is a first attach
+### H3.4 — First reveal is a recovery boundary
 
 A terminal created in a background tab produces output before any xterm or
-attachment exists. On first reveal, the Phase 06B snapshot reconstructs the
-newest retained suffix and reports any older unavailable history. Falsifier:
-pre-reveal rows disappear without structured loss metadata.
+attachment exists. Characterize this separately from hide/show: first reveal
+must use the initial-snapshot path, not pretend that a live renderer was hidden.
+The Phase 06B gate later requires reconstruction and loss metadata. Falsifier:
+the background terminal attaches early or first reveal bypasses snapshot install.
+
+### H3.5 — Hidden work is presentation-only
+
+Host PTY reads/Ghostty parsing and frontend sequence/write counts remain equal
+to an always-visible control, while DOM measurement, focus, and redundant paint
+work stop. Falsifier: hiding pauses either parser, drops raw frames, or performs
+the same presentation work as the visible control.
 
 ## Tasks
 
@@ -68,11 +82,16 @@ pre-reveal rows disappear without structured loss metadata.
    Register it in `ops/test/justfile`.
 7. Keep detach on terminal ID replacement, exit cleanup, and component unmount.
    Prove each path disposes the exact current attachment once.
-8. Add a background-create fixture: create terminal B without revealing it,
-   emit more than the row and byte budgets, then reveal it for the first time.
-   Assert one initial attach and a derived `history_truncated` status whose
-   cause is `host_eviction`, `snapshot_omission`, or both. Do not classify
-   bytes already evicted by Ghostty as snapshot omission.
+8. Add a background-create characterization fixture: create terminal B without
+   revealing it, emit more than the row and byte budgets, then reveal it for the
+   first time. In this phase assert zero pre-reveal attachment and exactly one
+   initial snapshot install. Carry row reconstruction and the derived
+   `history_truncated` assertions into Phase 06B rather than making Phase 03
+   depend on the future codec.
+9. Instrument hidden output at the host parse, attachment sequence, xterm write,
+   DOM measurement, fit, focus, and addon-paint seams. Assert state work
+   continues and avoidable presentation work does not scale with hidden-pane
+   count. Do not coalesce or discard raw output as a render optimization.
 
 ## Acceptance criteria
 
@@ -87,9 +106,12 @@ pre-reveal rows disappear without structured loss metadata.
   do not create parallel or repeated recovery loops.
 - Terminal replacement and true unmount still detach exactly once and ignore
   late callbacks.
-- A never-revealed background terminal either restores all retained pre-reveal
-  rows or reports `history_truncated` with the exact physical-eviction and/or
-  snapshot-omission cause on its first attach.
+- A never-revealed background terminal stays unattached before reveal and uses
+  exactly one initial-snapshot boundary on reveal. Phase 03 does not claim that
+  the pre-Phase-06B formatter already restores or reports all retained history.
+- Under sustained output, hiding preserves host parse and attachment sequence
+  counts while suppressing DOM measurement/focus and bounded avoidable paint
+  work. Fifteen hidden panes do not multiply presentation work by pane count.
 
 ## Validation
 

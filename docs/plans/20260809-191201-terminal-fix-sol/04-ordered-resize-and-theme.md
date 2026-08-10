@@ -100,7 +100,7 @@ the host round-trip makes supported drag visibly lag or miss the product gate.
 
 1. Add sequenced `TerminalEvent::Resized` and `PaletteChanged` variants. Include
    both in the same sequence extraction, subscriber queue, and gap rules as
-   `Output` and `Replay`.
+   every existing data/control variant. Do not narrow the total order.
 2. Change backend `resize` to publish `Resized` after PTY, Ghostty, and
    descriptor mutation. Publish nothing for an exact same-size no-op; return a
    typed acknowledgement containing canonical geometry and `changed`.
@@ -136,9 +136,12 @@ the host round-trip makes supported drag visibly lag or miss the product gate.
 10. Split `useThemeApplicator`: global CSS and frontend renderer policy may be
     stored immediately, but an attached terminal applies its palette and addon
     swap only when the matching `PaletteChanged` revision reaches its ordered
-    queue position. A never-attached renderer obtains current frontend renderer
-    policy locally and semantic palette from its initial snapshot; it does not
-    need a live attachment to select an addon.
+    queue position. Retain a bounded frontend `revision -> renderer policy`
+    mapping until all attached queues have consumed or superseded that revision;
+    rapid A -> B must not apply B's addon policy at A's marker. A never-attached
+    renderer obtains current frontend renderer policy locally and semantic
+    palette from its initial snapshot; it does not need a live attachment to
+    select an addon.
 11. Apply `PaletteChanged` through the ordered renderer queue. Add fixtures for
     app-authored RGB/palette mutations and rapid theme A -> B. If full theme
     replacement erases app-owned overrides, carry sparse semantic override
@@ -149,7 +152,9 @@ the host round-trip makes supported drag visibly lag or miss the product gate.
     reveal, within the existing buffer bound. Test one global theme change over
     multiple hidden terminals under sustained output: normal load causes zero
     recoveries; actual overflow causes at most one pending recovery per affected
-    terminal and never a repeated reattach storm.
+    terminal and never a repeated reattach storm. Reject the pause design if a
+    supported hidden duration/output workload predictably overflows every tab;
+    make hidden application safe instead.
 13. Delete or simplify code made dead by the new contract, including any replay
    scheduling reachable only from resize/theme. Preserve replay for initial
    attach, xterm-model recreation, gap, and overflow.

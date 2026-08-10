@@ -42,6 +42,16 @@ stated purpose is "keeps the child process unblocked".
 cmux's equivalent releases the *surface size* for a hidden view "while
 retaining the stream for a warm cache" (`cmux-tui/spec/render.md:191`).
 
+herdr makes the same split explicit, and drops the *render*, not the *parse*.
+Its server is headless: panes keep reading and parsing whether or not any
+client is attached, which is how it reports a pane as working or blocked while
+nobody is watching. What it discards is render work — `RenderSignal`
+(`src/render_signal.rs`) coalesces render requests into one pending flag and
+keeps the origin of each (`RenderRequest { generic, pty_sources }`) for the
+stated reason that the headless server can then "discard PTY-only updates
+hidden from every client". Origin is retained precisely so a hidden-pane update
+can be dropped without dropping a structural one.
+
 Neither detaches. One thing **not** to copy: openmux caps its hidden-pane raw
 buffer at 4 MB and silently drops data past it. shipctl's host owns the VT
 state, so a hidden renderer needs no buffer at all — it can resync from the
@@ -119,9 +129,15 @@ reveal.
 reveal.** Mount is still reveal-gated (H6.2), so the host runs with no
 subscriber and its output is recoverable only from the snapshot — bounded by
 exactly the phase 01 retention budget. That is correct behaviour, but it must
-not be silent: first reveal of such a terminal reports `snapshot_truncated`
-(phase 09) when the host held more than the snapshot carried, rather than
-showing less history with no explanation.
+not be silent.
+
+Report it with the right field. Output the host discarded before the reveal is
+**`host_eviction`** (`row_limit` or `byte_limit`), a retention fact. It is not
+`snapshot_truncated`, which means the host still holds rows this snapshot
+omitted — a transport fact. An earlier draft used the second label for the
+first case, which would blame the snapshot for a retention loss and send the
+next reader to the wrong phase. Phase 09 keeps them separate; this phase must
+not merge them.
 
 **Resize authority becomes long-lived.** `runtime.rs:743` grants
 `resize_authority` to the newest attachment that claims it, and today a hidden

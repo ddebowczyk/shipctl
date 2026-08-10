@@ -14,9 +14,22 @@ non-running lifecycle. The same lifecycle fact is therefore copied into two
 owners. Depending on race order, input is either silently dropped or reported
 as a user-facing error.
 
-The Phase 02 controller does need a readiness fact: input must not enter an
-attachment while its snapshot is installing or its stream is recovering. That
-is not terminal lifecycle and must not become another lifecycle authority.
+The Phase 02 controller does need a readiness fact while its snapshot installs
+or stream recovers. The PTY itself does not depend on renderer parse state; the
+risk is mode-sensitive encoding. xterm may still believe normal cursor, mouse,
+or paste modes while the host/child expects the snapshot's application modes.
+That is not terminal lifecycle and must not become another lifecycle authority.
+
+The current xterm `onData` seam delivers bytes after mode-sensitive encoding.
+Holding those bytes during recovery does not make later delivery correct. A
+true defer-and-encode design must capture structured keyboard, paste, and mouse
+intent before encoding and use a supported xterm 6 encoding seam after snapshot
+installation.
+
+Herdr proves the stronger single-parser design: semantic key/mouse/paste events
+cross the client boundary and Ghostty encodes them from current host modes. Use
+that as the escalation target, not as evidence that Shipctl's pinned binding or
+xterm integration already exposes the required seam.
 
 ## Authority rule
 
@@ -43,9 +56,16 @@ Falsifier: Tauri collapses all failures into an indistinguishable string.
 
 ### H8.3 — Recovery input gate
 
-Dropping input while installing/reattaching avoids an unknown terminal mode
-without hiding real errors. Inject input in every controller state and force a
-live transport failure. Falsifier: recovery input leaks or live errors vanish.
+No mode-sensitive bytes are encoded or transmitted from stale renderer modes.
+Inject input in every controller state and force a live transport failure.
+Falsifier: recovery input leaks, is silently queued after encoding, or live
+errors vanish.
+
+### H8.4 — Deferred intent feasibility
+
+Pinned xterm 6 exposes a supported public seam to retain bounded structured key,
+paste, and mouse intents and encode them only after the snapshot restores modes.
+Falsifier: only already encoded `onData` bytes or private APIs are available.
 
 ## Tasks
 
@@ -55,7 +75,8 @@ live transport failure. Falsifier: recovery input leaks or live errors vanish.
    recomputation from `TerminalView`.
 3. Expose a read-only controller readiness predicate based only on attachment
    state. It is false before snapshot completion, during recovery, after exit,
-   and after disposal.
+   and after disposal. Surface the short `installing`/`recovering` state at the
+   input boundary instead of silently pretending the PTY is unavailable.
 4. Give `TerminalClientRuntime.write()` a discriminated result:
    `written` or `unavailable`. It returns `unavailable` without IPC when its
    authoritative descriptor is not running.
@@ -66,10 +87,22 @@ live transport failure. Falsifier: recovery input leaks or live errors vanish.
 6. At the view boundary, ignore expected `unavailable`; report real failures
    through the existing error-notice path once. Do not turn arbitrary errors
    into silent drops.
-7. Route paste and mouse through the exact same function as keyboard bytes.
-   Keep xterm as the input encoder for this plan; structured key encoding by
-   Ghostty belongs only to a future cell-renderer architecture.
-8. Verify exit/reattach generation changes cannot re-enable an old input
+7. Resolve H8.4 before choosing recovery behavior:
+   - if a supported structured-intent seam exists, bound the intent queue,
+     encode only after snapshot installation, preserve event order, and define
+     overflow/cancellation behavior; or
+   - otherwise prevent keyboard/paste/mouse encoding while recovering, show the
+     readiness state, and resume when live.
+   Never queue already encoded mode-sensitive bytes or depend on xterm private
+   APIs. If neither public xterm deferred encoding nor the pinned Ghostty
+   binding exposes a complete supported encoder, suppress before encoding. A
+   Herdr-style structured-input/host-encoding migration belongs to the
+   conditional single-parser program and must cover keys, paste, mouse, focus,
+   application cursor/keypad, kitty keyboard, and bracketed paste together.
+8. Route paste and mouse through the same readiness-plus-runtime path as
+   keyboard input and cover application-cursor, mouse, and bracketed-paste
+   mode transitions around recovery.
+9. Verify exit/reattach generation changes cannot re-enable an old input
    callback. Disposal must permanently close that generation's write path.
 
 ## Acceptance criteria
@@ -80,8 +113,12 @@ live transport failure. Falsifier: recovery input leaks or live errors vanish.
   terminal lifecycle is writable.
 - `TerminalClientRuntime` is the sole frontend lifecycle authority and the
   backend enforces the same fact at the PTY boundary.
-- Key, paste, and mouse input are blocked during attach/replay/recovery and
-  accepted only when live.
+- No keyboard, paste, or mouse bytes are encoded from stale renderer modes. If
+  public deferred encoding is supported, bounded structured intents are encoded
+  after recovery; otherwise the UI exposes recovery and suppresses input before
+  encoding until live.
+- Already encoded mode-sensitive bytes are never queued for post-recovery
+  delivery, and no xterm private encoding API becomes a production dependency.
 - A keystroke racing normal exit yields `unavailable` and no error notice.
 - Malformed frames, ownership failures, and real IPC/write failures remain
   distinguishable and visible.
@@ -90,7 +127,7 @@ live transport failure. Falsifier: recovery input leaks or live errors vanish.
 ## Validation
 
 ```sh
-pnpm exec node --test \
+pnpm exec node --test --test-concurrency=1 \
   core/frontend/terminal/tests/terminalAttachmentController.test.ts \
   core/frontend/terminal/tests/terminalClientRuntime.test.ts
 cargo test --manifest-path core/backend/Cargo.toml terminal

@@ -51,12 +51,14 @@ to its owning phase.
 7. In that scenario assert event counts, not only screenshots:
    - zero routine replay/reset/detach;
    - one marker per changed canonical resize/theme;
+   - one consecutive sequence across data and every control-event kind;
    - one recovery snapshot per injected gap/recreation;
    - no lost/duplicate numbered output; and
    - no descriptor after observed removal.
 8. Run alternate-screen, OSC 8, search, selection, Unicode, app palette,
    bracketed paste, mouse mode, exit, and no-view-output regressions through the
-   production codec and controller.
+   production codec and controller. Unicode coverage includes combining marks,
+   flag pairs, ZWJ emoji, and wide-cell tails across reset and resize.
 9. Repeat Phase 01 performance measurements in release mode. Record raw output
    throughput, allocation, snapshot size/install time, resize-burst behavior,
    and memory at the selected retention budget. Explain regressions before
@@ -67,6 +69,18 @@ to its owning phase.
 11. Run the complete repository gates and Markdown checks. Inspect the final
     worktree and diff so unrelated `ops/build` changes and the independent Opus
     plan remain untouched.
+12. Run every focused terminal Node suite through `ops/test/justfile` with
+    `--test-concurrency=1`; fail review if a newly registered terminal suite
+    omits the repository's required serial-execution flag.
+13. Exercise the new settings route through production Tauri IPC: submit an
+    unsupported scrollback value and observe backend canonicalization, then
+    switch 50k -> 1k -> 10k with multiple running and background terminals.
+    Assert the persisted value, service policy revision, every still-live actor,
+    frontend store, cached xterm, first-reveal snapshot, and later spawn agree.
+14. Capture hidden-work counters with 1 and 15 output-producing hidden
+    terminals. Host parsing and attachment sequence consumption must continue;
+    DOM measurement/focus and avoidable presentation work must not scale with
+    hidden-pane count.
 
 ## Acceptance criteria
 
@@ -74,10 +88,15 @@ to its owning phase.
   Tauri adapter, not only isolated codecs or fake runtimes.
 - Source search finds no routine resize/theme/visibility path to `Replay`,
   `term.reset()`, or attachment teardown.
-- All retained history and active state expected by Phase 06 survive initial
-  attach and every recovery boundary; truncation is explicit and tested.
+- All retained history and active state expected by Phases 06A/06B survive
+  initial attach and every recovery boundary; physical eviction and snapshot
+  omission are explicit and independently tested, including a background
+  terminal's first reveal.
 - The integration scenario proves ordered resize with zero loss/duplication and
   no stale close resurrection.
+- Workspace normalization is the only scrollback validator, and the settings
+  integration scenario proves canonical startup/live propagation without a
+  stale host actor or unchecked frontend value.
 - The raw IPC benchmark and memory results are checked in with reproduction
   commands and are no worse than the agreed Phase 01 constraints.
 - Earlier plan documents and the VT proof describe the implementation that now
@@ -115,10 +134,12 @@ matches must correspond exactly to the named recovery boundaries and tests.
 3. Change app theme while visible and again while hidden. Confirm history and
    application-authored colors, then query the terminal defaults.
 4. Switch tabs and open/close settings while output continues. Confirm no
-   content jump and no attachment-ID change.
+   content jump and no attachment-ID change. Change scrollback 50k -> 1k -> 10k
+   and confirm all running/background terminals and the next spawned terminal
+   report the same canonical revision/value.
 5. Trigger the test-only sequence gap and xterm-model recreation. Confirm one
-   snapshot each and explicit history-truncation status if the bounded window
-   is smaller than retained history.
+   snapshot each and explicit `history_truncated` status with independent
+   `host_eviction`/`snapshot_omission` causes when older history is unavailable.
 6. Enter/exit a full-screen program, test mouse/paste, follow an OSC 8 link,
    search history, and copy a selection.
 7. Close the terminal while the reconciliation test hook delays a list result.

@@ -283,6 +283,19 @@ criterion 5 on both producer paths and supplies the missing evidence for
 criteria 3 and 4 at the same time. It is the cheapest work in this area and it
 should come before the projection change it exists to protect.
 
+Know where that harness has to live before planning it:
+
+```sh
+ast-grep outline core/backend/src/terminal
+```
+
+`runtime.rs` lists `TerminalRuntimeHandle` and `TerminalEventSink` and no
+actor. `RuntimeActor` is private, so no external test can construct or drive
+one. The harness therefore belongs in `runtime.rs`'s own `mod tests`, or the
+actor gains deliberate test visibility as the first change of this area. That
+is a decision to make once and record, not to rediscover while writing the
+first assertion.
+
 Capture projection cost and retained-memory behavior under representative
 traces. Report measurements without inventing an acceptance threshold. Any gate
 derived from them must cite the relevant product or technical authority.

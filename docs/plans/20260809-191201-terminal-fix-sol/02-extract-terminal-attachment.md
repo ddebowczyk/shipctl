@@ -110,7 +110,7 @@ attachments or an unbounded reattach loop appears.
 ## Validation
 
 ```sh
-pnpm exec node --test \
+pnpm exec node --test --test-concurrency=1 \
   core/frontend/terminal/tests/terminalAttachmentController.test.ts
 just test fast
 just check all

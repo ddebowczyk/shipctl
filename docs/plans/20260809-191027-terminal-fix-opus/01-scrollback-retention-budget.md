@@ -25,6 +25,17 @@ of scrollback in bytes. Zero means unlimited."). The name, the comment, and
 the binding's own doc string all say lines. The value is off by roughly three
 orders of magnitude for its apparent intent.
 
+An independent project reached the same conclusion and acted on it. herdr
+(`~/projects/_ext/herdr`) embeds the same library and names the setting
+`scrollback_limit_bytes: usize` (`src/config/model.rs:941-943`, default
+10,000,000 at `src/config.rs:50`) with `#[serde(alias = "scrollback_lines")]`
+— it *had* the lines-named key and renamed it, keeping the old spelling as a
+parse alias. Its constructor parameter is `max_scrollback` and its committed
+test is `max_scrollback_limit_bytes_retains_more_history_for_larger_limits`
+(`src/ghostty/mod.rs:3645`). That alias is also the migration recipe for
+shipctl's `TerminalSettings.scrollback`: rename the field to its true unit and
+accept the old key rather than silently reinterpreting a stored number.
+
 The configured history is `10000`, and it is **already a backend value**:
 `core/backend/src/workspace/config.rs:148,166-168` declares
 `TerminalSettings.scrollback: u32` with `default_scrollback() -> 10000`. So the
@@ -38,26 +49,45 @@ the two, or the setting is silently a lie.
 `[1000, 5000, 10000, 25000, 50000]`, labelled "Number of lines kept in the
 terminal scroll buffer." So the host budget is a function of a live setting.
 
-**The plumbing already exists; only the last hop is missing.** An earlier
-draft of this phase said the setting "reaches only xterm". That was wrong, and
-the correction shrinks the work:
+**The setting reaches the backend already — just not this capability.** An
+earlier draft of this phase said it "reaches only xterm". That was wrong.
+`scrollback` appears in the backend at exactly two sites, both in `workspace`
+(`config.rs:148-149,166-168,187`); `terminal` never reads it, and
+`replay.rs:37` uses its own constant instead. The remaining work, precisely:
 
-- the value already crosses IPC and is persisted —
-  `get_terminal_settings` / `save_terminal_settings`
-  (`core/backend/src/terminal/commands.rs:160-175`) through `WorkspaceManager`;
-- `terminal/commands.rs:15-16` already imports `WorkspaceManager` and
-  `TerminalSettings`, so no new capability boundary is crossed and the
-  modularity gate is not at issue — the value must be threaded from
-  `commands.rs` through `TerminalService::spawn` and the runtime into
-  `VtReplayEngine::new`;
-- `normalize_terminal_settings` (`workspace/config.rs:195-197`) normalizes
-  **only** `url_allowlist`. `scrollback` is an unvalidated `u32` straight from
-  IPC, so validation against the supported set is a real gap — extend the
-  existing normalizer rather than adding a second validator;
-- a live *reduction* trims immediately; a live *increase* applies to future
-  output and cannot restore already-evicted rows, and must say so. There is no
-  live-update path today: `save_terminal_settings` persists and returns, and
-  nothing notifies a running terminal.
+- **persistence exists.** `get_terminal_settings` / `save_terminal_settings`
+  (`terminal/commands.rs:160-175`) already round-trip the value through
+  `WorkspaceManager`, and `terminal/commands.rs:15-16` already imports both
+  `WorkspaceManager` and `TerminalSettings` — so no new capability boundary is
+  crossed and the modularity gate is not at issue.
+- **the launch path does not carry it.** `TerminalLaunchRequest`
+  (`types.rs:362-370`) has `target`, `cwd`, `environment`, `columns`, `rows`,
+  `color_theme`, `metadata` — no scrollback. Either add the field or have
+  `TerminalService::spawn` read it from `WorkspaceManager`; pick one owner and
+  state it.
+- **validation is missing.** `normalize_terminal_settings`
+  (`workspace/config.rs:195-197`) normalizes **only** `url_allowlist`, so
+  `scrollback` is an unvalidated `u32` straight from IPC. Extend that
+  normalizer — adding a second validator inside `terminal` would recreate the
+  two-owners defect this phase exists to remove.
+- **no live-update channel exists at all, and the VT has no setter to call at
+  the end of one.** `save_terminal_settings` persists and returns; the frontend
+  store calls `applyTerminalSettings` (`useTerminalSettingsStore.ts:45,77`),
+  which reaches xterm and nothing else. Below that, `max_scrollback` is a
+  **construction argument only** — H1.4 finds no post-construction setter, and
+  herdr confirms it by design: `scrollback_limit_bytes` is a parameter of
+  `spawn`, `spawn_with_initial_history` and `from_handoff_fd`
+  (`src/terminal/runtime.rs:65,90,119`) and appears nowhere else; a config
+  reload writes `state.pane_scrollback_limit_bytes` (`src/app/mod.rs:1524`),
+  which only reaches panes spawned afterwards. Live panes keep the budget they
+  were born with.
+
+  So "a reduction trims immediately" is not one piece of missing plumbing. It
+  is either **out of scope** — the setting applies to terminals created after
+  it, which is what the one shipping reference does — or it means **rebuilding
+  the VT** from its own replay at the new budget, which is a different and much
+  larger claim that must be stated as such. Pick one and say which. An increase
+  applies to future output and cannot restore evicted rows either way.
 
 **Two bounds, not one.** The row count is the product policy; a byte cap is
 memory safety. They are different facts with different authorities, so keep
@@ -118,11 +148,29 @@ Surveyed at `libghostty-rs` rev `72ac98f`, both layers:
 
 So the trim is missing *upstream*, not merely unwrapped.
 `crates/libghostty-vt-sys/build.rs` clones `ghostty-org/ghostty` at pinned
-commit `ab0b9da9e88fcb4b0533a1854e84628f663930af` and builds it with **Zig**.
-Exposing `eraseHistory` therefore means patching Ghostty in Zig, pinning that
-fork, forking `libghostty-rs` on top of it, and carrying a Zig toolchain in
-shipctl's build and CI. openmux can take this route only because it vendors
-its own Zig wrapper; shipctl consumes a prebuilt binding.
+commit `ab0b9da9e88fcb4b0533a1854e84628f663930af` and builds it with Zig.
+
+**Be precise about what that costs, because an earlier draft overstated it.**
+Zig is *already* a build requirement: `build.rs` invokes `zig build`
+unconditionally (`:130,171`) and offers no prebuilt-library path — only
+`GHOSTTY_SOURCE_DIR`, `GHOSTTY_ZIG_SYSTEM_DIR` and
+`LIBGHOSTTY_VT_SYS_OPTIMIZE` overrides. Shipctl builds Ghostty from source
+today. So exposing `eraseHistory` adds **no new toolchain**; it adds
+maintenance of two forks — Ghostty and `libghostty-rs` — and the obligation
+to rebase both onto upstream. `GHOSTTY_SOURCE_DIR` is the seam a fork would
+use, which makes the mechanics cheap and the ongoing ownership the real
+cost.
+
+**And "fork" is not the only way to own the dependency.** herdr does not
+depend on `libghostty-rs` at all. It vendors a *released distribution archive*
+of libghostty-vt into `vendor/libghostty-vt/` (`vendor/libghostty-vt.vendor.json`
+records `1.3.2-HEAD-+c5a21edfc` and its source commit), writes its own
+`src/ghostty/bindings.rs` and safe wrapper, and builds the vendored tree with
+`zig build` from its own `build.rs`. That removes the rebase treadmill — there
+is no fork branch tracking upstream, only a version bump when the project
+chooses one — at the price of owning the bindings shipctl currently gets from
+`libghostty-rs`. It is a real third position between A and B, and it is the one
+the closest comparable project chose.
 
 Record this in the code comment so the next reader does not re-derive it.
 Falsifier: such a symbol exists after all, in which case prefer openmux's
@@ -138,27 +186,34 @@ byte arithmetic — at the ordinary cost of a binding bump rather than a fork.
 2. Rename the constant to `MAX_SCROLLBACK_BYTES` and replace the misleading
    comment with the units fact and its source
    (`ghostty-src/terminal/Screen.zig`, "in bytes").
-3. Thread the existing `TerminalSettings.scrollback` from `commands.rs`
-   through `TerminalService::spawn` and the runtime into `VtReplayEngine::new`.
-   No `SCROLLBACK_LINES` literal appears in `replay.rs`: 10,000 is already
-   declared once at `workspace/config.rs:166-168`, and re-declaring it in the
-   terminal capability is the same class of defect this phase exists to
-   remove. Add the missing pieces only — `scrollback` validation in
-   `normalize_terminal_settings`, and a change path so a live reduction trims
-   immediately while an increase applies to future output and reports that
-   evicted rows cannot be restored.
-4. Under option `A′` the byte figure is a **memory-safety cap**, independent
+3. Get `TerminalSettings.scrollback` into `VtReplayEngine::new`, by one of the
+   two owners named above. No `SCROLLBACK_LINES` literal appears in
+   `replay.rs`: 10,000 is already declared once at
+   `workspace/config.rs:166-168`, and re-declaring it inside the terminal
+   capability is the same class of defect this phase exists to remove.
+4. Extend `normalize_terminal_settings` to validate `scrollback` against the
+   supported set. Extend it — do not add a validator inside `terminal`.
+5. Decide what a settings change does to *running* terminals, and write the
+   decision down. The default answer — the one herdr ships and the one the C
+   API supports — is that the new budget applies to terminals created
+   afterwards; running terminals keep theirs. Choosing that closes this task
+   with a documented limit and a test. Choosing live application means building
+   both a settings-change channel (`save_terminal_settings` today persists and
+   returns, notifying nothing) *and* a VT rebuild, because no setter exists at
+   any layer. That is a separate piece of work with its own risk, and it must
+   be sized before it is promised, not discovered here.
+6. Under option `A′` the byte figure is a **memory-safety cap**, independent
    of the row target — not a row count in disguise. It needs no per-content
    accuracy, only a defensible ceiling, and it is reported when it binds
    first.
-5. Only if `A′` is rejected does a bytes-per-row multiplier become load
+7. Only if `A′` is rejected does a bytes-per-row multiplier become load
    bearing. In that case it must be measured across *content*, not just width:
    H1.2's ~9 B/col-row came from ASCII fixtures, and styled, wide-Unicode and
    hyperlinked cells cost more. A single multiplier derived from ASCII would
    silently under-retain exactly the content users most want to scroll back
    to. Measure the worst supported case and derive from that, or state the
    guarantee as approximate.
-6. Assert the outcome: a test proving the configured row target survives at
+8. Assert the outcome: a test proving the configured row target survives at
    the construction width for each supported setting value, or that the
    memory cap bound first and said so.
 
@@ -168,16 +223,18 @@ If H1.3 fails — a widening resize silently shrinks retention and the binding
 cannot re-assert the budget — there are three sound options, and the choice is
 the owner's, not the implementer's.
 
-**Read H1.4 first: this is not a choice between three implementation styles.
-It is a choice between forking Ghostty and not forking Ghostty.** Every option
-built on a row trim requires the Zig-level fork described there. That cost
-belongs in the question, not discovered during implementation.
+**Read H1.4 first: this is not a choice between implementation styles. It is a
+choice about whether shipctl owns its VT dependency.** Every option built on a
+row trim requires the Zig-level change described there. That cost belongs in
+the question, not discovered during implementation. H1.4 also shows the cost
+has two shapes — a tracked fork, or a vendored release with in-tree bindings —
+and they price very differently.
 
 - **A.** Fork Ghostty to expose `eraseHistory`, fork `libghostty-rs` on top,
   and adopt openmux's model: unlimited byte budget, line trim enforced by
   shipctl on write and resize. Correct at any width and any content.
-  **Cost:** two pinned forks, a Zig toolchain in the app build and CI, and
-  ownership of rebasing both onto upstream Ghostty.
+  **Cost:** two pinned forks and ownership of rebasing both onto upstream —
+  not a new toolchain, since Zig already builds Ghostty here.
 - **B.** No fork. Accept a per-terminal memory budget as the policy (cmux
   states 50 MB per terminal for this reason) and change the renderer setting's
   documented meaning from "lines retained" to "lines shown, subject to a
@@ -190,12 +247,19 @@ belongs in the question, not discovered during implementation.
   label honest without giving up a memory bound, and the parallel review
   converged on it independently — **but it inherits A's fork in full**, since
   the row trim is precisely the forked capability.
+- **C.** A or A′, delivered herdr's way: vendor a released libghostty-vt
+  archive plus the one added entry point, and carry the bindings in-tree
+  instead of depending on `libghostty-rs`. Same capability as A, with no branch
+  to rebase — version bumps happen when shipctl chooses one. **Cost:** shipctl
+  owns the FFI surface it currently gets for free, plus a `build.rs` of its own.
 
 Do not select by intuition, and do not present A′ as the cheap middle option:
-on cost it sits with A, not between A and B. Present the H1.2/H1.3
-measurements *and* the fork cost together. If the owner declines the fork, B is
-the answer and the settings copy changes with it — a product decision, not an
-implementation detail to absorb silently.
+on capability it sits with A, not between A and B. Present the H1.2/H1.3
+measurements *and* the dependency-ownership cost together, pricing C's
+vendoring separately from A's fork — they are not the same bill. If the owner
+declines to own the dependency at all, B is the answer and the settings copy
+changes with it — a product decision, not an implementation detail to absorb
+silently.
 
 ## Acceptance criteria
 
@@ -209,6 +273,13 @@ implementation detail to absorb silently.
   resolves to the one `workspace/config.rs` declaration.
 - `normalize_terminal_settings` validates `scrollback` against the supported
   set, with a test for an out-of-set value arriving over IPC.
+- The task-5 decision is testable either way, and the test asserts against
+  `scrollback_rows()` rather than the persisted value — persisting was never
+  the gap. Under the default decision: the next terminal spawned after a change
+  retains at the new budget while a running one is unaffected, and the settings
+  UI says so. Under live application: a reduction trims a running terminal's
+  retained rows, and an increase changes only future retention and reports that
+  evicted rows are unrecoverable.
 - If the chosen option is B, the `SettingsPanel` copy changes in the same
   commit as the budget; label and behaviour never disagree.
 - A committed test holds H1.0, so a formatter change cannot silently stop

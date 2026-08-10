@@ -59,6 +59,37 @@ shipctl is better placed than either: xterm.js accepts a theme object
 directly, so the renderer can repaint without any replay and without any
 translation table.
 
+**herdr answers H8.2 outright, and exposes a defect shipctl has today.** It
+runs the same VT library and tracks default-color ownership per slot:
+`child_default_foreground_changed` and `child_default_background_changed`
+(`src/pane/terminal.rs:179-180`). Applying a host theme reads those flags and
+writes **selectively** — `write_host_terminal_theme_selective(terminal, theme,
+foreground_unowned, background_unowned)` (`:1078`) — so a default the child
+claimed with OSC 10/11 is left alone. Color *queries* answer from the same
+flags (`:3043-3047`): while the child owns the slot, the host theme does not
+answer for it. The indexed family is handled by a different mechanism, not the
+same one: the host palette goes in through `set_default_palette` (`:1074`),
+which changes the base palette underneath child OSC 4 overrides — herdr's test
+is named `child_palette_override_survives_host_refresh_until_reset` (`:6011`).
+Ownership is released on reset (`src/pane/osc.rs:855-856`).
+
+shipctl's `set_theme` has no such guard. `replay.rs:150-152` calls
+`set_default_fg_color`, `set_default_bg_color` and `set_default_color_palette`
+unconditionally, so a theme change **silently takes over default colors the
+child set for itself**. That is a live defect in the code this phase is already
+editing, on the `set` side rather than the replay side, and it does not
+disappear when the replay does.
+
+**herdr also gets ordering for free, from a mechanism worth copying.** It does
+not call a setter for the defaults: it writes the OSC bytes into the parser —
+`terminal.write(osc_set_default_color_sequence(kind, color))`
+(`src/pane/osc.rs:822-833`). The theme mutation therefore occupies a position
+in the same byte stream as child output, so it cannot be reordered against it,
+and it lands in any later replay as ordinary state. All of it happens under the
+one `core` mutex that also feeds PTY bytes into the terminal, so the host side
+is serialized by construction. The unordered surface is the renderer's write
+queue alone — which is exactly what the barrier below is for.
+
 ## Two constraints on "apply it locally" (adopted from the parallel review)
 
 **A local theme apply is not order-free.** Palette state also arrives as
@@ -136,7 +167,9 @@ because they behave differently under a later theme change:
   overrides what the theme otherwise owns outright.
 
 A blanket `.with_palette(false)` drops both. A blanket keep freezes the old
-app theme into terminal content. Method: one fixture per family — stream
+app theme into terminal content. herdr's split is the shape to test against:
+per-slot ownership flags for the defaults, and a base-palette setter that
+child OSC 4 overrides sit on top of. Method: one fixture per family — stream
 issues OSC 4, then OSC 10/11/12 — then attach, change theme, and compare
 semantic colours slot by slot.
 Falsifier: dropping `.with_palette(true)` also drops program-set entries. Then
@@ -170,17 +203,24 @@ pause.
    at `TerminalView.tsx:245` — extend it rather than adding a second one.
 3. Backend: `set_theme` updates the VT `ColorScheme` and writes the program
    response, and stops publishing a replay.
-4. Formatter: drop `.with_palette(true)` from the ordinary replay path,
+4. Backend: make `set_theme` respect child ownership of the default colors.
+   Today `replay.rs:150-152` overwrites default foreground and background
+   unconditionally; track per-slot ownership as herdr does and skip the slots
+   the child claimed, releasing ownership on reset. Prefer writing the OSC
+   sequence into the VT over calling the setter, so the mutation is ordered
+   against child output by construction and survives into a later replay. This
+   is a defect fix, not a refactor: it has its own failing test first.
+5. Formatter: drop `.with_palette(true)` from the ordinary replay path,
    preserving whatever H8.2 shows must be kept — carrying provenance per slot
    across both the indexed and the default families, not one aggregate flag.
-5. Publish the theme as a sequenced `PaletteChanged` marker carrying a
+6. Publish the theme as a sequenced `PaletteChanged` marker carrying a
    framework-neutral render theme and a monotonic revision — not xterm's
    `ITheme`, which must not cross the backend domain boundary. Apply it
    through the ordered renderer queue built in phase 07. That queue's
    `OutputTerminal` type widens from `Pick<Terminal, "write">`
    (`terminalOutputQueue.ts:5`) to include `options`; keep the widening to
    exactly what the barrier needs so test doubles stay small.
-6. Resolve H8.5. If hidden application is unsafe, pause the queue at the
+7. Resolve H8.5. If hidden application is unsafe, pause the queue at the
    barrier until reveal; never skip the marker.
 
 ## Acceptance criteria
@@ -195,6 +235,10 @@ pause.
 - Program-set palette state round-trips through attach for both families,
   proven by the two H8.2 fixtures: after a theme change, theme-owned slots
   adopt the new theme and child-overridden slots stay child-owned.
+- A child that sets its own default foreground or background keeps it across a
+  theme change, and a color query returns the child's value while the child
+  owns the slot. A reset returns the slot to the theme. This is asserted at
+  `set_theme`, independently of whether a replay is produced.
 - Renderer mode and transparency never appear in a backend type or on the
   wire; an xterm with no live attachment still gets them.
 - If the hidden barrier pauses, the recoveries caused by one theme change are

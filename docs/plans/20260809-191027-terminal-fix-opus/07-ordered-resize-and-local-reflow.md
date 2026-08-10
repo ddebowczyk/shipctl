@@ -75,6 +75,30 @@ flight per attachment, remember only the newest desired geometry, and reissue
 after acknowledgement only if it still differs from canonical. A no-op resize
 publishes nothing.
 
+**herdr already implements this, host-side, and its shape is worth copying.**
+Its PTY actor keeps resize in a *coalescing latest-wins slot* rather than a
+queue — `SharedPtyControls { resize: Option<PtyResizeRequest>, … }`
+(`src/pty/actor/unix.rs:60-64`); `resize()` overwrites the slot and pokes a
+wake pipe (`:176-200`). A drag burst therefore collapses to one `ioctl`
+regardless of how many frames arrive, without a debounce interval anyone had to
+invent. Two further details matter:
+
+- **The slot is on a control path separate from the data path.** User input
+  goes through a bounded async channel (`PtyIoDataCommand`, with backpressure
+  via `reserve()`); resize goes through the shared slot plus a `std` control
+  channel. Resize can never queue behind pending input, and input can never be
+  starved by resize.
+- **The resize carries the VT's response to it.** `PtyResizeRequest` holds
+  `terminal_responses: Vec<Bytes>` (`:54-57`), so whatever the VT emits because
+  of the resize is delivered with the resize and cannot be reordered against
+  the `ioctl`. The general case has the same guard:
+  `write_terminal_response` takes a *closure*, and generates and enqueues the
+  bytes under one `response_order` mutex (`:159-172`), so two responders cannot
+  interleave generation with enqueue.
+
+Coalescing at the host does not remove the renderer barrier — the two solve
+different halves — but it does mean the drag path is bounded on both sides.
+
 ## Hypotheses to verify
 
 **H7.0 — output can currently straddle a resize at two different geometries.**
@@ -153,7 +177,10 @@ either keep the upstream attribution or replace it with a measurement.
    barriers, and apply `Resized` through it wrapped in
    `preserveTerminalViewport`. Never reset.
 5. Implement drag coalescing: one in-flight request, newest desired geometry
-   only, reissue after acknowledgement only when it still differs.
+   only, reissue after acknowledgement only when it still differs. Coalesce at
+   the host too, in herdr's shape — a latest-wins slot on a path that cannot
+   queue behind pending input — and deliver any VT response to the resize
+   together with the resize rather than as a separate write.
 6. Define the resync trigger from H7.3 and route it through the existing
    `resync_required` event. The controller from phase 04 owns the transition.
 7. Re-evaluate the `fitAndResize` debounce per H7.4 and record the outcome

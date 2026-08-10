@@ -53,9 +53,12 @@ twice. Falsifier: subscribers see duplicate semantic close or state corrupts.
 5. Make duplicate and out-of-date registry events idempotent by terminal ID and
    revision. Publish one semantic `closed` notification only on the actual
    present-to-absent transition.
-6. If UI latency between command resolution and event delivery is measurable,
-   await the observed host removal with a bounded diagnostic path; do not add a
-   synthetic mutation that bypasses the reducer.
+6. Register a terminal-ID/revision removal waiter before invoking backend close.
+   Resolve `close()` only after both the command succeeds and the registry
+   reducer observes the matching `Removed`; reject if the registry subscription
+   fails. An optional watchdog may emit telemetry for delayed delivery, but it
+   never resolves the waiter, mutates descriptors, records removal, or treats a
+   timeout as successful closure.
 7. Add close-failure coverage proving that a descriptor remains present and no
    removal observation is recorded when the backend rejects the close.
 
@@ -68,6 +71,8 @@ twice. Falsifier: subscribers see duplicate semantic close or state corrupts.
 - A successful close yields one present-to-absent transition and one semantic
   close notification, even if `Removed` is delivered twice.
 - A failed close leaves the descriptor intact and emits no close notification.
+- Close has no state-changing timeout path. Delayed delivery may produce a
+  diagnostic, but only the observed reducer event completes removal.
 - Reconciliation still admits terminals created after an older list began and
   preserves newer updates, not only removals.
 - The backend test proves its event-before-return contract or this phase stops
@@ -76,7 +81,7 @@ twice. Falsifier: subscribers see duplicate semantic close or state corrupts.
 ## Validation
 
 ```sh
-pnpm exec node --test \
+pnpm exec node --test --test-concurrency=1 \
   core/frontend/terminal/tests/terminalClientRuntime.test.ts
 cargo test --manifest-path core/backend/Cargo.toml terminal::service
 just test fast
