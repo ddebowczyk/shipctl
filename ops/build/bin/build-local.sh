@@ -117,7 +117,9 @@ if [ "$(yq -r '.product_version' ops/version/current.yaml)" != "$version" ]; the
   fail 'product version changed during the build'
 fi
 
-bundle_root="target/${target}/release/bundle"
+cargo_target_dir="$(bash "$script_dir/cargo-target-dir.sh")" \
+  || fail 'could not determine Cargo target directory'
+bundle_root="${cargo_target_dir}/${target}/release/bundle"
 app_source="${bundle_root}/macos/shipctl.app"
 [ -d "$app_source" ] || fail "app artifact not found: $app_source"
 shopt -s nullglob

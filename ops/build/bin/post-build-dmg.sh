@@ -8,7 +8,8 @@ cd "$repo_root"
 # Post-build script: repositions .VolumeIcon.icns off-screen in the DMG
 # so it doesn't appear in Finder, and lays out the app + Applications nicely.
 
-DMG_DIR="target/release/bundle/dmg"
+cargo_target_dir="$(bash "$script_dir/cargo-target-dir.sh")"
+DMG_DIR="${cargo_target_dir}/release/bundle/dmg"
 DMG=$(ls "$DMG_DIR"/*.dmg 2>/dev/null | grep -v rw_temp | head -1)
 
 if [[ -z "$DMG" ]]; then

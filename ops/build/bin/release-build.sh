@@ -127,6 +127,8 @@ step "Verifying app version"
 just version check || fail "product version is invalid or its packaging projection has drifted"
 
 VERSION=$(yq -r '.product_version' ops/version/current.yaml)
+cargo_target_dir="$(bash "$script_dir/cargo-target-dir.sh")" \
+  || fail "could not determine Cargo target directory"
 ok "building v$VERSION"
 
 # ── Step 8: warn on dirty working tree (don't block) ────────────────
@@ -157,9 +159,9 @@ bash ops/build/bin/generate-update-json.sh
 
 # ── Step 10: summary ─────────────────────────────────────────────────
 
-DMG_PATH="target/release/bundle/dmg/shipctl_${VERSION}_aarch64.dmg"
-UPDATER_TARBALL="target/release/bundle/macos/shipctl.app.tar.gz"
-UPDATER_SIG="target/release/bundle/macos/shipctl.app.tar.gz.sig"
+DMG_PATH="${cargo_target_dir}/release/bundle/dmg/shipctl_${VERSION}_aarch64.dmg"
+UPDATER_TARBALL="${cargo_target_dir}/release/bundle/macos/shipctl.app.tar.gz"
+UPDATER_SIG="${cargo_target_dir}/release/bundle/macos/shipctl.app.tar.gz.sig"
 
 printf "\n"
 printf "── Release build complete: v%s\n" "$VERSION"

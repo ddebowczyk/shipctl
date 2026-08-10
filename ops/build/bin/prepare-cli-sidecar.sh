@@ -33,7 +33,7 @@ else
   cargo build -p shipctl-cli --bin shipctl --target "$target"
 fi
 
-cargo_target_dir="${CARGO_TARGET_DIR:-target}"
+cargo_target_dir="$(bash "$script_dir/cargo-target-dir.sh")"
 source_path="${cargo_target_dir}/${target}/${profile}/shipctl${extension}"
 destination="src-tauri/binaries/shipctl-${target}${extension}"
 [ -x "$source_path" ] || fail "CLI sidecar was not built at ${source_path}"

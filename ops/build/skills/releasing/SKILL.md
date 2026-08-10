@@ -83,10 +83,11 @@ the version in Settings, and confirm existing sessions and usage data load.
 ```bash
 git push origin main
 git tag v<version> && git push origin v<version>
+target_dir="$(bash ops/build/bin/cargo-target-dir.sh)"
 gh release create v<version> \
-  target/release/bundle/dmg/shipctl_<version>_aarch64.dmg \
-  target/release/bundle/macos/shipctl.app.tar.gz \
-  target/release/bundle/macos/shipctl.app.tar.gz.sig \
+  "$target_dir/release/bundle/dmg/shipctl_<version>_aarch64.dmg" \
+  "$target_dir/release/bundle/macos/shipctl.app.tar.gz" \
+  "$target_dir/release/bundle/macos/shipctl.app.tar.gz.sig" \
   latest.json
 ```
 

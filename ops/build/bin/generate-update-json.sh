@@ -14,8 +14,9 @@ cd "$repo_root"
 just version check
 VERSION=$(yq -r '.product_version' ops/version/current.yaml)
 
-# Locate the signed update artifact
-BUNDLE_DIR="target/release/bundle/macos"
+# Locate the signed update artifact under Cargo's effective target directory.
+cargo_target_dir="$(bash "$script_dir/cargo-target-dir.sh")"
+BUNDLE_DIR="${cargo_target_dir}/release/bundle/macos"
 SIG_FILE="${BUNDLE_DIR}/shipctl.app.tar.gz.sig"
 
 if [ ! -f "$SIG_FILE" ]; then
