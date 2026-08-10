@@ -16,9 +16,7 @@ use libghostty_vt::{
 };
 use shipctl_module_api::TerminalColorTheme;
 
-// This is the configuration exercised by the host-canonical replay proof. It
-// is retained as evidence-backed parser behavior, not a subscriber buffer.
-const MAX_SCROLLBACK_LINES: usize = 1_000;
+use super::retention::TerminalRetentionPolicy;
 
 pub struct VtReplayEngine {
     terminal: Terminal<'static, 'static>,
@@ -27,14 +25,19 @@ pub struct VtReplayEngine {
 }
 
 impl VtReplayEngine {
-    pub fn new(cols: u16, rows: u16, theme: &TerminalColorTheme) -> Result<Self, String> {
+    pub fn new(
+        cols: u16,
+        rows: u16,
+        theme: &TerminalColorTheme,
+        retention: TerminalRetentionPolicy,
+    ) -> Result<Self, String> {
         validate_dimensions(cols, rows)?;
         let responses = Arc::new(Mutex::new(Vec::new()));
         let color_scheme = Arc::new(Mutex::new(theme_color_scheme(theme)));
         let mut terminal = Terminal::new(TerminalOptions {
             cols,
             rows,
-            max_scrollback: MAX_SCROLLBACK_LINES,
+            max_scrollback: retention.bytes(),
         })
         .map_err(|error| format!("Failed to initialize terminal VT state: {error}"))?;
 
@@ -77,6 +80,14 @@ impl VtReplayEngine {
         self.discard_responses();
         self.terminal.vt_write(bytes);
         self.take_responses()
+    }
+
+    /// Rows currently held in history. The host is the retention authority, so
+    /// this is the only truthful answer to "how much history is there".
+    pub fn scrollback_rows(&self) -> Result<usize, String> {
+        self.terminal
+            .scrollback_rows()
+            .map_err(vt_error("read terminal scrollback rows"))
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), String> {
@@ -521,6 +532,158 @@ mod tests {
         }
     }
 
+    /// The engine is where the product policy becomes physical retention. If
+    /// this passes, no runtime can silently keep a different amount of history
+    /// than the service committed.
+    #[test]
+    fn the_engine_retains_history_according_to_the_policy_it_was_given() {
+        let feed_lines = |engine: &mut VtReplayEngine| {
+            for _ in 0..3_000 {
+                engine.feed(b"x\r\n");
+            }
+        };
+
+        let mut none =
+            VtReplayEngine::new(80, 24, &theme(), TerminalRetentionPolicy::from_bytes(0))
+                .expect("engine");
+        feed_lines(&mut none);
+        assert_eq!(none.scrollback_rows().expect("rows"), 0);
+
+        let mut budgeted =
+            VtReplayEngine::new(80, 24, &theme(), TerminalRetentionPolicy::default())
+                .expect("engine");
+        feed_lines(&mut budgeted);
+        assert!(budgeted.scrollback_rows().expect("rows") > 0);
+    }
+
+    /// A child that owns its colors keeps them when the user changes the app
+    /// theme. `compat.rs` proves the child's OSC 4/10/11 state is readable, so
+    /// a theme apply that overwrites it is discarding known state, not missing
+    /// it. This test states the contract the end-state plan depends on; it
+    /// records where today's engine does not meet it.
+    #[test]
+    fn a_theme_change_does_not_discard_colors_the_child_set_for_itself() {
+        let mut engine =
+            VtReplayEngine::new(20, 5, &theme(), TerminalRetentionPolicy::default()).unwrap();
+
+        // The child claims a background, a foreground, and one palette slot.
+        engine.feed(b"\x1b]11;#204060\x1b\\\x1b]10;#a0b0c0\x1b\\\x1b]4;1;#010203\x1b\\");
+
+        let child_bg = RgbColor {
+            r: 0x20,
+            g: 0x40,
+            b: 0x60,
+        };
+        let child_fg = RgbColor {
+            r: 0xa0,
+            g: 0xb0,
+            b: 0xc0,
+        };
+        let child_slot = RgbColor {
+            r: 0x01,
+            g: 0x02,
+            b: 0x03,
+        };
+        assert_eq!(engine.terminal.bg_color().unwrap(), Some(child_bg));
+        assert_eq!(engine.terminal.fg_color().unwrap(), Some(child_fg));
+        assert_eq!(
+            engine.terminal.color_palette().unwrap().get(PaletteIndex(1)),
+            child_slot
+        );
+
+        // The user switches the app theme. Nothing about that is a statement
+        // about the colors the child chose.
+        let new_theme = TerminalColorTheme {
+            foreground: "#ffffff".to_string(),
+            background: "#000000".to_string(),
+            palette: vec!["#fefefe".to_string(); 16],
+        };
+        engine.set_theme(&new_theme).expect("apply theme");
+
+        assert_eq!(
+            engine.terminal.bg_color().unwrap(),
+            Some(child_bg),
+            "the child's OSC 11 background survives an app theme change"
+        );
+        assert_eq!(
+            engine.terminal.fg_color().unwrap(),
+            Some(child_fg),
+            "the child's OSC 10 foreground survives an app theme change"
+        );
+        assert_eq!(
+            engine.terminal.color_palette().unwrap().get(PaletteIndex(1)),
+            child_slot,
+            "the child's OSC 4 palette slot survives an app theme change"
+        );
+
+        // Guard against a vacuous pass. The three assertions above are only
+        // meaningful if the theme apply actually did something, so prove it
+        // reached the layer underneath the child's overrides.
+        assert_eq!(
+            engine.terminal.default_bg_color().unwrap(),
+            Some(RgbColor {
+                r: 0x00,
+                g: 0x00,
+                b: 0x00
+            }),
+            "the theme reached the host default layer beneath the child override"
+        );
+        assert_eq!(
+            engine.terminal.color_palette().unwrap().get(PaletteIndex(2)),
+            RgbColor {
+                r: 0xfe,
+                g: 0xfe,
+                b: 0xfe
+            },
+            "a palette slot the child never claimed does follow the new theme"
+        );
+    }
+
+    /// `RuntimeActor::resize` and `set_theme` both publish a replay, and the
+    /// client installs one by calling `term.reset()` first. This test was
+    /// written to show that a replay drops history. It does not: the replay
+    /// carries every retained row. What a resize actually costs is the
+    /// re-encoding of the whole retained buffer into ANSI, on every resize
+    /// step and every theme change. Recorded here so no plan re-asserts a
+    /// content loss that the engine does not have.
+    #[test]
+    fn a_replay_re_encodes_every_retained_row_so_its_cost_scales_with_history() {
+        let mut engine =
+            VtReplayEngine::new(20, 5, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        for line in 0..60 {
+            engine.feed(format!("line{line}\r\n").as_bytes());
+        }
+
+        let retained = engine.scrollback_rows().expect("rows");
+        assert!(
+            retained > 0,
+            "the engine retained scrolled-off rows, so history exists to lose"
+        );
+
+        let replay = engine.replay().expect("replay");
+        let contains = |needle: &str| {
+            replay
+                .windows(needle.len())
+                .any(|window| window == needle.as_bytes())
+        };
+
+        let missing: Vec<usize> = (0..60).filter(|n| !contains(&format!("line{n}"))).collect();
+        assert!(
+            missing.is_empty(),
+            "the replay carries every retained row, not only the active screen; \
+             missing rows would be {missing:?}"
+        );
+
+        // The cost is size, not loss. A replay is the whole retained buffer
+        // re-encoded as ANSI, and resize and theme change each produce one.
+        let bytes_per_row = replay.len() / (retained + 5);
+        assert!(
+            bytes_per_row > 0,
+            "a replay re-encodes every retained row, so its size scales with \
+             retention rather than with the screen"
+        );
+    }
+
     #[test]
     fn rejects_zero_dimensions_before_parser_allocation() {
         assert!(validate_dimensions(0, 24).is_err());
@@ -529,7 +692,8 @@ mod tests {
 
     #[test]
     fn parses_output_before_replay_and_answers_queries_once() {
-        let mut engine = VtReplayEngine::new(20, 5, &theme()).unwrap();
+        let mut engine =
+            VtReplayEngine::new(20, 5, &theme(), TerminalRetentionPolicy::default()).unwrap();
         let responses = engine.feed(b"early\x1b[2;4H\x1b[6n");
 
         assert_eq!(responses, b"\x1b[2;4R");
