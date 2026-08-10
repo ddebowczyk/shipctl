@@ -6,6 +6,7 @@ import { resizeTerminal } from "@shipctl/core/platform";
 import { terminalCache } from "./terminalCache.ts";
 import { buildCSSFontFamily } from "@shipctl/core/appearance";
 import { preserveTerminalViewport } from "./terminalViewport.ts";
+import { TRANSITIONAL_RENDERER_SCROLLBACK_ROWS } from "./terminalRetention.ts";
 import { reconcileTerminalRenderer } from "./terminalRenderer.ts";
 
 // Utility to make hex colors partially transparent
@@ -115,7 +116,7 @@ export function applyTerminalSettings(settings: TerminalSettings): void {
 
     entry.term.options.cursorStyle = settings.cursorStyle;
     entry.term.options.cursorBlink = settings.cursorBlink;
-    entry.term.options.scrollback = settings.scrollback;
+    entry.term.options.scrollback = TRANSITIONAL_RENDERER_SCROLLBACK_ROWS;
     entry.term.options.fontFamily = cssFont;
     entry.term.options.fontSize = settings.fontSize;
 

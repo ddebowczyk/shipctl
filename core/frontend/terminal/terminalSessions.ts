@@ -22,7 +22,7 @@ export type TerminalSessionOwnerRequest = Extract<
   { readonly type: "rename-requested" | "placement-requested" | "stop-requested" }
 >;
 
-type TerminalProjectionEvent = "launched" | "adopted" | "updated";
+export type TerminalProjectionEvent = "launched" | "adopted" | "updated";
 
 let runtime: TerminalSessionsRuntime | null = null;
 let dimensionsProvider: () => ModuleTerminalDimensions = () => ({

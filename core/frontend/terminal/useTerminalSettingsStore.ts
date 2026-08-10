@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { TerminalSettings } from "@shipctl/core/platform";
 import { getTerminalSettings, saveTerminalSettings } from "@shipctl/core/platform";
 import { applyTerminalSettings } from "./terminalTheme.ts";
+import { applyTerminalSettingsCommit, RETENTION_DEFAULT_BYTES } from "./terminalRetention.ts";
 
 import { normalizeTerminalFontFamily, TERMINAL_FONT_FAMILY, TERMINAL_FONT_SIZE } from "@shipctl/core/appearance";
 import { ensureFamilyLoaded } from "@shipctl/core/appearance";
@@ -9,7 +10,7 @@ import { ensureFamilyLoaded } from "@shipctl/core/appearance";
 const DEFAULT_SETTINGS: TerminalSettings = {
   cursorStyle: "block",
   cursorBlink: true,
-  scrollback: 10000,
+  scrollbackBytes: RETENTION_DEFAULT_BYTES,
   fontFamily: TERMINAL_FONT_FAMILY,
   fontSize: TERMINAL_FONT_SIZE,
   urlAllowlist: ["http", "https"],
@@ -17,6 +18,12 @@ const DEFAULT_SETTINGS: TerminalSettings = {
 
 interface TerminalSettingsStore {
   settings: TerminalSettings;
+  /**
+   * Retention revision of the committed settings. A response that carries a
+   * lower revision describes an older policy and is discarded, so a delayed
+   * save can never reinstate a value the user has already replaced.
+   */
+  retentionRevision: number;
   hasLoaded: boolean;
   isSaving: boolean;
   error: string | null;
@@ -24,15 +31,24 @@ interface TerminalSettingsStore {
   updateSettings: (partial: Partial<TerminalSettings>) => Promise<void>;
 }
 
+
+
 export const useTerminalSettingsStore = create<TerminalSettingsStore>((set, get) => ({
   settings: DEFAULT_SETTINGS,
+  retentionRevision: 0,
   hasLoaded: false,
   isSaving: false,
   error: null,
 
   loadSettings: async () => {
     try {
-      const settings = await getTerminalSettings();
+      const commit = await getTerminalSettings();
+      const accepted = applyTerminalSettingsCommit(
+        { settings: get().settings, retentionRevision: get().retentionRevision },
+        commit,
+      );
+      if (accepted.retentionRevision !== commit.retentionRevision) return;
+      const { settings, retentionRevision } = accepted;
       const normalizedSettings = {
         ...settings,
         fontFamily: normalizeTerminalFontFamily(settings.fontFamily),
@@ -41,7 +57,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsStore>((set, get)
       // any terminal mounting concurrently doesn't measure against a face that
       // hasn't been registered yet.
       await ensureFamilyLoaded(normalizedSettings.fontFamily);
-      set({ settings: normalizedSettings, hasLoaded: true, error: null });
+      set({ settings: normalizedSettings, retentionRevision, hasLoaded: true, error: null });
       applyTerminalSettings(normalizedSettings);
       if (normalizedSettings.fontFamily !== settings.fontFamily) {
         saveTerminalSettings(normalizedSettings).catch((error) => {
@@ -72,9 +88,17 @@ export const useTerminalSettingsStore = create<TerminalSettingsStore>((set, get)
       // the UI never shows a value that wasn't written. This avoids the
       // three-way inconsistency (store / terminals / disk) that the
       // optimistic pattern exposed on save failure.
-      await saveTerminalSettings(next);
-      set({ settings: next, isSaving: false });
-      applyTerminalSettings(next);
+      const commit = await saveTerminalSettings(next);
+      const held = { settings: get().settings, retentionRevision: get().retentionRevision };
+      const accepted = applyTerminalSettingsCommit(held, commit);
+      if (accepted === held) {
+        // A newer save already committed. Keep the newer state and only clear
+        // the in-flight flag.
+        set({ isSaving: false });
+        return;
+      }
+      set({ settings: accepted.settings, retentionRevision: accepted.retentionRevision, isSaving: false });
+      applyTerminalSettings(accepted.settings);
     } catch (error) {
       // Nothing to roll back: `settings` was never mutated, terminals were
       // never re-applied, and the font (if loaded) sitting in document.fonts

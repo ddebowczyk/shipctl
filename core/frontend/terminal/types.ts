@@ -139,6 +139,29 @@ export interface TerminalCloseResult {
   readonly exit: TerminalExit | null;
 }
 
+/**
+ * What a close did to the frontend projection.
+ *
+ * `unconfirmed` means the host accepted the close but its removal has not been
+ * observed. The projection is left untouched: a removal is published by the
+ * host, never synthesized here.
+ */
+export type TerminalCloseOutcome =
+  | { readonly status: "closed" }
+  | { readonly status: "unconfirmed"; readonly terminalId: TerminalId };
+
+/**
+ * What happened to one submitted keystroke.
+ *
+ * `unavailable` is the expected result of racing an exit, a close, or a
+ * recovery: the terminal took no input and nothing failed. `failed` is a real
+ * transport, validation, or host I/O failure and is the only error to report.
+ */
+export type TerminalInputOutcome =
+  | { readonly status: "accepted" }
+  | { readonly status: "unavailable"; readonly reason: string }
+  | { readonly status: "failed"; readonly error: unknown };
+
 export type TerminalEvent =
   | {
       readonly event: "output";

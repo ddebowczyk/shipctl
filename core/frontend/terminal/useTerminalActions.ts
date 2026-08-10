@@ -341,7 +341,16 @@ export function useTerminalActions(
           reason: "tab-close",
         });
       }
-      await TERMINAL_CLIENT_RUNTIME.close(tab.terminalId);
+      const outcome = await TERMINAL_CLIENT_RUNTIME.close(tab.terminalId);
+      if (outcome.status === "unconfirmed") {
+        // The host accepted the close but its removal has not been observed.
+        // Say so rather than hide a terminal that may still exist.
+        pushNotice({
+          tone: "error",
+          title: "Terminal close is unconfirmed",
+          message: "The terminal was closed but its removal was not confirmed. Close it again to retry.",
+        });
+      }
     } catch (error) {
       pushNotice({
         tone: "error",

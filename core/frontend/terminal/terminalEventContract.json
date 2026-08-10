@@ -1,0 +1,101 @@
+{
+  "tagField": "event",
+  "maxExactInteger": 9007199254740991,
+  "variants": [
+    {
+      "tag": "output",
+      "fields": {
+        "data": {
+          "jsonType": "array",
+          "nullable": false
+        },
+        "revision": {
+          "jsonType": "number",
+          "nullable": false
+        },
+        "sequence": {
+          "jsonType": "number",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "tag": "replay",
+      "fields": {
+        "replay": {
+          "jsonType": "object",
+          "nullable": false
+        },
+        "sequence": {
+          "jsonType": "number",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "tag": "metadata_changed",
+      "fields": {
+        "descriptor": {
+          "jsonType": "object",
+          "nullable": false
+        },
+        "sequence": {
+          "jsonType": "number",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "tag": "agent_activity_changed",
+      "fields": {
+        "descriptor": {
+          "jsonType": "object",
+          "nullable": false
+        },
+        "sequence": {
+          "jsonType": "number",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "tag": "exited",
+      "fields": {
+        "descriptor": {
+          "jsonType": "object",
+          "nullable": false
+        },
+        "sequence": {
+          "jsonType": "number",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "tag": "resync_required",
+      "fields": {
+        "reason": {
+          "jsonType": "string",
+          "nullable": false
+        },
+        "sequence": {
+          "jsonType": "number",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "tag": "detached",
+      "fields": {
+        "reason": {
+          "jsonType": "string",
+          "nullable": false
+        },
+        "sequence": {
+          "jsonType": "number",
+          "nullable": false
+        }
+      }
+    }
+  ]
+}

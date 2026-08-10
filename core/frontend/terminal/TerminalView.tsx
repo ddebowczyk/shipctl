@@ -11,10 +11,8 @@ import {
   setTerminalRendererFactories,
 } from "./terminalRenderer.ts";
 import { browserTerminalRendererFactories } from "./terminalRendererAddons.ts";
-import {
-  openUrl,
-  type TerminalAttachmentHandle,
-} from "@shipctl/core/platform";
+import { openUrl } from "@shipctl/core/platform";
+import { TerminalAttachmentController } from "./terminalAttachmentController.ts";
 import {
   registerTerminal,
   unregisterTerminal,
@@ -23,6 +21,7 @@ import {
 import { TERMINAL_LINE_HEIGHT, buildCSSFontFamily } from "@shipctl/core/appearance";
 import {
   preserveTerminalViewport,
+  resolveViewportDrainAction,
   resyncTerminalViewport,
   terminalBottomOffset,
 } from "./terminalViewport.ts";
@@ -32,12 +31,20 @@ import {
   type ScrollPinIntent,
 } from "./terminalScrollPin.ts";
 import { createTerminalTheme } from "./terminalTheme.ts";
+import { TRANSITIONAL_RENDERER_SCROLLBACK_ROWS } from "./terminalRetention.ts";
 import { useThemeStore } from "@shipctl/core/appearance";
 import { notifyAgent } from "./notifications.ts";
-import { KEYBINDING_PRESETS } from "./keybindingPresets.ts";
+import { resolveKeybindingPreset } from "./keybindingPresets.ts";
+import { parseOscNotificationMessage } from "./terminalOscNotification.ts";
+import {
+  COLUMN_REFLOW_SETTLE_MS,
+  clampTerminalGeometry,
+  planTerminalFit,
+  type TerminalGeometry,
+} from "./terminalFitPlan.ts";
 import { useKeybindingStore } from "./useKeybindingStore.ts";
 import { useTerminalSettingsStore } from "./useTerminalSettingsStore.ts";
-import type { TerminalEvent, TerminalId, TerminalReplay } from "./types.ts";
+import type { TerminalId } from "./types.ts";
 import { TERMINAL_CLIENT_RUNTIME } from "./terminalClientRuntime.ts";
 import { useNoticeStore } from "@shipctl/core/shared";
 import { getErrorMessage } from "@shipctl/core/platform";
@@ -60,17 +67,17 @@ export default function TerminalView({
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(false);
-  const attachedRef = useRef(false);
-  const attachmentRef = useRef<TerminalAttachmentHandle | null>(null);
-  const attachmentGenerationRef = useRef(0);
-  const reattachingRef = useRef(false);
-  const needsReattachRef = useRef(false);
-  const inputEnabledRef = useRef(false);
-  const sequenceRef = useRef(0);
+  // The attachment protocol lives in the controller; the view only binds its
+  // ports to xterm and reads it from the persistent terminal callbacks.
+  const controllerRef = useRef<TerminalAttachmentController | null>(null);
   // Whether the viewport is following output. Tracked here rather than read
   // from xterm at write time: the queue writes in chunks across frames, so by
   // the time a chunk lands the buffer has already moved.
   const pinnedToBottomRef = useRef(true);
+  // Distance from the end of the buffer that a pending replay has to restore.
+  // Captured before the reset that discards it, applied when the replayed
+  // bytes have drained.
+  const pendingViewportRestoreRef = useRef<number | null>(null);
   const columnResizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const getOrCreateTerminal = useCallback(() => {
@@ -85,7 +92,7 @@ export default function TerminalView({
       fontFamily: buildCSSFontFamily(termSettings.fontFamily),
       lineHeight: TERMINAL_LINE_HEIGHT,
       theme: createTerminalTheme(useThemeStore.getState().theme),
-      scrollback: termSettings.scrollback,
+      scrollback: TRANSITIONAL_RENDERER_SCROLLBACK_ROWS,
       allowTransparency: true,
       allowProposedApi: true,
       linkHandler: {
@@ -104,24 +111,30 @@ export default function TerminalView({
       void openUrl(url);
     }));
 
-    // Send input to PTY
-    term.onData((data) => {
-      if (!attachmentRef.current || !inputEnabledRef.current) return;
-      // Typing resumes follow mode; the response to this input is the thing
-      // the user is waiting to see.
-      pinnedToBottomRef.current = true;
-      term.scrollToBottom();
-      TERMINAL_CLIENT_RUNTIME.write(terminalId, data).catch((error) => {
+    // The one input path. The controller decides admission and returns a typed
+    // outcome; the view only reacts to it.
+    const submitInput = (data: string) => {
+      void controllerRef.current?.submitInput(data).then((outcome) => {
+        if (outcome.status === "unavailable") return;
+        if (outcome.status === "accepted") {
+          // Typing resumes follow mode; the response to this input is the thing
+          // the user is waiting to see.
+          pinnedToBottomRef.current = true;
+          term.scrollToBottom();
+          return;
+        }
         if (import.meta.env.DEV) {
-          console.error("Failed to write terminal input:", error);
+          console.error("Failed to write terminal input:", outcome.error);
         }
         useNoticeStore.getState().pushNotice({
           tone: "error",
           title: "Couldn’t write to terminal",
-          message: getErrorMessage(error),
+          message: getErrorMessage(outcome.error),
         });
       });
-    });
+    };
+
+    term.onData(submitInput);
 
     // Track terminal bell (attention request)
     term.onBell(() => {
@@ -130,7 +143,7 @@ export default function TerminalView({
 
     // Intercept OSC 9 notifications from coding agents (Claude Code, Codex, Gemini)
     term.parser.registerOscHandler(9, (data) => {
-      const message = data.startsWith("2;") ? data.slice(2) : data;
+      const message = parseOscNotificationMessage(data);
       if (message) {
         void notifyAgent(terminalId, message);
       }
@@ -139,26 +152,13 @@ export default function TerminalView({
 
     // Intercept key combos for custom keybindings
     term.attachCustomKeyEventHandler((ev) => {
-      const settings = useKeybindingStore.getState().settings;
-      for (const preset of KEYBINDING_PRESETS) {
-        if (settings[preset.id] && preset.match(ev)) {
-          if (ev.type === "keydown") {
-            if (!attachmentRef.current || !inputEnabledRef.current) return false;
-            TERMINAL_CLIENT_RUNTIME.write(terminalId, preset.sequence).catch((error) => {
-              if (import.meta.env.DEV) {
-                console.error("Failed to write terminal keybinding:", error);
-              }
-              useNoticeStore.getState().pushNotice({
-                tone: "error",
-                title: "Couldn’t write to terminal",
-                message: getErrorMessage(error),
-              });
-            });
-          }
-          return false; // prevent xterm default handling
-        }
-      }
-      return true; // let xterm handle normally
+      const preset = resolveKeybindingPreset(
+        useKeybindingStore.getState().settings,
+        ev,
+      );
+      if (!preset) return true; // let xterm handle normally
+      if (ev.type === "keydown") submitInput(preset.sequence);
+      return false; // prevent xterm default handling
     });
 
     const entry: TerminalCacheEntry = {
@@ -171,23 +171,23 @@ export default function TerminalView({
     return entry;
   }, [terminalId]);
 
-  const applyTerminalSize = useCallback(async (cols: number, rows: number) => {
+  const applyTerminalSize = useCallback(async (geometry: TerminalGeometry) => {
     const cached = terminalCache.get(terminalId);
     if (!cached) return;
 
-    const size = { cols: Math.max(2, cols), rows: Math.max(2, rows) };
-    if (cached.term.cols === size.cols && cached.term.rows === size.rows) return;
+    const size = clampTerminalGeometry(geometry);
+    if (cached.term.cols === size.columns && cached.term.rows === size.rows) return;
 
     preserveTerminalViewport(cached.term, () => {
-      cached.term.resize(size.cols, size.rows);
+      cached.term.resize(size.columns, size.rows);
     });
 
-    const attachment = attachmentRef.current;
-    if (!attachment) return;
+    const attachmentId = controllerRef.current?.attachmentId;
+    if (!attachmentId) return;
     await TERMINAL_CLIENT_RUNTIME.resize(
       terminalId,
-      attachment.attachmentId,
-      size.cols,
+      attachmentId,
+      size.columns,
       size.rows,
     ).catch((error) => {
       if (import.meta.env.DEV) {
@@ -203,35 +203,33 @@ export default function TerminalView({
     const proposedSize = cached.fitAddon.proposeDimensions();
     if (!proposedSize) return;
 
-    const nextSize = { cols: proposedSize.cols, rows: proposedSize.rows };
-    const columnsChanged = cached.term.cols !== nextSize.cols;
-    const rowsChanged = cached.term.rows !== nextSize.rows;
-    if (!columnsChanged && !rowsChanged) return;
+    const plan = planTerminalFit({
+      current: { columns: cached.term.cols, rows: cached.term.rows },
+      proposed: { columns: proposedSize.cols, rows: proposedSize.rows },
+      bufferRows: cached.term.buffer.active.length,
+    });
+    if (plan.kind === "unchanged") return;
 
-    // Thresholds adopted from upstream 59e8fc7 rather than chosen here.
-    const shouldDebounceColumns =
-      columnsChanged && cached.term.buffer.active.length > 200;
-
-    if (!shouldDebounceColumns) {
+    const clearPendingColumnSettle = () => {
       if (columnResizeTimerRef.current) {
         clearTimeout(columnResizeTimerRef.current);
         columnResizeTimerRef.current = null;
       }
-      await applyTerminalSize(nextSize.cols, nextSize.rows);
+    };
+
+    if (plan.kind === "resize") {
+      clearPendingColumnSettle();
+      await applyTerminalSize(plan.size);
       return;
     }
 
-    // Reflowing a long scrollback buffer on every width observation is costly.
-    // Apply row changes immediately at the current width and settle columns
-    // after the resize gesture has been quiet for 100 ms.
-    if (rowsChanged) {
-      await applyTerminalSize(cached.term.cols, nextSize.rows);
-    }
-    if (columnResizeTimerRef.current) clearTimeout(columnResizeTimerRef.current);
+    if (plan.immediate) await applyTerminalSize(plan.immediate);
+    clearPendingColumnSettle();
+    const deferred = plan.deferred;
     columnResizeTimerRef.current = setTimeout(() => {
       columnResizeTimerRef.current = null;
-      void applyTerminalSize(nextSize.cols, nextSize.rows);
-    }, 100);
+      void applyTerminalSize(deferred);
+    }, COLUMN_REFLOW_SETTLE_MS);
   }, [applyTerminalSize, terminalId]);
 
   useEffect(() => {
@@ -251,8 +249,75 @@ export default function TerminalView({
       }
     }
 
+    // Bind the attachment protocol to this surface. Every port is a local
+    // xterm, output-queue, or runtime operation; ordering and recovery belong
+    // to the controller.
+    const controller = new TerminalAttachmentController({
+      attach: (onEvent) => TERMINAL_CLIENT_RUNTIME.attach(terminalId, true, onEvent),
+      detach: (attachmentId) => TERMINAL_CLIENT_RUNTIME.detach(attachmentId),
+      observeDescriptor: (descriptor) => {
+        TERMINAL_CLIENT_RUNTIME.observeDescriptor(descriptor);
+      },
+      installReplay: (replay) => {
+        unregisterTerminal(terminalId);
+        // A replay rebuilds the buffer behind this reset, which zeroes the
+        // scroll position. Remember how far from the end the user was reading
+        // so the drain can put them back; a user already at the end is handled
+        // by the pin and needs nothing remembered.
+        const bottomOffset = terminalBottomOffset(term);
+        pendingViewportRestoreRef.current = bottomOffset > 0 ? bottomOffset : null;
+        term.reset();
+        const replaySize = clampTerminalGeometry({
+          columns: replay.columns,
+          rows: replay.rows,
+        });
+        term.resize(replaySize.columns, replaySize.rows);
+        registerTerminal(
+          terminalId,
+          term,
+          () => {
+            // The queue reports a drain only when it has emptied, so the
+            // replayed buffer is whole by the time this runs.
+            const action = resolveViewportDrainAction({
+              pinnedToBottom: pinnedToBottomRef.current,
+              pendingBottomOffset: pendingViewportRestoreRef.current,
+              baseY: term.buffer.active.baseY,
+            });
+            pendingViewportRestoreRef.current = null;
+            if (action.kind === "bottom") term.scrollToBottom();
+            else if (action.kind === "line") term.scrollToLine(action.line);
+            controller.noteOutputDrained();
+          },
+          () => controller.requestRecovery(),
+        );
+      },
+      stopOutput: () => unregisterTerminal(terminalId),
+      releaseOutput: (bytes) => writeTerminalOutput(terminalId, bytes),
+      acceptsInput: () =>
+        TERMINAL_CLIENT_RUNTIME.descriptor(terminalId)?.lifecycle === "running",
+      write: (data) => TERMINAL_CLIENT_RUNTIME.write(terminalId, data),
+      publishAttachmentId: (attachmentId) => {
+        const cached = terminalCache.get(terminalId);
+        if (cached) cached.attachmentId = attachmentId;
+      },
+      reportError: (error) => {
+        if (import.meta.env.DEV) {
+          console.error("Failed to attach terminal renderer:", error);
+        }
+        useNoticeStore.getState().pushNotice({
+          tone: "error",
+          title: "Couldn’t attach terminal",
+          message: getErrorMessage(error),
+        });
+      },
+    });
+    controllerRef.current = controller;
+
     const surface = containerRef.current;
     const applyScrollPinIntent = (intent: ScrollPinIntent) => {
+      // A gesture during a replay supersedes the position that replay was
+      // going to restore.
+      pendingViewportRestoreRef.current = null;
       if (intent === "unpin") {
         pinnedToBottomRef.current = false;
         return;
@@ -300,7 +365,7 @@ export default function TerminalView({
         reconcileTerminalRenderer(term, rendererEntry, currentTheme);
       }
 
-      // Re-apply terminal settings (font, cursor, scrollback) that may have
+      // Re-apply terminal settings (font, cursor) that may have
       // changed while this terminal was hidden. `applyTerminalSettings` skips
       // hidden terminals to avoid corrupting xterm state, so we catch up here
       // once the container is visible again. If the font changed, the
@@ -313,7 +378,6 @@ export default function TerminalView({
 
       term.options.cursorStyle = currentTermSettings.cursorStyle;
       term.options.cursorBlink = currentTermSettings.cursorBlink;
-      term.options.scrollback = currentTermSettings.scrollback;
       term.options.fontFamily = nextCssFont;
       term.options.fontSize = currentTermSettings.fontSize;
 
@@ -336,114 +400,9 @@ export default function TerminalView({
       // fit work above can move the buffer, so an earlier snapshot is stale.
       resyncTerminalViewport(term, terminalBottomOffset(term));
 
-      if (!attachedRef.current) {
-        let attachRenderer: () => Promise<void>;
-        const requestReattach = () => {
-          inputEnabledRef.current = false;
-          needsReattachRef.current = true;
-          queueMicrotask(() => {
-            if (!disposed && !reattachingRef.current && needsReattachRef.current) {
-              void attachRenderer();
-            }
-          });
-        };
-        const installReplay = (replay: TerminalReplay, sequenceBoundary: number) => {
-          inputEnabledRef.current = false;
-          sequenceRef.current = sequenceBoundary;
-          unregisterTerminal(terminalId);
-          term.reset();
-          term.resize(Math.max(2, replay.columns), Math.max(2, replay.rows));
-          registerTerminal(
-            terminalId,
-            term,
-            () => {
-              if (pinnedToBottomRef.current) term.scrollToBottom();
-              const descriptor = TERMINAL_CLIENT_RUNTIME.descriptor(terminalId);
-              inputEnabledRef.current = descriptor?.lifecycle === "running";
-            },
-            requestReattach,
-          );
-          if (replay.bytes.length === 0) {
-            const descriptor = TERMINAL_CLIENT_RUNTIME.descriptor(terminalId);
-            inputEnabledRef.current = descriptor?.lifecycle === "running";
-          } else {
-            writeTerminalOutput(terminalId, replay.bytes);
-          }
-        };
-
-        attachRenderer = async () => {
-          if (disposed || reattachingRef.current) return;
-          reattachingRef.current = true;
-          const generation = ++attachmentGenerationRef.current;
-          const previous = attachmentRef.current;
-          attachmentRef.current = null;
-          attachedRef.current = false;
-          inputEnabledRef.current = false;
-          needsReattachRef.current = false;
-          unregisterTerminal(terminalId);
-          if (previous) {
-            await TERMINAL_CLIENT_RUNTIME.detach(previous.attachmentId).catch(() => undefined);
-          }
-
-          try {
-            const attachment = await TERMINAL_CLIENT_RUNTIME.attach(
-              terminalId,
-              true,
-              (event: TerminalEvent) => {
-                if (disposed || attachmentGenerationRef.current !== generation) return;
-                if (event.sequence !== sequenceRef.current + 1) {
-                  requestReattach();
-                  return;
-                }
-                sequenceRef.current = event.sequence;
-                if (event.event === "output") {
-                  writeTerminalOutput(terminalId, event.data);
-                } else if (event.event === "replay") {
-                  installReplay(event.replay, event.sequence);
-                } else if (
-                  event.event === "resync_required" ||
-                  event.event === "detached"
-                ) {
-                  requestReattach();
-                } else {
-                  if (event.event === "exited") inputEnabledRef.current = false;
-                }
-              },
-            );
-            if (disposed || attachmentGenerationRef.current !== generation) {
-              await TERMINAL_CLIENT_RUNTIME.detach(attachment.attachmentId).catch(() => undefined);
-              return;
-            }
-
-            attachmentRef.current = attachment;
-            const cached = terminalCache.get(terminalId);
-            if (cached) cached.attachmentId = attachment.attachmentId;
-            TERMINAL_CLIENT_RUNTIME.observeDescriptor(attachment.snapshot.descriptor);
-            installReplay(
-              attachment.snapshot.replay,
-              attachment.snapshot.sequenceBoundary,
-            );
-            attachedRef.current = true;
-            attachment.activate();
-          } catch (error) {
-            if (import.meta.env.DEV) {
-              console.error("Failed to attach terminal renderer:", error);
-            }
-            useNoticeStore.getState().pushNotice({
-              tone: "error",
-              title: "Couldn’t attach terminal",
-              message: getErrorMessage(error),
-            });
-          } finally {
-            reattachingRef.current = false;
-            if (needsReattachRef.current && !disposed) queueMicrotask(() => void attachRenderer());
-          }
-        };
-
-        await attachRenderer();
-        if (disposed) return;
-        await fitAndResize();
-      }
+      await controller.start();
+      if (disposed) return;
+      await fitAndResize();
 
       window.setTimeout(() => {
         if (disposed) return;
@@ -489,18 +448,8 @@ export default function TerminalView({
 
     return () => {
       disposed = true;
-      attachmentGenerationRef.current += 1;
-      reattachingRef.current = false;
-      const attachment = attachmentRef.current;
-      attachmentRef.current = null;
-      const cached = terminalCache.get(terminalId);
-      if (cached) cached.attachmentId = null;
-      attachedRef.current = false;
-      inputEnabledRef.current = false;
-      unregisterTerminal(terminalId);
-      if (attachment) {
-        void TERMINAL_CLIENT_RUNTIME.detach(attachment.attachmentId).catch(() => undefined);
-      }
+      controller.dispose();
+      controllerRef.current = null;
       observer.disconnect();
       surface.removeEventListener("wheel", handleWheelCapture, { capture: true });
       surface.removeEventListener("keydown", handleKeyDownCapture, { capture: true });
@@ -521,8 +470,8 @@ export default function TerminalView({
         unregisterTerminal(terminalId);
       }
       mountedRef.current = false;
-      attachedRef.current = false;
       pinnedToBottomRef.current = true;
+      pendingViewportRestoreRef.current = null;
       if (columnResizeTimerRef.current) {
         clearTimeout(columnResizeTimerRef.current);
         columnResizeTimerRef.current = null;

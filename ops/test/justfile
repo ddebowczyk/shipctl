@@ -17,7 +17,12 @@ fast:
     cd ../.. && pnpm exec node --test core/frontend/host/tests/projectCapabilityData.test.ts core/frontend/host/tests/globalCapabilityData.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalAgentActivity.test.ts core/frontend/terminal/tests/terminalSessions.test.ts
     cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalRenderer.test.ts core/frontend/terminal/tests/terminalTheme.test.ts core/frontend/terminal/tests/terminalScrollPin.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalFitPlan.test.ts core/frontend/terminal/tests/terminalViewport.test.ts core/frontend/terminal/tests/terminalOscNotification.test.ts core/frontend/terminal/tests/keybindingPresets.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalOutputQueue.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalRetention.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalEventDecoder.test.ts core/frontend/terminal/tests/terminalAttachmentBootstrap.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalProjection.test.ts core/frontend/terminal/tests/terminalTypes.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalAttachmentController.test.ts core/frontend/terminal/tests/terminalClientRuntime.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/projectActions.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/host/tests/projectActions.test.ts core/frontend/host/tests/projectFacts.test.ts core/frontend/host/tests/moduleComposition.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/skills/frontend/tests/*.test.ts

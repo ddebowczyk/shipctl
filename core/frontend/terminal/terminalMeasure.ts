@@ -2,6 +2,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { TERMINAL_LINE_HEIGHT } from "@shipctl/core/appearance";
 import { useTerminalSettingsStore } from "./useTerminalSettingsStore.ts";
+import { TRANSITIONAL_RENDERER_SCROLLBACK_ROWS } from "./terminalRetention.ts";
 
 /**
  * Compute terminal cols/rows from a container's pixel dimensions.
@@ -31,7 +32,7 @@ export function computeTerminalSize(
     fontSize,
     fontFamily,
     lineHeight: TERMINAL_LINE_HEIGHT,
-    scrollback: 10000,
+    scrollback: TRANSITIONAL_RENDERER_SCROLLBACK_ROWS,
     allowProposedApi: true,
   });
   const fitAddon = new FitAddon();

@@ -587,7 +587,11 @@ mod tests {
         assert_eq!(engine.terminal.bg_color().unwrap(), Some(child_bg));
         assert_eq!(engine.terminal.fg_color().unwrap(), Some(child_fg));
         assert_eq!(
-            engine.terminal.color_palette().unwrap().get(PaletteIndex(1)),
+            engine
+                .terminal
+                .color_palette()
+                .unwrap()
+                .get(PaletteIndex(1)),
             child_slot
         );
 
@@ -611,7 +615,11 @@ mod tests {
             "the child's OSC 10 foreground survives an app theme change"
         );
         assert_eq!(
-            engine.terminal.color_palette().unwrap().get(PaletteIndex(1)),
+            engine
+                .terminal
+                .color_palette()
+                .unwrap()
+                .get(PaletteIndex(1)),
             child_slot,
             "the child's OSC 4 palette slot survives an app theme change"
         );
@@ -629,7 +637,11 @@ mod tests {
             "the theme reached the host default layer beneath the child override"
         );
         assert_eq!(
-            engine.terminal.color_palette().unwrap().get(PaletteIndex(2)),
+            engine
+                .terminal
+                .color_palette()
+                .unwrap()
+                .get(PaletteIndex(2)),
             RgbColor {
                 r: 0xfe,
                 g: 0xfe,

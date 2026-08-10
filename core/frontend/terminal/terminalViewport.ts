@@ -21,6 +21,41 @@ export function preserveTerminalViewport(term: Terminal, update: () => void) {
   term.scrollToLine(Math.max(0, after.baseY - bottomOffset));
 }
 
+export type ViewportDrainAction =
+  /** Leave the viewport where it is. */
+  | { kind: "none" }
+  /** Follow output. */
+  | { kind: "bottom" }
+  /** Restore a remembered distance from the end of the rebuilt buffer. */
+  | { kind: "line"; line: number };
+
+/** What a completed output drain should do to the viewport.
+ *
+ *  A replay rebuilds the buffer behind a `term.reset()`, which zeroes the
+ *  scroll position, so `preserveTerminalViewport` cannot wrap it: the rows do
+ *  not exist again until the replayed bytes have been parsed. The distance the
+ *  user was reading at is captured before the reset and re-applied here. The
+ *  output queue reports a drain only once it has emptied, so this is the first
+ *  moment the rebuilt buffer is whole.
+ *
+ *  Following output wins over a remembered position, because a user at the end
+ *  of the buffer asked to stay at the end. */
+export function resolveViewportDrainAction(state: {
+  pinnedToBottom: boolean;
+  /** Lines from the end a pending replay must restore, or null when none is
+   *  pending. */
+  pendingBottomOffset: number | null;
+  /** The rebuilt buffer's last line. */
+  baseY: number;
+}): ViewportDrainAction {
+  if (state.pinnedToBottom) return { kind: "bottom" };
+  if (state.pendingBottomOffset === null) return { kind: "none" };
+  return {
+    kind: "line",
+    line: Math.max(0, state.baseY - state.pendingBottomOffset),
+  };
+}
+
 /** Re-assert a scroll position onto the DOM viewport after the terminal's
  *  container was `display:none`. Browsers zero a hidden element's scrollTop
  *  and never restore it, while xterm's internal position survives — and

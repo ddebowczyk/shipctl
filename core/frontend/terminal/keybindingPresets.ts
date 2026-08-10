@@ -40,3 +40,20 @@ export const KEYBINDING_PRESETS: KeybindingPreset[] = [
       ev.key === "k" && ev.metaKey && !ev.ctrlKey && !ev.altKey,
   },
 ];
+
+/** The enabled preset a keyboard event fires, or null when the event is
+ *  ordinary terminal input. Resolution is settings plus a match, so it is
+ *  decided here; the view owns writing the sequence and telling xterm whether
+ *  to handle the event itself.
+ *
+ *  A disabled preset never matches, so its combo stays available to the
+ *  program running in the terminal. */
+export function resolveKeybindingPreset(
+  settings: KeybindingSettings,
+  event: KeyboardEvent,
+): KeybindingPreset | null {
+  for (const preset of KEYBINDING_PRESETS) {
+    if (settings[preset.id] && preset.match(event)) return preset;
+  }
+  return null;
+}
