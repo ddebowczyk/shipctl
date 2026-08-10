@@ -29,6 +29,29 @@ The live runtime is still dual-VT:
 - the frontend gives those sequences to xterm, which derives the usable model
   again.
 
+Verify the second point rather than take it:
+
+```sh
+rg -n 'self\.replay\(\)' core/backend/src/terminal/runtime.rs
+```
+
+Three hits, in `resize`, `snapshot` and `set_theme`. `snapshot` is the third
+and only legitimate caller, because recovery is what a reconstruction is for.
+The other two are routine presentation changes, so two of the three producers of
+a full terminal reconstruction are events that should not reconstruct anything.
+That ratio is the reason this area is first, and the command re-proves it after
+any rename.
+
+Two things this area does **not** claim, because both were tested and refuted.
+A replay does not drop history: it re-encodes every retained row, so resize and
+theme change cost the re-encoding of the whole retained buffer rather than the
+loss of its contents. And today's engine does not overwrite child-authored
+colors: libghostty-vt holds OSC 4/10/11 state in a layer above the host
+defaults, so `apply_theme` writing the default layer is correct. Both are
+pinned by tests in `core/backend/src/terminal/replay.rs`. The requirement below
+to preserve child-authored color state is a constraint on the new path, not a
+defect report about the old one.
+
 The implemented feasibility enabler is deliberately test-only.
 `core/backend/src/terminal/compat.rs` proves that the pinned safe API can expose
 active and retained cells, graphemes, width and continuation, style, colors,
@@ -57,6 +80,14 @@ feasibility work before this area passes.
 Gate 01 passes when production can expose every required terminal fact and
 operation without ANSI reconstruction or browser terminal authority, and OSC 9
 has one approved disposition.
+
+The OSC 9 disposition is tracked in
+[`docs/ops/terminal-osc9-upstream-task.md`](../../ops/terminal-osc9-upstream-task.md),
+which has a named human owner. Read it before choosing a disposition, and note
+that it currently states two different start conditions — start now because the
+upstream merge is not ours to schedule, and the clock starts at closure area 5.
+Resolving that contradiction belongs to the page's owner, not to this plan, but
+an area that depends on the page cannot leave the reference unmade.
 
 ## Affected live modules
 
