@@ -2,7 +2,8 @@
 // has to be decided from the gesture, because the queue writes across frames
 // and the buffer has already moved by the time a chunk lands.
 //
-// This module classifies the gesture. TerminalView owns the xterm calls.
+// This module classifies the gesture. `terminalViewportPin.ts` holds the intent
+// it produces and applies it to a surface.
 
 export type ScrollPinIntent =
   /** The user is reading history — stop following output. */

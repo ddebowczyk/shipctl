@@ -5,12 +5,13 @@ use shipctl_module_api::TerminalColorTheme;
 use tauri::ipc::Channel;
 use tauri::State;
 
+use crate::terminal::retention::TerminalRetentionPolicy;
 use crate::terminal::runtime::TerminalEventSink;
 use crate::terminal::service::{TerminalRegistryEventSink, TerminalService};
 use crate::terminal::types::{
     TerminalAttachment, TerminalAttachmentId, TerminalCloseResult, TerminalDescriptor,
-    TerminalEvent, TerminalId, TerminalLaunchRequest, TerminalMetadata, TerminalRegistryEvent,
-    TerminalRegistrySubscriptionId, TerminalRuntimeSnapshot,
+    TerminalError, TerminalEvent, TerminalId, TerminalLaunchRequest, TerminalMetadata,
+    TerminalRegistryEvent, TerminalRegistrySubscriptionId, TerminalRuntimeSnapshot,
 };
 use crate::workspace::config::{normalize_terminal_settings, TerminalSettings};
 use crate::workspace::manager::WorkspaceManager;
@@ -50,15 +51,17 @@ pub fn get_terminal_snapshot(
         .map_err(|error| error.to_string())
 }
 
+/// Input admission. This is the only terminal command that returns the whole
+/// [`TerminalError`]: the client must tell an expected lifecycle refusal
+/// (exited, closing, gone) from a real validation or I/O failure, and only the
+/// code carries that distinction.
 #[tauri::command]
 pub fn write_terminal(
     terminal_id: TerminalId,
     data: Vec<u8>,
     terminals: State<'_, TerminalService>,
-) -> Result<(), String> {
-    terminals
-        .write(terminal_id, &data)
-        .map_err(|error| error.to_string())
+) -> Result<(), TerminalError> {
+    terminals.write(terminal_id, &data)
 }
 
 #[tauri::command]
@@ -156,22 +159,51 @@ pub fn update_terminal_metadata(
         .map_err(|error| error.to_string())
 }
 
+/// The canonical result of reading or committing terminal settings.
+///
+/// `retention_revision` lets a client discard its own delayed response: a lower
+/// revision than the one it already holds describes an older policy.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSettingsCommit {
+    #[serde(flatten)]
+    pub settings: TerminalSettings,
+    pub retention_revision: u64,
+}
+
 #[tauri::command]
 pub fn get_terminal_settings(
     workspace: State<'_, WorkspaceManager>,
-) -> Result<TerminalSettings, String> {
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalSettingsCommit, String> {
     let mut settings = workspace.load_terminal_settings()?;
     normalize_terminal_settings(&mut settings);
-    Ok(settings)
+    Ok(TerminalSettingsCommit {
+        settings,
+        retention_revision: terminals.retention().revision,
+    })
 }
 
+/// Normalize, persist, then commit the service revision. Durable persistence
+/// and the service revision are one product commit; terminals created after it
+/// use the new policy and running terminals keep the policy they were built
+/// with, because the pinned parser accepts a retention budget only at
+/// construction.
 #[tauri::command]
 pub fn save_terminal_settings(
     mut settings: TerminalSettings,
     workspace: State<'_, WorkspaceManager>,
-) -> Result<(), String> {
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalSettingsCommit, String> {
     normalize_terminal_settings(&mut settings);
-    workspace.save_terminal_settings(&settings)
+    workspace.save_terminal_settings(&settings)?;
+    let committed = terminals.set_retention(TerminalRetentionPolicy::from_bytes(
+        settings.scrollback_bytes,
+    ));
+    Ok(TerminalSettingsCommit {
+        settings,
+        retention_revision: committed.revision,
+    })
 }
 
 #[derive(serde::Serialize)]

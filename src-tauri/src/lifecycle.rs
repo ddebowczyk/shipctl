@@ -6,7 +6,7 @@ use shipctl_core::instance::control::terminal_control_error;
 use shipctl_core::instance::{
     ActiveWorkBlocker, CapabilityCommand, ControlError, ControlHandler, ControlRequestId,
     ControlResponseResult, ControlStream, MessageCommand, ModuleCommand, ModuleControlStatus,
-    OperationCommand, ScheduleCommand,
+    OperationCommand, ScheduleCommand, TerminalInspectResult,
 };
 use shipctl_core::message_bus::{
     diagnose_message_runtime, MessageBusBridgeService, MessageModuleInspection,
@@ -211,6 +211,15 @@ impl ControlHandler for TauriControlHandler {
             .state::<TerminalService>()
             .get(id)
             .map_err(terminal_control_error)
+    }
+
+    fn terminal_inspect(&self, id: TerminalId) -> Result<TerminalInspectResult, ControlError> {
+        let terminals = self.app.state::<TerminalService>();
+        Ok(TerminalInspectResult {
+            terminal_id: id,
+            descriptor: terminals.get(id).map_err(terminal_control_error)?,
+            projection: terminals.project(id).map_err(terminal_control_error)?,
+        })
     }
 
     fn terminal_write(&self, id: TerminalId, data: Vec<u8>) -> Result<(), ControlError> {

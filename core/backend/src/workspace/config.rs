@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+
+use crate::terminal::retention::{TerminalRetentionPolicy, RETENTION_DEFAULT_BYTES};
 use std::collections::{HashMap, HashSet};
 
 // ── Global config (~/.shipctl/config.yml) ───────────────────────────
@@ -145,8 +147,10 @@ pub struct TerminalSettings {
     pub cursor_style: String,
     #[serde(default = "default_true", rename = "cursorBlink")]
     pub cursor_blink: bool,
-    #[serde(default = "default_scrollback")]
-    pub scrollback: u32,
+    /// Host scrollback retention budget in bytes. Ghostty measures history in
+    /// bytes, so a row-named field here would be a lie the user cannot check.
+    #[serde(default = "default_scrollback_bytes", rename = "scrollbackBytes")]
+    pub scrollback_bytes: usize,
     #[serde(default = "default_font_family", rename = "fontFamily")]
     pub font_family: String,
     #[serde(default = "default_font_size", rename = "fontSize")]
@@ -163,8 +167,8 @@ fn default_cursor_style() -> String {
     "block".to_string()
 }
 
-fn default_scrollback() -> u32 {
-    10000
+fn default_scrollback_bytes() -> usize {
+    RETENTION_DEFAULT_BYTES
 }
 
 fn default_font_family() -> String {
@@ -184,7 +188,7 @@ impl Default for TerminalSettings {
         TerminalSettings {
             cursor_style: default_cursor_style(),
             cursor_blink: true,
-            scrollback: default_scrollback(),
+            scrollback_bytes: default_scrollback_bytes(),
             font_family: default_font_family(),
             font_size: default_font_size(),
             url_allowlist: default_url_allowlist(),
@@ -194,6 +198,8 @@ impl Default for TerminalSettings {
 
 pub fn normalize_terminal_settings(settings: &mut TerminalSettings) {
     settings.url_allowlist = normalize_url_allowlist(&settings.url_allowlist);
+    settings.scrollback_bytes =
+        TerminalRetentionPolicy::from_bytes(settings.scrollback_bytes).bytes();
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -328,7 +334,11 @@ pub struct WorkspaceConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{GlobalConfig, ProjectSettings, WorkspaceConfig};
+    use super::{
+        normalize_terminal_settings, GlobalConfig, ProjectSettings, TerminalSettings,
+        WorkspaceConfig, RETENTION_DEFAULT_BYTES,
+    };
+    use crate::terminal::retention::{RETENTION_MAX_BYTES, RETENTION_MIN_BYTES};
 
     #[test]
     fn global_config_preserves_capability_owned_top_level_values() {
@@ -426,5 +436,34 @@ mod tests {
         assert!(serialized.contains("assistants: []"));
         assert!(serialized.contains("futureCapability:"));
         assert!(serialized.contains("enabled: true"));
+    }
+
+    /// A settings file written before the rename holds a row count under the
+    /// old key. A row count cannot become a byte budget, so the load path
+    /// drops it and the user gets the default budget the settings panel shows.
+    #[test]
+    fn a_settings_file_from_before_the_rename_loads_the_default_byte_budget() {
+        let mut settings: TerminalSettings =
+            serde_yaml::from_str("cursorStyle: bar\nscrollback: 10000\n").unwrap();
+        normalize_terminal_settings(&mut settings);
+
+        assert_eq!(settings.cursor_style, "bar");
+        assert_eq!(settings.scrollback_bytes, RETENTION_DEFAULT_BYTES);
+    }
+
+    /// Any persisted byte value reaches the approved domain at load time, so
+    /// no later reader has to clamp it again.
+    #[test]
+    fn persisted_byte_budgets_are_clamped_into_the_approved_domain_at_load() {
+        let mut too_large: TerminalSettings =
+            serde_yaml::from_str(&format!("scrollbackBytes: {}\n", RETENTION_MAX_BYTES * 4))
+                .unwrap();
+        normalize_terminal_settings(&mut too_large);
+        assert_eq!(too_large.scrollback_bytes, RETENTION_MAX_BYTES);
+
+        let mut in_domain: TerminalSettings =
+            serde_yaml::from_str(&format!("scrollbackBytes: {}\n", RETENTION_MIN_BYTES)).unwrap();
+        normalize_terminal_settings(&mut in_domain);
+        assert_eq!(in_domain.scrollback_bytes, RETENTION_MIN_BYTES);
     }
 }

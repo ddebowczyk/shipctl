@@ -19,8 +19,9 @@ pub use protocol::{
     DiscoveryProblem, DiscoveryReport, InstanceDiagnosticReport, InstanceRecord, MessageCommand,
     ModuleCommand, ModuleControlStatus, OperationCommand, ScheduleCommand, StopOutcome,
     TerminalAgentReportResult, TerminalAttachmentState, TerminalCloseControlResult,
-    TerminalCommand, TerminalControlEvent, TerminalListResult, TerminalReplayFrame,
-    TerminalWriteResult, CONTROL_FRAME_SCHEMA_VERSION, TERMINAL_CONTROL_WRITE_MAX_BYTES,
+    TerminalCommand, TerminalControlEvent, TerminalInspectResult, TerminalListResult,
+    TerminalReplayFrame, TerminalWriteResult, CONTROL_FRAME_SCHEMA_VERSION,
+    TERMINAL_CONTROL_WRITE_MAX_BYTES,
 };
 /// Caller-owned identity for retryable running-instance mutations.
 pub use uuid::Uuid as ControlRequestId;

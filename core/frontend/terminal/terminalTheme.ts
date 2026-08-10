@@ -84,8 +84,8 @@ export function applyThemeToTerminals(theme: ShipctlTheme): void {
   for (const [, entry] of terminalCache) {
     // Skip hidden terminals entirely — setting options.theme on a
     // terminal with display:none corrupts xterm's internal scroll state.
-    // Hidden terminals get the theme applied when they become visible
-    // (TerminalView's useEffect re-applies the current store theme).
+    // Hidden terminals get the theme applied when they become visible: the
+    // view session's reveal re-reads the current store theme.
     const el = entry.term.element;
     if (!el || el.offsetParent === null) continue;
 

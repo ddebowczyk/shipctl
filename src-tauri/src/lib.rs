@@ -85,8 +85,19 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
-    let terminals = TerminalService::new(context.instance_id.to_string());
     let workspace = WorkspaceManager::new_with_barrier(paths.clone(), durable_writes.clone());
+    // Seed retention from normalized settings before any terminal can spawn, so
+    // no runtime is ever constructed with a policy the user did not choose.
+    let terminals = {
+        let mut settings = workspace.load_terminal_settings().unwrap_or_default();
+        shipctl_core::workspace::config::normalize_terminal_settings(&mut settings);
+        TerminalService::new(
+            context.instance_id.to_string(),
+            shipctl_core::terminal::retention::TerminalRetentionPolicy::from_bytes(
+                settings.scrollback_bytes,
+            ),
+        )
+    };
     let ui_state = UiStateStore::new_with_barrier(paths.ui_state.clone(), durable_writes.clone());
     let message_bus = RuntimeMessageBus::new(context.clone());
     let message_bridges = MessageBusBridgeService::new(message_bus.clone());

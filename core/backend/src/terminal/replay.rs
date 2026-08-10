@@ -4,11 +4,12 @@
 //! `research/20260809-124553-fut-tty/vt-proof`. Keep the replay compatibility
 //! helpers in step with that proof when the pinned parser is upgraded.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use libghostty_vt::{
     fmt::{Format, Formatter, FormatterOptions},
-    screen::{CellWide, Screen},
+    screen::{CellWide, Screen, TrackedGridRef},
     selection::Selection,
     style::{Palette, PaletteIndex, RgbColor, Style, StyleColor, Underline},
     terminal::{ColorScheme, Mode, Point, PointCoordinate},
@@ -16,12 +17,32 @@ use libghostty_vt::{
 };
 use shipctl_module_api::TerminalColorTheme;
 
+use super::projection::{
+    ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
+};
 use super::retention::TerminalRetentionPolicy;
 
 pub struct VtReplayEngine {
     terminal: Terminal<'static, 'static>,
     responses: Arc<Mutex<Vec<u8>>>,
     color_scheme: Arc<Mutex<ColorScheme>>,
+    /// The cells clients asked the host to keep pointing at. The tracked
+    /// references live here, beside the terminal that moves them, and never
+    /// leave: a client holds the handle only.
+    anchors: HashMap<TerminalAnchorId, TrackedGridRef>,
+    /// Handles are never reused, so a client that releases an anchor and asks
+    /// again cannot be answered with a different cell.
+    minted_anchors: u64,
+    /// Whether a page has ever held a line for this terminal.
+    ///
+    /// The retention budget alone does not answer this. Retention is
+    /// page-granular, so a nonzero budget below the page floor at a given
+    /// geometry retains no rows at all. Watching history become non-empty is
+    /// the statement that holds for every budget and every geometry.
+    ///
+    /// It stays true once set: a small budget evicts history back to empty, and
+    /// such a terminal still reports the eviction.
+    history_ever_retained: bool,
 }
 
 impl VtReplayEngine {
@@ -69,6 +90,9 @@ impl VtReplayEngine {
             terminal,
             responses,
             color_scheme,
+            anchors: HashMap::new(),
+            minted_anchors: 0,
+            history_ever_retained: false,
         };
         engine.apply_theme(theme)?;
         Ok(engine)
@@ -79,7 +103,97 @@ impl VtReplayEngine {
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<u8> {
         self.discard_responses();
         self.terminal.vt_write(bytes);
+        self.note_retained_history();
         self.take_responses()
+    }
+
+    /// The host's current state as owned Shipctl values.
+    ///
+    /// This reads the semantic API rather than the ANSI formatter, so it is the
+    /// only answer to "what does the host believe" that does not go through a
+    /// second parser. Reading advances nothing.
+    pub fn project(&self) -> Result<super::projection::TerminalProjection, String> {
+        super::projection::project(&self.terminal)
+    }
+
+    /// A window of retained history as the same rows the viewport reports.
+    pub fn project_history(
+        &self,
+        start_row: u32,
+        rows: u32,
+    ) -> Result<TerminalHistoryWindow, String> {
+        super::projection::project_history(&self.terminal, start_row, rows)
+    }
+
+    /// Pins one cell and returns the handle a client keeps instead of a row
+    /// number.
+    ///
+    /// The host holds the pin for as long as the client asks it to. Each pin
+    /// adds work to every terminal mutation, so they are created on request and
+    /// released on request, never on the host's own initiative.
+    ///
+    /// A history row past the end of history is refused here. The parser counts
+    /// history coordinates from the oldest retained row and reads on into the
+    /// active area rather than stopping at the end of history, so a client
+    /// asking for a history row would otherwise be given a live one.
+    pub fn anchor(
+        &mut self,
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    ) -> Result<TerminalAnchor, String> {
+        if space == ProjectedSpace::History {
+            let history_rows = self.scrollback_rows()?;
+            if at.row as usize >= history_rows {
+                return Err(format!(
+                    "Cannot anchor history row {}: history holds {history_rows} rows",
+                    at.row
+                ));
+            }
+        }
+        let tracked = self
+            .terminal
+            .track_grid_ref(space.at(at))
+            .map_err(vt_error("anchor a terminal cell"))?;
+        self.minted_anchors += 1;
+        let id = TerminalAnchorId(self.minted_anchors);
+        let anchor = read_anchor(&self.terminal, id, &tracked, self.loss_reported()?)?;
+        self.anchors.insert(id, tracked);
+        Ok(anchor)
+    }
+
+    /// Where an anchor is now, or `None` when the host holds no such handle.
+    pub fn resolve_anchor(&self, id: TerminalAnchorId) -> Result<Option<TerminalAnchor>, String> {
+        let loss_reported = self.loss_reported()?;
+        self.anchors
+            .get(&id)
+            .map(|tracked| read_anchor(&self.terminal, id, tracked, loss_reported))
+            .transpose()
+    }
+
+    /// Whether this terminal can report the loss of an anchored line.
+    ///
+    /// Read on every anchor answer rather than cached alone, so a terminal that
+    /// has just retained its first row corrects itself without waiting for the
+    /// next parse step.
+    fn loss_reported(&self) -> Result<bool, String> {
+        Ok(self.history_ever_retained || self.scrollback_rows()? > 0)
+    }
+
+    fn note_retained_history(&mut self) {
+        if !self.history_ever_retained {
+            self.history_ever_retained = self.loss_reported().unwrap_or(false);
+        }
+    }
+
+    /// Drops an anchor. Answers whether the host was holding it, so a client
+    /// releasing twice learns the difference.
+    pub fn release_anchor(&mut self, id: TerminalAnchorId) -> bool {
+        self.anchors.remove(&id).is_some()
+    }
+
+    /// Anchors the host is holding for clients.
+    pub fn anchor_count(&self) -> usize {
+        self.anchors.len()
     }
 
     /// Rows currently held in history. The host is the retention authority, so
@@ -184,6 +298,44 @@ impl VtReplayEngine {
             .unwrap_or_else(|error| error.into_inner())
             .clear();
     }
+}
+
+/// Copies an anchor's position out of the tracked reference.
+///
+/// A cell is named differently in each space and is not named at all in some of
+/// them, so every space is asked and the ones with no answer stay `None`.
+///
+/// The parser answers a history coordinate for cells that are not in history,
+/// counting them from the oldest retained row as the screen space does. That
+/// number would send a client to the wrong row, so it is kept only while it
+/// names retained history, which is what `project_history` reads.
+fn read_anchor(
+    terminal: &Terminal<'_, '_>,
+    id: TerminalAnchorId,
+    tracked: &TrackedGridRef,
+    loss_reported: bool,
+) -> Result<TerminalAnchor, String> {
+    let at = |space: ProjectedSpace| -> Result<Option<ProjectedPoint>, String> {
+        Ok(tracked
+            .point(space.space())
+            .map_err(vt_error("read an anchor position"))?
+            .map(|point| ProjectedPoint {
+                column: point.x,
+                row: point.y,
+            }))
+    };
+    let history_rows = terminal
+        .scrollback_rows()
+        .map_err(vt_error("read terminal scrollback rows"))?;
+    Ok(TerminalAnchor {
+        id,
+        retained: tracked.has_value(),
+        loss_reported,
+        history: at(ProjectedSpace::History)?.filter(|point| (point.row as usize) < history_rows),
+        screen: at(ProjectedSpace::Screen)?,
+        viewport: at(ProjectedSpace::Viewport)?,
+        active: at(ProjectedSpace::Active)?,
+    })
 }
 
 pub fn validate_dimensions(cols: u16, rows: u16) -> Result<(), String> {
@@ -700,6 +852,311 @@ mod tests {
     fn rejects_zero_dimensions_before_parser_allocation() {
         assert!(validate_dimensions(0, 24).is_err());
         assert!(validate_dimensions(80, 0).is_err());
+    }
+
+    /// The text of the row an anchor names, read back through the same reads a
+    /// client has.
+    fn anchored_text(engine: &VtReplayEngine, anchor: &TerminalAnchor) -> String {
+        if let Some(at) = anchor.history {
+            let window = engine.project_history(at.row, 1).expect("history reads");
+            return window.rows[0].text().trim_end().to_string();
+        }
+        let at = anchor.active.expect("a retained anchor is named somewhere");
+        // The viewport is the active area while nothing scrolled it away.
+        engine.project().expect("the projection reads").viewport[at.row as usize]
+            .text()
+            .trim_end()
+            .to_string()
+    }
+
+    /// The claim area 03 rests on: a client can keep pointing at one line
+    /// without holding a row number, because row numbers move and the anchor
+    /// moves with the line instead.
+    #[test]
+    fn an_anchor_follows_its_line_through_scrolling_and_resize() {
+        let mut engine =
+            VtReplayEngine::new(12, 3, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"anchored\r\n");
+
+        let anchor = engine
+            .anchor(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
+            .expect("the host anchors a cell");
+        assert!(anchor.retained);
+        assert_eq!(anchored_text(&engine, &anchor), "anchored");
+
+        for line in 0..8 {
+            engine.feed(format!("line{line}\r\n").as_bytes());
+        }
+        let scrolled = engine
+            .resolve_anchor(anchor.id)
+            .expect("the anchor reads")
+            .expect("the host still holds the handle");
+        assert!(scrolled.retained);
+        assert_ne!(
+            scrolled.active, anchor.active,
+            "the line is no longer where it was"
+        );
+        assert_eq!(anchored_text(&engine, &scrolled), "anchored");
+
+        engine.resize(24, 3).expect("the engine resizes");
+        let reflowed = engine
+            .resolve_anchor(anchor.id)
+            .expect("the anchor reads")
+            .expect("the host still holds the handle");
+        assert!(reflowed.retained);
+        assert_eq!(
+            anchored_text(&engine, &reflowed),
+            "anchored",
+            "reflow moved the line and the anchor went with it"
+        );
+    }
+
+    /// A history budget small enough that eviction happens inside a test.
+    ///
+    /// Measured, not chosen: at the 80-column geometry below it retains 655
+    /// rows, so the 3,000 lines the test writes evict the oldest several times
+    /// over. It is a test input and says nothing about what the product offers.
+    const EVICTING_BUDGET_BYTES: usize = 64 * 1024;
+
+    #[test]
+    fn an_evicted_anchor_says_so_instead_of_naming_another_line() {
+        let mut engine = VtReplayEngine::new(
+            80,
+            3,
+            &theme(),
+            TerminalRetentionPolicy::from_bytes(EVICTING_BUDGET_BYTES),
+        )
+        .unwrap();
+        engine.feed(b"oldest\r\n");
+        for line in 0..20 {
+            engine.feed(format!("line{line}\r\n").as_bytes());
+        }
+        let anchor = engine
+            .anchor(
+                ProjectedSpace::History,
+                ProjectedPoint { column: 0, row: 0 },
+            )
+            .expect("the host anchors a cell");
+        assert!(anchor.retained);
+        assert!(
+            anchor.loss_reported,
+            "history holds lines here, so a lost line is evicted from a page and reported"
+        );
+        assert_eq!(anchored_text(&engine, &anchor), "oldest");
+
+        for line in 0..3_000 {
+            engine.feed(format!("x{line}\r\n").as_bytes());
+        }
+        assert_ne!(
+            engine.project_history(0, 1).unwrap().rows[0]
+                .text()
+                .trim_end(),
+            "oldest",
+            "history row 0 is a different line now, which is why it is not an identity"
+        );
+
+        let evicted = engine
+            .resolve_anchor(anchor.id)
+            .expect("the anchor reads")
+            .expect("the handle is still answerable");
+        assert!(
+            !evicted.retained,
+            "the line left the terminal and the anchor reports it"
+        );
+        assert!(evicted.loss_reported);
+        assert_eq!(evicted.history, None);
+        assert_eq!(evicted.screen, None);
+        assert_eq!(evicted.active, None);
+
+        // A row number would name whatever moved in. A handle is never reused,
+        // so it cannot.
+        let fresh = engine
+            .anchor(
+                ProjectedSpace::History,
+                ProjectedPoint { column: 0, row: 0 },
+            )
+            .expect("the host anchors a cell");
+        assert_ne!(fresh.id, anchor.id);
+    }
+
+    /// Where the anchor cannot be trusted, and why the limit is recorded rather
+    /// than worked around.
+    ///
+    /// With no history budget, a line that scrolls off is not evicted from
+    /// history; there is no history to evict it from. The pinned parser keeps
+    /// the tracked reference on the active row instead, so the anchor names the
+    /// line that replaced the anchored one and reports itself retained. A
+    /// client on a zero-retention terminal therefore cannot anchor a line it
+    /// expects to scroll away. If a later revision of the parser reports this,
+    /// this test fails and the limit is lifted.
+    ///
+    /// The host does not leave a client to discover this: the anchor says its
+    /// loss is not reported, so `retained` is not to be believed on it.
+    #[test]
+    fn with_no_history_a_scrolled_off_anchor_names_the_line_that_replaced_it() {
+        let mut engine =
+            VtReplayEngine::new(12, 3, &theme(), TerminalRetentionPolicy::from_bytes(0)).unwrap();
+        engine.feed(b"gone\r\n");
+        let anchor = engine
+            .anchor(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
+            .expect("the host anchors a cell");
+        assert!(
+            !anchor.loss_reported,
+            "no page can hold a line here, so no loss can be reported"
+        );
+        assert_eq!(anchored_text(&engine, &anchor), "gone");
+
+        for line in 0..6 {
+            engine.feed(format!("line{line}\r\n").as_bytes());
+        }
+        assert_eq!(engine.scrollback_rows().unwrap(), 0, "nothing is retained");
+
+        let stale = engine
+            .resolve_anchor(anchor.id)
+            .expect("the anchor reads")
+            .expect("the handle is still answerable");
+        assert!(stale.retained);
+        assert_eq!(stale.active, Some(ProjectedPoint { column: 0, row: 0 }));
+        assert_ne!(
+            anchored_text(&engine, &stale),
+            "gone",
+            "the anchored line is gone and the parser did not say so"
+        );
+        assert!(
+            !stale.loss_reported,
+            "the same anchor that reports itself retained also reports that its \
+             loss cannot be seen, which is the fact a client acts on"
+        );
+    }
+
+    /// The host declares what it knows about loss instead of guessing at it, so
+    /// the fact tracks the terminal rather than the moment the anchor was made.
+    ///
+    /// A terminal that has not yet scrolled a line into history has proved
+    /// nothing about retention, so it says loss is not reported. It corrects
+    /// itself as soon as a page holds a line, for anchors made before that too.
+    #[test]
+    fn a_terminal_reports_loss_once_a_page_holds_a_line() {
+        let mut engine =
+            VtReplayEngine::new(12, 3, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"first\r\n");
+        assert_eq!(engine.scrollback_rows().unwrap(), 0);
+
+        let anchor = engine
+            .anchor(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
+            .expect("the host anchors a cell");
+        assert!(
+            !anchor.loss_reported,
+            "nothing has been retained yet, so nothing proves a loss would be reported"
+        );
+
+        for line in 0..6 {
+            engine.feed(format!("line{line}\r\n").as_bytes());
+        }
+        assert!(engine.scrollback_rows().unwrap() > 0);
+
+        let resolved = engine
+            .resolve_anchor(anchor.id)
+            .expect("the anchor reads")
+            .expect("the host still holds the handle");
+        assert!(
+            resolved.loss_reported,
+            "the same anchor corrects itself once history holds a line"
+        );
+        assert_eq!(anchored_text(&engine, &resolved), "first");
+    }
+
+    /// The parser reads a history coordinate on into the active area instead of
+    /// stopping at the end of history, so asking for history row 0 on a
+    /// terminal with no history would pin a live row and call it history.
+    #[test]
+    fn a_history_anchor_past_the_end_of_history_is_refused() {
+        let mut engine =
+            VtReplayEngine::new(12, 3, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"live\r\n");
+        assert_eq!(engine.scrollback_rows().unwrap(), 0);
+        engine
+            .anchor(
+                ProjectedSpace::History,
+                ProjectedPoint { column: 0, row: 0 },
+            )
+            .expect_err("there is no history row to anchor");
+        assert_eq!(engine.anchor_count(), 0);
+
+        // The same row is anchorable in the space that actually names it.
+        engine
+            .anchor(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
+            .expect("the live row is anchorable as a live row");
+
+        for line in 0..6 {
+            engine.feed(format!("line{line}\r\n").as_bytes());
+        }
+        let history_rows = engine.scrollback_rows().unwrap();
+        assert!(history_rows > 0);
+        engine
+            .anchor(
+                ProjectedSpace::History,
+                ProjectedPoint {
+                    column: 0,
+                    row: history_rows as u32 - 1,
+                },
+            )
+            .expect("the last retained row is anchorable");
+        engine
+            .anchor(
+                ProjectedSpace::History,
+                ProjectedPoint {
+                    column: 0,
+                    row: history_rows as u32,
+                },
+            )
+            .expect_err("one row past the end is the active area, not history");
+    }
+
+    #[test]
+    fn the_host_holds_anchors_only_while_a_client_asks_it_to() {
+        let mut engine =
+            VtReplayEngine::new(12, 3, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"pinned\r\n");
+        assert_eq!(engine.anchor_count(), 0);
+
+        let first = engine
+            .anchor(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
+            .unwrap();
+        let second = engine
+            .anchor(ProjectedSpace::Active, ProjectedPoint { column: 2, row: 0 })
+            .unwrap();
+        assert_eq!(engine.anchor_count(), 2);
+
+        assert!(engine.release_anchor(first.id));
+        assert!(
+            !engine.release_anchor(first.id),
+            "releasing twice is answered rather than repeated"
+        );
+        assert!(engine.resolve_anchor(first.id).unwrap().is_none());
+        assert!(engine.resolve_anchor(second.id).unwrap().is_some());
+        assert_eq!(engine.anchor_count(), 1);
+    }
+
+    /// The other half of the claim: what crosses a boundary is a number and
+    /// coordinates, with nothing of the parser in it.
+    #[test]
+    fn an_anchor_round_trips_as_json() {
+        let mut engine =
+            VtReplayEngine::new(12, 3, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"anchored\r\n");
+        let anchor = engine
+            .anchor(ProjectedSpace::Active, ProjectedPoint { column: 3, row: 0 })
+            .unwrap();
+
+        let json = serde_json::to_string(&anchor).expect("the anchor serializes");
+        assert!(
+            json.contains("\"lossReported\""),
+            "a client reads whether loss is reported off the wire: {json}"
+        );
+        let restored: TerminalAnchor =
+            serde_json::from_str(&json).expect("the anchor deserializes");
+        assert_eq!(restored, anchor);
     }
 
     #[test]

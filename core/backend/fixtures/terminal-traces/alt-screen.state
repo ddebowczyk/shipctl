@@ -1,0 +1,8 @@
+# recorded from: sh -c 'printf 'before\n\033[?1049hinside\033[?1049lafter\n''
+columns=40 rows=5 screen=primary scrollback=0
+cursor=0,2 visible=true pending_wrap=false
+modes=wraparound
+colors fg=#e6e6e6 bg=#101010
+palette=#000000 #cc0000 #00cc00 #cccc00 #0000cc #cc00cc #00cccc #cccccc #666666 #ff0000 #00ff00 #ffff00 #0000ff #ff00ff #00ffff #ffffff
+row 00 |before|
+row 01 |after|

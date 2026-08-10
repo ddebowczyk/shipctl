@@ -1,0 +1,7 @@
+# recorded from: sh -c 'printf '\033[?2004h\033[?1h\033[?25lmodes\n''
+columns=20 rows=3 screen=primary scrollback=0
+cursor=0,1 visible=false pending_wrap=false
+modes=wraparound,bracketed_paste,application_cursor_keys
+colors fg=#e6e6e6 bg=#101010
+palette=#000000 #cc0000 #00cc00 #cccc00 #0000cc #cc00cc #00cccc #cccccc #666666 #ff0000 #00ff00 #ffff00 #0000ff #ff00ff #00ffff #ffffff
+row 00 |modes|

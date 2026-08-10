@@ -1,0 +1,10 @@
+# recorded from: sh -c 'printf '\033[1mbold\033[0m \033[31mred\033[0m \033[48;2;0;0;255mbluebg\033[0m\n''
+columns=40 rows=4 screen=primary scrollback=0
+cursor=0,1 visible=true pending_wrap=false
+modes=wraparound
+colors fg=#e6e6e6 bg=#101010
+palette=#000000 #cc0000 #00cc00 #cccc00 #0000cc #cc00cc #00cccc #cccccc #666666 #ff0000 #00ff00 #ffff00 #0000ff #ff00ff #00ffff #ffffff
+row 00 |bold red bluebg|
+cells 00 0-4 bold
+cells 00 5-8 fg=#cc0000
+cells 00 9-15 bg=#0000ff

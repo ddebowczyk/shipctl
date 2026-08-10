@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use shipctl_core::instance::{InstanceContext, InstanceLaunchOptions};
 use shipctl_core::state::ui::UiStateStore;
+use shipctl_core::terminal::retention::TerminalRetentionPolicy;
 use shipctl_core::terminal::{TerminalId, TerminalService};
 use shipctl_core::workspace::config::EditorSettings;
 use shipctl_core::workspace::manager::WorkspaceManager;
@@ -124,8 +125,14 @@ fn two_backend_compositions_isolate_every_registered_durable_source_and_terminal
         })
         .is_err());
 
-    let first_terminals = TerminalService::new(first.instance_id.to_string());
-    let second_terminals = TerminalService::new(second.instance_id.to_string());
+    let first_terminals = TerminalService::new(
+        first.instance_id.to_string(),
+        TerminalRetentionPolicy::default(),
+    );
+    let second_terminals = TerminalService::new(
+        second.instance_id.to_string(),
+        TerminalRetentionPolicy::default(),
+    );
     let mut first_environment = HashMap::new();
     let mut second_environment = HashMap::new();
     first_terminals.inject_host_environment(TerminalId::new(), &mut first_environment);

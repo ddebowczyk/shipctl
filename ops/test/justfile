@@ -18,6 +18,7 @@ fast:
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalAgentActivity.test.ts core/frontend/terminal/tests/terminalSessions.test.ts
     cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalRenderer.test.ts core/frontend/terminal/tests/terminalTheme.test.ts core/frontend/terminal/tests/terminalScrollPin.test.ts
     cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalFitPlan.test.ts core/frontend/terminal/tests/terminalViewport.test.ts core/frontend/terminal/tests/terminalOscNotification.test.ts core/frontend/terminal/tests/keybindingPresets.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalViewportPin.test.ts core/frontend/terminal/tests/terminalFitScheduler.test.ts core/frontend/terminal/tests/terminalViewSession.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalOutputQueue.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalRetention.test.ts
     cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalEventDecoder.test.ts core/frontend/terminal/tests/terminalAttachmentBootstrap.test.ts

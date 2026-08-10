@@ -11,9 +11,19 @@ use crossbeam_channel::{bounded, select, unbounded, Receiver, Sender, TryRecvErr
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use shipctl_module_api::TerminalColorTheme;
 
+use super::contract::MAX_EXACT_JSON_INTEGER;
 use super::process::{ProcessTerminator, TERMINATION_GRACE_PERIOD};
+use super::projection::{
+    ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
+    TerminalProjection,
+};
+use super::publication::{
+    plan_child_output, plan_child_reply, plan_replay_transition, resize_admission,
+    subscriber_disposition, DeliveryOutcome, RuntimeEffect, RuntimeLiveness, SubscriberDisposition,
+};
 use super::record::TerminalRecord;
 use super::replay::{validate_dimensions, VtReplayEngine};
+use super::retention::TerminalRetentionPolicy;
 use super::types::{
     TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId, TerminalError,
     TerminalErrorCode, TerminalEvent, TerminalExit, TerminalExitReason, TerminalId,
@@ -22,6 +32,11 @@ use super::types::{
 };
 
 type TerminalDescriptorSink = Arc<dyn Fn(super::types::TerminalDescriptor) + Send + Sync>;
+
+/// The log target for the terminal capability, so its records can be filtered
+/// apart from the rest of the host. The runtime logs what no caller is told by
+/// a return value: what the child did, and what the host did about it.
+const LOG_TARGET: &str = "shipctl::terminal";
 
 const PTY_READ_CHUNK_BYTES: usize = 4_096;
 // The replaced renderer ACK path paused at 100,000 unacknowledged bytes. PTY
@@ -55,6 +70,7 @@ impl TerminalRuntimeHandle {
         record: Arc<TerminalRecord>,
         request: TerminalLaunchRequest,
         descriptor_sink: TerminalDescriptorSink,
+        retention: TerminalRetentionPolicy,
     ) -> Result<Self, TerminalError> {
         let (command_sender, command_receiver) = bounded(0);
         let (output_sender, output_receiver) = bounded(PTY_OUTPUT_QUEUE_CAPACITY);
@@ -76,6 +92,7 @@ impl TerminalRuntimeHandle {
                         output_receiver,
                         output_sender,
                         descriptor_sink,
+                        retention,
                     ) {
                         Ok(mut actor) => {
                             record.install_running(runtime_handle, actor.child_pid);
@@ -129,6 +146,48 @@ impl TerminalRuntimeHandle {
 
     pub fn snapshot(&self) -> Result<TerminalRuntimeSnapshot, TerminalError> {
         self.request(|reply| RuntimeCommand::Snapshot { reply })
+    }
+
+    /// The host's semantic state, read through the actor so it is consistent
+    /// with every other ordered operation.
+    pub fn project(&self) -> Result<TerminalProjection, TerminalError> {
+        self.request(|reply| RuntimeCommand::Project { reply })
+    }
+
+    /// A window of retained history, read through the actor for the same reason
+    /// the projection is: the host's state has one reader.
+    pub fn project_history(
+        &self,
+        start_row: u32,
+        rows: u32,
+    ) -> Result<TerminalHistoryWindow, TerminalError> {
+        self.request(|reply| RuntimeCommand::History {
+            start_row,
+            rows,
+            reply,
+        })
+    }
+
+    /// Pins a cell and returns the handle that outlives its row number.
+    pub fn anchor(
+        &self,
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    ) -> Result<TerminalAnchor, TerminalError> {
+        self.request(|reply| RuntimeCommand::Anchor { space, at, reply })
+    }
+
+    /// Where an anchor is now, or `None` when the host holds no such handle.
+    pub fn resolve_anchor(
+        &self,
+        id: TerminalAnchorId,
+    ) -> Result<Option<TerminalAnchor>, TerminalError> {
+        self.request(|reply| RuntimeCommand::ResolveAnchor { id, reply })
+    }
+
+    /// Drops an anchor, answering whether the host was holding it.
+    pub fn release_anchor(&self, id: TerminalAnchorId) -> Result<bool, TerminalError> {
+        self.request(|reply| RuntimeCommand::ReleaseAnchor { id, reply })
     }
 
     pub fn attach(
@@ -226,6 +285,27 @@ enum RuntimeCommand {
     Snapshot {
         reply: Sender<Result<TerminalRuntimeSnapshot, TerminalError>>,
     },
+    Project {
+        reply: Sender<Result<TerminalProjection, TerminalError>>,
+    },
+    History {
+        start_row: u32,
+        rows: u32,
+        reply: Sender<Result<TerminalHistoryWindow, TerminalError>>,
+    },
+    Anchor {
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+        reply: Sender<Result<TerminalAnchor, TerminalError>>,
+    },
+    ResolveAnchor {
+        id: TerminalAnchorId,
+        reply: Sender<Result<Option<TerminalAnchor>, TerminalError>>,
+    },
+    ReleaseAnchor {
+        id: TerminalAnchorId,
+        reply: Sender<Result<bool, TerminalError>>,
+    },
     Attach {
         attachment_id: TerminalAttachmentId,
         sink: Arc<dyn TerminalEventSink>,
@@ -280,11 +360,47 @@ enum SubscriberStatus {
     Disconnected(TerminalAttachmentId),
 }
 
+/// The only thing the actor asks of the PTY master: change the kernel's idea of
+/// the window size.
+///
+/// The actor held `Box<dyn MasterPty + Send>` for this one call. Naming the one
+/// call is what lets an actor exist without a PTY.
+pub(crate) trait TerminalGeometry: Send {
+    fn resize(&self, columns: u16, rows: u16) -> Result<(), String>;
+}
+
+impl TerminalGeometry for Box<dyn MasterPty + Send> {
+    fn resize(&self, columns: u16, rows: u16) -> Result<(), String> {
+        MasterPty::resize(
+            self.as_ref(),
+            PtySize {
+                rows,
+                cols: columns,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .map_err(|error| format!("Failed to resize PTY: {error}"))
+    }
+}
+
+/// Everything the actor owns that a child process supplies.
+///
+/// Production builds one by opening a PTY and spawning a program. A test builds
+/// one from an in-memory writer and a fake geometry, which is the whole point:
+/// the actor's ordering does not depend on a child existing.
+pub(crate) struct ChildAttachment {
+    pub(crate) geometry: Option<Box<dyn TerminalGeometry>>,
+    pub(crate) writer: Option<Box<dyn Write + Send>>,
+    pub(crate) terminator: Option<ProcessTerminator>,
+    pub(crate) child_pid: Option<u32>,
+}
+
 struct RuntimeActor {
     record: Arc<TerminalRecord>,
     command_receiver: Receiver<RuntimeCommand>,
     output_receiver: Receiver<ReaderEvent>,
-    master: Option<Box<dyn MasterPty + Send>>,
+    geometry: Option<Box<dyn TerminalGeometry>>,
     writer: Option<Box<dyn Write + Send>>,
     terminator: Option<ProcessTerminator>,
     vt: VtReplayEngine,
@@ -308,107 +424,68 @@ impl RuntimeActor {
         output_receiver: Receiver<ReaderEvent>,
         output_sender: Sender<ReaderEvent>,
         descriptor_sink: TerminalDescriptorSink,
+        retention: TerminalRetentionPolicy,
     ) -> Result<Self, TerminalError> {
         validate_dimensions(request.columns, request.rows)
             .map_err(|message| TerminalError::new(TerminalErrorCode::InvalidRequest, message))?;
         // The parser exists before PTY allocation or child spawn, so no child
         // path can produce bytes before continuous host state is available.
-        let vt = VtReplayEngine::new(request.columns, request.rows, &request.color_theme)
-            .map_err(|message| TerminalError::new(TerminalErrorCode::StartupFailed, message))?;
-
-        let pty_system = native_pty_system();
-        let pair = pty_system
-            .openpty(PtySize {
-                rows: request.rows,
-                cols: request.columns,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|error| startup_error(format!("Failed to open PTY: {error}")))?;
-        // Acquire all fallible master resources before a child exists.
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|error| startup_error(format!("Failed to get PTY writer: {error}")))?;
-        let mut reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|error| startup_error(format!("Failed to get PTY reader: {error}")))?;
-
-        let launch = resolve_launch_command(&request.target);
-        let mut command = CommandBuilder::new(&launch.program);
-        for argument in launch.argv {
-            command.arg(argument);
-        }
-        command.cwd(&request.cwd);
-        for (key, value) in request.environment.drain() {
-            command.env(key, value);
-        }
-        command.env("TERM", "xterm-256color");
-        command.env("TERM_PROGRAM", "iTerm.app");
-        command.env("COLORTERM", "truecolor");
-
-        let mut child = pair
-            .slave
-            .spawn_command(command)
-            .map_err(|error| startup_error(format!("Failed to spawn terminal command: {error}")))?;
-        let child_pid = child.process_id();
-        let terminator = ProcessTerminator::new(child_pid, child.clone_killer());
-        drop(pair.slave);
-
-        // This thread is part of the runtime and is the sole wait owner. Every
-        // EOF/read-error/close path reaches the same child.wait() epilogue.
-        thread::spawn(move || {
-            let mut buffer = [0u8; PTY_READ_CHUNK_BYTES];
-            let mut read_error = None;
-            loop {
-                match reader.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(length) => {
-                        if output_sender
-                            .send(ReaderEvent::Data(buffer[..length].to_vec()))
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        read_error = Some(error.to_string());
-                        break;
-                    }
-                }
-            }
-            let (code, wait_error) = match child.wait() {
-                Ok(status) => (i32::try_from(status.exit_code()).ok(), None),
-                Err(error) => (None, Some(error.to_string())),
-            };
-            let _ = output_sender.send(ReaderEvent::Exited {
-                code,
-                read_error,
-                wait_error,
-            });
-        });
-
-        let (subscriber_status_sender, subscriber_status_receiver) = unbounded();
-        Ok(Self {
+        let vt = VtReplayEngine::new(
+            request.columns,
+            request.rows,
+            &request.color_theme,
+            retention,
+        )
+        .map_err(|message| TerminalError::new(TerminalErrorCode::StartupFailed, message))?;
+        let child = spawn_child(&mut request, output_sender)?;
+        log::debug!(
+            target: LOG_TARGET,
+            "terminal {} started {}x{} pid={:?}",
+            record.id(),
+            request.columns,
+            request.rows,
+            child.child_pid
+        );
+        Ok(Self::new(
             record,
             command_receiver,
             output_receiver,
-            master: Some(pair.master),
-            writer: Some(writer),
-            terminator: Some(terminator),
+            descriptor_sink,
+            vt,
+            child,
+        ))
+    }
+
+    /// Assembles an actor from parts. This is the sole constructor and it starts
+    /// nothing: whether the parts came from a child process is not its concern.
+    fn new(
+        record: Arc<TerminalRecord>,
+        command_receiver: Receiver<RuntimeCommand>,
+        output_receiver: Receiver<ReaderEvent>,
+        descriptor_sink: TerminalDescriptorSink,
+        vt: VtReplayEngine,
+        child: ChildAttachment,
+    ) -> Self {
+        let (subscriber_status_sender, subscriber_status_receiver) = unbounded();
+        Self {
+            record,
+            command_receiver,
+            output_receiver,
+            geometry: child.geometry,
+            writer: child.writer,
+            terminator: child.terminator,
             vt,
             subscribers: HashMap::new(),
             subscriber_status_sender,
             subscriber_status_receiver,
             resize_authority: None,
-            child_pid,
+            child_pid: child.child_pid,
             sequence: 0,
             closing: None,
             exit_waiters: Vec::new(),
             exited: false,
             descriptor_sink,
-        })
+        }
     }
 
     fn run(&mut self) {
@@ -495,6 +572,11 @@ impl RuntimeActor {
         // thread is never orphaned.
         if !self.exited {
             if let Some(terminator) = self.terminator.as_mut() {
+                log::debug!(
+                    target: LOG_TARGET,
+                    "terminal {} runtime stopped without an explicit close; terminating the child",
+                    self.record.id()
+                );
                 terminator.request_graceful();
                 terminator.force_kill();
             }
@@ -528,6 +610,34 @@ impl RuntimeActor {
             RuntimeCommand::Snapshot { reply } => {
                 let result = self.snapshot();
                 let _ = reply.send(result);
+            }
+            RuntimeCommand::Project { reply } => {
+                // Reading the host's state publishes nothing and advances no
+                // sequence. An exited terminal still answers: its final state is
+                // exactly what a caller asks about.
+                let result = self.vt.project().map_err(io_error);
+                let _ = reply.send(result);
+            }
+            RuntimeCommand::History {
+                start_row,
+                rows,
+                reply,
+            } => {
+                let result = self.vt.project_history(start_row, rows).map_err(io_error);
+                let _ = reply.send(result);
+            }
+            RuntimeCommand::Anchor { space, at, reply } => {
+                // Anchors are held by the actor because the parser they pin is.
+                // A caller gets a number back and nothing that borrows.
+                let result = self.vt.anchor(space, at).map_err(io_error);
+                let _ = reply.send(result);
+            }
+            RuntimeCommand::ResolveAnchor { id, reply } => {
+                let result = self.vt.resolve_anchor(id).map_err(io_error);
+                let _ = reply.send(result);
+            }
+            RuntimeCommand::ReleaseAnchor { id, reply } => {
+                let _ = reply.send(Ok(self.vt.release_anchor(id)));
             }
             RuntimeCommand::Attach {
                 attachment_id,
@@ -639,44 +749,34 @@ impl RuntimeActor {
         columns: u16,
         rows: u16,
     ) -> Result<(), TerminalError> {
-        if self.exited {
-            return Err(TerminalError::new(
-                TerminalErrorCode::Exited,
-                format!("Terminal {} has exited", self.record.id()),
-            ));
-        }
-        if self.closing.is_some() {
-            return Err(TerminalError::new(
-                TerminalErrorCode::Closing,
-                format!("Terminal {} is closing", self.record.id()),
-            ));
-        }
-        if self.resize_authority != Some(attachment_id) {
-            return Err(TerminalError::new(
-                TerminalErrorCode::InvalidRequest,
-                "Resize rejected because this attachment is not the current renderer authority",
-            ));
-        }
+        resize_admission(
+            self.liveness(),
+            self.resize_authority,
+            attachment_id,
+            &self.record.id().to_string(),
+        )?;
         validate_dimensions(columns, rows)
             .map_err(|message| TerminalError::new(TerminalErrorCode::InvalidRequest, message))?;
-        self.master
+        self.geometry
             .as_ref()
             .ok_or_else(runtime_stopped)?
-            .resize(PtySize {
-                rows,
-                cols: columns,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|error| io_error(format!("Failed to resize PTY: {error}")))?;
-        self.vt
             .resize(columns, rows)
-            .map_err(|message| io_error(message))?;
+            .map_err(io_error)?;
+        self.vt.resize(columns, rows).map_err(io_error)?;
         let descriptor = self.record.record_resize(columns, rows);
-        self.publish_descriptor(descriptor);
-        let replay = self.replay()?;
+        let replay = match self.replay() {
+            Ok(replay) => replay,
+            Err(error) => {
+                // The grid has already moved. The registry is told even when the
+                // replay cannot be built, so it never reports the old size for a
+                // terminal that no longer has it.
+                self.publish_descriptor(descriptor);
+                return Err(error);
+            }
+        };
         let sequence = self.next_sequence();
-        self.publish(TerminalEvent::Replay { sequence, replay });
+        self.apply(plan_replay_transition(descriptor, replay, sequence))
+            .map_err(io_error)?;
         Ok(())
     }
 
@@ -705,15 +805,19 @@ impl RuntimeActor {
 
     fn set_theme(&mut self, theme: &TerminalColorTheme) -> Result<(), String> {
         let response = self.vt.set_theme(theme)?;
-        if !response.is_empty() {
-            self.write_response(&response)?;
-        }
+        // The child is answered before the change is recorded. An answer that
+        // cannot be written leaves the revision and the sequence where they were.
+        self.apply(plan_child_reply(response))?;
         let descriptor = self.record.note_replay_change();
-        self.publish_descriptor(descriptor);
-        let replay = self.replay().map_err(|error| error.to_string())?;
+        let replay = match self.replay() {
+            Ok(replay) => replay,
+            Err(error) => {
+                self.publish_descriptor(descriptor);
+                return Err(error.to_string());
+            }
+        };
         let sequence = self.next_sequence();
-        self.publish(TerminalEvent::Replay { sequence, replay });
-        Ok(())
+        self.apply(plan_replay_transition(descriptor, replay, sequence))
     }
 
     fn attach(
@@ -753,16 +857,11 @@ impl RuntimeActor {
         match output {
             ReaderEvent::Data(data) => {
                 let responses = self.vt.feed(&data);
-                if !responses.is_empty() {
-                    let _ = self.write_response(&responses);
-                }
                 let sequence = self.next_sequence();
                 let revision = self.record.note_output();
-                self.publish(TerminalEvent::Output {
-                    sequence,
-                    revision,
-                    data: Arc::from(data),
-                });
+                // Output is published whether or not the child could be
+                // answered: the bytes arrived either way.
+                let _ = self.apply(plan_child_output(&data, responses, sequence, revision));
             }
             ReaderEvent::Exited {
                 code,
@@ -775,15 +874,28 @@ impl RuntimeActor {
                     .map(|closing| closing.reason)
                     .unwrap_or(TerminalExitReason::ProcessExit);
                 if let Some(error) = read_error {
-                    eprintln!("terminal {} PTY reader ended: {error}", self.record.id());
+                    log::warn!(
+                        target: LOG_TARGET,
+                        "terminal {} PTY reader ended: {error}",
+                        self.record.id()
+                    );
                 }
                 if let Some(error) = wait_error {
-                    eprintln!("terminal {} child wait failed: {error}", self.record.id());
+                    log::warn!(
+                        target: LOG_TARGET,
+                        "terminal {} child wait failed: {error}",
+                        self.record.id()
+                    );
                 }
                 self.writer.take();
-                self.master.take();
+                self.geometry.take();
                 self.terminator.take();
                 let descriptor = self.record.finish_exit(code, reason);
+                log::info!(
+                    target: LOG_TARGET,
+                    "terminal {} exited code={code:?} reason={reason:?}",
+                    self.record.id()
+                );
                 self.publish_descriptor(descriptor.clone());
                 self.exited = true;
                 let sequence = self.next_sequence();
@@ -815,6 +927,35 @@ impl RuntimeActor {
         (self.descriptor_sink)(descriptor);
     }
 
+    fn liveness(&self) -> RuntimeLiveness {
+        RuntimeLiveness::of(self.exited, self.closing.is_some())
+    }
+
+    /// Carries out a plan in order.
+    ///
+    /// A reply the child could not be given does not cancel the effects after
+    /// it: the mutation that produced the reply already happened, so clients are
+    /// still told about it. The failure is returned once every effect has run,
+    /// for the callers that report it.
+    fn apply(&mut self, effects: Vec<RuntimeEffect>) -> Result<(), String> {
+        let mut failure = None;
+        for effect in effects {
+            match effect {
+                RuntimeEffect::ReplyToChild(bytes) => {
+                    if let Err(error) = self.write_response(&bytes) {
+                        failure.get_or_insert(error);
+                    }
+                }
+                RuntimeEffect::Descriptor(descriptor) => self.publish_descriptor(descriptor),
+                RuntimeEffect::Publish(event) => self.publish(event),
+            }
+        }
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
     fn write_response(&mut self, bytes: &[u8]) -> Result<(), String> {
         let Some(writer) = self.writer.as_mut() else {
             return Ok(());
@@ -826,23 +967,41 @@ impl RuntimeActor {
 
     fn publish(&mut self, event: TerminalEvent) {
         let sequence = event_sequence(&event);
-        let mut overflowed = Vec::new();
-        let mut disconnected = Vec::new();
+        let mut lost = Vec::new();
         for (attachment_id, subscriber) in &self.subscribers {
-            match subscriber.events.try_send(event.clone()) {
-                Ok(()) => {}
-                Err(TrySendError::Full(_)) => {
+            let outcome = match subscriber.events.try_send(event.clone()) {
+                Ok(()) => DeliveryOutcome::Delivered,
+                Err(TrySendError::Full(_)) => DeliveryOutcome::Full,
+                Err(TrySendError::Disconnected(_)) => DeliveryOutcome::Disconnected,
+            };
+            match subscriber_disposition(outcome) {
+                SubscriberDisposition::Keep => {}
+                SubscriberDisposition::ResyncThenRemove => {
+                    // Nobody returns an error to the host here, so the log is
+                    // the only record of why a viewer had to resynchronize.
+                    log::warn!(
+                        target: LOG_TARGET,
+                        "terminal {} attachment {attachment_id:?} fell behind at sequence {sequence} and must resync",
+                        self.record.id()
+                    );
                     let _ = subscriber.control.try_send(TerminalEvent::ResyncRequired {
                         sequence,
                         reason: "attachment mailbox exceeded the established 100000-byte flow-control budget"
                             .to_string(),
                     });
-                    overflowed.push(*attachment_id);
+                    lost.push(*attachment_id);
                 }
-                Err(TrySendError::Disconnected(_)) => disconnected.push(*attachment_id),
+                SubscriberDisposition::Remove => {
+                    log::debug!(
+                        target: LOG_TARGET,
+                        "terminal {} attachment {attachment_id:?} disconnected at sequence {sequence}",
+                        self.record.id()
+                    );
+                    lost.push(*attachment_id);
+                }
             }
         }
-        for attachment_id in overflowed.into_iter().chain(disconnected) {
+        for attachment_id in lost {
             self.remove_subscriber(attachment_id);
         }
     }
@@ -890,6 +1049,13 @@ impl RuntimeActor {
             .sequence
             .checked_add(1)
             .expect("terminal event sequence overflow is a fatal invariant violation");
+        // Clients hold the sequence in a JavaScript number. Past the exact
+        // integer boundary the two sides would disagree about ordering while
+        // both believing they were consecutive.
+        assert!(
+            self.sequence <= MAX_EXACT_JSON_INTEGER,
+            "terminal event sequence left the exact integer range shared with clients"
+        );
         self.sequence
     }
 
@@ -901,10 +1067,105 @@ impl RuntimeActor {
             return;
         }
         closing.force_kill_sent = true;
+        log::warn!(
+            target: LOG_TARGET,
+            "terminal {} did not stop within the grace period and is being killed",
+            self.record.id()
+        );
         if let Some(terminator) = self.terminator.as_mut() {
             terminator.force_kill();
         }
     }
+}
+
+/// Opens a PTY, starts the program, and starts the thread that reads it.
+///
+/// This is the only function in the capability that creates a child process. It
+/// produces parts; it decides nothing. Everything the actor does with those
+/// parts is reachable without calling this.
+fn spawn_child(
+    request: &mut TerminalLaunchRequest,
+    output_sender: Sender<ReaderEvent>,
+) -> Result<ChildAttachment, TerminalError> {
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: request.rows,
+            cols: request.columns,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| startup_error(format!("Failed to open PTY: {error}")))?;
+    // Acquire all fallible master resources before a child exists.
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| startup_error(format!("Failed to get PTY writer: {error}")))?;
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| startup_error(format!("Failed to get PTY reader: {error}")))?;
+
+    let launch = resolve_launch_command(&request.target);
+    let mut command = CommandBuilder::new(&launch.program);
+    for argument in launch.argv {
+        command.arg(argument);
+    }
+    command.cwd(&request.cwd);
+    for (key, value) in request.environment.drain() {
+        command.env(key, value);
+    }
+    command.env("TERM", "xterm-256color");
+    command.env("TERM_PROGRAM", "iTerm.app");
+    command.env("COLORTERM", "truecolor");
+
+    let mut child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| startup_error(format!("Failed to spawn terminal command: {error}")))?;
+    let child_pid = child.process_id();
+    let terminator = ProcessTerminator::new(child_pid, child.clone_killer());
+    drop(pair.slave);
+
+    // This thread is part of the runtime and is the sole wait owner. Every
+    // EOF/read-error/close path reaches the same child.wait() epilogue.
+    thread::spawn(move || {
+        let mut buffer = [0u8; PTY_READ_CHUNK_BYTES];
+        let mut read_error = None;
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(length) => {
+                    if output_sender
+                        .send(ReaderEvent::Data(buffer[..length].to_vec()))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    read_error = Some(error.to_string());
+                    break;
+                }
+            }
+        }
+        let (code, wait_error) = match child.wait() {
+            Ok(status) => (i32::try_from(status.exit_code()).ok(), None),
+            Err(error) => (None, Some(error.to_string())),
+        };
+        let _ = output_sender.send(ReaderEvent::Exited {
+            code,
+            read_error,
+            wait_error,
+        });
+    });
+
+    Ok(ChildAttachment {
+        geometry: Some(Box::new(pair.master)),
+        writer: Some(writer),
+        terminator: Some(terminator),
+        child_pid,
+    })
 }
 
 fn spawn_subscriber(
@@ -1035,6 +1296,483 @@ fn runtime_stopped() -> TerminalError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    use crate::terminal::types::{
+        TerminalDescriptor, TerminalLifecycle, TerminalMetadata, TerminalOwner,
+    };
+
+    /// The bytes the actor sent toward the child.
+    #[derive(Clone, Default)]
+    struct ChildInbox(Arc<Mutex<Vec<u8>>>);
+
+    impl ChildInbox {
+        fn taken(&self) -> Vec<u8> {
+            std::mem::take(&mut *self.0.lock().unwrap())
+        }
+    }
+
+    impl Write for ChildInbox {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// The window sizes the actor asked the kernel for.
+    #[derive(Clone, Default)]
+    struct GeometryLog(Arc<Mutex<Vec<(u16, u16)>>>);
+
+    impl TerminalGeometry for GeometryLog {
+        fn resize(&self, columns: u16, rows: u16) -> Result<(), String> {
+            self.0.lock().unwrap().push((columns, rows));
+            Ok(())
+        }
+    }
+
+    /// One attachment's view of the stream, as a plain list.
+    #[derive(Clone, Default)]
+    struct EventLog(Arc<Mutex<Vec<TerminalEvent>>>);
+
+    impl EventLog {
+        fn kinds(&self) -> Vec<&'static str> {
+            self.0
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|event| match event {
+                    TerminalEvent::Output { .. } => "output",
+                    TerminalEvent::Replay { .. } => "replay",
+                    TerminalEvent::MetadataChanged { .. } => "metadata",
+                    TerminalEvent::AgentActivityChanged { .. } => "agent",
+                    TerminalEvent::Exited { .. } => "exited",
+                    TerminalEvent::ResyncRequired { .. } => "resync",
+                    TerminalEvent::Detached { .. } => "detached",
+                })
+                .collect()
+        }
+
+        fn sequences(&self) -> Vec<u64> {
+            self.0.lock().unwrap().iter().map(event_sequence).collect()
+        }
+
+        fn taken(&self) -> Vec<TerminalEvent> {
+            std::mem::take(&mut *self.0.lock().unwrap())
+        }
+    }
+
+    impl TerminalEventSink for EventLog {
+        fn publish(&self, _terminal_id: TerminalId, event: TerminalEvent) -> Result<(), String> {
+            self.0.lock().unwrap().push(event);
+            Ok(())
+        }
+    }
+
+    fn test_request() -> TerminalLaunchRequest {
+        TerminalLaunchRequest {
+            target: TerminalLaunchTarget::Shell { executable: None },
+            cwd: PathBuf::from("/tmp"),
+            environment: HashMap::new(),
+            columns: 80,
+            rows: 24,
+            color_theme: TerminalColorTheme {
+                foreground: "#ffffff".to_string(),
+                background: "#000000".to_string(),
+                palette: vec!["#000000".to_string(); 16],
+            },
+            metadata: TerminalMetadata {
+                label: "harness".to_string(),
+                cwd: PathBuf::from("/tmp"),
+                project_path: None,
+                display_command: "none".to_string(),
+                created_at_ms: 1,
+                owner: TerminalOwner::Core,
+                owner_metadata: None,
+                presentation: None,
+            },
+        }
+    }
+
+    /// A running actor with no child process behind it.
+    ///
+    /// `VtReplayEngine` is not `Send`, so the actor is built on the thread that
+    /// runs it — the same reason production builds it inside the runtime thread.
+    /// The harness therefore drives the actor the way every caller does: through
+    /// the command channel. The reader channel replaces the PTY reader thread,
+    /// so a test decides exactly when output arrives and when the child exits.
+    struct ActorHarness {
+        handle: TerminalRuntimeHandle,
+        commands: Option<Sender<RuntimeCommand>>,
+        output: Sender<ReaderEvent>,
+        child_inbox: ChildInbox,
+        geometry: GeometryLog,
+        descriptors: Arc<Mutex<Vec<TerminalDescriptor>>>,
+        detached: Arc<Mutex<Vec<TerminalAttachmentId>>>,
+        record: Arc<TerminalRecord>,
+        thread: Option<thread::JoinHandle<()>>,
+    }
+
+    impl ActorHarness {
+        fn start() -> Self {
+            let request = test_request();
+            let record = TerminalRecord::new(TerminalId::new(), &request);
+            // The channel shapes production uses: a rendezvous for commands and
+            // a one-event queue for reader output.
+            let (commands, command_receiver) = bounded(0);
+            let (output, output_receiver) = bounded(PTY_OUTPUT_QUEUE_CAPACITY);
+            let child_inbox = ChildInbox::default();
+            let geometry = GeometryLog::default();
+            let descriptors: Arc<Mutex<Vec<TerminalDescriptor>>> = Arc::default();
+
+            let actor_record = Arc::clone(&record);
+            let actor_inbox = child_inbox.clone();
+            let actor_geometry = geometry.clone();
+            let sink_descriptors = Arc::clone(&descriptors);
+            let (ready, started) = bounded(0);
+            let thread = thread::spawn(move || {
+                let vt = VtReplayEngine::new(
+                    request.columns,
+                    request.rows,
+                    &request.color_theme,
+                    TerminalRetentionPolicy::default(),
+                )
+                .expect("the parser starts without a child");
+                let mut actor = RuntimeActor::new(
+                    actor_record,
+                    command_receiver,
+                    output_receiver,
+                    Arc::new(move |descriptor| {
+                        sink_descriptors.lock().unwrap().push(descriptor);
+                    }),
+                    vt,
+                    ChildAttachment {
+                        geometry: Some(Box::new(actor_geometry)),
+                        writer: Some(Box::new(actor_inbox)),
+                        terminator: None,
+                        child_pid: None,
+                    },
+                );
+                let _ = ready.send(());
+                actor.run();
+            });
+            started.recv().expect("the actor started");
+
+            Self {
+                handle: TerminalRuntimeHandle {
+                    commands: commands.clone(),
+                },
+                commands: Some(commands),
+                output,
+                child_inbox,
+                geometry,
+                descriptors,
+                detached: Arc::default(),
+                record,
+                thread: Some(thread),
+            }
+        }
+
+        fn send(&self, output: ReaderEvent) {
+            self.output.send(output).expect("the actor is reading");
+        }
+
+        /// Attaches one subscriber and returns its stream.
+        fn attach(&self, claims_resize: bool) -> (TerminalAttachmentId, EventLog) {
+            let attachment_id = TerminalAttachmentId::new();
+            let events = EventLog::default();
+            let detached = Arc::clone(&self.detached);
+            self.handle
+                .attach(
+                    attachment_id,
+                    Arc::new(events.clone()),
+                    claims_resize,
+                    Arc::new(move |id| detached.lock().unwrap().push(id)),
+                )
+                .expect("attach needs no child");
+            (attachment_id, events)
+        }
+
+        /// Closes the command channel, which is the actor's stop condition.
+        fn stop(&mut self) {
+            self.handle.commands = bounded(0).0;
+            self.commands.take();
+            if let Some(thread) = self.thread.take() {
+                thread.join().expect("the actor thread ended cleanly");
+            }
+        }
+    }
+
+    impl Drop for ActorHarness {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+
+    /// The subscriber thread delivers asynchronously, so a test waits for the
+    /// count it expects rather than assuming the thread has been scheduled.
+    fn wait_for_events(events: &EventLog, count: usize) {
+        for _ in 0..2_000 {
+            if events.0.lock().unwrap().len() >= count {
+                return;
+            }
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("expected {count} events, saw {:?}", events.kinds());
+    }
+
+    #[test]
+    fn an_actor_runs_without_a_child_process() {
+        let harness = ActorHarness::start();
+        assert_eq!(
+            harness.record.child_pid(),
+            None,
+            "the harness names no process"
+        );
+        let snapshot = harness.handle.snapshot().expect("the actor answers");
+        assert_eq!(
+            (snapshot.descriptor.columns, snapshot.descriptor.rows),
+            (80, 24)
+        );
+        assert_eq!(snapshot.sequence_boundary, 0, "nothing has happened yet");
+    }
+
+    #[test]
+    fn child_output_reaches_every_attachment_in_sequence_order() {
+        let harness = ActorHarness::start();
+        let (_, first) = harness.attach(false);
+        let (_, second) = harness.attach(false);
+
+        harness.send(ReaderEvent::Data(b"hello".to_vec()));
+        harness.send(ReaderEvent::Data(b"world".to_vec()));
+
+        wait_for_events(&first, 2);
+        wait_for_events(&second, 2);
+        assert_eq!(first.kinds(), vec!["output", "output"]);
+        assert_eq!(
+            first.sequences(),
+            second.sequences(),
+            "one sequence, not one per attachment"
+        );
+        assert_eq!(first.sequences(), vec![1, 2]);
+    }
+
+    #[test]
+    fn a_query_from_the_child_is_answered_without_a_child() {
+        let harness = ActorHarness::start();
+        let (_, events) = harness.attach(false);
+
+        // Device attributes: the parser must answer this one.
+        harness.send(ReaderEvent::Data(b"\x1b[c".to_vec()));
+
+        wait_for_events(&events, 1);
+        assert!(
+            !harness.child_inbox.taken().is_empty(),
+            "the parser answered nothing to a device-attributes query"
+        );
+        assert_eq!(
+            events.kinds(),
+            vec!["output"],
+            "the answer to the child is not a client event"
+        );
+        match &events.taken()[0] {
+            TerminalEvent::Output { data, .. } => assert_eq!(&data[..], b"\x1b[c"),
+            other => panic!("expected Output, got {other:?}"),
+        }
+    }
+
+    /// History and anchors are host facts, so they are answered by the actor
+    /// that owns the parser, in order with everything else it does.
+    #[test]
+    fn history_and_anchors_are_answered_through_the_actor() {
+        let harness = ActorHarness::start();
+        let (_, events) = harness.attach(false);
+
+        harness.send(ReaderEvent::Data(b"anchored\r\n".to_vec()));
+        wait_for_events(&events, 1);
+        let anchor = harness
+            .handle
+            .anchor(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
+            .expect("the actor anchors a cell");
+
+        // Enough lines to push the anchored one off a 24-row screen.
+        for line in 0..40 {
+            harness.send(ReaderEvent::Data(format!("line{line}\r\n").into_bytes()));
+        }
+        wait_for_events(&events, 41);
+
+        let window = harness
+            .handle
+            .project_history(0, 1)
+            .expect("the actor reads history");
+        assert!(window.history_rows > 0);
+        assert_eq!(window.rows[0].text().trim_end(), "anchored");
+
+        let resolved = harness
+            .handle
+            .resolve_anchor(anchor.id)
+            .expect("the actor reads the anchor")
+            .expect("the actor still holds it");
+        assert!(
+            resolved.loss_reported,
+            "the actor carries the loss fact with the anchor, so a client outside \
+             the engine knows whether `retained` can be believed"
+        );
+        let at = resolved.history.expect("the anchored line is in history");
+        assert_eq!(
+            harness
+                .handle
+                .project_history(at.row, 1)
+                .expect("the actor reads history")
+                .rows[0]
+                .text()
+                .trim_end(),
+            "anchored",
+            "the anchor names the line it was put on"
+        );
+
+        assert!(harness.handle.release_anchor(anchor.id).unwrap());
+        assert!(harness.handle.resolve_anchor(anchor.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn only_the_renderer_authority_moves_the_grid() {
+        let harness = ActorHarness::start();
+        let (authority, _) = harness.attach(true);
+        let (other, _) = harness.attach(false);
+
+        harness
+            .handle
+            .resize(other, 100, 40)
+            .expect_err("a second attachment must not resize");
+        assert!(
+            harness.geometry.0.lock().unwrap().is_empty(),
+            "a refused resize never reaches the kernel"
+        );
+
+        harness
+            .handle
+            .resize(authority, 100, 40)
+            .expect("the authority may resize");
+        assert_eq!(harness.geometry.0.lock().unwrap().as_slice(), &[(100, 40)]);
+    }
+
+    #[test]
+    fn a_resize_publishes_a_descriptor_and_one_replay() {
+        let harness = ActorHarness::start();
+        let (authority, events) = harness.attach(true);
+
+        harness.handle.resize(authority, 100, 40).unwrap();
+
+        wait_for_events(&events, 1);
+        assert_eq!(events.kinds(), vec!["replay"]);
+        let descriptors = harness.descriptors.lock().unwrap();
+        assert_eq!(descriptors.len(), 1, "one resize, one descriptor");
+        assert_eq!((descriptors[0].columns, descriptors[0].rows), (100, 40));
+    }
+
+    #[test]
+    fn a_detached_attachment_loses_the_resize_authority() {
+        let harness = ActorHarness::start();
+        let (authority, _) = harness.attach(true);
+
+        harness.handle.detach(authority).expect("detach succeeds");
+        harness
+            .handle
+            .resize(authority, 100, 40)
+            .expect_err("a detached attachment holds no authority");
+    }
+
+    #[test]
+    fn the_exit_is_the_last_event_and_reaches_every_waiter() {
+        let harness = ActorHarness::start();
+        let (_, events) = harness.attach(false);
+        let waiter = harness.handle.clone();
+        let waiting = thread::spawn(move || waiter.wait_for_exit());
+
+        harness.send(ReaderEvent::Data(b"before".to_vec()));
+        harness.send(ReaderEvent::Exited {
+            code: Some(3),
+            read_error: None,
+            wait_error: None,
+        });
+
+        wait_for_events(&events, 2);
+        assert_eq!(events.kinds(), vec!["output", "exited"]);
+        let exit = waiting
+            .join()
+            .expect("the waiter thread ended")
+            .expect("the waiter is answered");
+        assert_eq!(exit.code, Some(3));
+        assert_eq!(harness.record.lifecycle(), TerminalLifecycle::Exited);
+    }
+
+    #[test]
+    fn an_exited_terminal_refuses_work_and_releases_every_subscription() {
+        let harness = ActorHarness::start();
+        let (authority, events) = harness.attach(true);
+
+        harness.send(ReaderEvent::Exited {
+            code: Some(0),
+            read_error: None,
+            wait_error: None,
+        });
+        wait_for_events(&events, 1);
+
+        let refused = harness
+            .handle
+            .resize(authority, 100, 40)
+            .expect_err("an exited terminal has no grid to move");
+        assert_eq!(refused.code, TerminalErrorCode::Exited);
+        assert_eq!(
+            harness.detached.lock().unwrap().as_slice(),
+            &[authority],
+            "the exit released the subscription exactly once"
+        );
+    }
+
+    #[test]
+    fn a_theme_change_answers_only_a_child_that_asked_and_never_a_client() {
+        let harness = ActorHarness::start();
+        let (_, events) = harness.attach(false);
+        let theme = TerminalColorTheme {
+            foreground: "#102030".to_string(),
+            background: "#405060".to_string(),
+            palette: vec!["#708090".to_string(); 16],
+        };
+
+        harness
+            .handle
+            .set_theme(theme.clone())
+            .expect("a theme change needs no child");
+        wait_for_events(&events, 1);
+        assert!(
+            harness.child_inbox.taken().is_empty(),
+            "a child that did not ask for colour reports is not told"
+        );
+
+        // DEC mode 2031: the child asks to be told when colours change.
+        harness.send(ReaderEvent::Data(b"\x1b[?2031h".to_vec()));
+        wait_for_events(&events, 2);
+        harness.child_inbox.taken();
+
+        harness.handle.set_theme(theme).expect("the theme changes");
+        wait_for_events(&events, 3);
+        assert!(
+            !harness.child_inbox.taken().is_empty(),
+            "a child that asked is told the new colours"
+        );
+        assert_eq!(
+            events.kinds(),
+            vec!["replay", "output", "replay"],
+            "the answer to the child never becomes a client event"
+        );
+    }
 
     #[test]
     fn blank_shell_has_exactly_one_login_shell_boundary() {

@@ -11,7 +11,8 @@ use shipctl_core::instance::{
     StopOutcome,
 };
 use shipctl_core::instance::{
-    TerminalAttachmentClient, TerminalCloseControlResult, TerminalListResult, TerminalWriteResult,
+    TerminalAttachmentClient, TerminalCloseControlResult, TerminalInspectResult,
+    TerminalListResult, TerminalWriteResult,
 };
 use shipctl_core::message_bus::{
     MessageDiagnosticReport, MessageRuntimeInspection, RUNTIME_UNAVAILABLE,
@@ -623,6 +624,16 @@ pub fn get_terminal(
     let (runtime_root, _) = resolve_runtime_root(runtime_root)
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
     directory(runtime_root).get_terminal(selector, terminal_id)
+}
+
+pub fn inspect_terminal(
+    runtime_root: Option<&Path>,
+    selector: &str,
+    terminal_id: TerminalId,
+) -> Result<TerminalInspectResult, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).inspect_terminal(selector, terminal_id)
 }
 
 pub fn attach_terminal(

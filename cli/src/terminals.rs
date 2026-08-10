@@ -8,16 +8,21 @@ use serde::Serialize;
 use shipctl_core::instance::{
     ControlError, TerminalControlEvent, TERMINAL_CONTROL_WRITE_MAX_BYTES,
 };
+use shipctl_core::terminal::projection::TerminalProjection;
 use shipctl_core::terminal::{
     TerminalAgentReportRequest, TerminalAgentReportSource, TerminalDescriptor, TerminalId,
     TerminalLifecycle,
 };
 
-use crate::args::{TerminalAttachArgs, TerminalReportArgs, TerminalWriteArgs, TerminalsCommand};
+use crate::args::{
+    TerminalAttachArgs, TerminalInspectArgs, TerminalReportArgs, TerminalWriteArgs,
+    TerminalsCommand,
+};
 use crate::output::OutputFormat;
 
 const TERMINALS_LISTED: &str = "terminal.control.listed";
 const TERMINAL_INSPECTED: &str = "terminal.control.inspected";
+const TERMINAL_PROJECTED: &str = "terminal.control.projected";
 const TERMINAL_WRITTEN: &str = "terminal.control.written";
 const TERMINAL_AGENT_REPORTED: &str = "terminal.agent.reported";
 const TERMINAL_CLOSED: &str = "terminal.control.closed";
@@ -83,6 +88,7 @@ pub fn run(command: TerminalsCommand, output: OutputFormat) -> ExitCode {
                 Err(error) => crate::emit_failure(output, operation, &error, false),
             }
         }
+        TerminalsCommand::Inspect(args) => run_inspect(args, output),
         TerminalsCommand::Write(args) => run_write(args, output),
         TerminalsCommand::Report(args) => run_report(args, output),
         TerminalsCommand::Close(args) => {
@@ -103,6 +109,39 @@ pub fn run(command: TerminalsCommand, output: OutputFormat) -> ExitCode {
         }
         TerminalsCommand::Attach(args) => run_attach(args),
     }
+}
+
+fn run_inspect(args: TerminalInspectArgs, output: OutputFormat) -> ExitCode {
+    let operation = "terminals.inspect";
+    let result = crate::instances::inspect_terminal(
+        args.target.runtime.runtime_root.as_deref(),
+        &args.target.instance,
+        args.terminal_id,
+    );
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => return crate::emit_failure(output, operation, &error, false),
+    };
+    if args.text {
+        return print_viewport_text(&result.projection);
+    }
+    crate::emit_success(output, operation, TERMINAL_PROJECTED, false, result)
+        .unwrap_or_else(|message| crate::emit_render_failure(output, operation, message))
+}
+
+/// Renders the viewport the way a reader sees it: one line per row, with the
+/// padding the grid stores on the right of each row removed.
+fn print_viewport_text(projection: &TerminalProjection) -> ExitCode {
+    let mut stdout = io::stdout().lock();
+    for row in &projection.viewport {
+        if writeln!(stdout, "{}", row.text().trim_end()).is_err() {
+            return ExitCode::FAILURE;
+        }
+    }
+    if stdout.flush().is_err() {
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
 }
 
 fn run_report(args: TerminalReportArgs, output: OutputFormat) -> ExitCode {

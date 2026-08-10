@@ -63,10 +63,19 @@ export type CursorStyle = "block" | "underline" | "bar";
 export interface TerminalSettings {
   cursorStyle: CursorStyle;
   cursorBlink: boolean;
-  scrollback: number;
+  /** Host history budget in bytes. The host measures history in bytes, not rows. */
+  scrollbackBytes: number;
   fontFamily: string;
   fontSize: number;
   urlAllowlist: string[];
+}
+
+/**
+ * Terminal settings plus the retention revision they were committed at.
+ * A response carrying a revision lower than the one already held is stale.
+ */
+export interface TerminalSettingsCommit extends TerminalSettings {
+  retentionRevision: number;
 }
 
 export interface SidebarSettings {

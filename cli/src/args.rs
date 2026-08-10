@@ -89,6 +89,9 @@ pub enum TerminalsCommand {
     List(TerminalTargetArgs),
     /// Get the complete redacted descriptor for one terminal.
     Get(TerminalIdArgs),
+    /// Print what the host believes about one terminal: cells, cursor, modes,
+    /// and colours. Reads state; changes nothing.
+    Inspect(TerminalInspectArgs),
     /// Stream canonical replay followed by ordered live terminal events.
     Attach(TerminalAttachArgs),
     /// Write exact bytes to one running terminal.
@@ -162,6 +165,19 @@ pub struct TerminalTargetArgs {
 pub struct TerminalIdArgs {
     /// Opaque terminal UUID returned by `terminals list`.
     pub terminal_id: TerminalId,
+
+    #[command(flatten)]
+    pub target: TerminalTargetArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct TerminalInspectArgs {
+    /// Opaque terminal UUID returned by `terminals list`.
+    pub terminal_id: TerminalId,
+
+    /// Print the viewport as plain text instead of the full state.
+    #[arg(long)]
+    pub text: bool,
 
     #[command(flatten)]
     pub target: TerminalTargetArgs,

@@ -16,6 +16,13 @@ export * from "./terminalProjection.ts";
 export * from "./terminalClientRuntime.ts";
 export * from "./terminalScrollPin.ts";
 export * from "./terminalFitPlan.ts";
+export * from "./terminalFitScheduler.ts";
+export * from "./terminalViewportPin.ts";
+export * from "./terminalSurface.ts";
+// The session composes those seams; "./terminalXtermSurface.ts" and
+// "./terminalBrowserSession.ts" bind them to xterm and the browser and stay out
+// of this entry point.
+export * from "./terminalViewSession.ts";
 export * from "./terminalOscNotification.ts";
 export * from "./terminalAttachmentBootstrap.ts";
 export * from "./terminalEventDecoder.ts";

@@ -26,8 +26,8 @@ use super::protocol::{
     InstanceLifecycle, InstanceRecord, MessageCommand, ModuleCommand, ModuleControlStatus,
     OperationCommand, ScheduleCommand, StopOutcome, StoredDescriptor, TerminalAgentReportResult,
     TerminalAttachmentState, TerminalCloseControlResult, TerminalCommand, TerminalControlEvent,
-    TerminalListResult, TerminalReplayFrame, TerminalWriteResult, CONTROL_FRAME_SCHEMA_VERSION,
-    TERMINAL_CONTROL_WRITE_MAX_BYTES,
+    TerminalInspectResult, TerminalListResult, TerminalReplayFrame, TerminalWriteResult,
+    CONTROL_FRAME_SCHEMA_VERSION, TERMINAL_CONTROL_WRITE_MAX_BYTES,
 };
 use crate::message_bus::{MessageDiagnosticReport, MessageRuntimeInspection, RUNTIME_UNAVAILABLE};
 use crate::module_control::codes::{
@@ -119,6 +119,9 @@ pub trait ControlHandler: Send + Sync + 'static {
         Err(terminal_control_unavailable())
     }
     fn terminal_get(&self, _id: TerminalId) -> Result<TerminalDescriptor, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    fn terminal_inspect(&self, _id: TerminalId) -> Result<TerminalInspectResult, ControlError> {
         Err(terminal_control_unavailable())
     }
     fn terminal_write(&self, _id: TerminalId, _data: Vec<u8>) -> Result<(), ControlError> {
@@ -738,6 +741,9 @@ fn dispatch_terminal_request(
         TerminalCommand::Get { terminal_id } => handler
             .terminal_get(terminal_id)
             .map(ControlResponseResult::TerminalDescriptor),
+        TerminalCommand::Inspect { terminal_id } => handler
+            .terminal_inspect(terminal_id)
+            .map(ControlResponseResult::TerminalInspect),
         TerminalCommand::Write {
             terminal_id,
             data_base64,
@@ -1415,6 +1421,26 @@ impl InstanceDirectory {
             },
         )
         .and_then(expect_terminal_descriptor_result)
+    }
+
+    /// Reads the host's semantic state for one terminal.
+    ///
+    /// Paired with `write_terminal`, this closes the loop a caller needs to ask
+    /// what the host believes: drive the child, then read the state.
+    pub fn inspect_terminal(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+    ) -> Result<TerminalInspectResult, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::Inspect { terminal_id },
+            },
+        )
+        .and_then(expect_terminal_inspect_result)
     }
 
     pub fn write_terminal(
@@ -2185,6 +2211,18 @@ fn expect_terminal_descriptor_result(
     }
 }
 
+fn expect_terminal_inspect_result(
+    stream: ControlStream,
+) -> Result<TerminalInspectResult, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalInspect(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-projection result for a terminal inspect request",
+        )),
+    }
+}
+
 fn expect_terminal_write_result(
     stream: ControlStream,
 ) -> Result<TerminalWriteResult, ControlError> {
@@ -2615,6 +2653,57 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::Mutex;
 
+    /// The control socket is a second consumer of the domain model. Driving it
+    /// from the same samples as the cross-language contract means a new variant
+    /// cannot reach a CLI client as an unnamed or unencoded frame.
+    #[test]
+    fn every_domain_event_has_a_named_control_frame_with_preserved_encoding() {
+        use crate::terminal::contract::{sample_event, TerminalEventKind};
+
+        let terminal_id = TerminalId::new();
+        let attachment_id = TerminalAttachmentId::new();
+        let mut tags = Vec::new();
+
+        for kind in TerminalEventKind::all() {
+            let (frame, terminal) =
+                terminal_event_frame(terminal_id, attachment_id, sample_event(kind));
+            let value = serde_json::to_value(&frame).expect("control frames serialize");
+            let object = value.as_object().expect("control frames are objects");
+            let tag = object
+                .get("type")
+                .and_then(|tag| tag.as_str())
+                .expect("control frames carry a tag")
+                .to_string();
+            assert!(
+                !tags.contains(&tag),
+                "control frame tag {tag} is not unique"
+            );
+
+            // Byte payloads stay base64 on this transport; that encoding is
+            // transitional but it is public, so it may not change here.
+            if let Some(encoded) = object.get("dataBase64").and_then(|data| data.as_str()) {
+                assert_eq!(
+                    BASE64_STANDARD.decode(encoded).expect("valid base64"),
+                    b"ok".to_vec()
+                );
+            }
+
+            // Exit, resync, and detach end an attachment; output does not.
+            assert_eq!(
+                terminal,
+                matches!(
+                    kind,
+                    TerminalEventKind::Exited
+                        | TerminalEventKind::ResyncRequired
+                        | TerminalEventKind::Detached
+                )
+            );
+            tags.push(tag);
+        }
+
+        assert_eq!(tags.len(), TerminalEventKind::all().len());
+    }
+
     struct FakeHandler {
         active: AtomicUsize,
         shutdown: AtomicBool,
@@ -2669,6 +2758,14 @@ mod tests {
 
         fn terminal_get(&self, id: TerminalId) -> Result<TerminalDescriptor, ControlError> {
             self.terminals.get(id).map_err(terminal_control_error)
+        }
+
+        fn terminal_inspect(&self, id: TerminalId) -> Result<TerminalInspectResult, ControlError> {
+            Ok(TerminalInspectResult {
+                terminal_id: id,
+                descriptor: self.terminals.get(id).map_err(terminal_control_error)?,
+                projection: self.terminals.project(id).map_err(terminal_control_error)?,
+            })
         }
 
         fn terminal_write(&self, id: TerminalId, data: Vec<u8>) -> Result<(), ControlError> {
@@ -2839,7 +2936,10 @@ mod tests {
             shutdown: AtomicBool::new(false),
             schedule_requests: Mutex::new(Vec::new()),
             terminal_writes: Mutex::new(Vec::new()),
-            terminals: TerminalService::new(instance_id),
+            terminals: TerminalService::new(
+                instance_id,
+                crate::terminal::retention::TerminalRetentionPolicy::default(),
+            ),
         })
     }
 
@@ -3276,6 +3376,57 @@ mod tests {
             0
         );
 
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn written_bytes_become_readable_semantic_state_over_the_socket() {
+        let (context, root) = fixture("terminal-inspect");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-inspect", 0);
+        let terminal = handler
+            .terminals
+            .spawn(terminal_request(
+                "stty -echo; while IFS= read -r line; do printf 'seen:%s\\r\\n' \"$line\"; done",
+            ))
+            .unwrap();
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+
+        directory
+            .write_terminal("terminal-inspect", terminal.id, b"closed-loop\n")
+            .unwrap();
+
+        // The write and the read are the whole point: bytes go in, and the
+        // state the host derived from them comes back without a screen scrape.
+        let inspected = loop {
+            let inspected = directory
+                .inspect_terminal("terminal-inspect", terminal.id)
+                .unwrap();
+            if inspected
+                .projection
+                .viewport
+                .iter()
+                .any(|row| row.text().contains("seen:closed-loop"))
+            {
+                break inspected;
+            }
+            std::thread::yield_now();
+        };
+        assert_eq!(inspected.terminal_id, terminal.id);
+        assert_eq!(inspected.descriptor.id, terminal.id);
+        assert_eq!(inspected.projection.columns, 80);
+        assert_eq!(inspected.projection.rows, 24);
+        assert_eq!(inspected.projection.viewport.len(), 24);
+
+        let missing = directory
+            .inspect_terminal("terminal-inspect", TerminalId::new())
+            .unwrap_err();
+        assert_eq!(missing.code.as_str(), "terminal.not_found");
+
+        handler.terminals.close(terminal.id).unwrap();
         drop(server);
         let _ = fs::remove_dir_all(root);
     }

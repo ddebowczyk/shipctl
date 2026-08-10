@@ -14,6 +14,7 @@ use crate::scheduler::{
     ScheduleVerification,
 };
 use crate::state::archive::StateArchiveInspection;
+use crate::terminal::projection::TerminalProjection;
 use crate::terminal::{
     TerminalAgentActivity, TerminalAgentReportKind, TerminalAgentReportSource,
     TerminalAttachmentId, TerminalDescriptor, TerminalExit, TerminalId, TerminalRevision,
@@ -267,6 +268,11 @@ pub enum TerminalCommand {
     Attach {
         terminal_id: TerminalId,
     },
+    /// Read the host's semantic state. This is an inspection path: it publishes
+    /// nothing and moves no sequence.
+    Inspect {
+        terminal_id: TerminalId,
+    },
     Write {
         terminal_id: TerminalId,
         data_base64: String,
@@ -287,6 +293,18 @@ pub enum TerminalCommand {
 pub struct TerminalListResult {
     pub count: usize,
     pub terminals: Vec<TerminalDescriptor>,
+}
+
+/// The host's terminal state, unchanged from the projection the runtime built.
+///
+/// Nothing here is base64: this carries semantic facts, never child output or
+/// replay ANSI.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalInspectResult {
+    pub terminal_id: TerminalId,
+    pub descriptor: TerminalDescriptor,
+    pub projection: TerminalProjection,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -503,6 +521,7 @@ pub enum ControlResponseResult {
     CapabilityInvocation(CapabilityInvocation),
     TerminalList(TerminalListResult),
     TerminalDescriptor(TerminalDescriptor),
+    TerminalInspect(TerminalInspectResult),
     TerminalWrite(TerminalWriteResult),
     TerminalAgentReport(TerminalAgentReportResult),
     TerminalClose(TerminalCloseControlResult),

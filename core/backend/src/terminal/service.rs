@@ -8,7 +8,12 @@ use std::sync::{Arc, Mutex};
 
 use shipctl_module_api::TerminalColorTheme;
 
+use super::projection::{
+    ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
+    TerminalProjection,
+};
 use super::record::TerminalRecord;
+use super::retention::TerminalRetentionPolicy;
 use super::runtime::{TerminalCloseTicket, TerminalEventSink, TerminalRuntimeHandle};
 use super::types::{
     TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId,
@@ -43,6 +48,16 @@ struct TerminalServiceInner {
         Mutex<HashMap<TerminalRegistrySubscriptionId, Arc<dyn TerminalRegistryEventSink>>>,
     shutting_down: AtomicBool,
     next_creation_ordinal: AtomicU64,
+    /// The committed product retention policy and its monotonic revision. One
+    /// lock keeps the pair atomic, so a spawn can never read a policy from one
+    /// commit and a revision from another.
+    retention: Mutex<RetentionCommit>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RetentionCommit {
+    pub policy: TerminalRetentionPolicy,
+    pub revision: u64,
 }
 
 struct RegisteredTerminal {
@@ -51,7 +66,7 @@ struct RegisteredTerminal {
 }
 
 impl TerminalService {
-    pub fn new(instance_id: impl Into<String>) -> Self {
+    pub fn new(instance_id: impl Into<String>, retention: TerminalRetentionPolicy) -> Self {
         Self {
             inner: Arc::new(TerminalServiceInner {
                 instance_id: Arc::from(instance_id.into()),
@@ -60,6 +75,10 @@ impl TerminalService {
                 registry_subscribers: Mutex::new(HashMap::new()),
                 shutting_down: AtomicBool::new(false),
                 next_creation_ordinal: AtomicU64::new(0),
+                retention: Mutex::new(RetentionCommit {
+                    policy: retention,
+                    revision: 1,
+                }),
             }),
         }
     }
@@ -103,9 +122,12 @@ impl TerminalService {
                 inner.publish_registry_event(TerminalRegistryEvent::Upserted { descriptor });
             }
         });
-        if let Err(error) =
-            TerminalRuntimeHandle::start(Arc::clone(&record), request, descriptor_sink)
-        {
+        if let Err(error) = TerminalRuntimeHandle::start(
+            Arc::clone(&record),
+            request,
+            descriptor_sink,
+            self.retention().policy,
+        ) {
             self.records().remove(&id);
             record.finish_exit(None, TerminalExitReason::StartupFailure);
             return Err(error);
@@ -116,6 +138,31 @@ impl TerminalService {
                 descriptor: descriptor.clone(),
             });
         Ok(descriptor)
+    }
+
+    /// The policy every terminal created after the last commit will use.
+    pub fn retention(&self) -> RetentionCommit {
+        *self
+            .inner
+            .retention
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Commit a new policy and return the new revision. The revision only ever
+    /// increases, so a delayed caller cannot reinstate an older policy.
+    pub fn set_retention(&self, policy: TerminalRetentionPolicy) -> RetentionCommit {
+        let mut committed = self
+            .inner
+            .retention
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        committed.policy = policy;
+        committed.revision = committed
+            .revision
+            .checked_add(1)
+            .expect("retention revision overflow is a fatal invariant violation");
+        *committed
     }
 
     pub fn list(&self) -> Vec<TerminalDescriptor> {
@@ -137,6 +184,56 @@ impl TerminalService {
 
     pub fn snapshot(&self, id: TerminalId) -> Result<TerminalRuntimeSnapshot, TerminalError> {
         runtime(self.record(id)?.as_ref())?.snapshot()
+    }
+
+    /// What the host believes about this terminal, as owned values.
+    ///
+    /// This is an inspection path. It publishes nothing, changes no sequence,
+    /// and no client depends on it.
+    pub fn project(&self, id: TerminalId) -> Result<TerminalProjection, TerminalError> {
+        runtime(self.record(id)?.as_ref())?.project()
+    }
+
+    /// A window of retained history as the same rows the viewport reports.
+    ///
+    /// The host is the retention authority, so this is the only answer to
+    /// "what scrolled away" that no client has to reconstruct.
+    pub fn project_history(
+        &self,
+        id: TerminalId,
+        start_row: u32,
+        rows: u32,
+    ) -> Result<TerminalHistoryWindow, TerminalError> {
+        runtime(self.record(id)?.as_ref())?.project_history(start_row, rows)
+    }
+
+    /// Pins a cell so a client can keep pointing at one line while row numbers
+    /// move under it.
+    pub fn anchor(
+        &self,
+        id: TerminalId,
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    ) -> Result<TerminalAnchor, TerminalError> {
+        runtime(self.record(id)?.as_ref())?.anchor(space, at)
+    }
+
+    /// Where an anchor is now, or `None` when the host holds no such handle.
+    pub fn resolve_anchor(
+        &self,
+        id: TerminalId,
+        anchor: TerminalAnchorId,
+    ) -> Result<Option<TerminalAnchor>, TerminalError> {
+        runtime(self.record(id)?.as_ref())?.resolve_anchor(anchor)
+    }
+
+    /// Drops an anchor, answering whether the host was holding it.
+    pub fn release_anchor(
+        &self,
+        id: TerminalId,
+        anchor: TerminalAnchorId,
+    ) -> Result<bool, TerminalError> {
+        runtime(self.record(id)?.as_ref())?.release_anchor(anchor)
     }
 
     pub fn write(&self, id: TerminalId, data: &[u8]) -> Result<(), TerminalError> {
@@ -259,17 +356,32 @@ impl TerminalService {
         runtime(self.record(id)?.as_ref())?.wait_for_exit()
     }
 
+    /// Close a terminal without ever creating an unobservable absence.
+    ///
+    /// The record stays registered for the whole close, so a parked close is
+    /// still discoverable and truthfully described as `Closing`. Removal and
+    /// `Removed` are one ordered commit reached only after the process is
+    /// gone. A failed close therefore leaves a discoverable record that the
+    /// same call can retry, never a silent disappearance.
     pub fn close(&self, id: TerminalId) -> Result<TerminalCloseResult, TerminalError> {
-        let registered = self.records().remove(&id);
-        let Some(registered) = registered else {
+        let Some(record) = self
+            .records()
+            .get(&id)
+            .map(|registered| Arc::clone(&registered.record))
+        else {
             return Ok(TerminalCloseResult {
                 existed: false,
                 exit: None,
             });
         };
-        let record = registered.record;
+        // Reject input for the whole close, not only once the runtime reaches
+        // the command. The runtime publishes this transition when it handles
+        // the close, and the record is still registered, so that publication
+        // now reaches observers instead of being dropped as unregistered.
         record.mark_closing();
         let exit = if let Some(runtime) = record.wait_runtime() {
+            // The runtime coalesces concurrent close requests onto one
+            // termination, so racing callers observe the same exit.
             runtime
                 .request_close(TerminalExitReason::ExplicitClose)?
                 .wait()?
@@ -279,8 +391,12 @@ impl TerminalService {
                 .exit
                 .expect("explicitly closed record must have exit state")
         };
-        self.inner
-            .publish_registry_event(TerminalRegistryEvent::Removed { terminal_id: id });
+        // The commit. Only the caller that removes the record publishes the
+        // removal, so concurrent closes produce exactly one `Removed`.
+        if self.records().remove(&id).is_some() {
+            self.inner
+                .publish_registry_event(TerminalRegistryEvent::Removed { terminal_id: id });
+        }
         Ok(TerminalCloseResult {
             existed: true,
             exit: Some(exit),
@@ -521,8 +637,40 @@ mod tests {
     }
 
     #[test]
+    fn retention_is_service_state_and_its_revision_only_moves_forward() {
+        let service = TerminalService::new(
+            "runtime-instance",
+            TerminalRetentionPolicy::from_bytes(4 * 1024 * 1024),
+        );
+        let seeded = service.retention();
+        assert_eq!(seeded.policy.bytes(), 4 * 1024 * 1024);
+
+        let first = service.set_retention(TerminalRetentionPolicy::from_bytes(0));
+        assert!(first.revision > seeded.revision);
+        assert_eq!(service.retention().policy.bytes(), 0);
+
+        // Re-committing the value the service started with still advances the
+        // revision, so a client cannot mistake it for the earlier commit.
+        let second = service.set_retention(seeded.policy);
+        assert!(second.revision > first.revision);
+        assert_eq!(service.retention().policy, seeded.policy);
+    }
+
+    #[test]
+    fn an_out_of_domain_setting_cannot_reach_the_parser() {
+        let service = TerminalService::new(
+            "runtime-instance",
+            TerminalRetentionPolicy::from_bytes(usize::MAX),
+        );
+        assert_eq!(
+            service.retention().policy.bytes(),
+            crate::terminal::retention::RETENTION_MAX_BYTES
+        );
+    }
+
+    #[test]
     fn host_identity_overrides_untrusted_environment() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let id = TerminalId::new();
         let mut environment = HashMap::from([
             ("SHIPCTL_INSTANCE_ID".to_string(), "spoofed".to_string()),
@@ -537,7 +685,7 @@ mod tests {
 
     #[test]
     fn registry_helpers_release_the_lock_before_runtime_work() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let records = service.records();
         drop(records);
         assert!(service.inner.records.try_lock().is_ok());
@@ -546,7 +694,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn registry_subscription_tracks_spawn_update_exit_and_removal_without_attachment() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let (sender, receiver) = mpsc::channel();
         let sink: Arc<dyn TerminalRegistryEventSink> =
             Arc::new(move |event| sender.send(event).map_err(|error| error.to_string()));
@@ -591,7 +739,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn explicit_agent_reports_are_ordered_public_state_and_never_process_lifecycle() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let descriptor = service.spawn(shell_request("read done; exit 0")).unwrap();
         let (registry_sender, registry_receiver) = mpsc::channel();
         let list_during_delivery = service.clone();
@@ -706,7 +854,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_report_validation_is_bounded_and_never_echoes_rejected_content() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let descriptor = service.spawn(shell_request("cat")).unwrap();
         let invalid_source = TerminalAgentReportRequest {
             terminal_id: descriptor.id,
@@ -744,7 +892,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn agent_report_and_process_exit_have_one_actor_order() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let descriptor = service.spawn(shell_request("exit 0")).unwrap();
         let reporter = service.clone();
         let report = TerminalAgentReportRequest {
@@ -776,7 +924,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn natural_exit_is_retained_until_idempotent_close() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let descriptor = service
             .spawn(shell_request("printf retained-output; exit 7"))
             .unwrap();
@@ -808,7 +956,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn failed_output_sink_detaches_without_losing_later_state_or_exit() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let failed_sink: Arc<dyn TerminalEventSink> =
             Arc::new(|_terminal_id: TerminalId, _event: TerminalEvent| {
                 Err("renderer disappeared".to_string())
@@ -837,7 +985,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn concurrent_spawns_mint_distinct_stable_ids() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let first_service = service.clone();
         let second_service = service.clone();
         let first =
@@ -862,7 +1010,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn list_preserves_registry_creation_order_independent_of_uuid_order() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let first = service.spawn(shell_request("cat")).unwrap();
         let second = service.spawn(shell_request("cat")).unwrap();
 
@@ -881,8 +1029,8 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn closing_one_terminal_does_not_hold_the_registry_lock_or_block_another() {
-        let service = TerminalService::new("runtime-instance");
+    fn a_parked_close_stays_discoverable_and_does_not_block_another_terminal() {
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let ready_sink: Arc<dyn TerminalEventSink> =
             Arc::new(move |_terminal_id: TerminalId, event: TerminalEvent| {
@@ -907,14 +1055,21 @@ mod tests {
             done_sender.send(result).unwrap();
         });
 
+        // The close parks in the grace period. Through the whole park the
+        // record stays registered and truthfully reports `Closing`, so no
+        // observer can see an absence that was never published.
         loop {
             if let Ok(records) = service.inner.records.try_lock() {
-                if !records.contains_key(&closing.id) {
+                assert!(
+                    records.contains_key(&closing.id),
+                    "a parked close must remain discoverable"
+                );
+                drop(records);
+                if service.get(closing.id).unwrap().lifecycle == TerminalLifecycle::Closing {
                     assert!(matches!(
                         done_receiver.try_recv(),
                         Err(mpsc::TryRecvError::Empty)
                     ));
-                    drop(records);
                     break;
                 }
             }
@@ -928,8 +1083,58 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn concurrent_closes_publish_one_removal_after_the_closing_transition() {
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&events);
+        service.subscribe_registry(Arc::new(move |event: TerminalRegistryEvent| {
+            observed
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(event);
+            Ok(())
+        }));
+        let descriptor = service.spawn(shell_request("cat")).unwrap();
+
+        let id = descriptor.id;
+        let left_service = service.clone();
+        let right_service = service.clone();
+        let left = std::thread::spawn(move || left_service.close(id).unwrap());
+        let right = std::thread::spawn(move || right_service.close(id).unwrap());
+        let left = left.join().unwrap();
+        let right = right.join().unwrap();
+
+        // Both callers observe the same close transaction.
+        assert!(left.existed && right.existed);
+        assert_eq!(
+            left.exit.map(|exit| exit.reason),
+            right.exit.map(|exit| exit.reason)
+        );
+
+        let events = events.lock().unwrap_or_else(|error| error.into_inner());
+        let removals = events
+            .iter()
+            .filter(|event| matches!(event, TerminalRegistryEvent::Removed { .. }))
+            .count();
+        assert_eq!(removals, 1, "concurrent closes must publish one removal");
+        let removal = events
+            .iter()
+            .position(|event| matches!(event, TerminalRegistryEvent::Removed { .. }))
+            .expect("a successful close publishes its removal");
+        assert!(
+            events[..removal].iter().any(|event| matches!(
+                event,
+                TerminalRegistryEvent::Upserted { descriptor }
+                    if descriptor.lifecycle == TerminalLifecycle::Closing
+            )),
+            "the closing transition must be observable before the removal"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn attach_captures_one_replay_boundary_before_later_live_output() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let descriptor = service
             .spawn(shell_request(
                 "stty -echo; read first; printf before-boundary; read second; printf after-boundary",
@@ -982,7 +1187,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn renderer_restart_reattaches_the_same_module_terminal_without_killing_it() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let mut request = shell_request(
             r#"stty -echo; read first; printf '\033[31mphase-one\033[0m'; read second; printf phase-two"#,
         );
@@ -1058,7 +1263,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn exited_terminal_attach_returns_final_read_only_replay() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let descriptor = service
             .spawn(shell_request("printf final-before-attach; exit 4"))
             .unwrap();
@@ -1088,7 +1293,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn slow_attachment_overflows_without_blocking_fast_attachment_or_parser() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let descriptor = service
             .spawn(shell_request(
                 "stty -echo; read go; head -c 200000 /dev/zero | tr '\\0' x; read finish",
@@ -1161,7 +1366,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn newest_renderer_attachment_is_the_only_resize_authority() {
-        let service = TerminalService::new("runtime-instance");
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
         let descriptor = service.spawn(shell_request("cat")).unwrap();
         let sink: Arc<dyn TerminalEventSink> =
             Arc::new(|_terminal_id: TerminalId, _event: TerminalEvent| Ok(()));

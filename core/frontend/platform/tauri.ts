@@ -8,6 +8,7 @@ import type {
   EditorSettings,
   KeybindingSettings,
   TerminalSettings,
+  TerminalSettingsCommit,
   SidebarSettings,
   FontFamily,
   FontFaceData,
@@ -20,14 +21,15 @@ import type {
   TerminalCloseResult,
   TerminalColorTheme,
   TerminalDescriptor,
-  TerminalEvent,
   TerminalId,
   TerminalLaunchRequest,
   TerminalMetadata,
   TerminalRegistryEvent,
   TerminalRegistrySubscriptionId,
+  TerminalAttachmentBootstrap,
   TerminalRuntimeSnapshot,
 } from "@shipctl/core/terminal";
+
 
 // ── Workspace commands ──────────────────────────────────────────────
 
@@ -111,11 +113,11 @@ export function saveKeybindingSettings(settings: KeybindingSettings): Promise<vo
   return invoke("save_keybinding_settings", { settings });
 }
 
-export function getTerminalSettings(): Promise<TerminalSettings> {
+export function getTerminalSettings(): Promise<TerminalSettingsCommit> {
   return invoke("get_terminal_settings");
 }
 
-export function saveTerminalSettings(settings: TerminalSettings): Promise<void> {
+export function saveTerminalSettings(settings: TerminalSettings): Promise<TerminalSettingsCommit> {
   return invoke("save_terminal_settings", { settings });
 }
 
@@ -208,31 +210,26 @@ export function getTerminalSnapshot(
   return invoke("get_terminal_snapshot", { terminalId });
 }
 
+/**
+ * Open a host attachment.
+ *
+ * The adapter never interprets a host event. `bootstrap` owns decoding and
+ * arrival order, so an event that violates the host contract is rejected at
+ * this boundary instead of reaching client state.
+ */
 export async function attachTerminal(
   terminalId: TerminalId,
   claimsResize: boolean,
-  onEvent: (event: TerminalEvent) => void,
+  bootstrap: TerminalAttachmentBootstrap,
 ): Promise<TerminalAttachmentHandle> {
-  const channel = new Channel<TerminalEvent>();
-  const buffered: TerminalEvent[] = [];
-  let active = false;
-  channel.onmessage = (event) => {
-    if (active) onEvent(event);
-    else buffered.push(event);
-  };
+  const channel = new Channel<unknown>();
+  channel.onmessage = bootstrap.deliver;
   const attachment = await invoke<TerminalAttachment>("attach_terminal", {
     terminalId,
     claimsResize,
     onEvent: channel,
   });
-  return {
-    ...attachment,
-    activate() {
-      if (active) return;
-      active = true;
-      for (const event of buffered.splice(0)) onEvent(event);
-    },
-  };
+  return { ...attachment, activate: bootstrap.activate };
 }
 
 export function detachTerminal(attachmentId: TerminalAttachmentId): Promise<void> {

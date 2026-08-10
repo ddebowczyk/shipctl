@@ -9,7 +9,11 @@ import { useThemeStore } from "../appearance/index.ts";
 import { useKeybindingStore } from "../terminal/index.ts";
 import { useProjectSettingsStore } from "../projects/index.ts";
 import { useRepoStore } from "../projects/index.ts";
-import { useTerminalSettingsStore } from "../terminal/index.ts";
+import {
+  formatRetentionBudget,
+  RETENTION_PRESET_BYTES,
+  useTerminalSettingsStore,
+} from "../terminal/index.ts";
 import { useUpdateStore } from "./useUpdateStore.ts";
 import {
   FONT_SIZE_OPTIONS,
@@ -510,17 +514,17 @@ export default function SettingsPanel() {
 
         <div className="settings-row !mb-0">
           <span className="settings-row__label">
-            Scrollback
-            <InfoTip text="Number of lines kept in the terminal scroll buffer. Higher values use more memory." />
+            History
+            <InfoTip text="Memory each terminal may use for scrollback history. The terminal keeps as much history as fits, so the number of lines depends on how wide the output is. Applies to terminals started after the change." />
           </span>
           <div className="flex flex-wrap gap-2">
-            {[1000, 5000, 10000, 25000, 50000].map((value) => (
+            {RETENTION_PRESET_BYTES.map((value) => (
               <button
                 key={value}
-                onClick={() => void updateTermSettings({ scrollback: value })}
-                className={`option-card option-card--compact ${termSettings.scrollback === value ? "selected" : ""}`}
+                onClick={() => void updateTermSettings({ scrollbackBytes: value })}
+                className={`option-card option-card--compact ${termSettings.scrollbackBytes === value ? "selected" : ""}`}
               >
-                {value >= 1000 ? `${value / 1000}k` : value}
+                {formatRetentionBudget(value)}
               </button>
             ))}
           </div>
