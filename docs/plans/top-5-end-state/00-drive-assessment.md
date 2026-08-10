@@ -129,9 +129,12 @@ against and will appear to require a second frontend toolchain. Sequencing area
 ## The execution order the evidence supports
 
 1. **Actor seam, then actor harness** — closes four claims plus criterion 5 on
-   both paths. The seam comes first: the actor is private and is only
-   constructible by spawning a real PTY, so the tests cannot be written until
-   the publication decisions are reachable without a child process.
+   both paths. The seam comes first: the actor is private, and its only
+   constructor spawns a real PTY. A test in `mod tests` can reach the private
+   fields and hand-build a struct literal with `None` in the PTY slots, so this
+   is "can, but should not" — that literal compiles against the field list and
+   breaks whenever the actor gains state. Make the publication decisions
+   reachable without a child process, then write the tests.
 2. **Area 03 extraction, continuously** — proven pattern, already half done, and
    it is what makes every later frontend claim testable in the existing lane.
 3. **Area 04 falsification probes, in parallel from now** — the only surviving
