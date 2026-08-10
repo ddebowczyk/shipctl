@@ -287,6 +287,42 @@ host-defined spans, IME, selection gestures, history windows, effects, viewport,
 fallback, and surface lifecycle. Run a real packaged Tauri scenario so browser,
 font, GPU, clipboard, focus, and IME integrations are exercised.
 
+Know which lane each of those tests can run in before writing one. The frontend
+lane is `pnpm exec node --test` over `.ts` through Node's type stripping. It
+cannot parse JSX, and that is deliberate rather than incidental:
+
+```sh
+sed -n '5,8p' core/frontend/terminal/index.ts
+```
+
+The comment states that React components are deliberately not exported, because
+mixing views into the entry point would make the capability's logic untestable
+in those lanes. The tree matches: no `.test.tsx` exists, no test imports a
+`.tsx`, and `package.json` carries no vitest, jest, jsdom, happy-dom, or React
+renderer.
+
+So the working pattern is logic in `.ts`, xterm as an erased `import type`, and
+a structural fake. Only three modules value-import xterm — `terminalMeasure.ts`,
+`terminalRendererAddons.ts`, and `TerminalView.tsx` — while
+`terminalRenderer.ts`, `terminalTheme.ts` and `terminalOutputQueue.ts` take it
+as a type and are tested against fakes today.
+
+That splits the untested presentation facts by what each actually needs:
+
+- `terminalMeasure` needs a DOM and nothing else. It is already a `.ts` file
+  that the lane can parse; only `document` is missing.
+- Browser input delivery, the hidden-surface early return, visibility in the
+  attachment dependencies, and cleanup disposal are React lifecycle facts inside
+  a `.tsx`. Testing them where they sit needs a JSX transform, a DOM, and a
+  React renderer. That is a repository-wide toolchain decision with a named
+  owner, not a task inside this area.
+
+Do not adopt a second frontend toolchain to satisfy this area. Area 03 already
+moves that logic out of the component and behind a port, which is the same shape
+the existing fakes rely on. Sequence the work so those facts become testable in
+the lane that exists. Record any residue that still needs a new toolchain as an
+explicit owner decision rather than an implied one.
+
 Add CLI integration scenarios through the control socket for semantic attach,
 resize, interaction, raw presentation, NDJSON, effects, disconnect, and exit.
 Verify that captured local painter output derives from semantic fixtures rather

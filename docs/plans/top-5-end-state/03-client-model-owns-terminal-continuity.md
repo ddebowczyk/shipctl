@@ -247,6 +247,25 @@ Run at least one production Tauri attachment scenario with a real host frame to
 prove the decoder and controller are connected. Fixture-only tests cannot prove
 the live component stopped consuming raw output.
 
+This extraction is also what makes the current view's behavior testable at all,
+which is a second reason to sequence it before area 04.
+
+```sh
+ast-grep outline core/frontend/terminal/TerminalView.tsx
+```
+
+One interface and one exported function. The whole file is a single component
+body, so every fact about input delivery, hidden-surface behavior, visibility
+dependencies, and cleanup disposal is reachable only through a React lifecycle.
+The frontend lane runs `pnpm exec node --test` over `.ts` through type
+stripping and cannot parse JSX, so nothing in the repository executes any of
+those facts today. Moving them into `.ts` behind a controller port puts them in
+the lane that already exists, beside the fakes that
+`terminalRenderer.test.ts` and `terminalOutputQueue.test.ts` use. Adding a JSX
+and DOM toolchain to test them where they sit is the alternative this area
+removes the need for. See area 04's validation section for the split between
+what this extraction covers and what would still need an owner decision.
+
 Measure model application, retained client memory, hidden-update cost, surface
 catch-up, and history-window cache behavior. Report values without inventing
 acceptance thresholds.
