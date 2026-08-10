@@ -62,8 +62,33 @@ One actor harness closes:
   called from `handle_output` and from `set_theme`, so a test against the output
   path alone satisfies half the requirement.
 
-This is the highest proof-per-unit-work item in the entire plan and it has no
-dependencies. It should be first.
+**Correction: this is not dependency-free, and I first wrote that it was.**
+Two constraints sit in front of it, and both were found after the claim.
+
+*Visibility.* `ast-grep outline core/backend/src/terminal` lists
+`TerminalRuntimeHandle` and `TerminalEventSink` from `runtime.rs`, and no actor.
+`struct RuntimeActor` at `runtime.rs:287` has no `pub` and appears in no other
+module. Nothing outside the file can name it, so the harness belongs in
+`runtime.rs`'s own `mod tests` (`:1053`), which can reach it, or the actor gains
+deliberate test visibility as a recorded decision.
+
+*Constructibility, which visibility does not solve.* The actor has exactly one
+constructor, `RuntimeActor::initialize`, called only from the thread spawned
+inside `start`. It takes a `TerminalLaunchRequest` and produces `master`,
+`writer`, `terminator`, and `child_pid` — it spawns a real PTY and a real child.
+The struct holds `Box<dyn MasterPty + Send>` and `ProcessTerminator` directly and
+has no other constructor. So a test placed inside `mod tests` still cannot obtain
+an actor without launching a process.
+
+The harness therefore needs a seam decision before it needs a test — inject the
+PTY-side values at the `initialize` boundary, or lift the publication decisions
+into pure functions the actor calls. The second is what the frontend already did
+successfully: `resolveViewportDrainAction` decides what a drain should do and is
+tested with no xterm, no DOM, and no terminal at all.
+
+It remains the highest proof-per-unit-work item, and it should still be first.
+It is a small refactor followed by cheap tests, not cheap tests alone, and
+planning it as the latter would stall at the first assertion.
 
 ## Finding 3: area 03 is half-built and its pattern is proven
 

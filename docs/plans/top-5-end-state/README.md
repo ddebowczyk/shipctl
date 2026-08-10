@@ -16,6 +16,8 @@ replay, to xterm. xterm parses it again and remains the browser's buffer,
 history, width, mode, selection, and input authority. That duplicated authority
 is the root cause of cursor, reflow, replay, visibility, and recovery tripwires.
 
+[`00-drive-assessment.md`](00-drive-assessment.md) answers how to drive the work:
+what the enablers left, where the remaining risk is, and the order to start in.
 The five plans below close one authority boundary each:
 
 1. [Host semantic authority is production](01-host-semantic-authority-is-production.md)
@@ -116,6 +118,14 @@ registry writer is introduced.
 
 This is an authority acceptance order, not a requirement for five monolithic
 pull requests or strictly serial staffing.
+
+**It is not a start order.** It says which proof must exist before another proof
+counts. Risk and dependency do not point the same way here: read as a start
+order it puts the only surviving unknown last.
+[`00-drive-assessment.md`](00-drive-assessment.md) derives the execution order
+from what the enablers measurably left in the tree, and it begins with an actor
+harness that is in none of the five areas. Read it before staffing them. The
+acceptance order below is unchanged by it.
 
 - Area 04 begins its capability register, Unicode rendering probe, IME and
   accessibility probes, and CLI painter probe while area 01 progresses.
