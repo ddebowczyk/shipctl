@@ -342,6 +342,103 @@ mod tests {
         }
     }
 
+    /// Area 01 criterion 10: a dependency that changed an exposed semantic fact
+    /// must fail the gate rather than pass with stale state.
+    ///
+    /// The gate is a comparison against a checked-in file, so it is only as
+    /// strong as what that file records. This test perturbs one fact at a time
+    /// and requires the recorded form to change. A fact that survives its own
+    /// perturbation is a fact the corpus cannot defend, whatever the parser
+    /// does with it later.
+    ///
+    /// The perturbation stands in for the parser reporting something else. It
+    /// is applied to the projection because the alternative — pinning a second
+    /// parser revision to disagree with — is not available offline.
+    #[test]
+    fn a_changed_semantic_fact_cannot_pass_the_corpus_gate() {
+        type Perturbation = (&'static str, &'static str, fn(&mut TerminalProjection));
+        const PERTURBATIONS: &[Perturbation] = &[
+            ("soft-wrap", "the cursor moved", |state| {
+                state.cursor.column += 1;
+            }),
+            ("soft-wrap", "the cursor became hidden", |state| {
+                state.cursor.visible = !state.cursor.visible;
+            }),
+            ("soft-wrap", "a pending wrap was dropped", |state| {
+                state.cursor.pending_wrap = !state.cursor.pending_wrap;
+            }),
+            ("soft-wrap", "a filled row stopped wrapping", |state| {
+                state.viewport[0].wrapped = false;
+            }),
+            ("soft-wrap", "a row stopped continuing", |state| {
+                state.viewport[1].continuation = false;
+            }),
+            ("soft-wrap", "a glyph changed", |state| {
+                state.viewport[0].cells[0].text = "z".to_string();
+            }),
+            ("soft-wrap", "history appeared", |state| {
+                state.scrollback_rows += 1;
+            }),
+            ("wide-graphemes", "a wide cell became narrow", |state| {
+                state.viewport[0].cells[0].width = ProjectedWidth::Narrow;
+            }),
+            ("sgr-styles", "bold was lost", |state| {
+                state.viewport[0].cells[0].bold = false;
+            }),
+            ("sgr-styles", "a foreground was lost", |state| {
+                for cell in &mut state.viewport[0].cells {
+                    cell.foreground = None;
+                }
+            }),
+            ("sgr-styles", "a background was lost", |state| {
+                for cell in &mut state.viewport[0].cells {
+                    cell.background = None;
+                }
+            }),
+            ("hyperlink", "a link was lost", |state| {
+                for cell in &mut state.viewport[0].cells {
+                    cell.hyperlink = None;
+                }
+            }),
+            ("prompt-marks", "a prompt mark was lost", |state| {
+                for row in &mut state.viewport {
+                    row.prompt = ProjectedPrompt::None;
+                }
+            }),
+            ("mode-switches", "a mode flipped", |state| {
+                state.modes.bracketed_paste = !state.modes.bracketed_paste;
+            }),
+            ("alt-screen", "the active screen changed", |state| {
+                state.screen = super::super::projection::ProjectedScreen::Alternate;
+            }),
+            ("alt-screen", "the default colours changed", |state| {
+                state.colors.foreground = None;
+            }),
+            ("alt-screen", "a palette entry changed", |state| {
+                state.colors.palette[1] = ProjectedColor { r: 1, g: 2, b: 3 };
+            }),
+        ];
+
+        for (name, what, perturb) in PERTURBATIONS {
+            let trace = TRACES
+                .iter()
+                .find(|trace| trace.name == *name)
+                .unwrap_or_else(|| panic!("the corpus has no trace named {name}"));
+            let truth = replay(trace, &recorded_bytes(trace));
+            let mut changed = truth.clone();
+            perturb(&mut changed);
+            assert_ne!(
+                truth, changed,
+                "the perturbation for {name}/{what} changed nothing, so it tests nothing"
+            );
+            assert_ne!(
+                render(trace, &changed),
+                render(trace, &truth),
+                "{name}: {what} and the recorded state did not notice"
+            );
+        }
+    }
+
     /// The goldens catch drift; these assertions say what each trace is for, so
     /// a golden that drifts to something meaningless still fails.
     #[test]

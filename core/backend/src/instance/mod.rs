@@ -18,9 +18,10 @@ pub use protocol::{
     ControlOperation, ControlRequest, ControlResponse, ControlResponseResult, ControlStream,
     DiscoveryProblem, DiscoveryReport, InstanceDiagnosticReport, InstanceRecord, MessageCommand,
     ModuleCommand, ModuleControlStatus, OperationCommand, ScheduleCommand, StopOutcome,
-    TerminalAgentReportResult, TerminalAttachmentState, TerminalCloseControlResult,
-    TerminalCommand, TerminalControlEvent, TerminalInspectResult, TerminalListResult,
-    TerminalReplayFrame, TerminalWriteResult, CONTROL_FRAME_SCHEMA_VERSION,
+    TerminalAgentReportResult, TerminalAnchorReleaseResult, TerminalAnchorResolution,
+    TerminalAnchorResult, TerminalAttachmentState, TerminalCloseControlResult, TerminalCommand,
+    TerminalControlEvent, TerminalHistoryResult, TerminalInputResult, TerminalInspectResult,
+    TerminalListResult, TerminalReplayFrame, TerminalWriteResult, CONTROL_FRAME_SCHEMA_VERSION,
     TERMINAL_CONTROL_WRITE_MAX_BYTES,
 };
 /// Caller-owned identity for retryable running-instance mutations.

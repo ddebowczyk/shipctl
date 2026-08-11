@@ -231,19 +231,56 @@ pub enum TerminalRegistryEvent {
     Removed { terminal_id: TerminalId },
 }
 
+/// Which encoding of the terminal an attachment receives.
+///
+/// This is the sole migration switch from the byte path to the semantic path.
+/// Area 05 owns it from here to its deletion: when every client is on
+/// `Semantic`, this enum, the `Legacy` events it selects, and the code that
+/// produces them are removed together. It is not a preference and not a
+/// setting; nothing reads it from configuration.
+///
+/// One occurrence produces at most one event per audience, and the audiences
+/// are disjoint, so an attachment's stream stays consecutive whichever side of
+/// the switch it is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalTransport {
+    /// Child bytes and ANSI replay, interpreted by a second VT in the client.
+    /// Legacy: it exists until area 05 deletes it.
+    Legacy,
+    /// Host state as meaning. No child bytes, no ANSI.
+    Semantic,
+}
+
 /// Ordered event emitted by the host runtime. Transport adapters may encode
 /// it for Tauri, the control socket, or tests without becoming process owners.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum TerminalEvent {
+    /// Legacy. The child's bytes, for a client that parses them itself.
     Output {
         sequence: u64,
         revision: TerminalRevision,
         data: std::sync::Arc<[u8]>,
     },
+    /// Legacy. ANSI that reconstructs the screen in a second VT.
     Replay {
         sequence: u64,
         replay: TerminalReplay,
+    },
+    /// The host's state, as meaning. Carries no child bytes and no ANSI.
+    ///
+    /// The effects travel beside the state, not inside it: a bell is not a
+    /// cell, and a title is not a row. They are ordered as the parser reported
+    /// them, and they belong to this occurrence — which is why they share its
+    /// frame instead of taking a sequence number of their own, because a
+    /// sequence a byte-path attachment never receives would make its stream
+    /// look like it had lost an event.
+    Screen {
+        sequence: u64,
+        revision: TerminalRevision,
+        state: Box<super::projection::TerminalProjection>,
+        effects: Vec<super::effects::TerminalEffect>,
     },
     MetadataChanged {
         sequence: u64,
@@ -281,7 +318,21 @@ pub struct TerminalReplay {
 pub struct TerminalRuntimeSnapshot {
     pub descriptor: TerminalDescriptor,
     pub sequence_boundary: u64,
+    /// The byte path's baseline: ANSI that reconstructs the screen. Legacy;
+    /// area 05 deletes it with the encoding it serves.
     pub replay: TerminalReplay,
+    /// The semantic path's baseline: the host's state as meaning.
+    ///
+    /// Present exactly when the attachment asked for the semantic encoding, and
+    /// absent otherwise, because projecting costs real work and a byte-path
+    /// client would never read it. It carries the terminal's state at
+    /// `sequence_boundary`, at the revision the descriptor reports, so a client
+    /// model starts from a state the host named rather than from bytes it
+    /// re-parses.
+    /// It is written as null rather than omitted on the byte path: a client
+    /// that must decide what a missing field meant is a client that can guess.
+    #[serde(default)]
+    pub state: Option<Box<super::projection::TerminalProjection>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

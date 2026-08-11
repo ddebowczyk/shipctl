@@ -1,0 +1,15 @@
+{
+  "id": 1,
+  "retained": true,
+  "lossReported": true,
+  "history": {
+    "column": 0,
+    "row": 0
+  },
+  "screen": {
+    "column": 0,
+    "row": 0
+  },
+  "viewport": null,
+  "active": null
+}

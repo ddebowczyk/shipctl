@@ -14,18 +14,30 @@ use crate::scheduler::{
     ScheduleVerification,
 };
 use crate::state::archive::StateArchiveInspection;
-use crate::terminal::projection::TerminalProjection;
+use crate::terminal::effects::TerminalEffect;
+use crate::terminal::input::TerminalInput;
+use crate::terminal::projection::{
+    ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
+    TerminalProjection,
+};
 use crate::terminal::{
     TerminalAgentActivity, TerminalAgentReportKind, TerminalAgentReportSource,
     TerminalAttachmentId, TerminalDescriptor, TerminalExit, TerminalId, TerminalRevision,
+    TerminalTransport,
 };
 
 /// The JSON-line envelope version for the authenticated local endpoint.
 ///
-/// Version seven adds explicit host-owned terminal agent reports and activity
-/// events. The build control-protocol version remains the compatibility check
-/// between executable roles; this version only describes the wire envelope.
-pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 7;
+/// Version nine adds terminal anchors: a handle for one line that the host
+/// moves with its cell through scrolling, eviction and reflow. History row
+/// numbers are positions, so eviction renumbers them; an anchor is what lets a
+/// client keep naming one line across reads. Version eight added
+/// history-window reads: the rows that scrolled out of the viewport, answered
+/// by the host's own retention rather than reconstructed by a client that kept
+/// the child's output. The build control-protocol version remains the
+/// compatibility check between executable roles; this version only describes
+/// the wire envelope.
+pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 9;
 
 /// Maximum raw bytes accepted by one terminal control write. This preserves
 /// the replaced terminal ACK path's established 100,000-byte flow-control
@@ -253,7 +265,10 @@ pub enum ControlOperation {
 
 /// Commands against the host-owned terminal registry. `Attach` is the only
 /// long-lived operation; every other command produces a finite response.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+///
+/// Not `Eq`: a pointer position is a pixel measurement, and two of them are
+/// comparable but not equatable.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     rename_all = "snake_case",
     rename_all_fields = "camelCase",
@@ -267,15 +282,68 @@ pub enum TerminalCommand {
     },
     Attach {
         terminal_id: TerminalId,
+        /// Which encoding of the terminal to receive. A request that names none
+        /// gets the byte encoding, because a client built before this field
+        /// existed asked for the only encoding there was. Area 05 deletes the
+        /// field, the default and the encoding it names together.
+        #[serde(default = "attach_encoding_default")]
+        encoding: TerminalTransport,
     },
     /// Read the host's semantic state. This is an inspection path: it publishes
     /// nothing and moves no sequence.
     Inspect {
         terminal_id: TerminalId,
     },
+    /// Read a window of retained history: the rows behind the viewport.
+    ///
+    /// The viewport is what a screen frame carries, so this is the only way a
+    /// client sees what scrolled away. It reads the host's retention rather
+    /// than a client's copy of the child's output, which is why scrollback
+    /// survives the byte path's deletion. Like `Inspect`, it publishes nothing
+    /// and moves no sequence.
+    History {
+        terminal_id: TerminalId,
+        /// Oldest retained row is zero. Eviction renumbers, so this names a
+        /// position in history, never a line.
+        start_row: u32,
+        /// How many rows to read. A request past what history holds answers
+        /// with the rows that exist.
+        rows: u32,
+    },
+    /// Pin a cell, so a client can keep naming one line while row numbers move
+    /// under it.
+    ///
+    /// The host holds the pin until the client releases it, which is why this
+    /// is the one terminal read that leaves something behind.
+    Anchor {
+        terminal_id: TerminalId,
+        /// Which space the point is named in. The same cell has a different
+        /// number in each, so the space is never inferred from the number.
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    },
+    /// Where an anchor is now. An anchor the host does not hold answers with
+    /// nothing, rather than with another line.
+    ResolveAnchor {
+        terminal_id: TerminalId,
+        anchor: TerminalAnchorId,
+    },
+    /// Drop an anchor. Answers whether the host was holding it, so a client
+    /// that lost track of its own handles learns which ones were live.
+    ReleaseAnchor {
+        terminal_id: TerminalId,
+        anchor: TerminalAnchorId,
+    },
     Write {
         terminal_id: TerminalId,
         data_base64: String,
+    },
+    /// Report what a person did and let the host encode it. The client sends
+    /// meaning; which bytes that becomes depends on the modes the child
+    /// selected, and those live in the host's parser.
+    Input {
+        terminal_id: TerminalId,
+        input: TerminalInput,
     },
     Report {
         terminal_id: TerminalId,
@@ -286,6 +354,12 @@ pub enum TerminalCommand {
     Close {
         terminal_id: TerminalId,
     },
+}
+
+/// The encoding an attach request gets when it names none. Legacy, and deleted
+/// with the byte path.
+fn attach_encoding_default() -> TerminalTransport {
+    TerminalTransport::Legacy
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -307,11 +381,67 @@ pub struct TerminalInspectResult {
     pub projection: TerminalProjection,
 }
 
+/// Rows read out of the host's retention, with what history looked like when
+/// they were read.
+///
+/// The window is the runtime's own, unchanged: this frame adds the terminal it
+/// belongs to and nothing else.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalHistoryResult {
+    pub terminal_id: TerminalId,
+    pub window: TerminalHistoryWindow,
+}
+
+/// One anchor the host minted, and where its line is now.
+///
+/// The anchor is the runtime's own, unchanged: this frame adds the terminal it
+/// belongs to and nothing else.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalAnchorResult {
+    pub terminal_id: TerminalId,
+    pub anchor: TerminalAnchor,
+}
+
+/// Where an anchor is now, or that the host holds no such handle.
+///
+/// `anchor` is `None` for a handle the host never minted or already released.
+/// That is an answer, not a failure: a client that outlived its own anchor
+/// learns so rather than reading a cell that now holds another line.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalAnchorResolution {
+    pub terminal_id: TerminalId,
+    pub anchor: Option<TerminalAnchor>,
+}
+
+/// Whether the host was holding the anchor a client dropped.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalAnchorReleaseResult {
+    pub terminal_id: TerminalId,
+    pub anchor: TerminalAnchorId,
+    pub released: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TerminalWriteResult {
     pub terminal_id: TerminalId,
     pub accepted_bytes: usize,
+}
+
+/// What the host made of one semantic input.
+///
+/// `encoded_bytes` is zero when the child's current modes do not report the
+/// input — a mouse move with no tracking on, a focus change with no focus
+/// reporting. That is an answer, not a failure.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalInputResult {
+    pub terminal_id: TerminalId,
+    pub encoded_bytes: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -350,6 +480,9 @@ pub struct TerminalAttachmentState {
     pub descriptor: TerminalDescriptor,
     pub sequence_boundary: u64,
     pub replay: TerminalReplayFrame,
+    /// The semantic baseline, present exactly when the attachment asked for the
+    /// semantic encoding. Nothing here is base64; it carries no child bytes.
+    pub state: Option<Box<TerminalProjection>>,
 }
 
 /// One event from a detachable terminal subscription. The terminal sequence
@@ -374,6 +507,16 @@ pub enum TerminalControlEvent {
         attachment_id: TerminalAttachmentId,
         sequence: u64,
         replay: TerminalReplayFrame,
+    },
+    /// Host state as meaning. The semantic path's answer to `Output` and
+    /// `Replay`, carrying no child bytes and no ANSI.
+    Screen {
+        terminal_id: TerminalId,
+        attachment_id: TerminalAttachmentId,
+        sequence: u64,
+        revision: TerminalRevision,
+        state: Box<TerminalProjection>,
+        effects: Vec<TerminalEffect>,
     },
     MetadataChanged {
         terminal_id: TerminalId,
@@ -522,7 +665,12 @@ pub enum ControlResponseResult {
     TerminalList(TerminalListResult),
     TerminalDescriptor(TerminalDescriptor),
     TerminalInspect(TerminalInspectResult),
+    TerminalHistory(TerminalHistoryResult),
+    TerminalAnchor(TerminalAnchorResult),
+    TerminalAnchorResolution(TerminalAnchorResolution),
+    TerminalAnchorRelease(TerminalAnchorReleaseResult),
     TerminalWrite(TerminalWriteResult),
+    TerminalInput(TerminalInputResult),
     TerminalAgentReport(TerminalAgentReportResult),
     TerminalClose(TerminalCloseControlResult),
     TerminalAttachment(TerminalAttachmentState),
@@ -616,7 +764,12 @@ mod tests {
         ControlOperation, ControlResponseResult, MessageCommand, ScheduleCommand, TerminalCommand,
     };
     use crate::scheduler::{ScheduleInspection, SCHEDULE_INSPECTION_SCHEMA_VERSION};
-    use crate::terminal::{TerminalAgentReportKind, TerminalAgentReportSource, TerminalId};
+    use crate::terminal::input::{
+        TerminalInput, TerminalKeyAction, TerminalKeyEvent, TerminalModifiers,
+    };
+    use crate::terminal::{
+        TerminalAgentReportKind, TerminalAgentReportSource, TerminalId, TerminalTransport,
+    };
     use std::str::FromStr;
 
     fn schedule_inspection() -> ScheduleInspection {
@@ -657,7 +810,14 @@ mod tests {
         for command in [
             TerminalCommand::List {},
             TerminalCommand::Get { terminal_id },
-            TerminalCommand::Attach { terminal_id },
+            TerminalCommand::Attach {
+                terminal_id,
+                encoding: TerminalTransport::Legacy,
+            },
+            TerminalCommand::Attach {
+                terminal_id,
+                encoding: TerminalTransport::Semantic,
+            },
             TerminalCommand::Write {
                 terminal_id,
                 data_base64: "AAEC/w==".to_string(),
@@ -670,6 +830,25 @@ mod tests {
                     version: "1.0.0".to_string(),
                 },
                 message: Some("waiting for review".to_string()),
+            },
+            TerminalCommand::Input {
+                terminal_id,
+                input: TerminalInput::Key(TerminalKeyEvent {
+                    action: TerminalKeyAction::Press,
+                    code: "ArrowUp".to_string(),
+                    text: None,
+                    mods: TerminalModifiers {
+                        ctrl: true,
+                        ..TerminalModifiers::default()
+                    },
+                    composing: false,
+                }),
+            },
+            TerminalCommand::Input {
+                terminal_id,
+                input: TerminalInput::Paste {
+                    text: "pasted".to_string(),
+                },
             },
             TerminalCommand::Close { terminal_id },
         ] {
@@ -693,6 +872,89 @@ mod tests {
                 "dataBase64": "AA=="
             }))
             .is_err()
+        );
+    }
+
+    /// The encoding is named on the wire, and a request written before the
+    /// field existed still asks for the encoding it was built to read.
+    #[test]
+    fn attach_names_its_encoding_and_an_older_client_still_gets_bytes() {
+        let terminal_id = TerminalId::from_str("01234567-89ab-4def-8123-456789abcdef").unwrap();
+
+        let semantic = serde_json::to_value(TerminalCommand::Attach {
+            terminal_id,
+            encoding: TerminalTransport::Semantic,
+        })
+        .unwrap();
+        assert_eq!(semantic["encoding"], "semantic");
+
+        let older: TerminalCommand = serde_json::from_value(serde_json::json!({
+            "type": "attach",
+            "terminalId": terminal_id,
+        }))
+        .unwrap();
+        assert_eq!(
+            older,
+            TerminalCommand::Attach {
+                terminal_id,
+                encoding: TerminalTransport::Legacy,
+            }
+        );
+
+        assert!(
+            serde_json::from_value::<TerminalCommand>(serde_json::json!({
+                "type": "attach",
+                "terminalId": terminal_id,
+                "encoding": "guess",
+            }))
+            .is_err(),
+            "an encoding the host does not implement is refused, not guessed"
+        );
+    }
+
+    /// Input crosses the boundary as what a person did. A client that names
+    /// bytes instead of meaning, or a key this host cannot read, is refused
+    /// rather than guessed at.
+    #[test]
+    fn input_names_meaning_on_the_wire_and_never_bytes() {
+        let terminal_id = TerminalId::from_str("01234567-89ab-4def-8123-456789abcdef").unwrap();
+
+        let encoded = serde_json::to_value(TerminalCommand::Input {
+            terminal_id,
+            input: TerminalInput::Key(TerminalKeyEvent {
+                action: TerminalKeyAction::Press,
+                code: "ArrowUp".to_string(),
+                text: None,
+                mods: TerminalModifiers::default(),
+                composing: false,
+            }),
+        })
+        .unwrap();
+        assert_eq!(encoded["type"], "input");
+        assert_eq!(encoded["input"]["kind"], "key");
+        assert_eq!(encoded["input"]["code"], "ArrowUp");
+        assert!(
+            encoded["input"].get("dataBase64").is_none(),
+            "a semantic input carries no bytes for the host to trust"
+        );
+
+        assert!(
+            serde_json::from_value::<TerminalCommand>(serde_json::json!({
+                "type": "input",
+                "terminalId": terminal_id,
+                "input": { "kind": "key", "action": "press", "code": "ArrowUp" },
+                "unexpected": true,
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<TerminalCommand>(serde_json::json!({
+                "type": "input",
+                "terminalId": terminal_id,
+                "input": { "kind": "telepathy" },
+            }))
+            .is_err(),
+            "an input kind the host does not implement is refused, not guessed"
         );
     }
 

@@ -491,6 +491,50 @@ test("a container change reaches the host only while an attachment is held", asy
   session.dispose();
 });
 
+test("a terminal already on screen is told the theme and the font changed", async () => {
+  const h = new Harness();
+  const session = startTerminalViewSession(h.ports);
+  h.proposed = { columns: 120, rows: 50 };
+  await h.frame();
+  h.trace.length = 0;
+
+  // A new theme repaints and nothing more: colour does not decide how much of a
+  // terminal fits.
+  session.applyTheme();
+  await settle();
+  assert.deepEqual(h.trace, ["theme"]);
+
+  // A new font does. The cell is a different size, so the host is told how many
+  // columns and rows the same container now holds.
+  h.trace.length = 0;
+  h.proposed = { columns: 96, rows: 40 };
+  session.applySettings();
+  await settle();
+  assert.deepEqual(h.trace, [
+    "settings",
+    "fit:96x40",
+    `host-resize:${h.attachmentId}:96x40`,
+  ]);
+
+  session.dispose();
+});
+
+test("a disposed session is told nothing more about the theme or the font", async () => {
+  const h = new Harness();
+  const session = startTerminalViewSession(h.ports);
+  await h.frame();
+  session.dispose();
+  await settle();
+  h.trace.length = 0;
+
+  h.proposed = { columns: 96, rows: 40 };
+  session.applyTheme();
+  session.applySettings();
+  await settle();
+
+  assert.deepEqual(h.trace, []);
+});
+
 test("a disposed session stops fitting", async () => {
   const h = new Harness();
   const session = startTerminalViewSession(h.ports);

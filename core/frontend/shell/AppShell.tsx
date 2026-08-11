@@ -13,7 +13,7 @@ import { useShallow } from "zustand/shallow";
 import { useTerminalActions } from "../terminal/index.ts";
 import { useThemeApplicator } from "./useThemeApplicator.ts";
 import { useProjectWatcher } from "../projects/index.ts";
-import { computeTerminalSize } from "../terminal/index.ts";
+import { computeTerminalSize } from "../terminal/browser.ts";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { BUILTIN_GLOBAL_SURFACE_LOADERS } from "./builtinGlobalSurfaceLoaders.ts";

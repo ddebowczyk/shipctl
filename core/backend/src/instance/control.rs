@@ -25,9 +25,11 @@ use super::protocol::{
     DiscoveryProblem, DiscoveryProblemCategory, DiscoveryReport, InstanceDiagnosticReport,
     InstanceLifecycle, InstanceRecord, MessageCommand, ModuleCommand, ModuleControlStatus,
     OperationCommand, ScheduleCommand, StopOutcome, StoredDescriptor, TerminalAgentReportResult,
+    TerminalAnchorReleaseResult, TerminalAnchorResolution, TerminalAnchorResult,
     TerminalAttachmentState, TerminalCloseControlResult, TerminalCommand, TerminalControlEvent,
-    TerminalInspectResult, TerminalListResult, TerminalReplayFrame, TerminalWriteResult,
-    CONTROL_FRAME_SCHEMA_VERSION, TERMINAL_CONTROL_WRITE_MAX_BYTES,
+    TerminalHistoryResult, TerminalInputResult, TerminalInspectResult, TerminalListResult,
+    TerminalReplayFrame, TerminalWriteResult, CONTROL_FRAME_SCHEMA_VERSION,
+    TERMINAL_CONTROL_WRITE_MAX_BYTES,
 };
 use crate::message_bus::{MessageDiagnosticReport, MessageRuntimeInspection, RUNTIME_UNAVAILABLE};
 use crate::module_control::codes::{
@@ -43,10 +45,14 @@ use crate::scheduler::{
     ScheduleVerification,
 };
 use crate::state::archive::StateArchiveInspection;
+use crate::terminal::input::TerminalInput;
+use crate::terminal::projection::{
+    ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
+};
 use crate::terminal::{
     TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId,
     TerminalDescriptor, TerminalError, TerminalErrorCode, TerminalEvent, TerminalEventSink,
-    TerminalId,
+    TerminalId, TerminalTransport,
 };
 
 const DESCRIPTOR_SCHEMA_VERSION: u32 = 1;
@@ -124,7 +130,54 @@ pub trait ControlHandler: Send + Sync + 'static {
     fn terminal_inspect(&self, _id: TerminalId) -> Result<TerminalInspectResult, ControlError> {
         Err(terminal_control_unavailable())
     }
+    /// Read a window of the rows behind the viewport. The host is the retention
+    /// authority, so this answers what scrolled away without any client keeping
+    /// a copy of the child's output.
+    fn terminal_history(
+        &self,
+        _id: TerminalId,
+        _start_row: u32,
+        _rows: u32,
+    ) -> Result<TerminalHistoryWindow, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    /// Pin a cell. History row numbers are positions and eviction renumbers
+    /// them, so a client that must keep naming one line holds one of these
+    /// instead of a number.
+    fn terminal_anchor(
+        &self,
+        _id: TerminalId,
+        _space: ProjectedSpace,
+        _at: ProjectedPoint,
+    ) -> Result<TerminalAnchor, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    /// Where an anchor is now, or `None` when the host holds no such handle.
+    fn terminal_resolve_anchor(
+        &self,
+        _id: TerminalId,
+        _anchor: TerminalAnchorId,
+    ) -> Result<Option<TerminalAnchor>, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    /// Drop an anchor, answering whether the host was holding it.
+    fn terminal_release_anchor(
+        &self,
+        _id: TerminalId,
+        _anchor: TerminalAnchorId,
+    ) -> Result<bool, ControlError> {
+        Err(terminal_control_unavailable())
+    }
     fn terminal_write(&self, _id: TerminalId, _data: Vec<u8>) -> Result<(), ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    /// Encode one semantic input from the host's current modes and write it to
+    /// the child. Answers how many bytes that became.
+    fn terminal_input(
+        &self,
+        _id: TerminalId,
+        _input: TerminalInput,
+    ) -> Result<usize, ControlError> {
         Err(terminal_control_unavailable())
     }
     fn terminal_report(
@@ -143,6 +196,7 @@ pub trait ControlHandler: Send + Sync + 'static {
         &self,
         _id: TerminalId,
         _sink: Arc<dyn TerminalEventSink>,
+        _encoding: TerminalTransport,
     ) -> Result<TerminalAttachment, ControlError> {
         Err(terminal_control_unavailable())
     }
@@ -461,7 +515,10 @@ fn handle_connection(
         _ => None,
     };
     if let ControlOperation::Terminals {
-        command: TerminalCommand::Attach { terminal_id },
+        command: TerminalCommand::Attach {
+            terminal_id,
+            encoding,
+        },
     } = request.operation.clone()
     {
         if let Err(error) = validate_request(&request, descriptor) {
@@ -476,6 +533,7 @@ fn handle_connection(
             reader.into_inner(),
             request.request_id,
             terminal_id,
+            encoding,
             handler,
             signal,
         )
@@ -744,6 +802,53 @@ fn dispatch_terminal_request(
         TerminalCommand::Inspect { terminal_id } => handler
             .terminal_inspect(terminal_id)
             .map(ControlResponseResult::TerminalInspect),
+        TerminalCommand::History {
+            terminal_id,
+            start_row,
+            rows,
+        } => handler
+            .terminal_history(terminal_id, start_row, rows)
+            .map(|window| {
+                ControlResponseResult::TerminalHistory(TerminalHistoryResult {
+                    terminal_id,
+                    window,
+                })
+            }),
+        TerminalCommand::Anchor {
+            terminal_id,
+            space,
+            at,
+        } => handler
+            .terminal_anchor(terminal_id, space, at)
+            .map(|anchor| {
+                ControlResponseResult::TerminalAnchor(TerminalAnchorResult {
+                    terminal_id,
+                    anchor,
+                })
+            }),
+        TerminalCommand::ResolveAnchor {
+            terminal_id,
+            anchor,
+        } => handler
+            .terminal_resolve_anchor(terminal_id, anchor)
+            .map(|anchor| {
+                ControlResponseResult::TerminalAnchorResolution(TerminalAnchorResolution {
+                    terminal_id,
+                    anchor,
+                })
+            }),
+        TerminalCommand::ReleaseAnchor {
+            terminal_id,
+            anchor,
+        } => handler
+            .terminal_release_anchor(terminal_id, anchor)
+            .map(|released| {
+                ControlResponseResult::TerminalAnchorRelease(TerminalAnchorReleaseResult {
+                    terminal_id,
+                    anchor,
+                    released,
+                })
+            }),
         TerminalCommand::Write {
             terminal_id,
             data_base64,
@@ -756,6 +861,14 @@ fn dispatch_terminal_request(
                 })
             })
         }),
+        TerminalCommand::Input { terminal_id, input } => {
+            handler.terminal_input(terminal_id, input).map(|encoded| {
+                ControlResponseResult::TerminalInput(TerminalInputResult {
+                    terminal_id,
+                    encoded_bytes: encoded,
+                })
+            })
+        }
         TerminalCommand::Report {
             terminal_id,
             kind,
@@ -919,6 +1032,7 @@ fn handle_terminal_attachment(
     stream: Stream,
     request_id: Uuid,
     terminal_id: TerminalId,
+    encoding: TerminalTransport,
     handler: &dyn ControlHandler,
     signal: Arc<ServerSignal>,
 ) -> std::io::Result<()> {
@@ -995,7 +1109,7 @@ fn handle_terminal_attachment(
     );
 
     let mut writer_guard = writer.lock().unwrap_or_else(|error| error.into_inner());
-    let attachment = match handler.terminal_attach(terminal_id, sink) {
+    let attachment = match handler.terminal_attach(terminal_id, sink, encoding) {
         Ok(attachment) => attachment,
         Err(error) => {
             return write_frames_to(
@@ -1009,11 +1123,12 @@ fn handle_terminal_attachment(
         .lock()
         .unwrap_or_else(|error| error.into_inner()) = Some(attachment.attachment_id);
     let initial = terminal_attachment_state(terminal_id, &attachment);
-    // Attachment writes must never wait on a client receive buffer. The
-    // terminal runtime already supplies the bounded mailbox; a full socket
-    // therefore fails this subscriber instead of adding another queue or
-    // blocking PTY draining.
-    writer_guard.set_nonblocking(true)?;
+    // Frames are written whole and blocking. A frame carrying meaning is larger
+    // than a socket send buffer, so a nonblocking write would stop in the middle
+    // of one and leave the reader a broken line it cannot recover from. Waiting
+    // here costs nothing that matters: the terminal runtime holds the bounded
+    // mailbox, so a client that stops reading fills that mailbox and is resynced
+    // or detached, and PTY draining never waits on this thread.
     if let Err(error) = write_response_frame(
         &mut writer_guard,
         &ControlResponse::success(
@@ -1044,10 +1159,9 @@ fn handle_terminal_attachment(
     closed.store(true, Ordering::SeqCst);
     let _ = handler.terminal_detach(attachment.attachment_id);
 
-    // A disconnected or stalled peer may make this write fail; attachment
-    // cleanup has already happened and never closes the terminal process. A
-    // shutdown completion lets a well-behaved client close its read observer;
-    // nonblocking I/O keeps a stalled peer from delaying server teardown.
+    // A disconnected peer may make this write fail; attachment cleanup has
+    // already happened and never closes the terminal process. A shutdown
+    // completion lets a well-behaved client close its read observer.
     let mut writer_guard = writer.lock().unwrap_or_else(|error| error.into_inner());
     write_completion_frame(
         &mut writer_guard,
@@ -1072,6 +1186,7 @@ fn terminal_attachment_state(
         descriptor: attachment.snapshot.descriptor.clone(),
         sequence_boundary: attachment.snapshot.sequence_boundary,
         replay: terminal_replay_frame(&attachment.snapshot.replay),
+        state: attachment.snapshot.state.clone(),
     }
 }
 
@@ -1111,6 +1226,22 @@ fn terminal_event_frame(
                 attachment_id,
                 sequence,
                 replay: terminal_replay_frame(&replay),
+            },
+            false,
+        ),
+        TerminalEvent::Screen {
+            sequence,
+            revision,
+            state,
+            effects,
+        } => (
+            TerminalControlEvent::Screen {
+                terminal_id,
+                attachment_id,
+                sequence,
+                revision,
+                state,
+                effects,
             },
             false,
         ),
@@ -1443,6 +1574,102 @@ impl InstanceDirectory {
         .and_then(expect_terminal_inspect_result)
     }
 
+    /// Reads the rows behind one terminal's viewport.
+    ///
+    /// Paired with `inspect_terminal`, this is the whole terminal: what is on
+    /// screen and what scrolled off it, both from the host's retention.
+    pub fn history_terminal(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+        start_row: u32,
+        rows: u32,
+    ) -> Result<TerminalHistoryResult, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::History {
+                    terminal_id,
+                    start_row,
+                    rows,
+                },
+            },
+        )
+        .and_then(expect_terminal_history_result)
+    }
+
+    /// Pins a cell, and answers with the handle the host minted.
+    ///
+    /// A row number read now names a different line after the terminal evicts.
+    /// This is what a caller holds instead, and the caller keeps holding it
+    /// until it releases it: the host tracks a pin for as long as somebody asked
+    /// it to.
+    pub fn anchor_terminal(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    ) -> Result<TerminalAnchorResult, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::Anchor {
+                    terminal_id,
+                    space,
+                    at,
+                },
+            },
+        )
+        .and_then(expect_terminal_anchor_result)
+    }
+
+    /// Reads where an anchored line is now, in every space that still names it.
+    pub fn resolve_terminal_anchor(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+        anchor: TerminalAnchorId,
+    ) -> Result<TerminalAnchorResolution, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::ResolveAnchor {
+                    terminal_id,
+                    anchor,
+                },
+            },
+        )
+        .and_then(expect_terminal_anchor_resolution)
+    }
+
+    /// Drops an anchor the host was holding for this caller.
+    pub fn release_terminal_anchor(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+        anchor: TerminalAnchorId,
+    ) -> Result<TerminalAnchorReleaseResult, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::ReleaseAnchor {
+                    terminal_id,
+                    anchor,
+                },
+            },
+        )
+        .and_then(expect_terminal_anchor_release)
+    }
+
     pub fn write_terminal(
         &self,
         selector: &str,
@@ -1461,6 +1688,25 @@ impl InstanceDirectory {
             },
         )
         .and_then(expect_terminal_write_result)
+    }
+
+    /// Report what a person did. The bytes it becomes are the host's answer,
+    /// not this client's decision.
+    pub fn input_terminal(
+        &self,
+        selector: &str,
+        terminal_id: TerminalId,
+        input: TerminalInput,
+    ) -> Result<TerminalInputResult, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::Input { terminal_id, input },
+            },
+        )
+        .and_then(expect_terminal_input_result)
     }
 
     pub fn report_terminal_agent(
@@ -1504,10 +1750,11 @@ impl InstanceDirectory {
         &self,
         selector: &str,
         terminal_id: TerminalId,
+        encoding: TerminalTransport,
     ) -> Result<TerminalAttachmentClient, ControlError> {
         let (instances, _) = self.scan();
         let descriptor = select_instance(instances, Some(selector))?;
-        request_terminal_attachment(&descriptor, terminal_id)
+        request_terminal_attachment(&descriptor, terminal_id, encoding)
     }
 
     pub fn inspect_module(
@@ -1927,6 +2174,7 @@ fn request(
 fn request_terminal_attachment(
     descriptor: &StoredDescriptor,
     terminal_id: TerminalId,
+    encoding: TerminalTransport,
 ) -> Result<TerminalAttachmentClient, ControlError> {
     let request_id = Uuid::new_v4();
     let frame = ControlRequest {
@@ -1943,7 +2191,10 @@ fn request_terminal_attachment(
                 .filter(|value| !value.trim().is_empty()),
         },
         operation: ControlOperation::Terminals {
-            command: TerminalCommand::Attach { terminal_id },
+            command: TerminalCommand::Attach {
+                terminal_id,
+                encoding,
+            },
         },
     };
     let mut stream = connect_endpoint(&descriptor.endpoint).map_err(|error| {
@@ -2223,6 +2474,54 @@ fn expect_terminal_inspect_result(
     }
 }
 
+fn expect_terminal_history_result(
+    stream: ControlStream,
+) -> Result<TerminalHistoryResult, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalHistory(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-history result for a terminal history request",
+        )),
+    }
+}
+
+fn expect_terminal_anchor_result(
+    stream: ControlStream,
+) -> Result<TerminalAnchorResult, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalAnchor(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-anchor result for a terminal anchor request",
+        )),
+    }
+}
+
+fn expect_terminal_anchor_resolution(
+    stream: ControlStream,
+) -> Result<TerminalAnchorResolution, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalAnchorResolution(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-anchor result for a terminal anchor resolve request",
+        )),
+    }
+}
+
+fn expect_terminal_anchor_release(
+    stream: ControlStream,
+) -> Result<TerminalAnchorReleaseResult, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalAnchorRelease(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-anchor result for a terminal anchor release request",
+        )),
+    }
+}
+
 fn expect_terminal_write_result(
     stream: ControlStream,
 ) -> Result<TerminalWriteResult, ControlError> {
@@ -2231,6 +2530,18 @@ fn expect_terminal_write_result(
         _ => Err(ControlError::new(
             "control.instance.handshake_failed",
             "The endpoint returned a non-write result for a terminal write request",
+        )),
+    }
+}
+
+fn expect_terminal_input_result(
+    stream: ControlStream,
+) -> Result<TerminalInputResult, ControlError> {
+    match stream.result {
+        ControlResponseResult::TerminalInput(result) => Ok(result),
+        _ => Err(ControlError::new(
+            "control.instance.handshake_failed",
+            "The endpoint returned a non-input result for a terminal input request",
         )),
     }
 }
@@ -2270,6 +2581,12 @@ fn terminal_event_identity(
             ..
         }
         | TerminalControlEvent::Replay {
+            terminal_id,
+            attachment_id,
+            sequence,
+            ..
+        }
+        | TerminalControlEvent::Screen {
             terminal_id,
             attachment_id,
             sequence,
@@ -2644,6 +2961,7 @@ mod tests {
     use crate::instance::context::{InstanceLaunchOptions, LaunchProvenance};
     use crate::scheduler::contracts::{ScheduleDeliveryOutcome, ScheduleDeliverySummary};
     use crate::scheduler::{SCHEDULE_CONTROL_SCHEMA_VERSION, SCHEDULE_INSPECTION_SCHEMA_VERSION};
+    use crate::terminal::input::{TerminalKeyAction, TerminalKeyEvent, TerminalModifiers};
     use crate::terminal::{
         TerminalLaunchRequest, TerminalLaunchTarget, TerminalMetadata, TerminalOwner,
         TerminalService,
@@ -2768,6 +3086,48 @@ mod tests {
             })
         }
 
+        fn terminal_history(
+            &self,
+            id: TerminalId,
+            start_row: u32,
+            rows: u32,
+        ) -> Result<TerminalHistoryWindow, ControlError> {
+            self.terminals
+                .project_history(id, start_row, rows)
+                .map_err(terminal_control_error)
+        }
+
+        fn terminal_anchor(
+            &self,
+            id: TerminalId,
+            space: ProjectedSpace,
+            at: ProjectedPoint,
+        ) -> Result<TerminalAnchor, ControlError> {
+            self.terminals
+                .anchor(id, space, at)
+                .map_err(terminal_control_error)
+        }
+
+        fn terminal_resolve_anchor(
+            &self,
+            id: TerminalId,
+            anchor: TerminalAnchorId,
+        ) -> Result<Option<TerminalAnchor>, ControlError> {
+            self.terminals
+                .resolve_anchor(id, anchor)
+                .map_err(terminal_control_error)
+        }
+
+        fn terminal_release_anchor(
+            &self,
+            id: TerminalId,
+            anchor: TerminalAnchorId,
+        ) -> Result<bool, ControlError> {
+            self.terminals
+                .release_anchor(id, anchor)
+                .map_err(terminal_control_error)
+        }
+
         fn terminal_write(&self, id: TerminalId, data: Vec<u8>) -> Result<(), ControlError> {
             self.terminal_writes
                 .lock()
@@ -2775,6 +3135,16 @@ mod tests {
                 .push(data.clone());
             self.terminals
                 .write(id, &data)
+                .map_err(terminal_control_error)
+        }
+
+        fn terminal_input(
+            &self,
+            id: TerminalId,
+            input: TerminalInput,
+        ) -> Result<usize, ControlError> {
+            self.terminals
+                .input(id, input)
                 .map_err(terminal_control_error)
         }
 
@@ -2798,9 +3168,10 @@ mod tests {
             &self,
             id: TerminalId,
             sink: Arc<dyn TerminalEventSink>,
+            encoding: TerminalTransport,
         ) -> Result<TerminalAttachment, ControlError> {
             self.terminals
-                .attach(id, sink, false)
+                .attach_with(id, sink, false, encoding)
                 .map_err(terminal_control_error)
         }
 
@@ -3257,7 +3628,7 @@ mod tests {
         assert_eq!(foreign_error.code.as_str(), "terminal.not_found");
 
         let mut first = directory
-            .attach_terminal("terminal-control", terminal.id)
+            .attach_terminal("terminal-control", terminal.id, TerminalTransport::Legacy)
             .unwrap();
         assert!(first.state().live);
         assert_eq!(first.state().terminal_id, terminal.id);
@@ -3331,7 +3702,7 @@ mod tests {
         );
 
         let mut second = directory
-            .attach_terminal("terminal-control", terminal.id)
+            .attach_terminal("terminal-control", terminal.id, TerminalTransport::Legacy)
             .unwrap();
         let second_replay = BASE64_STANDARD
             .decode(&second.state().replay.data_base64)
@@ -3376,6 +3747,367 @@ mod tests {
             0
         );
 
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// The semantic path reaches a client that is not the webview. An
+    /// out-of-process attachment asks for meaning, starts from state rather
+    /// than from bytes, and is sent what the child did as state — never as the
+    /// child's bytes and never as ANSI.
+    #[cfg(unix)]
+    #[test]
+    fn an_attachment_that_asks_for_meaning_is_sent_meaning_over_the_socket() {
+        let (context, root) = fixture("terminal-semantic");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-semantic", 0);
+        let terminal = handler
+            .terminals
+            .spawn(terminal_request(
+                "stty -echo; while IFS= read -r line; do printf 'seen:%s\\r\\n' \"$line\"; done",
+            ))
+            .unwrap();
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+
+        let mut semantic = directory
+            .attach_terminal(
+                "terminal-semantic",
+                terminal.id,
+                TerminalTransport::Semantic,
+            )
+            .unwrap();
+        let baseline = semantic
+            .state()
+            .state
+            .clone()
+            .expect("a semantic attachment starts from state");
+        assert_eq!(baseline.columns, 80);
+        assert_eq!(baseline.viewport.len(), 24);
+        assert!(
+            semantic.state().replay.data_base64.is_empty(),
+            "the semantic baseline carries no ANSI for a second parser"
+        );
+
+        directory
+            .write_terminal("terminal-semantic", terminal.id, b"over-the-socket\n")
+            .unwrap();
+
+        let mut seen_screens = 0_usize;
+        let painted = loop {
+            match semantic.next_event().unwrap() {
+                Some(TerminalControlEvent::Screen { state, .. }) => {
+                    seen_screens += 1;
+                    if state
+                        .viewport
+                        .iter()
+                        .any(|row| row.text().contains("seen:over-the-socket"))
+                    {
+                        break state;
+                    }
+                }
+                Some(TerminalControlEvent::Output { .. })
+                | Some(TerminalControlEvent::Replay { .. }) => {
+                    panic!("a semantic attachment was sent the child's bytes")
+                }
+                Some(_) => continue,
+                None => panic!("the semantic attachment ended before the child's line arrived"),
+            }
+        };
+        assert!(seen_screens > 0);
+        // The state is presentable as it stands: the CLI painter turns it into
+        // local output with no access to what the child wrote.
+        let output = crate::terminal::painter::paint(&painted);
+        assert!(
+            String::from_utf8_lossy(&output).contains("seen:over-the-socket"),
+            "the painted picture does not show what the host holds"
+        );
+
+        handler.terminals.close(terminal.id).unwrap();
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// The input half of the same rule: a client reports what a person did and
+    /// names no bytes. The host encodes it from the modes the child selected,
+    /// answers how many bytes that became, and the child receives them.
+    #[cfg(unix)]
+    #[test]
+    fn a_client_reports_what_a_person_did_and_the_host_encodes_it() {
+        let (context, root) = fixture("terminal-input");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-input", 0);
+        let terminal = handler
+            .terminals
+            .spawn(terminal_request(
+                "stty -echo; while IFS= read -r line; do printf 'seen:%s\\r\\n' \"$line\"; done",
+            ))
+            .unwrap();
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+
+        let typed = directory
+            .input_terminal(
+                "terminal-input",
+                terminal.id,
+                TerminalInput::Text {
+                    text: "typed-by-meaning".to_string(),
+                },
+            )
+            .unwrap();
+        assert_eq!(typed.terminal_id, terminal.id);
+        assert_eq!(typed.encoded_bytes, "typed-by-meaning".len());
+
+        // Enter is a key, not a byte. Which byte it becomes is the host's
+        // answer from the child's current modes, and the client never says.
+        let entered = directory
+            .input_terminal(
+                "terminal-input",
+                terminal.id,
+                TerminalInput::Key(TerminalKeyEvent {
+                    action: TerminalKeyAction::Press,
+                    code: "Enter".to_string(),
+                    text: None,
+                    mods: TerminalModifiers::default(),
+                    composing: false,
+                }),
+            )
+            .unwrap();
+        assert_eq!(entered.encoded_bytes, 1);
+
+        // The child received bytes it can read, and the host holds what came
+        // back — neither end of this ever named an escape sequence.
+        loop {
+            let inspected = directory
+                .inspect_terminal("terminal-input", terminal.id)
+                .unwrap();
+            if inspected
+                .projection
+                .viewport
+                .iter()
+                .any(|row| row.text().contains("seen:typed-by-meaning"))
+            {
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        handler.terminals.close(terminal.id).unwrap();
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// What scrolled away is still the host's, and a client can read it.
+    ///
+    /// A screen frame carries the viewport only, so without this a client that
+    /// wanted scrollback would have to keep the child's output — the exact
+    /// dependency area 05 deletes. The rows come back as the same projected
+    /// rows the viewport reports, and a window past what history holds is an
+    /// empty answer rather than an error.
+    #[cfg(unix)]
+    #[test]
+    fn rows_that_scrolled_off_are_read_back_over_the_socket() {
+        let (context, root) = fixture("terminal-history");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-history", 0);
+        // Forty lines into a twenty-four-row screen: the early ones are behind
+        // the viewport by the time the last one lands.
+        let terminal = handler
+            .terminals
+            .spawn(terminal_request(
+                "i=1; while [ $i -le 40 ]; do printf 'history-line-%s\\r\\n' \"$i\"; \
+                 i=$((i+1)); done; while IFS= read -r line; do :; done",
+            ))
+            .unwrap();
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+
+        loop {
+            let inspected = directory
+                .inspect_terminal("terminal-history", terminal.id)
+                .unwrap();
+            if inspected
+                .projection
+                .viewport
+                .iter()
+                .any(|row| row.text().contains("history-line-40"))
+            {
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        let read = directory
+            .history_terminal("terminal-history", terminal.id, 0, 4)
+            .unwrap();
+        assert_eq!(read.terminal_id, terminal.id);
+        assert_eq!(read.window.start_row, 0);
+        assert_eq!(read.window.rows.len(), 4);
+        assert!(
+            read.window.history_rows >= 16,
+            "forty lines on a twenty-four-row screen leave sixteen behind it, not {}",
+            read.window.history_rows
+        );
+        assert!(
+            read.window.rows[0].text().contains("history-line-1"),
+            "row zero is the oldest row still kept, not {:?}",
+            read.window.rows[0].text()
+        );
+
+        // The window moves with the request, and running off the end of history
+        // answers with the rows that exist.
+        let later = directory
+            .history_terminal("terminal-history", terminal.id, 2, 2)
+            .unwrap();
+        assert_eq!(later.window.start_row, 2);
+        assert_eq!(later.window.rows, read.window.rows[2..4].to_vec());
+
+        let past = directory
+            .history_terminal(
+                "terminal-history",
+                terminal.id,
+                read.window.history_rows as u32 + 10,
+                4,
+            )
+            .unwrap();
+        assert!(past.window.rows.is_empty(), "an empty window is an answer");
+
+        handler.terminals.close(terminal.id).unwrap();
+        drop(server);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// A client can keep naming one line while the numbers move under it.
+    ///
+    /// Row numbers are positions: the row a client read a line at names another
+    /// line as soon as the screen scrolls, and history renumbers on eviction.
+    /// The host already tracked a line for itself; without this the fact never
+    /// left the process, and every client outside it was left comparing numbers
+    /// across time. Here the anchor crosses the socket, follows its line out of
+    /// the active area into history, and is released.
+    #[cfg(unix)]
+    #[test]
+    fn an_anchor_follows_its_line_over_the_socket() {
+        let (context, root) = fixture("terminal-anchor");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-anchor", 0);
+        let terminal = handler
+            .terminals
+            .spawn(terminal_request(
+                "stty -echo; while IFS= read -r line; do printf 'seen:%s\\r\\n' \"$line\"; done",
+            ))
+            .unwrap();
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+
+        directory
+            .write_terminal("terminal-anchor", terminal.id, b"anchor-me\n")
+            .unwrap();
+
+        // The row the line landed on. This is the number a client without
+        // anchors would have had to keep.
+        let landed = loop {
+            let inspected = directory
+                .inspect_terminal("terminal-anchor", terminal.id)
+                .unwrap();
+            let found = inspected
+                .projection
+                .viewport
+                .iter()
+                .position(|row| row.text().contains("seen:anchor-me"));
+            if let Some(row) = found {
+                break row as u32;
+            }
+            std::thread::yield_now();
+        };
+
+        let pinned = directory
+            .anchor_terminal(
+                "terminal-anchor",
+                terminal.id,
+                ProjectedSpace::Active,
+                ProjectedPoint {
+                    column: 0,
+                    row: landed,
+                },
+            )
+            .unwrap();
+        assert_eq!(pinned.terminal_id, terminal.id);
+        assert!(pinned.anchor.retained);
+        assert_eq!(
+            pinned.anchor.active.map(|at| at.row),
+            Some(landed),
+            "the host answers where the line is now, in the space the client named"
+        );
+
+        // Thirty lines past a twenty-four-row screen: the anchored line is
+        // behind the viewport by the time the last one lands.
+        let mut pushed = String::new();
+        for line in 0..30 {
+            pushed.push_str(&format!("push-{line}\n"));
+        }
+        directory
+            .write_terminal("terminal-anchor", terminal.id, pushed.as_bytes())
+            .unwrap();
+
+        let moved = loop {
+            let resolved = directory
+                .resolve_terminal_anchor("terminal-anchor", terminal.id, pinned.anchor.id)
+                .unwrap();
+            let anchor = resolved.anchor.expect("the host still holds the handle");
+            if anchor.active.is_none() {
+                break anchor;
+            }
+            std::thread::yield_now();
+        };
+        assert!(moved.retained, "the line is retained, not evicted");
+        let at = moved
+            .history
+            .expect("a retained line off the active area is in history");
+
+        // The anchor names its own line, and the number the client started with
+        // now names another one.
+        let window = directory
+            .history_terminal("terminal-anchor", terminal.id, at.row, 1)
+            .unwrap();
+        assert!(
+            window.window.rows[0].text().contains("seen:anchor-me"),
+            "the anchor points at {:?}",
+            window.window.rows[0].text()
+        );
+        let now = directory
+            .inspect_terminal("terminal-anchor", terminal.id)
+            .unwrap();
+        assert!(
+            !now.projection.viewport[landed as usize]
+                .text()
+                .contains("seen:anchor-me"),
+            "the row number the client read the line at holds another line now"
+        );
+
+        // The host holds a pin only while a client asks it to.
+        let released = directory
+            .release_terminal_anchor("terminal-anchor", terminal.id, pinned.anchor.id)
+            .unwrap();
+        assert_eq!(released.anchor, pinned.anchor.id);
+        assert!(released.released);
+        assert_eq!(
+            directory
+                .resolve_terminal_anchor("terminal-anchor", terminal.id, pinned.anchor.id)
+                .unwrap()
+                .anchor,
+            None,
+            "a released handle is answered, not dereferenced"
+        );
+        assert!(
+            !directory
+                .release_terminal_anchor("terminal-anchor", terminal.id, pinned.anchor.id)
+                .unwrap()
+                .released,
+            "releasing twice is a successful no-op"
+        );
+
+        handler.terminals.close(terminal.id).unwrap();
         drop(server);
         let _ = fs::remove_dir_all(root);
     }
@@ -3446,7 +4178,7 @@ mod tests {
         let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
         let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
         let attachment = directory
-            .attach_terminal("terminal-shutdown", terminal.id)
+            .attach_terminal("terminal-shutdown", terminal.id, TerminalTransport::Legacy)
             .unwrap();
         assert!(attachment.state().live);
 
@@ -3474,7 +4206,11 @@ mod tests {
         let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
         let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
         let attachment = directory
-            .attach_terminal("terminal-stalled-socket", terminal.id)
+            .attach_terminal(
+                "terminal-stalled-socket",
+                terminal.id,
+                TerminalTransport::Legacy,
+            )
             .unwrap();
         assert!(attachment.state().live);
         assert_eq!(handler.terminals.attachment_count(), 1);
@@ -3519,7 +4255,11 @@ mod tests {
         let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
 
         let first = directory
-            .attach_terminal("terminal-disconnect", terminal.id)
+            .attach_terminal(
+                "terminal-disconnect",
+                terminal.id,
+                TerminalTransport::Legacy,
+            )
             .unwrap();
         assert!(first.state().live);
         assert_eq!(handler.terminals.attachment_count(), 1);
@@ -3530,7 +4270,11 @@ mod tests {
         assert_eq!(handler.terminals.active_count(), 1);
 
         let second = directory
-            .attach_terminal("terminal-disconnect", terminal.id)
+            .attach_terminal(
+                "terminal-disconnect",
+                terminal.id,
+                TerminalTransport::Legacy,
+            )
             .unwrap();
         assert!(second.state().live);
         drop(second);

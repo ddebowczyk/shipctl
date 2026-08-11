@@ -8,11 +8,19 @@ pub mod commands;
 #[cfg(test)]
 mod compat;
 pub mod contract;
+pub mod effects;
+pub mod input;
+/// What one frame of semantic state costs the host, measured rather than
+/// argued. Tests only, and ignored by default: it reports numbers and gates on
+/// nothing.
+#[cfg(test)]
+mod measure;
 /// Executable evidence that semantic state alone can be presented, which is
-/// what area 04 must not fail. Tests only: it is a falsification probe, not the
-/// painter the product ships.
+/// what area 04 must not fail. Tests only: it is the falsification probe for
+/// `painter`, not a painter of its own.
 #[cfg(test)]
 mod paint_probe;
+pub mod painter;
 pub mod process;
 pub mod projection;
 mod publication;

@@ -1,0 +1,431 @@
+[
+  {
+    "name": "key-press-plain",
+    "input": {
+      "kind": "key",
+      "action": "press",
+      "code": "KeyC",
+      "text": "c",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "composing": false
+    }
+  },
+  {
+    "name": "key-press-ctrl",
+    "input": {
+      "kind": "key",
+      "action": "press",
+      "code": "KeyC",
+      "text": "c",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": true,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "composing": false
+    }
+  },
+  {
+    "name": "key-press-named",
+    "input": {
+      "kind": "key",
+      "action": "press",
+      "code": "ArrowUp",
+      "text": null,
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "composing": false
+    }
+  },
+  {
+    "name": "key-repeat",
+    "input": {
+      "kind": "key",
+      "action": "repeat",
+      "code": "KeyA",
+      "text": "a",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "composing": false
+    }
+  },
+  {
+    "name": "key-release",
+    "input": {
+      "kind": "key",
+      "action": "release",
+      "code": "KeyC",
+      "text": "c",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "composing": false
+    }
+  },
+  {
+    "name": "key-composing",
+    "input": {
+      "kind": "key",
+      "action": "press",
+      "code": "KeyA",
+      "text": "a",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "composing": true
+    }
+  },
+  {
+    "name": "key-locks",
+    "input": {
+      "kind": "key",
+      "action": "press",
+      "code": "Digit1",
+      "text": "!",
+      "mods": {
+        "shift": true,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": true,
+        "numLock": true
+      },
+      "composing": false
+    }
+  },
+  {
+    "name": "text-commit",
+    "input": {
+      "kind": "text",
+      "text": "漢字"
+    }
+  },
+  {
+    "name": "paste",
+    "input": {
+      "kind": "paste",
+      "text": "echo hi"
+    }
+  },
+  {
+    "name": "mouse-press-left",
+    "input": {
+      "kind": "mouse",
+      "action": "press",
+      "button": "left",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "x": 123.5,
+      "y": 47.0,
+      "surface": {
+        "screenWidth": 800,
+        "screenHeight": 480,
+        "cellWidth": 9,
+        "cellHeight": 18,
+        "paddingTop": 4,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "paddingRight": 6
+      },
+      "anyButtonPressed": true
+    }
+  },
+  {
+    "name": "mouse-motion-drag",
+    "input": {
+      "kind": "mouse",
+      "action": "motion",
+      "button": "left",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "x": 123.5,
+      "y": 47.0,
+      "surface": {
+        "screenWidth": 800,
+        "screenHeight": 480,
+        "cellWidth": 9,
+        "cellHeight": 18,
+        "paddingTop": 4,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "paddingRight": 6
+      },
+      "anyButtonPressed": true
+    }
+  },
+  {
+    "name": "mouse-motion-idle",
+    "input": {
+      "kind": "mouse",
+      "action": "motion",
+      "button": null,
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "x": 123.5,
+      "y": 47.0,
+      "surface": {
+        "screenWidth": 800,
+        "screenHeight": 480,
+        "cellWidth": 9,
+        "cellHeight": 18,
+        "paddingTop": 4,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "paddingRight": 6
+      },
+      "anyButtonPressed": false
+    }
+  },
+  {
+    "name": "mouse-release-right",
+    "input": {
+      "kind": "mouse",
+      "action": "release",
+      "button": "right",
+      "mods": {
+        "shift": true,
+        "alt": true,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "x": 123.5,
+      "y": 47.0,
+      "surface": {
+        "screenWidth": 800,
+        "screenHeight": 480,
+        "cellWidth": 9,
+        "cellHeight": 18,
+        "paddingTop": 4,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "paddingRight": 6
+      },
+      "anyButtonPressed": false
+    }
+  },
+  {
+    "name": "mouse-wheel-up",
+    "input": {
+      "kind": "mouse",
+      "action": "press",
+      "button": "four",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "x": 123.5,
+      "y": 47.0,
+      "surface": {
+        "screenWidth": 800,
+        "screenHeight": 480,
+        "cellWidth": 9,
+        "cellHeight": 18,
+        "paddingTop": 4,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "paddingRight": 6
+      },
+      "anyButtonPressed": false
+    }
+  },
+  {
+    "name": "mouse-wheel-down",
+    "input": {
+      "kind": "mouse",
+      "action": "press",
+      "button": "five",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "x": 123.5,
+      "y": 47.0,
+      "surface": {
+        "screenWidth": 800,
+        "screenHeight": 480,
+        "cellWidth": 9,
+        "cellHeight": 18,
+        "paddingTop": 4,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "paddingRight": 6
+      },
+      "anyButtonPressed": false
+    }
+  },
+  {
+    "name": "mouse-wheel-left",
+    "input": {
+      "kind": "mouse",
+      "action": "press",
+      "button": "six",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "x": 123.5,
+      "y": 47.0,
+      "surface": {
+        "screenWidth": 800,
+        "screenHeight": 480,
+        "cellWidth": 9,
+        "cellHeight": 18,
+        "paddingTop": 4,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "paddingRight": 6
+      },
+      "anyButtonPressed": false
+    }
+  },
+  {
+    "name": "mouse-wheel-right",
+    "input": {
+      "kind": "mouse",
+      "action": "press",
+      "button": "seven",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": false,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "x": 123.5,
+      "y": 47.0,
+      "surface": {
+        "screenWidth": 800,
+        "screenHeight": 480,
+        "cellWidth": 9,
+        "cellHeight": 18,
+        "paddingTop": 4,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "paddingRight": 6
+      },
+      "anyButtonPressed": false
+    }
+  },
+  {
+    "name": "preset-delete-word",
+    "input": {
+      "kind": "key",
+      "action": "press",
+      "code": "KeyW",
+      "text": "w",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": true,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "composing": false
+    }
+  },
+  {
+    "name": "preset-clear-screen",
+    "input": {
+      "kind": "key",
+      "action": "press",
+      "code": "KeyL",
+      "text": "l",
+      "mods": {
+        "shift": false,
+        "alt": false,
+        "ctrl": true,
+        "meta": false,
+        "capsLock": false,
+        "numLock": false
+      },
+      "composing": false
+    }
+  },
+  {
+    "name": "preset-newline",
+    "input": {
+      "kind": "text",
+      "text": "\n"
+    }
+  },
+  {
+    "name": "focus-gained",
+    "input": {
+      "kind": "focus",
+      "gained": true
+    }
+  },
+  {
+    "name": "focus-lost",
+    "input": {
+      "kind": "focus",
+      "gained": false
+    }
+  }
+]

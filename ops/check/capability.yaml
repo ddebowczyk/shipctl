@@ -59,6 +59,9 @@ commands:
     summary: Reject instance-owned state outside the injected path boundary.
     lane: fast
     aggregate: check
+  - name: release-bundle
+    summary: Reject a release bundle that carries the dev-only scenario harness.
+    lane: slow
   - name: all
     summary: Run every declared fast check.
     lane: fast

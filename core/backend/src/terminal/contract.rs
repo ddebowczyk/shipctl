@@ -21,7 +21,14 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::Value as JsonValue;
+use shipctl_module_api::TerminalColorTheme;
 
+use super::effects::TerminalEffect;
+#[cfg(test)]
+use super::input::{
+    TerminalInput, TerminalKeyAction, TerminalKeyEvent, TerminalModifiers, TerminalMouseAction,
+    TerminalMouseButton, TerminalMouseEvent, TerminalSurfaceGeometry,
+};
 use super::types::{
     TerminalAgentActivity, TerminalAgentAttention, TerminalAgentAttentionKind,
     TerminalAgentReportSource, TerminalAgentState, TerminalDescriptor, TerminalEvent, TerminalExit,
@@ -42,6 +49,7 @@ pub const MAX_EXACT_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 pub enum TerminalEventKind {
     Output,
     Replay,
+    Screen,
     MetadataChanged,
     AgentActivityChanged,
     Exited,
@@ -55,6 +63,7 @@ impl TerminalEventKind {
         match event {
             TerminalEvent::Output { .. } => Self::Output,
             TerminalEvent::Replay { .. } => Self::Replay,
+            TerminalEvent::Screen { .. } => Self::Screen,
             TerminalEvent::MetadataChanged { .. } => Self::MetadataChanged,
             TerminalEvent::AgentActivityChanged { .. } => Self::AgentActivityChanged,
             TerminalEvent::Exited { .. } => Self::Exited,
@@ -68,7 +77,8 @@ impl TerminalEventKind {
     fn successor(self) -> Option<Self> {
         match self {
             Self::Output => Some(Self::Replay),
-            Self::Replay => Some(Self::MetadataChanged),
+            Self::Replay => Some(Self::Screen),
+            Self::Screen => Some(Self::MetadataChanged),
             Self::MetadataChanged => Some(Self::AgentActivityChanged),
             Self::AgentActivityChanged => Some(Self::Exited),
             Self::Exited => Some(Self::ResyncRequired),
@@ -107,6 +117,12 @@ pub fn sample_event(kind: TerminalEventKind) -> TerminalEvent {
                 bytes: std::sync::Arc::from(b"\x1b[H".as_slice()),
             },
         },
+        TerminalEventKind::Screen => TerminalEvent::Screen {
+            sequence: 3,
+            revision: TerminalRevision(4),
+            state: Box::new(sample_projection()),
+            effects: vec![TerminalEffect::Bell],
+        },
         TerminalEventKind::MetadataChanged => TerminalEvent::MetadataChanged {
             sequence: 3,
             descriptor: sample_descriptor(),
@@ -128,6 +144,180 @@ pub fn sample_event(kind: TerminalEventKind) -> TerminalEvent {
             reason: "closed".to_string(),
         },
     }
+}
+
+/// A real projection of a real terminal.
+///
+/// Written by the host's own parser rather than restated as a literal: the
+/// projection is a large tree, and a hand-written copy of it here would be a
+/// second model that can disagree with the first. The artifact records the
+/// field as an object; what an object of that shape contains is proved by
+/// `projection.rs` and the recorded corpus.
+fn sample_projection() -> super::projection::TerminalProjection {
+    let theme = TerminalColorTheme {
+        foreground: "#ffffff".to_string(),
+        background: "#000000".to_string(),
+        palette: vec!["#000000".to_string(); 16],
+    };
+    let mut engine = super::replay::VtReplayEngine::new(
+        80,
+        24,
+        &theme,
+        super::retention::TerminalRetentionPolicy::default(),
+    )
+    .expect("the contract sample needs a terminal");
+    engine.feed(b"contract");
+    engine
+        .project()
+        .expect("the contract sample needs a projection")
+}
+
+/// One representative semantic frame, written by the host's own parser.
+///
+/// The contract artifact records `state` as one object, so nothing below that
+/// field is gated by it. A client model that types rows and cells therefore has
+/// nothing to check itself against except a reading of the Rust field names —
+/// and a reading is what a generated fixture exists to replace. This frame is
+/// checked in beside the contract so the client model decodes what the host
+/// actually writes.
+///
+/// The trace carries the facts a client cannot infer from text: a title and a
+/// bell as ordered effects, a prompt mark, a styled run, a wide grapheme with a
+/// combining mark after it, a hyperlink, and a row that fills and wraps.
+#[cfg(test)]
+fn sample_screen_frame() -> TerminalEvent {
+    let theme = TerminalColorTheme {
+        foreground: "#e6e6e6".to_string(),
+        background: "#101010".to_string(),
+        palette: vec!["#000000".to_string(); 16],
+    };
+    let mut engine = super::replay::VtReplayEngine::new(
+        40,
+        8,
+        &theme,
+        super::retention::TerminalRetentionPolicy::default(),
+    )
+    .expect("the fixture needs a terminal");
+
+    let mut trace: Vec<u8> = Vec::new();
+    trace.extend_from_slice(b"\x1b]0;shipctl\x1b\\");
+    trace.extend_from_slice(b"\x1b]133;A\x1b\\$ \x1b[1;38;2;10;20;30mbold\x1b[0m\r\n");
+    trace.extend_from_slice("\u{6f22}e\u{301}\r\n".as_bytes());
+    trace.extend_from_slice(b"\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\r\n");
+    trace.extend(std::iter::repeat_n(b'w', 45));
+    trace.extend_from_slice(b"\x07");
+    let feed = engine.feed(&trace);
+
+    TerminalEvent::Screen {
+        sequence: 12,
+        revision: TerminalRevision(7),
+        state: Box::new(engine.project().expect("the fixture needs a projection")),
+        effects: feed.effects,
+    }
+}
+
+/// Where the representative frame lives. The client model's suite reads this
+/// file, so a renamed field or a changed shape fails on both sides.
+pub fn screen_fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../core/frontend/terminal/terminalScreenFixture.json")
+}
+
+/// One representative history window, read out of the host's own retention.
+///
+/// A screen frame carries the viewport, so nothing in the screen fixture shows
+/// what a client is given for the rows behind it. The trace scrolls the early
+/// rows off deliberately and puts the facts a client cannot infer from text
+/// among them: a prompt mark, a styled run, a wide grapheme with a combining
+/// mark, a hyperlink, and a row that fills and wraps. If history rows were ever
+/// a poorer kind of row than viewport rows, this fixture would say so.
+#[cfg(test)]
+fn sample_history_window() -> super::projection::TerminalHistoryWindow {
+    let theme = TerminalColorTheme {
+        foreground: "#e6e6e6".to_string(),
+        background: "#101010".to_string(),
+        palette: vec!["#000000".to_string(); 16],
+    };
+    let mut engine = super::replay::VtReplayEngine::new(
+        40,
+        8,
+        &theme,
+        super::retention::TerminalRetentionPolicy::default(),
+    )
+    .expect("the fixture needs a terminal");
+
+    let mut trace: Vec<u8> = Vec::new();
+    trace.extend_from_slice(b"\x1b]133;A\x1b\\$ \x1b[1;38;2;10;20;30mbold\x1b[0m\r\n");
+    trace.extend_from_slice("\u{6f22}e\u{301}\r\n".as_bytes());
+    trace.extend_from_slice(b"\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\r\n");
+    trace.extend(std::iter::repeat_n(b'w', 45));
+    trace.extend_from_slice(b"\r\n");
+    // Past the eight rows this screen holds, so the rows above are behind the
+    // viewport rather than on it.
+    for line in 0..12 {
+        trace.extend_from_slice(format!("scrolled-{line}\r\n").as_bytes());
+    }
+    engine.feed(&trace);
+
+    engine
+        .project_history(0, 6)
+        .expect("the fixture needs a history window")
+}
+
+/// Where that window lives. The client model's suite reads it for the same
+/// reason it reads the screen fixture: the host writes the shape, not a
+/// reading of the host.
+pub fn history_fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../core/frontend/terminal/terminalHistoryFixture.json")
+}
+
+/// One representative anchor: a line the host pinned, after it scrolled off.
+///
+/// This is the state a client reads an anchor in that it cannot read a row
+/// number in — the line is behind the viewport, so the anchor names it in
+/// history and on the screen and in neither of the two spaces that only name
+/// visible rows. Both encodings a client must decode are therefore in one
+/// sample: a point the host wrote, and the null it writes for a space that does
+/// not name the line.
+#[cfg(test)]
+fn sample_anchor() -> super::projection::TerminalAnchor {
+    let theme = TerminalColorTheme {
+        foreground: "#e6e6e6".to_string(),
+        background: "#101010".to_string(),
+        palette: vec!["#000000".to_string(); 16],
+    };
+    let mut engine = super::replay::VtReplayEngine::new(
+        40,
+        8,
+        &theme,
+        super::retention::TerminalRetentionPolicy::default(),
+    )
+    .expect("the fixture needs a terminal");
+
+    engine.feed(b"anchored\r\n");
+    let anchor = engine
+        .anchor(
+            super::projection::ProjectedSpace::Active,
+            super::projection::ProjectedPoint { column: 0, row: 0 },
+        )
+        .expect("the fixture needs an anchor");
+    // Past the eight rows this screen holds, so the anchored line is behind the
+    // viewport rather than on it.
+    for line in 0..12 {
+        engine.feed(format!("scrolled-{line}\r\n").as_bytes());
+    }
+
+    engine
+        .resolve_anchor(anchor.id)
+        .expect("the anchor reads")
+        .expect("the host is still holding the anchor")
+}
+
+/// Where that anchor lives, read by the client's reading-position suite.
+pub fn anchor_fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../core/frontend/terminal/terminalAnchorFixture.json")
 }
 
 fn sample_descriptor() -> TerminalDescriptor {
@@ -262,6 +452,289 @@ pub fn contract_artifact_path() -> PathBuf {
         .join("../../core/frontend/terminal/terminalEventContract.json")
 }
 
+/// One named semantic input, as the host reads it off the wire.
+#[cfg(test)]
+#[derive(Serialize)]
+pub(super) struct NamedInput {
+    pub(super) name: &'static str,
+    pub(super) input: TerminalInput,
+}
+
+/// The input half of the screen fixture, and the same argument for it.
+///
+/// `input.rs` is the authority for what a client may report. A client that
+/// builds those values from browser events has nothing to check itself against
+/// except a reading of the Rust field names, and the shapes are exactly where a
+/// reading goes wrong: a defaulted modifier that must still be written, an
+/// absent value that must be `null` rather than missing, a tag that names the
+/// variant. Each sample below is one thing a person does, so a client suite can
+/// build the same event and compare whole values.
+///
+/// The names are the join. A renamed or deleted sample fails the client suite
+/// that looks it up, and a new variant of [`TerminalInput`] fails to compile
+/// here until it has one.
+#[cfg(test)]
+pub(super) fn sample_inputs() -> Vec<NamedInput> {
+    fn surface() -> TerminalSurfaceGeometry {
+        TerminalSurfaceGeometry {
+            screen_width: 800,
+            screen_height: 480,
+            cell_width: 9,
+            cell_height: 18,
+            padding_top: 4,
+            padding_bottom: 4,
+            padding_left: 6,
+            padding_right: 6,
+        }
+    }
+
+    fn key(
+        name: &'static str,
+        action: TerminalKeyAction,
+        code: &str,
+        text: Option<&str>,
+        mods: TerminalModifiers,
+        composing: bool,
+    ) -> NamedInput {
+        NamedInput {
+            name,
+            input: TerminalInput::Key(TerminalKeyEvent {
+                action,
+                code: code.to_string(),
+                text: text.map(str::to_string),
+                mods,
+                composing,
+            }),
+        }
+    }
+
+    fn mouse(
+        name: &'static str,
+        action: TerminalMouseAction,
+        button: Option<TerminalMouseButton>,
+        mods: TerminalModifiers,
+        any_button_pressed: bool,
+    ) -> NamedInput {
+        NamedInput {
+            name,
+            input: TerminalInput::Mouse(TerminalMouseEvent {
+                action,
+                button,
+                mods,
+                x: 123.5,
+                y: 47.0,
+                surface: surface(),
+                any_button_pressed,
+            }),
+        }
+    }
+
+    let ctrl = TerminalModifiers {
+        ctrl: true,
+        ..TerminalModifiers::default()
+    };
+    let locks = TerminalModifiers {
+        shift: true,
+        caps_lock: true,
+        num_lock: true,
+        ..TerminalModifiers::default()
+    };
+    let alt_shift = TerminalModifiers {
+        alt: true,
+        shift: true,
+        ..TerminalModifiers::default()
+    };
+
+    vec![
+        // A printable key carries what the layout produced. The host decides
+        // what byte that becomes under the child's current modes.
+        key(
+            "key-press-plain",
+            TerminalKeyAction::Press,
+            "KeyC",
+            Some("c"),
+            TerminalModifiers::default(),
+            false,
+        ),
+        // Ctrl+C still reports the unmodified text. The control byte is the
+        // host's conclusion, never the client's.
+        key(
+            "key-press-ctrl",
+            TerminalKeyAction::Press,
+            "KeyC",
+            Some("c"),
+            ctrl,
+            false,
+        ),
+        // A key that produces no text names only the physical key.
+        key(
+            "key-press-named",
+            TerminalKeyAction::Press,
+            "ArrowUp",
+            None,
+            TerminalModifiers::default(),
+            false,
+        ),
+        key(
+            "key-repeat",
+            TerminalKeyAction::Repeat,
+            "KeyA",
+            Some("a"),
+            TerminalModifiers::default(),
+            false,
+        ),
+        // Releases matter to the Kitty protocol and to nothing else. A client
+        // reports them and does not decide whether they are wanted.
+        key(
+            "key-release",
+            TerminalKeyAction::Release,
+            "KeyC",
+            Some("c"),
+            TerminalModifiers::default(),
+            false,
+        ),
+        // A key inside a composition produces no bytes; the commit arrives as
+        // `text`.
+        key(
+            "key-composing",
+            TerminalKeyAction::Press,
+            "KeyA",
+            Some("a"),
+            TerminalModifiers::default(),
+            true,
+        ),
+        // Lock state is held, not pressed, and is reported the same way.
+        key(
+            "key-locks",
+            TerminalKeyAction::Press,
+            "Digit1",
+            Some("!"),
+            locks,
+            false,
+        ),
+        NamedInput {
+            name: "text-commit",
+            input: TerminalInput::Text {
+                text: "\u{6f22}\u{5b57}".to_string(),
+            },
+        },
+        NamedInput {
+            name: "paste",
+            input: TerminalInput::Paste {
+                text: "echo hi".to_string(),
+            },
+        },
+        mouse(
+            "mouse-press-left",
+            TerminalMouseAction::Press,
+            Some(TerminalMouseButton::Left),
+            TerminalModifiers::default(),
+            true,
+        ),
+        // A drag is a motion that names the held button.
+        mouse(
+            "mouse-motion-drag",
+            TerminalMouseAction::Motion,
+            Some(TerminalMouseButton::Left),
+            TerminalModifiers::default(),
+            true,
+        ),
+        // A hover names none.
+        mouse(
+            "mouse-motion-idle",
+            TerminalMouseAction::Motion,
+            None,
+            TerminalModifiers::default(),
+            false,
+        ),
+        mouse(
+            "mouse-release-right",
+            TerminalMouseAction::Release,
+            Some(TerminalMouseButton::Right),
+            alt_shift,
+            false,
+        ),
+        // The wheel is buttons four to seven, pressed and never released — the
+        // encoding every mouse format has carried since X11, asserted against
+        // the pinned parser in
+        // `compat.rs::the_wheel_encodes_as_the_buttons_the_scroll_flag_names`.
+        // A client turning a wheel event into one of these is following the
+        // host's own convention rather than inventing a scroll message.
+        mouse(
+            "mouse-wheel-up",
+            TerminalMouseAction::Press,
+            Some(TerminalMouseButton::Four),
+            TerminalModifiers::default(),
+            false,
+        ),
+        mouse(
+            "mouse-wheel-down",
+            TerminalMouseAction::Press,
+            Some(TerminalMouseButton::Five),
+            TerminalModifiers::default(),
+            false,
+        ),
+        mouse(
+            "mouse-wheel-left",
+            TerminalMouseAction::Press,
+            Some(TerminalMouseButton::Six),
+            TerminalModifiers::default(),
+            false,
+        ),
+        mouse(
+            "mouse-wheel-right",
+            TerminalMouseAction::Press,
+            Some(TerminalMouseButton::Seven),
+            TerminalModifiers::default(),
+            false,
+        ),
+        // The webview's three keybinding presets, which ship a byte sequence
+        // each. Reported as meaning they produce the same bytes, which
+        // `runtime.rs::the_keybinding_presets_are_bytes_this_host_already_makes`
+        // asserts against these very samples, and which
+        // `tests/keybindingPresets.test.ts` holds the client's table to.
+        key(
+            "preset-delete-word",
+            TerminalKeyAction::Press,
+            "KeyW",
+            Some("w"),
+            ctrl,
+            false,
+        ),
+        key(
+            "preset-clear-screen",
+            TerminalKeyAction::Press,
+            "KeyL",
+            Some("l"),
+            ctrl,
+            false,
+        ),
+        // Shift-return asks for the character return would not produce, which
+        // is why this preset is text and not a key.
+        NamedInput {
+            name: "preset-newline",
+            input: TerminalInput::Text {
+                text: "\n".to_string(),
+            },
+        },
+        NamedInput {
+            name: "focus-gained",
+            input: TerminalInput::Focus { gained: true },
+        },
+        NamedInput {
+            name: "focus-lost",
+            input: TerminalInput::Focus { gained: false },
+        },
+    ]
+}
+
+/// Where the input samples live. The client's input suite reads this file, so a
+/// renamed field or a changed tag fails on both sides.
+pub fn input_fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../core/frontend/terminal/terminalInputFixture.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,6 +779,220 @@ mod tests {
             checked_in, rendered,
             "the terminal event contract is stale; regenerate it with \
              SHIPCTL_WRITE_TERMINAL_CONTRACT=1 and update the TypeScript decoder"
+        );
+    }
+
+    /// Every variant of the input model carries a named sample.
+    ///
+    /// The match is exhaustive, so a new variant of [`TerminalInput`] stops
+    /// this module compiling until it is sampled, and the wire tag is asserted
+    /// beside it so the name a client looks for is the name the host reads.
+    #[test]
+    fn every_input_variant_has_a_named_sample_and_names_itself_on_the_wire() {
+        fn tag(input: &TerminalInput) -> &'static str {
+            match input {
+                TerminalInput::Key(_) => "key",
+                TerminalInput::Text { .. } => "text",
+                TerminalInput::Paste { .. } => "paste",
+                TerminalInput::Mouse(_) => "mouse",
+                TerminalInput::Focus { .. } => "focus",
+            }
+        }
+
+        let samples = sample_inputs();
+        let mut names: Vec<&str> = samples.iter().map(|sample| sample.name).collect();
+        let unique: std::collections::BTreeSet<&str> = names.iter().copied().collect();
+        names.sort_unstable();
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "sample names are the client's key"
+        );
+
+        for sample in &samples {
+            let value = serde_json::to_value(&sample.input).expect("serialize an input");
+            assert_eq!(
+                value.get("kind").and_then(JsonValue::as_str),
+                Some(tag(&sample.input)),
+                "{} must name its variant on the wire",
+                sample.name
+            );
+        }
+
+        let covered: std::collections::BTreeSet<&str> =
+            samples.iter().map(|sample| tag(&sample.input)).collect();
+        assert_eq!(
+            covered,
+            std::collections::BTreeSet::from(["focus", "key", "mouse", "paste", "text"])
+        );
+    }
+
+    /// The same gate again, for input: the values a client must produce.
+    #[test]
+    fn the_checked_in_input_fixture_matches_the_rust_model() {
+        let rendered = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&sample_inputs()).expect("render the input fixture")
+        );
+        let path = input_fixture_path();
+
+        if std::env::var_os("SHIPCTL_WRITE_TERMINAL_CONTRACT").is_some() {
+            std::fs::write(&path, &rendered).expect("write the input fixture");
+            return;
+        }
+
+        let checked_in = std::fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(
+            checked_in, rendered,
+            "the checked-in input fixture is stale; regenerate it with \
+             SHIPCTL_WRITE_TERMINAL_CONTRACT=1 and update the client's input adapter"
+        );
+    }
+
+    /// The same gate, one level deeper: the frame the client model reads.
+    #[test]
+    fn the_checked_in_screen_fixture_matches_the_rust_model() {
+        let rendered = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&sample_screen_frame())
+                .expect("render the screen fixture")
+        );
+        let path = screen_fixture_path();
+
+        if std::env::var_os("SHIPCTL_WRITE_TERMINAL_CONTRACT").is_some() {
+            std::fs::write(&path, &rendered).expect("write the screen fixture");
+            return;
+        }
+
+        let checked_in = std::fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(
+            checked_in, rendered,
+            "the checked-in screen fixture is stale; regenerate it with \
+             SHIPCTL_WRITE_TERMINAL_CONTRACT=1 and update the client model"
+        );
+    }
+
+    /// The rows behind the viewport are the same kind of row as the ones on it.
+    ///
+    /// This is the claim the whole history path rests on: if a history row were
+    /// missing a field the viewport reports, every client would have to hold a
+    /// second, poorer representation of what scrolled away.
+    #[test]
+    fn a_history_row_carries_everything_a_viewport_row_carries() {
+        let window = sample_history_window();
+        assert!(
+            window.history_rows >= window.rows.len(),
+            "a window cannot hold more rows than history does"
+        );
+
+        let history = serde_json::to_value(&window.rows).expect("serialize history rows");
+        let viewport = match sample_screen_frame() {
+            TerminalEvent::Screen { state, .. } => {
+                serde_json::to_value(&state.viewport).expect("serialize viewport rows")
+            }
+            _ => panic!("the screen fixture is a screen frame"),
+        };
+
+        let fields = |rows: &JsonValue| -> std::collections::BTreeSet<String> {
+            rows.as_array()
+                .expect("rows are an array")
+                .iter()
+                .flat_map(|row| {
+                    row.as_object()
+                        .expect("a row is an object")
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        assert_eq!(
+            fields(&history),
+            fields(&viewport),
+            "history rows and viewport rows must be the same shape"
+        );
+
+        // The facts a client cannot infer from text survive the scroll.
+        let cells: Vec<&JsonValue> = history
+            .as_array()
+            .expect("rows are an array")
+            .iter()
+            .flat_map(|row| row["cells"].as_array().expect("cells are an array"))
+            .collect();
+        assert!(
+            cells.iter().any(|cell| cell["width"] == "wide"),
+            "the wide grapheme did not survive scrolling into history"
+        );
+        assert!(
+            cells.iter().any(|cell| cell["hyperlink"].is_string()),
+            "the hyperlink did not survive scrolling into history"
+        );
+        assert!(
+            cells.iter().any(|cell| cell["bold"] == true),
+            "the styled run did not survive scrolling into history"
+        );
+    }
+
+    /// The same gate, for the window the client reads.
+    #[test]
+    fn the_checked_in_history_fixture_matches_the_rust_model() {
+        let rendered = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&sample_history_window())
+                .expect("render the history fixture")
+        );
+        let path = history_fixture_path();
+
+        if std::env::var_os("SHIPCTL_WRITE_TERMINAL_CONTRACT").is_some() {
+            std::fs::write(&path, &rendered).expect("write the history fixture");
+            return;
+        }
+
+        let checked_in = std::fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(
+            checked_in, rendered,
+            "the checked-in history fixture is stale; regenerate it with \
+             SHIPCTL_WRITE_TERMINAL_CONTRACT=1 and update the client model"
+        );
+    }
+
+    /// The anchored line is in history and on the screen, and in neither space
+    /// that names only visible rows. A client that reads a row number cannot
+    /// tell any of that.
+    #[test]
+    fn the_sample_anchor_names_a_line_no_row_number_could_hold() {
+        let anchor = sample_anchor();
+
+        assert!(anchor.retained, "the line is still in the terminal");
+        assert!(
+            anchor.loss_reported,
+            "history holds lines here, so a lost one would be reported"
+        );
+        assert!(anchor.history.is_some(), "the line is behind the viewport");
+        assert!(anchor.screen.is_some());
+        assert_eq!(anchor.viewport, None, "and is not drawn");
+        assert_eq!(anchor.active, None, "and the child cannot write to it");
+    }
+
+    /// The same gate, for the anchor the client reads.
+    #[test]
+    fn the_checked_in_anchor_fixture_matches_the_rust_model() {
+        let rendered = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&sample_anchor()).expect("render the anchor fixture")
+        );
+        let path = anchor_fixture_path();
+
+        if std::env::var_os("SHIPCTL_WRITE_TERMINAL_CONTRACT").is_some() {
+            std::fs::write(&path, &rendered).expect("write the anchor fixture");
+            return;
+        }
+
+        let checked_in = std::fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(
+            checked_in, rendered,
+            "the checked-in anchor fixture is stale; regenerate it with \
+             SHIPCTL_WRITE_TERMINAL_CONTRACT=1 and update the client model"
         );
     }
 }

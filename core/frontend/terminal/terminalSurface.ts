@@ -9,6 +9,7 @@
  */
 
 import type { TerminalGeometry } from "./terminalFitPlan.ts";
+import type { TerminalInput } from "./terminalSemanticInput.ts";
 import type { TerminalViewportPin } from "./terminalViewportPin.ts";
 import type { TerminalAttachmentId } from "./types.ts";
 
@@ -21,6 +22,16 @@ export interface TerminalSurface {
 
   /** Install the sink for locally produced input, or null to close it. */
   setInputSink(sink: ((data: string) => void) | null): void;
+
+  /**
+   * Install the sink for input that names what a person did, or null to close
+   * it.
+   *
+   * Optional because the xterm surface has none: it holds the child's modes and
+   * therefore produces bytes. A surface that has this one produces no bytes at
+   * all, and area 05 leaves only this.
+   */
+  setSemanticInputSink?(sink: ((input: TerminalInput) => void) | null): void;
 
   /** Install the current theme and reconcile the renderer against it. */
   applyCurrentTheme(): void;

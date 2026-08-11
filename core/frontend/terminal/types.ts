@@ -125,7 +125,14 @@ export interface TerminalReplay {
 export interface TerminalRuntimeSnapshot {
   readonly descriptor: TerminalDescriptor;
   readonly sequenceBoundary: number;
+  /** The byte path's baseline. Legacy; area 05 deletes it. */
   readonly replay: TerminalReplay;
+  /**
+   * The semantic path's baseline: the host's state at `sequenceBoundary`, at
+   * the revision the descriptor reports. Null on the byte path, and never
+   * absent, so a client never has to decide what a missing field meant.
+   */
+  readonly state: TerminalScreenState | null;
 }
 
 export interface TerminalAttachment {
@@ -162,6 +169,122 @@ export type TerminalInputOutcome =
   | { readonly status: "unavailable"; readonly reason: string }
   | { readonly status: "failed"; readonly error: unknown };
 
+/**
+ * Which encoding of a terminal an attachment asks the host for.
+ *
+ * The authority is `TerminalTransport` in `core/backend/src/terminal/types.rs`.
+ * It is the sole migration switch, not a preference: nothing reads it from
+ * configuration, and area 05 deletes it with the encoding it names.
+ */
+export type TerminalTransport = "legacy" | "semantic";
+
+/**
+ * The coordinate space a point is named in.
+ *
+ * The same cell has a different number in each space, and which one is meant is
+ * never guessable from the number alone, so every coordinate that crosses this
+ * boundary says which space it belongs to.
+ */
+export type TerminalProjectedSpace = "active" | "viewport" | "screen" | "history";
+
+/** A cell coordinate in one of those spaces. */
+export interface TerminalProjectedPoint {
+  readonly column: number;
+  readonly row: number;
+}
+
+/**
+ * The name the host minted for one anchored cell.
+ *
+ * A number and nothing else: the parser's tracked reference stays in the host,
+ * so a stale handle is answered rather than dereferenced. The authority is
+ * `TerminalAnchorId` in `core/backend/src/terminal/projection.rs`.
+ */
+export type TerminalAnchorId = number;
+
+/** How the end of a selection moves when no cell is named. */
+export type TerminalSelectionMove =
+  | "left"
+  | "right"
+  | "up"
+  | "down"
+  | "home"
+  | "end"
+  | "page_up"
+  | "page_down"
+  | "beginning_of_line"
+  | "end_of_line";
+
+/**
+ * What a client asks the host to select.
+ *
+ * An intent, never a set of cells: which cells an intent covers depends on
+ * where rows wrap, where a word ends, where the OSC 133 marks are and where
+ * history begins — all of which the host holds. A client that named cells would
+ * be the second authority on the screen.
+ */
+export type TerminalSelectionRequest =
+  | {
+      readonly kind: "range";
+      readonly space: TerminalProjectedSpace;
+      readonly from: TerminalProjectedPoint;
+      readonly to: TerminalProjectedPoint;
+      /** Column-bounded rather than line-following. */
+      readonly rectangle: boolean;
+    }
+  | { readonly kind: "word"; readonly space: TerminalProjectedSpace; readonly at: TerminalProjectedPoint }
+  | { readonly kind: "line"; readonly space: TerminalProjectedSpace; readonly at: TerminalProjectedPoint }
+  | { readonly kind: "output"; readonly space: TerminalProjectedSpace; readonly at: TerminalProjectedPoint }
+  | { readonly kind: "all" }
+  | { readonly kind: "extend"; readonly movement: TerminalSelectionMove }
+  | { readonly kind: "clear" };
+
+/**
+ * What the host holds after a selection request.
+ *
+ * The text comes with the answer because the host is the only place that can
+ * produce it: unwrapping a wrapped line and dropping the spacer half of a wide
+ * grapheme are its facts.
+ */
+export interface TerminalSelectionState {
+  readonly active: boolean;
+  readonly text: string | null;
+}
+
+/**
+ * The host's terminal state, as the semantic path carries it.
+ *
+ * The authority is `TerminalProjection` in
+ * `core/backend/src/terminal/projection.rs`. This type names the facts the
+ * decoder checks on the way in; the rows and cells below them are the client
+ * model's to read, and are typed where that model consumes them.
+ */
+export interface TerminalScreenState {
+  readonly columns: number;
+  readonly rows: number;
+  readonly screen: string;
+  readonly scrollbackRows: number;
+  readonly cursor: Record<string, unknown>;
+  readonly modes: Record<string, unknown>;
+  readonly colors: Record<string, unknown>;
+  /** What changed since the host's previous read. */
+  readonly damage: Record<string, unknown>;
+  readonly viewport: readonly unknown[];
+}
+
+/**
+ * One thing that happened during a parse and is not screen state.
+ *
+ * The authority is `TerminalEffect` in
+ * `core/backend/src/terminal/effects.rs`. The decoder checks the tag and keeps
+ * the payload as the host sent it, because the client that acts on a title, a
+ * bell, or a notification is the one that knows what each payload needs.
+ */
+export interface TerminalEffect {
+  readonly kind: string;
+  readonly [field: string]: unknown;
+}
+
 export type TerminalEvent =
   | {
       readonly event: "output";
@@ -173,6 +296,13 @@ export type TerminalEvent =
       readonly event: "replay";
       readonly sequence: number;
       readonly replay: TerminalReplay;
+    }
+  | {
+      readonly event: "screen";
+      readonly sequence: number;
+      readonly revision: TerminalRevision;
+      readonly state: TerminalScreenState;
+      readonly effects: readonly TerminalEffect[];
     }
   | {
       readonly event: "metadata_changed";

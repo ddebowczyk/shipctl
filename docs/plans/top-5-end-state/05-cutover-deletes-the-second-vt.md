@@ -90,11 +90,14 @@ mechanism.
 - `core/frontend/terminal/TerminalView.tsx`
   - remove xterm construction, `term.write`, `term.reset`, parser handlers,
     raw `onData`, addon setup, and legacy visibility behavior.
-- `terminalMeasure.ts`, `terminalRenderer.ts`,
-  `terminalRendererAddons.ts`, `terminalViewport.ts`, `terminalTheme.ts`,
-  `terminalCache.ts`, and styles
+- `terminalRenderer.ts`, `terminalRendererAddons.ts`, `terminalViewport.ts`,
+  `terminalTheme.ts`, `terminalCache.ts`, and styles
   - remove xterm-specific code, imports, CSS, and compatibility branches while
     retaining only presentation-only implementations from area 04.
+- `terminalXtermMeasure.ts` and `core/frontend/terminal/browser.ts`
+  - delete outright. `browser.ts` is the named legacy entrypoint; when it is
+    gone, no consumer can reach xterm through the capability at all.
+    `terminalMeasure.ts` is pure policy and stays.
 - `package.json` and `pnpm-lock.yaml`
   - delete `@xterm/xterm`, Fit, Unicode 11, Web Links, and WebGL addon entries.
 
@@ -208,8 +211,18 @@ Fail repository checks when:
 - frontend code derives cell columns with a Unicode width table or VT parser;
 - a Tauri, control, CLI, or module DTO carries child output or replay ANSI;
 - a webview command exposes arbitrary raw PTY input;
-- legacy replay formatting or reset/replay behavior returns; or
-- a terminal migration flag remains after final cutover.
+- legacy replay formatting or reset/replay behavior returns;
+- a terminal migration flag remains after final cutover; or
+- a release bundle contains the dev-only scenario entry point.
+
+The last one is this area's own obligation, not an import from area 04. The
+scenario harness that area 04 uses to reach packaged-only capabilities is a
+second entry point into the terminal surface. Deleting a second VT while
+shipping a second entry point is a trade, not a cutover. The gate is
+`ops/check/bin/check-release-bundle.mjs`, run by `just check release-bundle`:
+it builds and scans the emitted assets for the harness global, the runner, and
+the scenario ids. It also asserts the markers are present in source, so a
+rename fails the gate instead of silently passing it.
 
 Do not use blanket bans on bytes, base64, or ANSI. Prove forbidden type and
 payload provenance so the gate permits backend PTY boundaries, binary semantic
@@ -247,7 +260,9 @@ This area does not:
 7. `TerminalReplayFrame`, `TERMINAL_REPLAY_FORMAT`, control raw mappings, CLI
    `write_raw_replay`, and child-byte CLI branches are deleted.
 8. The single migration switch and comparison-only legacy telemetry are deleted.
-   Searching configuration and consumers finds no private replacement flag.
+   Searching configuration and consumers finds no private replacement flag. A
+   built release bundle contains no scenario entry point, runner, or scenario
+   id, and the check that proves it has failed under a deliberate perturbation.
 9. Fixed PTY traces pass host-to-semantic conformance, and independent semantic
    fixtures pass webview and CLI presentation conformance.
 10. Production scenarios cover resize, theme, focus, visibility, hidden output,
@@ -271,6 +286,7 @@ just test fast
 just test rust
 just test full
 just check all
+just check release-bundle
 just modularity boundaries
 ```
 

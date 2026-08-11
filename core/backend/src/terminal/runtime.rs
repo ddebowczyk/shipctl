@@ -12,14 +12,17 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use shipctl_module_api::TerminalColorTheme;
 
 use super::contract::MAX_EXACT_JSON_INTEGER;
+use super::effects::TerminalEffect;
+use super::input::TerminalInput;
 use super::process::{ProcessTerminator, TERMINATION_GRACE_PERIOD};
 use super::projection::{
     ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
-    TerminalProjection,
+    TerminalProjection, TerminalSelectionRequest, TerminalSelectionState,
 };
 use super::publication::{
-    plan_child_output, plan_child_reply, plan_replay_transition, resize_admission,
-    subscriber_disposition, DeliveryOutcome, RuntimeEffect, RuntimeLiveness, SubscriberDisposition,
+    event_audience, plan_child_output, plan_child_reply, plan_replay_transition,
+    plan_semantic_state, resize_admission, subscriber_disposition, DeliveryOutcome, RuntimeEffect,
+    RuntimeLiveness, SubscriberDisposition,
 };
 use super::record::TerminalRecord;
 use super::replay::{validate_dimensions, VtReplayEngine};
@@ -28,7 +31,7 @@ use super::types::{
     TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId, TerminalError,
     TerminalErrorCode, TerminalEvent, TerminalExit, TerminalExitReason, TerminalId,
     TerminalLaunchRequest, TerminalLaunchTarget, TerminalMetadata, TerminalReplay,
-    TerminalRuntimeSnapshot,
+    TerminalRevision, TerminalRuntimeSnapshot, TerminalTransport,
 };
 
 type TerminalDescriptorSink = Arc<dyn Fn(super::types::TerminalDescriptor) + Send + Sync>;
@@ -190,17 +193,38 @@ impl TerminalRuntimeHandle {
         self.request(|reply| RuntimeCommand::ReleaseAnchor { id, reply })
     }
 
+    /// Encodes one semantic input from the host's current modes and writes it
+    /// to the child. Answers how many bytes that was, which is zero when the
+    /// modes do not report the input.
+    pub fn input(&self, input: TerminalInput) -> Result<usize, TerminalError> {
+        self.request(|reply| RuntimeCommand::Input { input, reply })
+    }
+
+    /// Applies a selection intent and answers with what the host then holds.
+    ///
+    /// Ordered with output and input rather than beside them: a drag that
+    /// arrives while the child is writing selects against the state the host
+    /// has at that point, and every later read agrees with the answer.
+    pub fn select(
+        &self,
+        request: TerminalSelectionRequest,
+    ) -> Result<TerminalSelectionState, TerminalError> {
+        self.request(|reply| RuntimeCommand::Select { request, reply })
+    }
+
     pub fn attach(
         &self,
         attachment_id: TerminalAttachmentId,
         sink: Arc<dyn TerminalEventSink>,
         claims_resize: bool,
+        transport: TerminalTransport,
         on_detached: Arc<dyn Fn(TerminalAttachmentId) + Send + Sync>,
     ) -> Result<TerminalAttachment, TerminalError> {
         self.request(|reply| RuntimeCommand::Attach {
             attachment_id,
             sink,
             claims_resize,
+            transport,
             on_detached,
             reply,
         })
@@ -306,10 +330,19 @@ enum RuntimeCommand {
         id: TerminalAnchorId,
         reply: Sender<Result<bool, TerminalError>>,
     },
+    Select {
+        request: TerminalSelectionRequest,
+        reply: Sender<Result<TerminalSelectionState, TerminalError>>,
+    },
+    Input {
+        input: TerminalInput,
+        reply: Sender<Result<usize, TerminalError>>,
+    },
     Attach {
         attachment_id: TerminalAttachmentId,
         sink: Arc<dyn TerminalEventSink>,
         claims_resize: bool,
+        transport: TerminalTransport,
         on_detached: Arc<dyn Fn(TerminalAttachmentId) + Send + Sync>,
         reply: Sender<Result<TerminalAttachment, TerminalError>>,
     },
@@ -353,6 +386,9 @@ struct ClosingState {
 struct Subscriber {
     events: Sender<TerminalEvent>,
     control: Sender<TerminalEvent>,
+    /// Which encoding this attachment asked for. The actor produces the other
+    /// encoding only while somebody is listening for it.
+    transport: TerminalTransport,
     on_detached: Arc<dyn Fn(TerminalAttachmentId) + Send + Sync>,
 }
 
@@ -639,14 +675,46 @@ impl RuntimeActor {
             RuntimeCommand::ReleaseAnchor { id, reply } => {
                 let _ = reply.send(Ok(self.vt.release_anchor(id)));
             }
+            RuntimeCommand::Select { request, reply } => {
+                let result = self.vt.apply_selection(request).map_err(io_error);
+                let _ = reply.send(result);
+            }
+            RuntimeCommand::Input { input, reply } => {
+                // Encoded here, from the modes this actor's parser holds, and
+                // written from here, in order with everything else the actor
+                // does. A caller cannot encode it earlier: the modes it would
+                // have to read are only correct at this point in the sequence.
+                let result = self
+                    .vt
+                    .encode_input(&input)
+                    .map_err(io_error)
+                    .and_then(|bytes| {
+                        if bytes.is_empty() {
+                            // The current modes do not report this input. There
+                            // is nothing to write and nothing wrong.
+                            return Ok(0);
+                        }
+                        self.require_writable().and_then(|writer| {
+                            writer
+                                .write_all(&bytes)
+                                .map(|()| bytes.len())
+                                .map_err(|error| {
+                                    io_error(format!("Failed to write to terminal: {error}"))
+                                })
+                        })
+                    });
+                let _ = reply.send(result);
+            }
             RuntimeCommand::Attach {
                 attachment_id,
                 sink,
                 claims_resize,
+                transport,
                 on_detached,
                 reply,
             } => {
-                let result = self.attach(attachment_id, sink, claims_resize, on_detached);
+                let result =
+                    self.attach(attachment_id, sink, claims_resize, transport, on_detached);
                 let _ = reply.send(result);
             }
             RuntimeCommand::Detach {
@@ -775,8 +843,11 @@ impl RuntimeActor {
             }
         };
         let sequence = self.next_sequence();
+        let revision = descriptor.revision;
         self.apply(plan_replay_transition(descriptor, replay, sequence))
             .map_err(io_error)?;
+        // A resize on the semantic path is state, not a replay to re-parse.
+        self.publish_semantic_state(sequence, revision, Vec::new());
         Ok(())
     }
 
@@ -786,6 +857,35 @@ impl RuntimeActor {
             descriptor: self.record.descriptor(),
             sequence_boundary: self.sequence,
             replay,
+            state: None,
+        })
+    }
+
+    /// The baseline a semantic attachment starts from.
+    ///
+    /// The state is projected through a render state of its own, so consuming
+    /// the damage of this read does not take the change away from the frames
+    /// the stream is already publishing.
+    ///
+    /// The replay is reduced to the geometry it names. A client that reads
+    /// meaning must not also be handed a second, parseable copy of the screen:
+    /// area 05 deletes the field, and until then nothing on this path fills it.
+    fn semantic_snapshot(&mut self) -> Result<TerminalRuntimeSnapshot, TerminalError> {
+        let state = self
+            .vt
+            .project_baseline()
+            .map_err(|message| io_error(format!("Failed to project state: {message}")))?;
+        let descriptor = self.record.descriptor();
+        Ok(TerminalRuntimeSnapshot {
+            sequence_boundary: self.sequence,
+            replay: TerminalReplay {
+                revision: descriptor.revision,
+                columns: descriptor.columns,
+                rows: descriptor.rows,
+                bytes: Arc::from(&[][..]),
+            },
+            descriptor,
+            state: Some(Box::new(state)),
         })
     }
 
@@ -817,7 +917,12 @@ impl RuntimeActor {
             }
         };
         let sequence = self.next_sequence();
-        self.apply(plan_replay_transition(descriptor, replay, sequence))
+        let revision = descriptor.revision;
+        let applied = self.apply(plan_replay_transition(descriptor, replay, sequence));
+        // A theme change on the semantic path is state too: the colours the
+        // client paints with are a fact it reads, not ANSI it replays.
+        self.publish_semantic_state(sequence, revision, Vec::new());
+        applied
     }
 
     fn attach(
@@ -825,9 +930,13 @@ impl RuntimeActor {
         attachment_id: TerminalAttachmentId,
         sink: Arc<dyn TerminalEventSink>,
         claims_resize: bool,
+        transport: TerminalTransport,
         on_detached: Arc<dyn Fn(TerminalAttachmentId) + Send + Sync>,
     ) -> Result<TerminalAttachment, TerminalError> {
-        let snapshot = self.snapshot()?;
+        let snapshot = match transport {
+            TerminalTransport::Legacy => self.snapshot()?,
+            TerminalTransport::Semantic => self.semantic_snapshot()?,
+        };
         if self.exited {
             return Ok(TerminalAttachment {
                 attachment_id,
@@ -840,6 +949,7 @@ impl RuntimeActor {
             attachment_id,
             sink,
             self.subscriber_status_sender.clone(),
+            transport,
             on_detached,
         )?;
         self.subscribers.insert(attachment_id, subscriber);
@@ -853,15 +963,57 @@ impl RuntimeActor {
         })
     }
 
+    /// Whether anybody is listening on the semantic path.
+    ///
+    /// Projecting the host's state costs real work, so it is done when it has a
+    /// reader and not otherwise.
+    fn has_semantic_attachment(&self) -> bool {
+        self.subscribers
+            .values()
+            .any(|subscriber| subscriber.transport == TerminalTransport::Semantic)
+    }
+
+    /// Publish the semantic encoding of the occurrence that just happened.
+    ///
+    /// A projection failure is logged and dropped rather than raised: the
+    /// occurrence has already happened, and the legacy audience has already
+    /// been told. The semantic audience learns the state at the next
+    /// occurrence, or by asking.
+    fn publish_semantic_state(
+        &mut self,
+        sequence: u64,
+        revision: TerminalRevision,
+        effects: Vec<TerminalEffect>,
+    ) {
+        if !self.has_semantic_attachment() {
+            return;
+        }
+        match self.vt.project() {
+            Ok(state) => {
+                let _ = self.apply(plan_semantic_state(state, effects, sequence, revision));
+            }
+            Err(error) => log::warn!(
+                target: LOG_TARGET,
+                "terminal {} could not project its state at sequence {sequence}: {error}",
+                self.record.id()
+            ),
+        }
+    }
+
     fn handle_output(&mut self, output: ReaderEvent) {
         match output {
             ReaderEvent::Data(data) => {
-                let responses = self.vt.feed(&data);
+                let feed = self.vt.feed(&data);
                 let sequence = self.next_sequence();
                 let revision = self.record.note_output();
                 // Output is published whether or not the child could be
                 // answered: the bytes arrived either way.
-                let _ = self.apply(plan_child_output(&data, responses, sequence, revision));
+                let _ = self.apply(plan_child_output(&data, feed.responses, sequence, revision));
+                // The same occurrence, told as meaning. It carries the same
+                // sequence because it is the same occurrence, and it reaches a
+                // different set of attachments. The effects the parse reported
+                // travel with it, in the order the parse reported them.
+                self.publish_semantic_state(sequence, revision, feed.effects);
             }
             ReaderEvent::Exited {
                 code,
@@ -967,8 +1119,12 @@ impl RuntimeActor {
 
     fn publish(&mut self, event: TerminalEvent) {
         let sequence = event_sequence(&event);
+        let audience = event_audience(&event);
         let mut lost = Vec::new();
         for (attachment_id, subscriber) in &self.subscribers {
+            if !audience.includes(subscriber.transport) {
+                continue;
+            }
             let outcome = match subscriber.events.try_send(event.clone()) {
                 Ok(()) => DeliveryOutcome::Delivered,
                 Err(TrySendError::Full(_)) => DeliveryOutcome::Full,
@@ -1173,6 +1329,7 @@ fn spawn_subscriber(
     attachment_id: TerminalAttachmentId,
     sink: Arc<dyn TerminalEventSink>,
     status: Sender<SubscriberStatus>,
+    transport: TerminalTransport,
     on_detached: Arc<dyn Fn(TerminalAttachmentId) + Send + Sync>,
 ) -> Result<Subscriber, TerminalError> {
     let (event_sender, event_receiver) = bounded(ATTACHMENT_MAILBOX_EVENTS);
@@ -1226,6 +1383,7 @@ fn spawn_subscriber(
     Ok(Subscriber {
         events: event_sender,
         control: control_sender,
+        transport,
         on_detached,
     })
 }
@@ -1234,6 +1392,7 @@ fn event_sequence(event: &TerminalEvent) -> u64 {
     match event {
         TerminalEvent::Output { sequence, .. }
         | TerminalEvent::Replay { sequence, .. }
+        | TerminalEvent::Screen { sequence, .. }
         | TerminalEvent::MetadataChanged { sequence, .. }
         | TerminalEvent::AgentActivityChanged { sequence, .. }
         | TerminalEvent::Exited { sequence, .. }
@@ -1300,6 +1459,15 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
 
+    use crate::terminal::effects::{TerminalClipboardContent, TerminalClipboardLocation};
+    use crate::terminal::input::{
+        TerminalKeyAction, TerminalKeyEvent, TerminalModifiers, TerminalMouseAction,
+        TerminalMouseButton, TerminalMouseEvent, TerminalSurfaceGeometry,
+    };
+    use crate::terminal::projection::{
+        ProjectedColor, ProjectedDamage, ProjectedDamageScope, ProjectedModes, ProjectedPrompt,
+        ProjectedScreen, ProjectedSelectionMove, ProjectedWidth,
+    };
     use crate::terminal::types::{
         TerminalDescriptor, TerminalLifecycle, TerminalMetadata, TerminalOwner,
     };
@@ -1349,6 +1517,7 @@ mod tests {
                 .map(|event| match event {
                     TerminalEvent::Output { .. } => "output",
                     TerminalEvent::Replay { .. } => "replay",
+                    TerminalEvent::Screen { .. } => "screen",
                     TerminalEvent::MetadataChanged { .. } => "metadata",
                     TerminalEvent::AgentActivityChanged { .. } => "agent",
                     TerminalEvent::Exited { .. } => "exited",
@@ -1482,20 +1651,41 @@ mod tests {
             self.output.send(output).expect("the actor is reading");
         }
 
-        /// Attaches one subscriber and returns its stream.
+        /// Attaches one byte-path subscriber and returns its stream.
         fn attach(&self, claims_resize: bool) -> (TerminalAttachmentId, EventLog) {
+            self.attach_with(claims_resize, TerminalTransport::Legacy)
+        }
+
+        /// Attaches one subscriber on the transport it asks for.
+        fn attach_with(
+            &self,
+            claims_resize: bool,
+            transport: TerminalTransport,
+        ) -> (TerminalAttachmentId, EventLog) {
+            let (attachment, events) = self.attach_returning(claims_resize, transport);
+            (attachment.attachment_id, events)
+        }
+
+        /// The same attach, with the snapshot the host answered it with.
+        fn attach_returning(
+            &self,
+            claims_resize: bool,
+            transport: TerminalTransport,
+        ) -> (TerminalAttachment, EventLog) {
             let attachment_id = TerminalAttachmentId::new();
             let events = EventLog::default();
             let detached = Arc::clone(&self.detached);
-            self.handle
+            let attachment = self
+                .handle
                 .attach(
                     attachment_id,
                     Arc::new(events.clone()),
                     claims_resize,
+                    transport,
                     Arc::new(move |id| detached.lock().unwrap().push(id)),
                 )
                 .expect("attach needs no child");
-            (attachment_id, events)
+            (attachment, events)
         }
 
         /// Closes the command channel, which is the actor's stop condition.
@@ -1524,6 +1714,22 @@ mod tests {
             thread::sleep(std::time::Duration::from_millis(1));
         }
         panic!("expected {count} events, saw {:?}", events.kinds());
+    }
+
+    /// Waits for a fact the actor holds, rather than for events about it.
+    ///
+    /// An attachment mailbox holds [`ATTACHMENT_MAILBOX_EVENTS`] events, and a
+    /// subscriber that falls behind that far is resynchronized and dropped by
+    /// design. A test that writes more than a mailbox-full therefore cannot
+    /// count events to learn that the writes were applied — it asks the engine.
+    fn wait_until(what: &str, mut ready: impl FnMut() -> bool) {
+        for _ in 0..2_000 {
+            if ready() {
+                return;
+            }
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("the actor never reached: {what}");
     }
 
     #[test]
@@ -1604,7 +1810,16 @@ mod tests {
         for line in 0..40 {
             harness.send(ReaderEvent::Data(format!("line{line}\r\n").into_bytes()));
         }
-        wait_for_events(&events, 41);
+        // More writes than a mailbox holds, so the wait is on the engine's own
+        // history rather than on a subscriber that the host may have dropped.
+        wait_until("the anchored line scrolled into history", || {
+            harness.handle.project_history(0, 1).is_ok_and(|window| {
+                window
+                    .rows
+                    .first()
+                    .is_some_and(|row| row.text().trim_end() == "anchored")
+            })
+        });
 
         let window = harness
             .handle
@@ -1638,6 +1853,837 @@ mod tests {
 
         assert!(harness.handle.release_anchor(anchor.id).unwrap());
         assert!(harness.handle.resolve_anchor(anchor.id).unwrap().is_none());
+    }
+
+    fn key(code: &str, mods: TerminalModifiers, text: Option<&str>) -> TerminalInput {
+        TerminalInput::Key(TerminalKeyEvent {
+            action: TerminalKeyAction::Press,
+            code: code.to_string(),
+            text: text.map(str::to_string),
+            mods,
+            composing: false,
+        })
+    }
+
+    /// Area 01 criterion 3. The semantic path out of `handle_output` publishes
+    /// no child bytes and no ANSI replay, and the byte path is what the
+    /// migration switch selects — not a default the actor falls back to.
+    #[test]
+    fn the_semantic_path_publishes_state_and_the_byte_path_publishes_bytes() {
+        let harness = ActorHarness::start();
+        let (_, legacy) = harness.attach_with(false, TerminalTransport::Legacy);
+        let (_, semantic) = harness.attach_with(false, TerminalTransport::Semantic);
+
+        harness.send(ReaderEvent::Data(b"hello".to_vec()));
+        wait_for_events(&legacy, 1);
+        wait_for_events(&semantic, 1);
+
+        assert_eq!(legacy.kinds(), vec!["output"]);
+        assert_eq!(semantic.kinds(), vec!["screen"]);
+
+        let bytes = legacy.taken();
+        let state = semantic.taken();
+        let (legacy_sequence, revision) = match &bytes[0] {
+            TerminalEvent::Output {
+                sequence, revision, ..
+            } => (*sequence, *revision),
+            other => panic!("expected Output, got {other:?}"),
+        };
+        match &state[0] {
+            TerminalEvent::Screen {
+                sequence,
+                revision: semantic_revision,
+                state,
+                ..
+            } => {
+                assert_eq!(
+                    *sequence, legacy_sequence,
+                    "one occurrence, one sequence, two encodings"
+                );
+                assert_eq!(*semantic_revision, revision);
+                assert_eq!(state.viewport[0].text().trim_end(), "hello");
+            }
+            other => panic!("expected Screen, got {other:?}"),
+        }
+
+        // A resize is state on the semantic path, not ANSI to re-parse.
+        let (authority, _) = harness.attach_with(true, TerminalTransport::Legacy);
+        harness.handle.resize(authority, 40, 12).expect("resize");
+        wait_for_events(&legacy, 1);
+        wait_for_events(&semantic, 1);
+        assert_eq!(legacy.kinds(), vec!["replay"]);
+        assert_eq!(semantic.kinds(), vec!["screen"]);
+        match &semantic.taken()[0] {
+            TerminalEvent::Screen { state, .. } => assert_eq!(state.columns, 40),
+            other => panic!("expected Screen, got {other:?}"),
+        }
+        legacy.taken();
+
+        // Lifecycle is neither encoding, so both hear it.
+        harness.send(ReaderEvent::Exited {
+            code: Some(0),
+            read_error: None,
+            wait_error: None,
+        });
+        wait_for_events(&legacy, 1);
+        wait_for_events(&semantic, 1);
+        assert_eq!(legacy.kinds(), vec!["exited"]);
+        assert_eq!(semantic.kinds(), vec!["exited"]);
+    }
+
+    /// Area 01 criterion 6, on the production path: a client reports what the
+    /// person did, and the actor decides what bytes that is from the modes the
+    /// child selected. Nothing here is a keymap the client could hold, because
+    /// the same event encodes differently a moment later.
+    #[test]
+    fn input_is_encoded_from_the_modes_the_child_selected() {
+        let harness = ActorHarness::start();
+        let (_, events) = harness.attach(false);
+
+        // Arrows, before and after the child asks for application cursor keys.
+        assert!(
+            harness
+                .handle
+                .input(key("ArrowUp", TerminalModifiers::default(), None))
+                .expect("the actor encodes a key")
+                > 0
+        );
+        assert_eq!(harness.child_inbox.taken(), b"\x1b[A");
+
+        harness.send(ReaderEvent::Data(b"\x1b[?1h".to_vec()));
+        wait_for_events(&events, 1);
+        harness
+            .handle
+            .input(key("ArrowUp", TerminalModifiers::default(), None))
+            .expect("the actor encodes a key");
+        assert_eq!(
+            harness.child_inbox.taken(),
+            b"\x1bOA",
+            "the same key, a different mode, different bytes"
+        );
+
+        // A control character is derived from the key and the modifiers, not
+        // sent as text by the client.
+        harness
+            .handle
+            .input(key(
+                "KeyC",
+                TerminalModifiers {
+                    ctrl: true,
+                    ..TerminalModifiers::default()
+                },
+                Some("c"),
+            ))
+            .expect("the actor encodes a key");
+        assert_eq!(harness.child_inbox.taken(), b"\x03");
+
+        // Application keypad mode, which is a command the child sends and a
+        // fact no client can see any other way.
+        harness
+            .handle
+            .input(key("NumpadAdd", TerminalModifiers::default(), Some("+")))
+            .expect("the actor encodes a key");
+        assert_eq!(harness.child_inbox.taken(), b"+");
+        harness.send(ReaderEvent::Data(b"\x1b[?66h\x1b[?1035l".to_vec()));
+        wait_for_events(&events, 1);
+        harness
+            .handle
+            .input(key("NumpadAdd", TerminalModifiers::default(), Some("+")))
+            .expect("the actor encodes a key");
+        assert_eq!(
+            harness.child_inbox.taken(),
+            b"\x1bOk",
+            "two modes decide this together, and the layout text loses to them"
+        );
+
+        // The Kitty keyboard protocol is another such command, and it changes
+        // the encoding of keys the legacy mode has no way to report.
+        harness.send(ReaderEvent::Data(b"\x1b[>1u".to_vec()));
+        wait_for_events(&events, 1);
+        harness
+            .handle
+            .input(key("Escape", TerminalModifiers::default(), None))
+            .expect("the actor encodes a key");
+        assert_eq!(harness.child_inbox.taken(), b"\x1b[27u");
+
+        // A key the host cannot name is refused rather than guessed at.
+        assert!(harness
+            .handle
+            .input(key("NoSuchKey", TerminalModifiers::default(), None))
+            .is_err());
+    }
+
+    /// Composition, paste, pointer and focus, each gated by the mode that
+    /// governs it. An input the modes do not report writes nothing.
+    #[test]
+    fn composed_text_paste_pointer_and_focus_follow_their_modes() {
+        let harness = ActorHarness::start();
+        let (_, events) = harness.attach(false);
+
+        // A composing key produces no bytes; the commit produces the text.
+        harness
+            .handle
+            .input(TerminalInput::Key(TerminalKeyEvent {
+                action: TerminalKeyAction::Press,
+                code: "KeyA".to_string(),
+                text: Some("a".to_string()),
+                mods: TerminalModifiers::default(),
+                composing: true,
+            }))
+            .expect("the actor accepts a composing key");
+        assert!(
+            harness.child_inbox.taken().is_empty(),
+            "a composition in progress is not input yet"
+        );
+        harness
+            .handle
+            .input(TerminalInput::Text {
+                text: "日本".to_string(),
+            })
+            .expect("the actor writes committed text");
+        assert_eq!(harness.child_inbox.taken(), "日本".as_bytes());
+
+        // Paste follows bracketed-paste mode.
+        harness
+            .handle
+            .input(TerminalInput::Paste {
+                text: "ls".to_string(),
+            })
+            .expect("the actor encodes a paste");
+        assert_eq!(harness.child_inbox.taken(), b"ls");
+
+        harness.send(ReaderEvent::Data(b"\x1b[?2004h".to_vec()));
+        wait_for_events(&events, 1);
+        harness
+            .handle
+            .input(TerminalInput::Paste {
+                text: "ls".to_string(),
+            })
+            .expect("the actor encodes a paste");
+        assert_eq!(harness.child_inbox.taken(), b"\x1b[200~ls\x1b[201~");
+
+        // The pointer says nothing until the child asks to hear about it.
+        let surface = TerminalSurfaceGeometry {
+            screen_width: 800,
+            screen_height: 480,
+            cell_width: 10,
+            cell_height: 20,
+            padding_top: 0,
+            padding_bottom: 0,
+            padding_left: 0,
+            padding_right: 0,
+        };
+        let press = TerminalInput::Mouse(TerminalMouseEvent {
+            action: TerminalMouseAction::Press,
+            button: Some(TerminalMouseButton::Left),
+            mods: TerminalModifiers::default(),
+            x: 25.0,
+            y: 21.0,
+            surface,
+            any_button_pressed: true,
+        });
+        assert_eq!(
+            harness
+                .handle
+                .input(press.clone())
+                .expect("the actor answers a pointer event"),
+            0,
+            "no tracking mode, no report"
+        );
+        assert!(harness.child_inbox.taken().is_empty());
+
+        harness.send(ReaderEvent::Data(b"\x1b[?1000h\x1b[?1006h".to_vec()));
+        wait_for_events(&events, 1);
+        harness
+            .handle
+            .input(press)
+            .expect("the actor encodes a pointer event");
+        assert_eq!(
+            harness.child_inbox.taken(),
+            b"\x1b[<0;3;2M",
+            "the host turned pixels into a cell using the geometry the client sent"
+        );
+
+        // The wheel is one of those buttons. A client reports the direction as
+        // the button it is, and the host encodes the scroll report.
+        harness
+            .handle
+            .input(TerminalInput::Mouse(TerminalMouseEvent {
+                action: TerminalMouseAction::Press,
+                button: Some(TerminalMouseButton::Five),
+                mods: TerminalModifiers::default(),
+                x: 25.0,
+                y: 21.0,
+                surface,
+                any_button_pressed: false,
+            }))
+            .expect("the actor encodes a wheel report");
+        assert_eq!(
+            harness.child_inbox.taken(),
+            b"\x1b[<65;3;2M",
+            "a wheel the child asked for reaches it as a scroll, not as a scrollback move"
+        );
+
+        // Focus is reported only under mode 1004.
+        assert_eq!(
+            harness
+                .handle
+                .input(TerminalInput::Focus { gained: true })
+                .expect("the actor answers a focus change"),
+            0
+        );
+        harness.send(ReaderEvent::Data(b"\x1b[?1004h".to_vec()));
+        wait_for_events(&events, 1);
+        harness
+            .handle
+            .input(TerminalInput::Focus { gained: true })
+            .expect("the actor encodes a focus change");
+        assert_eq!(harness.child_inbox.taken(), b"\x1b[I");
+        harness
+            .handle
+            .input(TerminalInput::Focus { gained: false })
+            .expect("the actor encodes a focus change");
+        assert_eq!(harness.child_inbox.taken(), b"\x1b[O");
+    }
+
+    /// The webview's keybinding presets, as the meaning they always were.
+    ///
+    /// Each preset ships a byte sequence a client writes: `\n` for the newline
+    /// on shift-return, `\x17` for delete-word, `\x0c` for clear. Those bytes
+    /// are what this host already makes of what the person asked for, so the
+    /// client can report the meaning and stop holding the sequence.
+    ///
+    /// The values are taken from the input fixture by name rather than restated
+    /// here, so what the client receives is what this test proved.
+    #[test]
+    fn the_keybinding_presets_are_bytes_this_host_already_makes() {
+        let harness = ActorHarness::start();
+        let _ = harness.attach(false);
+
+        let samples = super::super::contract::sample_inputs();
+        let sample = |name: &str| {
+            samples
+                .iter()
+                .find(|sample| sample.name == name)
+                .map(|sample| sample.input.clone())
+                .unwrap_or_else(|| panic!("the input fixture has no {name} sample"))
+        };
+
+        for (name, bytes) in [
+            ("preset-delete-word", b"\x17".as_slice()),
+            ("preset-clear-screen", b"\x0c".as_slice()),
+            ("preset-newline", b"\n".as_slice()),
+        ] {
+            harness
+                .handle
+                .input(sample(name))
+                .expect("the actor encodes the preset");
+            assert_eq!(
+                harness.child_inbox.taken(),
+                bytes,
+                "{name} reaches the child as the sequence the preset ships"
+            );
+        }
+    }
+
+    /// Selection on the production path. The client sends an intent, the actor
+    /// answers with the state and the text, and the projection every client
+    /// reads carries the same answer. No client computes which cells a gesture
+    /// covers, and none re-reads bytes to find out.
+    #[test]
+    fn selection_is_an_intent_the_actor_answers() {
+        let harness = ActorHarness::start();
+        let (_, events) = harness.attach(false);
+
+        harness.send(ReaderEvent::Data(b"alpha beta gamma\r\n".to_vec()));
+        wait_for_events(&events, 1);
+
+        let selected = harness
+            .handle
+            .select(TerminalSelectionRequest::Word {
+                space: ProjectedSpace::Active,
+                at: ProjectedPoint { column: 0, row: 0 },
+            })
+            .expect("the actor selects a word");
+        assert!(selected.active);
+        assert_eq!(selected.text.as_deref(), Some("alpha"));
+
+        let extended = harness
+            .handle
+            .select(TerminalSelectionRequest::Extend {
+                movement: ProjectedSelectionMove::EndOfLine,
+            })
+            .expect("the actor extends the selection");
+        assert_eq!(
+            extended.text.as_deref(),
+            Some("alpha beta gamma"),
+            "the host resolved the end of the line, not the client"
+        );
+
+        let marked: String = harness
+            .handle
+            .project()
+            .expect("the actor projects")
+            .viewport[0]
+            .cells
+            .iter()
+            .filter(|cell| cell.selected)
+            .map(|cell| cell.text.as_str())
+            .collect();
+        assert_eq!(
+            marked, "alpha beta gamma",
+            "the selection reaches clients as the per-cell fact every read carries"
+        );
+
+        let cleared = harness
+            .handle
+            .select(TerminalSelectionRequest::Clear)
+            .expect("the actor clears the selection");
+        assert!(!cleared.active && cleared.text.is_none());
+        assert!(harness
+            .handle
+            .project()
+            .expect("the actor projects")
+            .viewport
+            .iter()
+            .all(|row| row.cells.iter().all(|cell| !cell.selected)));
+    }
+
+    /// Area 01 criterion 5: what happened travels beside what the screen now
+    /// is, in the order the parse reported it, and the answer the parser owed
+    /// the child goes to the child alone.
+    ///
+    /// OSC 9 is absent from this list on purpose. The pinned parser reports no
+    /// payload for it, and the approved disposition is to expose it in the
+    /// dependency rather than to scan the child's bytes beside the parser —
+    /// see gap 1 in `docs/ops/terminal-vt-dependency.md`.
+    #[test]
+    fn occurrences_reach_clients_in_order_and_replies_reach_only_the_child() {
+        let harness = ActorHarness::start();
+        let (_, legacy) = harness.attach_with(false, TerminalTransport::Legacy);
+        let (_, semantic) = harness.attach_with(false, TerminalTransport::Semantic);
+
+        // One chunk: text, a title, a bell, a directory, a clipboard write, and
+        // a cursor report the child asked for.
+        harness.send(ReaderEvent::Data(
+            b"one\x1b]0;shipctl\x1b\\two\x07\x1b]7;file:///workspace\x1b\\\
+              \x1b]52;c;aGVsbG8=\x1b\\\x1b[6n"
+                .to_vec(),
+        ));
+        wait_for_events(&semantic, 1);
+        wait_for_events(&legacy, 1);
+
+        let effects = match &semantic.taken()[0] {
+            TerminalEvent::Screen { effects, .. } => effects.clone(),
+            other => panic!("expected Screen, got {other:?}"),
+        };
+        assert_eq!(
+            effects,
+            vec![
+                TerminalEffect::Title {
+                    title: "shipctl".to_string()
+                },
+                TerminalEffect::Bell,
+                TerminalEffect::WorkingDirectory {
+                    uri: "file:///workspace".to_string()
+                },
+                TerminalEffect::Clipboard {
+                    location: TerminalClipboardLocation::Standard,
+                    contents: vec![TerminalClipboardContent {
+                        mime: "text/plain".to_string(),
+                        data: "hello".to_string(),
+                    }],
+                },
+            ],
+            "the order is the child's order, not the order of the reads"
+        );
+
+        // The cursor report is the parser's answer to the child. It went to the
+        // child and to no client, on either encoding.
+        let replies = harness.child_inbox.taken();
+        assert_eq!(replies, b"\x1b[1;7R".to_vec());
+        assert_eq!(legacy.kinds(), vec!["output"]);
+        let published = legacy.taken();
+        match &published[0] {
+            TerminalEvent::Output { data, .. } => assert!(
+                !data.windows(3).any(|window| window == b"[1;"),
+                "the answer to the child is not in the client's bytes"
+            ),
+            other => panic!("expected Output, got {other:?}"),
+        }
+
+        // Screen state is not where an occurrence goes: nothing above turned
+        // into a cell, and the next chunk carries its own occurrences only.
+        harness.send(ReaderEvent::Data(b"plain".to_vec()));
+        wait_for_events(&semantic, 1);
+        match &semantic.taken()[0] {
+            TerminalEvent::Screen { effects, .. } => assert!(
+                effects.is_empty(),
+                "occurrences belong to the parse that reported them"
+            ),
+            other => panic!("expected Screen, got {other:?}"),
+        }
+    }
+
+    /// Area 01 criterion 4: a resize and a theme change are state transitions
+    /// the host decides. The resize proves the host reflowed the text, so no
+    /// client has to re-wrap it. The theme proves the published colours are the
+    /// resolved ones — the child's choices survive, and only what the child did
+    /// not choose follows the application theme.
+    #[test]
+    fn a_resize_reflows_and_a_theme_publishes_the_resolved_colours() {
+        let harness = ActorHarness::start();
+        let (authority, legacy) = harness.attach_with(true, TerminalTransport::Legacy);
+        let (_, semantic) = harness.attach_with(false, TerminalTransport::Semantic);
+
+        let line = "x".repeat(60);
+        harness.send(ReaderEvent::Data(line.clone().into_bytes()));
+        wait_for_events(&semantic, 1);
+        let before = harness.handle.project().expect("the actor projects");
+        assert!(
+            !before.viewport[0].wrapped,
+            "sixty columns of eighty do not wrap"
+        );
+
+        harness.handle.resize(authority, 40, 12).expect("resize");
+        wait_for_events(&semantic, 2);
+        let after = harness.handle.project().expect("the actor projects");
+        assert_eq!((after.columns, after.rows), (40, 12));
+        assert!(
+            after.viewport[0].wrapped && after.viewport[1].continuation,
+            "the host reflowed the row; the client is told, not asked"
+        );
+        assert_eq!(
+            format!(
+                "{}{}",
+                after.viewport[0].text(),
+                after.viewport[1].text().trim_end()
+            ),
+            line,
+            "reflow moved the text, it did not lose it"
+        );
+
+        // The child chooses its own background and one palette entry.
+        harness.send(ReaderEvent::Data(
+            b"\x1b]11;#204060\x1b\\\x1b]4;1;#010203\x1b\\".to_vec(),
+        ));
+        wait_for_events(&semantic, 3);
+
+        let theme = TerminalColorTheme {
+            foreground: "#101112".to_string(),
+            background: "#131415".to_string(),
+            palette: vec!["#161718".to_string(); 16],
+        };
+        harness.handle.set_theme(theme).expect("the theme changes");
+        wait_for_events(&semantic, 4);
+
+        assert_eq!(
+            semantic.kinds(),
+            vec!["screen"; 4],
+            "no ANSI reconstruction reached the semantic subscriber"
+        );
+        let colours = match semantic.taken().pop() {
+            Some(TerminalEvent::Screen { state, .. }) => state.colors,
+            other => panic!("expected Screen, got {other:?}"),
+        };
+        assert_eq!(
+            colours.background,
+            Some(ProjectedColor {
+                r: 0x20,
+                g: 0x40,
+                b: 0x60
+            }),
+            "the application theme did not overwrite the colour the child chose"
+        );
+        assert_eq!(
+            colours.palette[1],
+            ProjectedColor {
+                r: 0x01,
+                g: 0x02,
+                b: 0x03
+            },
+            "a child-authored palette entry survives the theme too"
+        );
+        assert_eq!(
+            colours.foreground,
+            Some(ProjectedColor {
+                r: 0x10,
+                g: 0x11,
+                b: 0x12
+            }),
+            "what the child did not choose resolves to the new theme"
+        );
+        assert_eq!(
+            colours.palette[2],
+            ProjectedColor {
+                r: 0x16,
+                g: 0x17,
+                b: 0x18
+            }
+        );
+        legacy.taken();
+    }
+
+    /// A client that attaches mid-stream needs a baseline it can read. On the
+    /// semantic path that baseline is state, and it must not consume the damage
+    /// the attachments already following the stream have not read yet.
+    #[test]
+    fn a_semantic_attachment_starts_from_state_and_a_byte_one_does_not() {
+        let harness = ActorHarness::start();
+        let (_, following) = harness.attach_with(false, TerminalTransport::Semantic);
+        harness.send(ReaderEvent::Data(b"already here".to_vec()));
+        wait_for_events(&following, 1);
+        following.taken();
+
+        let (legacy, _) = harness.attach_returning(false, TerminalTransport::Legacy);
+        assert!(
+            legacy.snapshot.state.is_none(),
+            "a byte-path attachment is given no state to read"
+        );
+        assert!(
+            !legacy.snapshot.replay.bytes.is_empty(),
+            "and is given the bytes it does read"
+        );
+
+        let (semantic, _) = harness.attach_returning(false, TerminalTransport::Semantic);
+        let state = semantic
+            .snapshot
+            .state
+            .expect("a semantic attachment is given the state it reads");
+        assert_eq!(state.viewport[0].text().trim_end(), "already here");
+        assert_eq!(
+            state.damage.scope,
+            ProjectedDamageScope::Full,
+            "a client that has painted nothing is told to paint everything"
+        );
+        assert_eq!(
+            semantic.snapshot.sequence_boundary, 1,
+            "the baseline names the occurrence it is current as of"
+        );
+        assert!(
+            semantic.snapshot.replay.bytes.is_empty(),
+            "and is given no second, parseable copy of the screen"
+        );
+        assert_eq!(
+            semantic.snapshot.replay.columns, legacy.snapshot.replay.columns,
+            "the geometry the baseline names is the host's"
+        );
+
+        // The stream the first attachment follows still owes it that change.
+        harness.send(ReaderEvent::Data(b"!".to_vec()));
+        wait_for_events(&following, 1);
+        match following.taken().pop() {
+            Some(TerminalEvent::Screen { state, .. }) => assert_eq!(
+                state.damage.scope,
+                ProjectedDamageScope::Partial,
+                "the baseline read did not take the stream's damage away from it"
+            ),
+            other => panic!("expected Screen, got {other:?}"),
+        }
+    }
+
+    /// Area 01 criterion 1. One representative trace through the running actor,
+    /// and every terminal fact read back out of the live projection.
+    ///
+    /// The facts this test is the only proof of are the per-cell and per-row
+    /// ones — grapheme, occupancy, style, link, prompt — plus the screen,
+    /// cursor, mode, palette and damage facts. History, selection and effects
+    /// are proved through the same handle by the tests named for them.
+    ///
+    /// The attachment is a byte-path one on purpose: a semantic attachment
+    /// would project on every chunk, and damage is a difference, so the actor
+    /// would consume the change this test asks about before the test could read
+    /// it.
+    #[test]
+    fn one_trace_through_the_actor_carries_every_terminal_fact() {
+        let harness = ActorHarness::start();
+        let (_, events) = harness.attach(false);
+
+        let mut trace: Vec<u8> = Vec::new();
+        // More lines than the screen holds, so rows leave for history.
+        for line in 0..30 {
+            trace.extend_from_slice(format!("fill{line}\r\n").as_bytes());
+        }
+        // Home, then erase what the fills left, so every row this test reads is
+        // one this test wrote.
+        trace.extend_from_slice(b"\x1b[H\x1b[J");
+        // A shell prompt, styled text, a wide grapheme with a combining mark
+        // after it, a hyperlink, and a palette entry the child chose.
+        trace.extend_from_slice(b"\x1b]133;A\x1b\\");
+        trace.extend_from_slice(b"$ \x1b[1;38;2;10;20;30mbold\x1b[0m done\r\n");
+        trace.extend_from_slice("\u{6f22}e\u{301}\r\n".as_bytes());
+        trace.extend_from_slice(b"\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\r\n");
+        trace.extend_from_slice(b"\x1b]4;3;rgb:0a/0b/0c\x1b\\");
+        // Exactly one row of text: the row is full and the next character
+        // decides whether it wraps.
+        trace.extend(std::iter::repeat_n(b'w', 80));
+        harness.send(ReaderEvent::Data(trace));
+        wait_for_events(&events, 1);
+
+        let state = harness.handle.project().expect("the actor projects");
+        assert_eq!((state.columns, state.rows), (80, 24));
+        assert_eq!(state.screen, ProjectedScreen::Primary);
+        assert!(
+            state.scrollback_rows > 0,
+            "the rows that left the screen are retained, and the count says so"
+        );
+
+        let prompt_row = &state.viewport[0];
+        assert_eq!(
+            prompt_row.prompt,
+            ProjectedPrompt::Prompt,
+            "the host reports the OSC 133 marking; a client does not guess it"
+        );
+        assert_eq!(prompt_row.text().trim_end(), "$ bold done");
+        let styled = &prompt_row.cells[2];
+        assert_eq!(styled.text, "b");
+        assert!(styled.bold);
+        assert_eq!(
+            styled.foreground,
+            Some(ProjectedColor {
+                r: 10,
+                g: 20,
+                b: 30
+            })
+        );
+        assert!(
+            !prompt_row.cells[0].bold && prompt_row.cells[0].foreground.is_none(),
+            "the style belongs to the cells the child styled and no others"
+        );
+
+        let grapheme_row = &state.viewport[1];
+        assert_eq!(grapheme_row.cells[0].text, "\u{6f22}");
+        assert_eq!(
+            grapheme_row.cells[0].width,
+            ProjectedWidth::Wide,
+            "the host owns how many columns a grapheme takes"
+        );
+        assert_eq!(grapheme_row.cells[1].width, ProjectedWidth::SpacerTail);
+        assert!(
+            grapheme_row.cells[1].text.is_empty(),
+            "the second column of a wide grapheme carries no text to draw"
+        );
+        assert_eq!(
+            grapheme_row.cells[2].text, "e\u{301}",
+            "the combining mark stays on the cell it belongs to"
+        );
+
+        let link_row = &state.viewport[2];
+        assert_eq!(link_row.text().trim_end(), "link");
+        assert_eq!(
+            link_row.cells[0].hyperlink.as_deref(),
+            Some("https://example.com")
+        );
+        assert!(
+            link_row.cells[6].hyperlink.is_none(),
+            "the link ends where the child ended it"
+        );
+
+        assert_eq!(
+            state.colors.foreground,
+            Some(ProjectedColor {
+                r: 0xff,
+                g: 0xff,
+                b: 0xff
+            })
+        );
+        assert_eq!(
+            state.colors.palette[3],
+            ProjectedColor {
+                r: 0x0a,
+                g: 0x0b,
+                b: 0x0c
+            },
+            "the palette entry the child set, not the one the theme carried"
+        );
+
+        assert!(
+            state.cursor.visible && state.cursor.pending_wrap,
+            "the row is full and the cursor waits; a client cannot infer this \
+             from the cells"
+        );
+        assert_eq!((state.cursor.column, state.cursor.row), (79, 3));
+        assert_eq!(
+            state.damage.scope,
+            ProjectedDamageScope::Full,
+            "the first read of a screen has no earlier read to differ from"
+        );
+
+        assert_eq!(
+            harness
+                .handle
+                .project()
+                .expect("the actor projects")
+                .damage
+                .scope,
+            ProjectedDamageScope::Clean,
+            "nothing happened between the two reads"
+        );
+
+        // One more character: the full row wraps onto the next one.
+        harness.send(ReaderEvent::Data(b"wwwwwwwwwwwwwwwwwwww".to_vec()));
+        wait_for_events(&events, 2);
+        let wrapped = harness.handle.project().expect("the actor projects");
+        assert!(wrapped.viewport[3].wrapped && wrapped.viewport[4].continuation);
+        assert!(!wrapped.cursor.pending_wrap);
+        assert_eq!(
+            wrapped.damage,
+            ProjectedDamage {
+                scope: ProjectedDamageScope::Partial,
+                rows: vec![3, 4]
+            },
+            "the host names the rows that changed since the previous read"
+        );
+
+        // Every mode a client would otherwise guess.
+        harness.send(ReaderEvent::Data(
+            b"\x1b[?1h\x1b[?2004h\x1b[?1004h\x1b[?1000h\x1b[4h\x1b[?5h\x1b[?6h\x1b[?25l".to_vec(),
+        ));
+        wait_for_events(&events, 3);
+        let modes = harness.handle.project().expect("the actor projects");
+        assert_eq!(
+            modes.modes,
+            ProjectedModes {
+                wraparound: true,
+                bracketed_paste: true,
+                application_cursor_keys: true,
+                application_keypad: false,
+                focus_events: true,
+                mouse_tracking: true,
+                insert: true,
+                reverse_video: true,
+                origin: true,
+            }
+        );
+        assert!(
+            !modes.cursor.visible,
+            "the child hid the cursor and the host says so"
+        );
+
+        // The alternate screen is its own surface, and leaving it restores the
+        // one underneath unchanged.
+        harness.send(ReaderEvent::Data(b"\x1b[?1049h".to_vec()));
+        wait_for_events(&events, 4);
+        let alternate = harness.handle.project().expect("the actor projects");
+        assert_eq!(alternate.screen, ProjectedScreen::Alternate);
+        assert!(
+            alternate
+                .viewport
+                .iter()
+                .all(|row| row.text().trim().is_empty()),
+            "the alternate screen starts empty"
+        );
+
+        harness.send(ReaderEvent::Data(b"\x1b[?1049l".to_vec()));
+        wait_for_events(&events, 5);
+        let restored = harness.handle.project().expect("the actor projects");
+        assert_eq!(restored.screen, ProjectedScreen::Primary);
+        assert_eq!(restored.viewport[2].text().trim_end(), "link");
+        assert_eq!(
+            restored.viewport[2].cells[0].hyperlink.as_deref(),
+            Some("https://example.com"),
+            "the primary screen came back whole, links included"
+        );
     }
 
     #[test]

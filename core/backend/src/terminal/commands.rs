@@ -5,6 +5,11 @@ use shipctl_module_api::TerminalColorTheme;
 use tauri::ipc::Channel;
 use tauri::State;
 
+use crate::terminal::input::TerminalInput;
+use crate::terminal::projection::{
+    ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
+    TerminalSelectionRequest, TerminalSelectionState,
+};
 use crate::terminal::retention::TerminalRetentionPolicy;
 use crate::terminal::runtime::TerminalEventSink;
 use crate::terminal::service::{TerminalRegistryEventSink, TerminalService};
@@ -12,6 +17,7 @@ use crate::terminal::types::{
     TerminalAttachment, TerminalAttachmentId, TerminalCloseResult, TerminalDescriptor,
     TerminalError, TerminalEvent, TerminalId, TerminalLaunchRequest, TerminalMetadata,
     TerminalRegistryEvent, TerminalRegistrySubscriptionId, TerminalRuntimeSnapshot,
+    TerminalTransport,
 };
 use crate::workspace::config::{normalize_terminal_settings, TerminalSettings};
 use crate::workspace::manager::WorkspaceManager;
@@ -64,6 +70,102 @@ pub fn write_terminal(
     terminals.write(terminal_id, &data)
 }
 
+/// The semantic half of input admission, and the one the webview is moving to.
+///
+/// The client reports what a person did; the host encodes it from the modes
+/// the child selected and answers how many bytes that became. Zero is a normal
+/// answer, not a failure: a focus report or a mouse motion produces nothing
+/// unless the child asked for it. This returns the whole [`TerminalError`] for
+/// the same reason [`write_terminal`] does.
+#[tauri::command]
+pub fn input_terminal(
+    terminal_id: TerminalId,
+    input: TerminalInput,
+    terminals: State<'_, TerminalService>,
+) -> Result<usize, TerminalError> {
+    terminals.input(terminal_id, input)
+}
+
+/// The rows behind the viewport.
+///
+/// A screen frame carries the viewport, so scrollback is read rather than
+/// streamed. The host is the retention authority: this is what lets a client
+/// show what scrolled away without keeping its own copy of the child's output,
+/// which is the dependency area 05 deletes.
+///
+/// An empty window is an answer, not a failure — history shrinks whenever the
+/// terminal evicts, and a request past what it holds returns the rows that
+/// exist.
+#[tauri::command]
+pub fn history_terminal(
+    terminal_id: TerminalId,
+    start_row: u32,
+    rows: u32,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalHistoryWindow, TerminalError> {
+    terminals.project_history(terminal_id, start_row, rows)
+}
+
+/// Pin a cell, so a client can keep naming one line while row numbers move.
+///
+/// A history row number is a position, and eviction renumbers every row behind
+/// the one it drops. A client that must point at one line across reads — a
+/// reader scrolled back, a mark, a selection endpoint — holds this instead of a
+/// number, and the host moves it with its cell through scrolling, eviction and
+/// reflow.
+///
+/// The host holds the pin until the client releases it, which is why this is
+/// the one terminal read that leaves something behind.
+#[tauri::command]
+pub fn anchor_terminal(
+    terminal_id: TerminalId,
+    space: ProjectedSpace,
+    at: ProjectedPoint,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalAnchor, TerminalError> {
+    terminals.anchor(terminal_id, space, at)
+}
+
+/// Where an anchored line is now, in every space that still names it.
+///
+/// A handle the host does not hold answers with nothing rather than with
+/// another line, so a client that outlived its own anchor learns so.
+#[tauri::command]
+pub fn resolve_terminal_anchor(
+    terminal_id: TerminalId,
+    anchor: TerminalAnchorId,
+    terminals: State<'_, TerminalService>,
+) -> Result<Option<TerminalAnchor>, TerminalError> {
+    terminals.resolve_anchor(terminal_id, anchor)
+}
+
+/// Drop an anchor, answering whether the host was holding it.
+#[tauri::command]
+pub fn release_terminal_anchor(
+    terminal_id: TerminalId,
+    anchor: TerminalAnchorId,
+    terminals: State<'_, TerminalService>,
+) -> Result<bool, TerminalError> {
+    terminals.release_anchor(terminal_id, anchor)
+}
+
+/// Select by intent, and answer what the host holds.
+///
+/// The client names a point, a word, a command's output or a movement. It never
+/// names a set of cells: which cells an intent covers depends on where rows
+/// wrap, where a word ends, where the OSC 133 marks are and where history
+/// begins, and a client that decided that would be the second authority on the
+/// screen this path exists to end. The selected text comes back with the
+/// answer, so copying needs no client-side reconstruction either.
+#[tauri::command]
+pub fn select_terminal(
+    terminal_id: TerminalId,
+    request: TerminalSelectionRequest,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalSelectionState, TerminalError> {
+    terminals.select(terminal_id, request)
+}
+
 #[tauri::command]
 pub fn resize_terminal(
     terminal_id: TerminalId,
@@ -87,10 +189,18 @@ pub fn close_terminal(
         .map_err(|error| error.to_string())
 }
 
+/// Open an attachment for the webview, in the encoding it names.
+///
+/// The encoding is the caller's and has no default here. Choosing one for a
+/// client that did not ask is how the webview stayed on the byte path while
+/// every other client could select the semantic one; the control socket's own
+/// default exists only for clients built before the field did, which the
+/// webview is not. The field, and the choice, die with area 05.
 #[tauri::command]
 pub fn attach_terminal(
     terminal_id: TerminalId,
     claims_resize: bool,
+    transport: TerminalTransport,
     on_event: Channel<TerminalEvent>,
     terminals: State<'_, TerminalService>,
 ) -> Result<TerminalAttachment, String> {
@@ -100,7 +210,7 @@ pub fn attach_terminal(
             .map_err(|error| format!("Terminal attachment channel closed: {error}"))
     });
     terminals
-        .attach(terminal_id, sink, claims_resize)
+        .attach_with(terminal_id, sink, claims_resize, transport)
         .map_err(|error| error.to_string())
 }
 

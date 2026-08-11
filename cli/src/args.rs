@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
-use shipctl_core::terminal::{TerminalAgentReportKind, TerminalId};
+use shipctl_core::terminal::projection::ProjectedSpace;
+use shipctl_core::terminal::{TerminalAgentReportKind, TerminalId, TerminalTransport};
 use uuid::Uuid;
 
 use crate::output::OutputFormat;
@@ -92,10 +93,20 @@ pub enum TerminalsCommand {
     /// Print what the host believes about one terminal: cells, cursor, modes,
     /// and colours. Reads state; changes nothing.
     Inspect(TerminalInspectArgs),
+    /// Print the rows that scrolled out of one terminal's viewport.
+    History(TerminalHistoryArgs),
+    /// Pin one cell, so a later read can find that line after row numbers move.
+    Anchor(TerminalAnchorArgs),
+    /// Print where an anchored line is now.
+    ResolveAnchor(TerminalAnchorIdArgs),
+    /// Drop an anchor the host is holding.
+    ReleaseAnchor(TerminalAnchorIdArgs),
     /// Stream canonical replay followed by ordered live terminal events.
     Attach(TerminalAttachArgs),
     /// Write exact bytes to one running terminal.
     Write(TerminalWriteArgs),
+    /// Report one thing a person did and let the host encode it.
+    Input(TerminalInputArgs),
     /// Report supplemental agent activity for one terminal.
     Report(TerminalReportArgs),
     /// Close one terminal; repeated close is a successful no-op.
@@ -183,17 +194,154 @@ pub struct TerminalInspectArgs {
     pub target: TerminalTargetArgs,
 }
 
+/// A window of retained history.
+///
+/// Both bounds are required: history has no natural end to default to, and a
+/// number invented here would be this CLI deciding how much scrollback a
+/// caller wanted.
+#[derive(Debug, Args)]
+pub struct TerminalHistoryArgs {
+    /// Opaque terminal UUID returned by `terminals list`.
+    pub terminal_id: TerminalId,
+
+    /// History row to start at. Zero is the oldest row the host still keeps.
+    #[arg(long)]
+    pub start_row: u32,
+
+    /// How many rows to read. A window past what history holds answers with
+    /// the rows that exist.
+    #[arg(long)]
+    pub rows: u32,
+
+    /// Print the rows as plain text instead of the full window.
+    #[arg(long)]
+    pub text: bool,
+
+    #[command(flatten)]
+    pub target: TerminalTargetArgs,
+}
+
+/// Which space a cell is named in.
+///
+/// The same cell has a different number in each, so a point with no space is
+/// not a point. There is no default for the same reason.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum TerminalSpaceArg {
+    /// The rows the child writes to.
+    Active,
+    /// What is displayed.
+    Viewport,
+    /// History and the active area together.
+    Screen,
+    /// History alone, oldest row first.
+    History,
+}
+
+impl From<TerminalSpaceArg> for ProjectedSpace {
+    fn from(value: TerminalSpaceArg) -> Self {
+        match value {
+            TerminalSpaceArg::Active => Self::Active,
+            TerminalSpaceArg::Viewport => Self::Viewport,
+            TerminalSpaceArg::Screen => Self::Screen,
+            TerminalSpaceArg::History => Self::History,
+        }
+    }
+}
+
+/// The cell to pin.
+#[derive(Debug, Args)]
+pub struct TerminalAnchorArgs {
+    /// Opaque terminal UUID returned by `terminals list`.
+    pub terminal_id: TerminalId,
+
+    /// Which space the row and column are named in.
+    #[arg(long, value_enum)]
+    pub space: TerminalSpaceArg,
+
+    /// Row within that space.
+    #[arg(long)]
+    pub row: u32,
+
+    /// Column within that row.
+    #[arg(long)]
+    pub column: u16,
+
+    #[command(flatten)]
+    pub target: TerminalTargetArgs,
+}
+
+/// An anchor the host minted for this terminal.
+#[derive(Debug, Args)]
+pub struct TerminalAnchorIdArgs {
+    /// Opaque terminal UUID returned by `terminals list`.
+    pub terminal_id: TerminalId,
+
+    /// Anchor handle returned by `terminals anchor`.
+    pub anchor: u64,
+
+    #[command(flatten)]
+    pub target: TerminalTargetArgs,
+}
+
 #[derive(Debug, Args)]
 pub struct TerminalAttachArgs {
     /// Opaque terminal UUID returned by `terminals list`.
     pub terminal_id: TerminalId,
 
-    /// Write replay and live terminal bytes directly to stdout.
+    /// Write the terminal directly to stdout: the child's bytes on the bytes
+    /// encoding, and the painted picture of the host's state on the semantic
+    /// one.
     #[arg(long)]
     pub raw: bool,
 
+    /// Which encoding of the terminal to receive.
+    #[arg(long, value_enum, default_value_t = TerminalEncodingArg::Bytes)]
+    pub encoding: TerminalEncodingArg,
+
     #[command(flatten)]
     pub target: TerminalTargetArgs,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("terminal_semantic_input")
+        .required(true)
+        .multiple(false)
+        .args(["json", "stdin"])
+))]
+pub struct TerminalInputArgs {
+    /// Opaque terminal UUID returned by `terminals list`.
+    pub terminal_id: TerminalId,
+
+    /// One semantic input event as JSON: a key, committed text, a paste, a
+    /// pointer event, or a focus change.
+    #[arg(long)]
+    pub json: Option<String>,
+
+    /// Read the semantic input event from stdin as JSON.
+    #[arg(long)]
+    pub stdin: bool,
+
+    #[command(flatten)]
+    pub target: TerminalTargetArgs,
+}
+
+/// Which encoding of a terminal an attachment asks the host for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum TerminalEncodingArg {
+    /// The child's bytes and ANSI replay. Legacy: area 05 deletes it.
+    Bytes,
+    /// The host's state as meaning. No child bytes and no ANSI.
+    Semantic,
+}
+
+impl From<TerminalEncodingArg> for TerminalTransport {
+    fn from(value: TerminalEncodingArg) -> Self {
+        match value {
+            TerminalEncodingArg::Bytes => Self::Legacy,
+            TerminalEncodingArg::Semantic => Self::Semantic,
+        }
+    }
 }
 
 #[derive(Debug, Args)]

@@ -1,55 +1,62 @@
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { TERMINAL_LINE_HEIGHT } from "@shipctl/core/appearance";
-import { useTerminalSettingsStore } from "./useTerminalSettingsStore.ts";
-import { TRANSITIONAL_RENDERER_SCROLLBACK_ROWS } from "./terminalRetention.ts";
+/**
+ * How a container's pixels become a terminal's columns and rows.
+ *
+ * The measurement itself needs a font, a layout engine and xterm's fit logic,
+ * and lives in "./terminalXtermMeasure.ts". What is decided about the answer —
+ * when not to ask, what to do when the measurement is unavailable, and the
+ * floor every answer is held to — is here, where it can be proved without a
+ * browser.
+ *
+ * The split is not cosmetic. This module is exported from the capability's
+ * logic entry point, and a value-import of xterm anywhere in that graph makes
+ * the entry point unloadable in the `node --test` lanes: xterm ships UMD, which
+ * Node's ESM loader cannot named-import.
+ */
 
 /**
- * Compute terminal cols/rows from a container's pixel dimensions.
- * Uses xterm's own fit logic against an offscreen container sized to match
- * the real terminal viewport.
+ * Ask the presentation layer how many cells fit in a box, or `null` when it
+ * cannot say — an unmeasurable container, or a renderer with no metrics yet.
  */
-export function computeTerminalSize(
+export type TerminalSizeProbe = (
   containerWidth: number,
   containerHeight: number,
+) => { cols: number; rows: number } | null;
+
+/**
+ * The size used when the container cannot be measured. A terminal is shown at
+ * a conventional size rather than at nothing.
+ */
+export const TERMINAL_FALLBACK_SIZE: Readonly<{ cols: number; rows: number }> = {
+  cols: 80,
+  rows: 24,
+};
+
+/** No terminal is narrower or shorter than this, whatever the box reports. */
+export const MIN_TERMINAL_DIMENSION = 2;
+
+/**
+ * Resolve a terminal size for a container of the given pixel dimensions.
+ *
+ * A container with no area is not measured at all: it is hidden or not yet
+ * laid out, and probing it would build and tear down a renderer to learn
+ * nothing.
+ */
+export function resolveTerminalSize(
+  containerWidth: number,
+  containerHeight: number,
+  probe: TerminalSizeProbe,
 ): { cols: number; rows: number } {
   if (containerWidth <= 0 || containerHeight <= 0) {
-    return { cols: 80, rows: 24 };
+    return { ...TERMINAL_FALLBACK_SIZE };
   }
 
-  const { fontFamily, fontSize } = useTerminalSettingsStore.getState().settings;
-
-  const container = document.createElement("div");
-  container.style.position = "fixed";
-  container.style.left = "-9999px";
-  container.style.top = "-9999px";
-  container.style.width = `${containerWidth}px`;
-  container.style.height = `${containerHeight}px`;
-  container.style.visibility = "hidden";
-  document.body.appendChild(container);
-
-  const term = new Terminal({
-    fontSize,
-    fontFamily,
-    lineHeight: TERMINAL_LINE_HEIGHT,
-    scrollback: TRANSITIONAL_RENDERER_SCROLLBACK_ROWS,
-    allowProposedApi: true,
-  });
-  const fitAddon = new FitAddon();
-  term.loadAddon(fitAddon);
-  term.open(container);
-
-  const dims = fitAddon.proposeDimensions();
-
-  term.dispose();
-  document.body.removeChild(container);
-
-  if (!dims) {
-    return { cols: 80, rows: 24 };
+  const measured = probe(containerWidth, containerHeight);
+  if (!measured) {
+    return { ...TERMINAL_FALLBACK_SIZE };
   }
 
   return {
-    cols: Math.max(2, dims.cols),
-    rows: Math.max(2, dims.rows),
+    cols: Math.max(MIN_TERMINAL_DIMENSION, measured.cols),
+    rows: Math.max(MIN_TERMINAL_DIMENSION, measured.rows),
   };
 }

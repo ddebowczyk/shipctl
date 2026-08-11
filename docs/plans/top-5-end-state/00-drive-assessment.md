@@ -110,6 +110,20 @@ logic moved out of the component, which is the work the area already specifies.
 and one exported function — the whole file is a single component body with no
 seam to attach a test to. Creating that seam *is* area 03.
 
+**Correction, since recorded.** Two claims above have been overtaken:
+
+- The value-import list was right but its consequence was understated.
+  `terminalMeasure.ts` value-imported xterm, so it — and therefore
+  `@shipctl/core/terminal`, which re-exported it — could not load in the lane at
+  all. The pattern was proven for the modules that used `import type`, and
+  nothing had ever checked the entry point itself. It is now split into
+  `terminalMeasure.ts` (pure policy, in the lane) and `terminalXtermMeasure.ts`
+  (the probe, reached through `terminal/browser.ts`), and
+  `tests/terminalEntryPoint.test.ts` keeps the entry loadable.
+- The seam exists. `TerminalView.tsx` is refs and two delegating effects; the
+  lifecycle is `terminalContainerBinding.ts` behind `TerminalContainerPorts`,
+  tested against structural fakes.
+
 ## Finding 4: area 04 is the only thing that can still kill this
 
 Nothing of area 04 exists. It is also the only area whose failure invalidates

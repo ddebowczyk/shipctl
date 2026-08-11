@@ -9,22 +9,54 @@ use std::sync::{Arc, Mutex};
 
 use libghostty_vt::{
     fmt::{Format, Formatter, FormatterOptions},
+    key, mouse, paste,
     screen::{CellWide, Screen, TrackedGridRef},
-    selection::Selection,
+    selection::{FormatOptions, SelectLineOptions, SelectWordOptions, Selection},
     style::{Palette, PaletteIndex, RgbColor, Style, StyleColor, Underline},
     terminal::{ColorScheme, Mode, Point, PointCoordinate},
-    Error, Terminal, TerminalOptions,
+    Error, RenderState, Terminal, TerminalOptions,
 };
 use shipctl_module_api::TerminalColorTheme;
 
+use super::effects::{TerminalClipboardContent, TerminalClipboardLocation, TerminalEffect};
+use super::input::{focus_event, TerminalInput};
 use super::projection::{
-    ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
+    ProjectedPoint, ProjectedSelectionMove, ProjectedSpace, TerminalAnchor, TerminalAnchorId,
+    TerminalHistoryWindow, TerminalSelectionRequest, TerminalSelectionState,
 };
 use super::retention::TerminalRetentionPolicy;
+
+/// What one parse step produced besides new screen state.
+///
+/// The two are separate because they go to opposite places: responses are
+/// written back to the child and never reach a client, and effects reach
+/// clients and are never written to the child.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TerminalFeed {
+    pub responses: Vec<u8>,
+    pub effects: Vec<TerminalEffect>,
+}
+
+fn push_effect(effects: &Arc<Mutex<Vec<TerminalEffect>>>, effect: TerminalEffect) {
+    effects
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .push(effect);
+}
 
 pub struct VtReplayEngine {
     terminal: Terminal<'static, 'static>,
     responses: Arc<Mutex<Vec<u8>>>,
+    /// Occurrences the parser reported during the current parse, in the order
+    /// it reported them. The callbacks that fill this run inside `vt_write`, so
+    /// the order is the child's order and not a reconstruction.
+    effects: Arc<Mutex<Vec<TerminalEffect>>>,
+    /// The render state the projection reads through.
+    ///
+    /// It is kept, not rebuilt, because damage is a difference and a fresh
+    /// render state has nothing to differ from. One engine, one damage account:
+    /// every projection reports what changed since the previous one.
+    render: RenderState<'static>,
     color_scheme: Arc<Mutex<ColorScheme>>,
     /// The cells clients asked the host to keep pointing at. The tracked
     /// references live here, beside the terminal that moves them, and never
@@ -86,34 +118,183 @@ impl VtReplayEngine {
             })
             .map_err(|error| format!("Failed to install terminal color responder: {error}"))?;
 
+        let effects = Arc::new(Mutex::new(Vec::new()));
+        terminal
+            .on_title_changed({
+                let effects = Arc::clone(&effects);
+                move |terminal| {
+                    let title = terminal.title().unwrap_or_default().to_string();
+                    push_effect(&effects, TerminalEffect::Title { title });
+                }
+            })
+            .map_err(|error| format!("Failed to install terminal title reporter: {error}"))?;
+        terminal
+            .on_pwd_changed({
+                let effects = Arc::clone(&effects);
+                move |terminal| {
+                    let uri = terminal.pwd().unwrap_or_default().to_string();
+                    push_effect(&effects, TerminalEffect::WorkingDirectory { uri });
+                }
+            })
+            .map_err(|error| format!("Failed to install terminal directory reporter: {error}"))?;
+        terminal
+            .on_bell({
+                let effects = Arc::clone(&effects);
+                move |_terminal| push_effect(&effects, TerminalEffect::Bell)
+            })
+            .map_err(|error| format!("Failed to install terminal bell reporter: {error}"))?;
+        terminal
+            .on_clipboard_write({
+                let effects = Arc::clone(&effects);
+                move |_terminal, write| {
+                    push_effect(
+                        &effects,
+                        TerminalEffect::Clipboard {
+                            location: TerminalClipboardLocation::from(write.location()),
+                            contents: write
+                                .contents()
+                                .map(|content| TerminalClipboardContent {
+                                    mime: content.mime.to_string(),
+                                    data: content.data.to_string(),
+                                })
+                                .collect(),
+                        },
+                    );
+                    // The host records the request; whether a clipboard exists
+                    // to write to is a client question, and the protocols this
+                    // callback serves ignore the answer anyway.
+                    Ok(())
+                }
+            })
+            .map_err(|error| format!("Failed to install terminal clipboard reporter: {error}"))?;
+
         let mut engine = Self {
             terminal,
             responses,
+            effects,
+            render: RenderState::new()
+                .map_err(|error| format!("Failed to initialize terminal render state: {error}"))?,
             color_scheme,
             anchors: HashMap::new(),
             minted_anchors: 0,
             history_ever_retained: false,
         };
         engine.apply_theme(theme)?;
+        // Applying the theme is a host action, not the child's, so nothing it
+        // reported belongs to the child's stream.
+        engine.take_effects();
         Ok(engine)
     }
 
-    /// Parse bytes before they are published and return exactly the responses
-    /// generated by this parse step for ordered write-back to the PTY.
-    pub fn feed(&mut self, bytes: &[u8]) -> Vec<u8> {
+    /// Parse bytes before they are published, returning the responses generated
+    /// by this parse step for ordered write-back to the PTY and the occurrences
+    /// the parse reported.
+    ///
+    /// The occurrences arrive through the parser's own callbacks, inside the
+    /// write, so their order is the child's order and not a reconstruction.
+    pub fn feed(&mut self, bytes: &[u8]) -> TerminalFeed {
         self.discard_responses();
+        self.take_effects();
         self.terminal.vt_write(bytes);
         self.note_retained_history();
-        self.take_responses()
+        TerminalFeed {
+            responses: self.take_responses(),
+            effects: self.take_effects(),
+        }
+    }
+
+    /// The occurrences reported since the last read, in order.
+    fn take_effects(&mut self) -> Vec<TerminalEffect> {
+        std::mem::take(
+            &mut *self
+                .effects
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        )
+    }
+
+    /// Encode one semantic input into the bytes this terminal's child expects.
+    ///
+    /// Every answer depends on modes the child selected and the host holds:
+    /// application cursor keys, the Kitty keyboard protocol, bracketed paste,
+    /// mouse tracking and format, focus reporting. An input the current modes
+    /// do not report encodes to nothing, which is the correct answer and not a
+    /// failure — a mouse move with tracking off is not a message.
+    pub fn encode_input(&mut self, input: &TerminalInput) -> Result<Vec<u8>, String> {
+        let mut encoded = Vec::new();
+        match input {
+            TerminalInput::Key(event) => {
+                if event.composing {
+                    // A composing key produces no bytes. The input method
+                    // sends the result as text when the person commits it.
+                    return Ok(encoded);
+                }
+                let built = event.build()?;
+                let mut encoder = key::Encoder::new()
+                    .map_err(|error| format!("Failed to build a key encoder: {error}"))?;
+                encoder.set_options_from_terminal(&self.terminal);
+                encoder
+                    .encode_to_vec(&built, &mut encoded)
+                    .map_err(vt_error("encode a key"))?;
+            }
+            TerminalInput::Text { text } => encoded.extend_from_slice(text.as_bytes()),
+            TerminalInput::Paste { text } => {
+                let bracketed = self
+                    .terminal
+                    .mode(Mode::BRACKETED_PASTE)
+                    .map_err(vt_error("read bracketed paste mode"))?;
+                let mut payload = text.clone().into_bytes();
+                encoded = encode_into_grown_buffer(payload.len(), |buffer| {
+                    paste::encode(&mut payload, bracketed, buffer)
+                })
+                .map_err(vt_error("encode a paste"))?;
+            }
+            TerminalInput::Mouse(event) => {
+                let (built, size) = event.build()?;
+                let mut encoder = mouse::Encoder::new()
+                    .map_err(|error| format!("Failed to build a mouse encoder: {error}"))?;
+                encoder.set_options_from_terminal(&self.terminal);
+                encoder.set_size(size);
+                encoder.set_any_button_pressed(event.any_button_pressed);
+                encoder
+                    .encode_to_vec(&built, &mut encoded)
+                    .map_err(vt_error("encode a pointer event"))?;
+            }
+            TerminalInput::Focus { gained } => {
+                if self
+                    .terminal
+                    .mode(Mode::FOCUS_EVENT)
+                    .map_err(vt_error("read focus reporting mode"))?
+                {
+                    let event = focus_event(*gained);
+                    encoded = encode_into_grown_buffer(0, |buffer| event.encode(buffer))
+                        .map_err(vt_error("encode a focus change"))?;
+                }
+            }
+        }
+        Ok(encoded)
     }
 
     /// The host's current state as owned Shipctl values.
     ///
     /// This reads the semantic API rather than the ANSI formatter, so it is the
     /// only answer to "what does the host believe" that does not go through a
-    /// second parser. Reading advances nothing.
-    pub fn project(&self) -> Result<super::projection::TerminalProjection, String> {
-        super::projection::project(&self.terminal)
+    /// second parser. Reading advances no parse, but it does consume the damage
+    /// the parse recorded, so each answer reports what changed since the one
+    /// before it.
+    pub fn project(&mut self) -> Result<super::projection::TerminalProjection, String> {
+        super::projection::project(&self.terminal, &mut self.render)
+    }
+
+    /// The same state, read for a client that has painted nothing yet.
+    ///
+    /// A new attachment needs the whole screen, and it must not take the damage
+    /// away from the readers already following the stream. This read therefore
+    /// uses a render state of its own, which has seen no earlier frame and so
+    /// reports the whole screen as changed.
+    pub fn project_baseline(&mut self) -> Result<super::projection::TerminalProjection, String> {
+        let mut baseline = RenderState::new().map_err(|error| error.to_string())?;
+        super::projection::project(&self.terminal, &mut baseline)
     }
 
     /// A window of retained history as the same rows the viewport reports.
@@ -194,6 +375,215 @@ impl VtReplayEngine {
     /// Anchors the host is holding for clients.
     pub fn anchor_count(&self) -> usize {
         self.anchors.len()
+    }
+
+    /// Apply one client selection intent and answer with what the host now
+    /// holds.
+    ///
+    /// This is the whole selection surface a client boundary needs: one intent
+    /// in, one state out. The individual operations below stay public because
+    /// the host uses them directly, but nothing outside has to know which of
+    /// them a given gesture becomes.
+    pub fn apply_selection(
+        &mut self,
+        request: TerminalSelectionRequest,
+    ) -> Result<TerminalSelectionState, String> {
+        match request {
+            TerminalSelectionRequest::Range {
+                space,
+                from,
+                to,
+                rectangle,
+            } => self.select(space, from, to, rectangle)?,
+            TerminalSelectionRequest::Word { space, at } => {
+                self.select_word_at(space, at)?;
+            }
+            TerminalSelectionRequest::Line { space, at } => {
+                self.select_line_at(space, at)?;
+            }
+            TerminalSelectionRequest::Output { space, at } => {
+                self.select_output_at(space, at)?;
+            }
+            TerminalSelectionRequest::All => {
+                self.select_all()?;
+            }
+            TerminalSelectionRequest::Extend { movement } => {
+                self.extend_selection(movement)?;
+            }
+            TerminalSelectionRequest::Clear => self.clear_selection()?,
+        }
+        Ok(TerminalSelectionState {
+            active: self.has_selection()?,
+            text: self.selection_text()?,
+        })
+    }
+
+    /// Select the cells between two points, as a drag does.
+    ///
+    /// The selection is installed on the terminal, so it reaches clients as the
+    /// per-cell `selected` fact that every read already carries. Nothing about
+    /// what a selection means — where a line wraps, where history starts, which
+    /// cells a rectangle covers — leaves the host.
+    pub fn select(
+        &mut self,
+        space: ProjectedSpace,
+        from: ProjectedPoint,
+        to: ProjectedPoint,
+        rectangle: bool,
+    ) -> Result<(), String> {
+        let start = self
+            .terminal
+            .grid_ref(space.at(from))
+            .map_err(vt_error("read a selection start"))?;
+        let end = self
+            .terminal
+            .grid_ref(space.at(to))
+            .map_err(vt_error("read a selection end"))?;
+        let selection = Selection::new(start, end, rectangle);
+        self.terminal
+            .set_selection(Some(&selection))
+            .map_err(vt_error("install a selection"))?;
+        Ok(())
+    }
+
+    /// Select the word under a point, as a double click does. Answers whether
+    /// there was a word there.
+    pub fn select_word_at(
+        &mut self,
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    ) -> Result<bool, String> {
+        let reference = self
+            .terminal
+            .grid_ref(space.at(at))
+            .map_err(vt_error("read a selection point"))?;
+        let word = self
+            .terminal
+            .select_word(SelectWordOptions::new(reference))
+            .map_err(vt_error("select a word"))?;
+        self.install(word.as_ref())
+    }
+
+    /// Select the logical line under a point, as a triple click does. A wrapped
+    /// line is one line here, which is the reason this is not a row range.
+    pub fn select_line_at(
+        &mut self,
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    ) -> Result<bool, String> {
+        let reference = self
+            .terminal
+            .grid_ref(space.at(at))
+            .map_err(vt_error("read a selection point"))?;
+        let line = self
+            .terminal
+            .select_line(SelectLineOptions::new(reference))
+            .map_err(vt_error("select a line"))?;
+        self.install(line.as_ref())
+    }
+
+    /// Select what the command under a point printed, without its prompt.
+    pub fn select_output_at(
+        &mut self,
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    ) -> Result<bool, String> {
+        let reference = self
+            .terminal
+            .grid_ref(space.at(at))
+            .map_err(vt_error("read a selection point"))?;
+        let output = self
+            .terminal
+            .select_output(reference)
+            .map_err(vt_error("select command output"))?;
+        self.install(output.as_ref())
+    }
+
+    pub fn select_all(&mut self) -> Result<bool, String> {
+        let all = self
+            .terminal
+            .select_all()
+            .map_err(vt_error("select everything"))?;
+        self.install(all.as_ref())
+    }
+
+    /// Move the selection's active end without naming a cell.
+    ///
+    /// This is the drag that left the window, the keyboard extension, and the
+    /// autoscroll: the host decides which cell the move reaches, including when
+    /// that cell is in retained history. Answers whether there was a selection
+    /// to move.
+    pub fn extend_selection(&mut self, movement: ProjectedSelectionMove) -> Result<bool, String> {
+        let Some(mut selection) = self
+            .terminal
+            .selection()
+            .map_err(vt_error("read the current selection"))?
+        else {
+            return Ok(false);
+        };
+        selection
+            .adjust(&self.terminal, movement.adjustment())
+            .map_err(vt_error("extend a selection"))?;
+        self.terminal
+            .set_selection(Some(&selection))
+            .map_err(vt_error("install a selection"))?;
+        Ok(true)
+    }
+
+    pub fn clear_selection(&mut self) -> Result<(), String> {
+        self.terminal
+            .set_selection(None)
+            .map_err(vt_error("clear the selection"))?;
+        Ok(())
+    }
+
+    /// The selected text, copied out of the parser as an owned string.
+    ///
+    /// A wrapped line is joined here rather than by the client, because where
+    /// the line wrapped is a host fact.
+    pub fn selection_text(&self) -> Result<Option<String>, String> {
+        let Some(selection) = self
+            .terminal
+            .selection()
+            .map_err(vt_error("read the current selection"))?
+        else {
+            return Ok(None);
+        };
+        let copied = self
+            .terminal
+            .format_selection_alloc(
+                None,
+                FormatOptions::new()
+                    .with_selection(&selection)
+                    .with_unwrap(true),
+            )
+            .map_err(vt_error("copy the selected text"))?;
+        copied
+            .map(|bytes| {
+                String::from_utf8(bytes.as_ref().to_vec())
+                    .map_err(|error| format!("Selected text is not UTF-8: {error}"))
+            })
+            .transpose()
+    }
+
+    pub fn has_selection(&self) -> Result<bool, String> {
+        Ok(self
+            .terminal
+            .selection()
+            .map_err(vt_error("read the current selection"))?
+            .is_some())
+    }
+
+    fn install(&self, selection: Option<&Selection<'_>>) -> Result<bool, String> {
+        match selection {
+            Some(selection) => {
+                self.terminal
+                    .set_selection(Some(selection))
+                    .map_err(vt_error("install a selection"))?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
     }
 
     /// Rows currently held in history. The host is the retention authority, so
@@ -380,6 +770,29 @@ fn theme_color_scheme(theme: &TerminalColorTheme) -> ColorScheme {
 
 fn vt_error(context: &'static str) -> impl FnOnce(Error) -> String {
     move |error| format!("Failed to {context}: {error}")
+}
+
+/// Run an encoder that writes into a caller-supplied buffer, growing the buffer
+/// to whatever size it asks for.
+///
+/// The fixed-buffer encoders answer `OutOfSpace { required }` rather than
+/// truncating, so the exact size is a fact the dependency reports. Nothing here
+/// guesses one, and no input is capped by a number this host chose.
+fn encode_into_grown_buffer(
+    hint: usize,
+    mut encode: impl FnMut(&mut [u8]) -> Result<usize, Error>,
+) -> Result<Vec<u8>, Error> {
+    let mut buffer = vec![0u8; hint];
+    loop {
+        match encode(&mut buffer) {
+            Ok(written) => {
+                buffer.truncate(written);
+                return Ok(buffer);
+            }
+            Err(Error::OutOfSpace { required }) => buffer.resize(required, 0),
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 fn format_active_screen(terminal: &Terminal<'_, '_>) -> Result<Vec<u8>, String> {
@@ -856,7 +1269,7 @@ mod tests {
 
     /// The text of the row an anchor names, read back through the same reads a
     /// client has.
-    fn anchored_text(engine: &VtReplayEngine, anchor: &TerminalAnchor) -> String {
+    fn anchored_text(engine: &mut VtReplayEngine, anchor: &TerminalAnchor) -> String {
         if let Some(at) = anchor.history {
             let window = engine.project_history(at.row, 1).expect("history reads");
             return window.rows[0].text().trim_end().to_string();
@@ -882,7 +1295,7 @@ mod tests {
             .anchor(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
             .expect("the host anchors a cell");
         assert!(anchor.retained);
-        assert_eq!(anchored_text(&engine, &anchor), "anchored");
+        assert_eq!(anchored_text(&mut engine, &anchor), "anchored");
 
         for line in 0..8 {
             engine.feed(format!("line{line}\r\n").as_bytes());
@@ -896,7 +1309,7 @@ mod tests {
             scrolled.active, anchor.active,
             "the line is no longer where it was"
         );
-        assert_eq!(anchored_text(&engine, &scrolled), "anchored");
+        assert_eq!(anchored_text(&mut engine, &scrolled), "anchored");
 
         engine.resize(24, 3).expect("the engine resizes");
         let reflowed = engine
@@ -905,7 +1318,7 @@ mod tests {
             .expect("the host still holds the handle");
         assert!(reflowed.retained);
         assert_eq!(
-            anchored_text(&engine, &reflowed),
+            anchored_text(&mut engine, &reflowed),
             "anchored",
             "reflow moved the line and the anchor went with it"
         );
@@ -942,7 +1355,7 @@ mod tests {
             anchor.loss_reported,
             "history holds lines here, so a lost line is evicted from a page and reported"
         );
-        assert_eq!(anchored_text(&engine, &anchor), "oldest");
+        assert_eq!(anchored_text(&mut engine, &anchor), "oldest");
 
         for line in 0..3_000 {
             engine.feed(format!("x{line}\r\n").as_bytes());
@@ -1004,7 +1417,7 @@ mod tests {
             !anchor.loss_reported,
             "no page can hold a line here, so no loss can be reported"
         );
-        assert_eq!(anchored_text(&engine, &anchor), "gone");
+        assert_eq!(anchored_text(&mut engine, &anchor), "gone");
 
         for line in 0..6 {
             engine.feed(format!("line{line}\r\n").as_bytes());
@@ -1018,7 +1431,7 @@ mod tests {
         assert!(stale.retained);
         assert_eq!(stale.active, Some(ProjectedPoint { column: 0, row: 0 }));
         assert_ne!(
-            anchored_text(&engine, &stale),
+            anchored_text(&mut engine, &stale),
             "gone",
             "the anchored line is gone and the parser did not say so"
         );
@@ -1063,7 +1476,7 @@ mod tests {
             resolved.loss_reported,
             "the same anchor corrects itself once history holds a line"
         );
-        assert_eq!(anchored_text(&engine, &resolved), "first");
+        assert_eq!(anchored_text(&mut engine, &resolved), "first");
     }
 
     /// The parser reads a history coordinate on into the active area instead of
@@ -1159,13 +1572,202 @@ mod tests {
         assert_eq!(restored, anchor);
     }
 
+    /// Area 01 criterion 7. A selection is a host fact: the client names cells
+    /// or directions, and the host decides which cells that covers. These are
+    /// the cases beyond word, line and range helpers — a drag, an extension the
+    /// client did not spell out, a wrapped line, the alternate screen, and
+    /// retained history.
+    #[test]
+    fn a_drag_selects_the_cells_between_two_points() {
+        let mut engine =
+            VtReplayEngine::new(24, 4, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"alpha beta gamma\r\n");
+
+        engine
+            .select(
+                ProjectedSpace::Active,
+                ProjectedPoint { column: 0, row: 0 },
+                ProjectedPoint { column: 4, row: 0 },
+                false,
+            )
+            .expect("the host selects a range");
+        assert_eq!(engine.selection_text().unwrap().as_deref(), Some("alpha"));
+
+        // The per-cell fact every read already carries follows the selection.
+        let selected: String = engine.project().unwrap().viewport[0]
+            .cells
+            .iter()
+            .filter(|cell| cell.selected)
+            .map(|cell| cell.text.as_str())
+            .collect();
+        assert_eq!(selected, "alpha");
+
+        engine.clear_selection().expect("the host clears it");
+        assert!(!engine.has_selection().unwrap());
+        assert_eq!(engine.selection_text().unwrap(), None);
+        assert!(engine.project().unwrap().viewport[0]
+            .cells
+            .iter()
+            .all(|cell| !cell.selected));
+    }
+
+    /// A wrapped line is one line. A client that selected it as two row ranges
+    /// would be deciding where the line broke, which is the host's fact.
+    #[test]
+    fn a_wrapped_line_selects_and_copies_as_one_line() {
+        let mut engine =
+            VtReplayEngine::new(20, 5, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"abcdefghijklmnopqrstuvwxyz0123\r\n");
+        let state = engine.project().unwrap();
+        assert!(
+            state.viewport[0].wrapped && state.viewport[1].continuation,
+            "the subject must actually be a wrapped line"
+        );
+
+        assert!(engine
+            .select_line_at(ProjectedSpace::Active, ProjectedPoint { column: 2, row: 0 })
+            .expect("the host selects a line"));
+        assert_eq!(
+            engine.selection_text().unwrap().as_deref(),
+            Some("abcdefghijklmnopqrstuvwxyz0123"),
+            "the selection crossed the wrap without the client knowing where it was"
+        );
+    }
+
+    /// The drag that left the window, and the keyboard extension. The client
+    /// says which way; the host says which cell.
+    #[test]
+    fn extending_a_selection_reaches_cells_the_client_never_named() {
+        let mut engine =
+            VtReplayEngine::new(24, 4, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"alpha beta gamma\r\n");
+
+        assert!(
+            !engine
+                .extend_selection(ProjectedSelectionMove::Right)
+                .unwrap(),
+            "with nothing selected there is nothing to extend"
+        );
+
+        assert!(engine
+            .select_word_at(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
+            .expect("the host selects a word"));
+        assert_eq!(engine.selection_text().unwrap().as_deref(), Some("alpha"));
+
+        assert!(engine
+            .extend_selection(ProjectedSelectionMove::EndOfLine)
+            .unwrap());
+        assert_eq!(
+            engine.selection_text().unwrap().as_deref(),
+            Some("alpha beta gamma"),
+            "the host resolved the edge of the line, not the client"
+        );
+    }
+
+    /// Autoscroll: an extension that runs off the top of the screen reaches
+    /// rows that are no longer on it. History is where selection meets
+    /// retention, and neither is the client's to decide.
+    #[test]
+    fn a_selection_extended_upward_reaches_retained_history() {
+        let mut engine =
+            VtReplayEngine::new(12, 3, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"oldest\r\n");
+        for line in 0..8 {
+            engine.feed(format!("line{line}\r\n").as_bytes());
+        }
+        assert!(engine.scrollback_rows().unwrap() > 0);
+
+        assert!(engine
+            .select_word_at(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
+            .expect("the host selects a word on screen"));
+
+        for _ in 0..12 {
+            engine
+                .extend_selection(ProjectedSelectionMove::Up)
+                .expect("the host extends the selection");
+        }
+
+        let history = engine
+            .project_history(0, u32::MAX)
+            .expect("the host reads history");
+        assert!(
+            history
+                .rows
+                .iter()
+                .any(|row| row.cells.iter().any(|cell| cell.selected)),
+            "the extension never reached history, so this proves nothing about autoscroll"
+        );
+        let copied = engine.selection_text().unwrap().unwrap_or_default();
+        assert!(
+            copied.contains("oldest"),
+            "the copied text stops at the screen edge: {copied:?}"
+        );
+    }
+
+    /// The alternate screen has its own cells and its own selection. A client
+    /// that kept selection state across the switch would be holding a second
+    /// answer.
+    #[test]
+    fn selection_applies_to_the_alternate_screen_it_was_made_on() {
+        let mut engine =
+            VtReplayEngine::new(24, 4, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(b"primary text\r\n\x1b[?1049h\x1b[Halternate text\r\n");
+
+        assert!(engine
+            .select_word_at(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 0 })
+            .expect("the host selects a word on the alternate screen"));
+        assert_eq!(
+            engine.selection_text().unwrap().as_deref(),
+            Some("alternate")
+        );
+
+        engine.feed(b"\x1b[?1049l");
+        let restored = engine.project().unwrap();
+        assert!(restored.viewport[0].text().starts_with("primary"));
+        assert!(
+            restored
+                .viewport
+                .iter()
+                .all(|row| row.cells.iter().all(|cell| !cell.selected)),
+            "a selection made on the alternate screen does not mark the primary one"
+        );
+    }
+
+    /// "Copy the output of that command" is a host answer, because only the
+    /// host holds the OSC 133 marks that say where the output starts and ends.
+    #[test]
+    fn the_host_selects_the_output_of_one_command() {
+        let mut engine =
+            VtReplayEngine::new(24, 6, &theme(), TerminalRetentionPolicy::default()).unwrap();
+        engine.feed(
+            b"\x1b]133;A\x1b\\$ ls\r\n\x1b]133;C\x1b\\file-one\r\nfile-two\r\n\x1b]133;D\x1b\\",
+        );
+
+        assert!(engine
+            .select_output_at(ProjectedSpace::Active, ProjectedPoint { column: 0, row: 1 })
+            .expect("the host selects command output"));
+        let output = engine.selection_text().unwrap().unwrap_or_default();
+        assert!(
+            output.contains("file-one") && output.contains("file-two"),
+            "the output block did not come back whole: {output:?}"
+        );
+        assert!(
+            !output.contains("$ ls"),
+            "the command line is not its output: {output:?}"
+        );
+    }
+
     #[test]
     fn parses_output_before_replay_and_answers_queries_once() {
         let mut engine =
             VtReplayEngine::new(20, 5, &theme(), TerminalRetentionPolicy::default()).unwrap();
-        let responses = engine.feed(b"early\x1b[2;4H\x1b[6n");
+        let feed = engine.feed(b"early\x1b[2;4H\x1b[6n");
 
-        assert_eq!(responses, b"\x1b[2;4R");
+        assert_eq!(feed.responses, b"\x1b[2;4R");
+        assert!(
+            feed.effects.is_empty(),
+            "a cursor report is an answer to the child, not an occurrence a client hears"
+        );
         assert!(engine
             .replay()
             .unwrap()

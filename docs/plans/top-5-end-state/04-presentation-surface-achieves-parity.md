@@ -32,8 +32,8 @@ xterm currently supplies far more than pixels:
   links, focus, and clipboard interaction;
 - the view registers bell and OSC 9 notification behavior;
 - replay resets xterm and feeds it reconstructed ANSI;
-- `terminalMeasure.ts` creates a hidden xterm with `FitAddon` to calculate
-  geometry; and
+- the hidden-xterm probe in `terminalXtermMeasure.ts` calculates geometry with
+  `FitAddon`; and
 - `terminalOutputQueue.ts` drains byte chunks into `term.write`.
 
 Five xterm packages remain in `package.json`: the core package plus Fit,
@@ -66,10 +66,17 @@ packaged behavior and no target-path dependency on xterm facts.
 
 - `core/frontend/terminal/TerminalView.tsx`
   - replace xterm construction, parser handlers, raw input, reset/replay, and
-    visibility-coupled integration with a thin surface host.
+    visibility-coupled integration with a thin surface host. The DOM lifecycle
+    now lives in `terminalContainerBinding.ts` behind
+    `TerminalContainerPorts`; what stays in the component is refs and effects
+    that delegate.
 - `core/frontend/terminal/terminalMeasure.ts`
-  - replace hidden-xterm geometry calculation with presentation-owned cell and
-    container measurement.
+  - already reduced to size policy over a `TerminalSizeProbe`. It survives the
+    migration; what changes is which probe it is given.
+- `core/frontend/terminal/terminalXtermMeasure.ts`
+  - delete with the rest of xterm. Reached only through
+    `core/frontend/terminal/browser.ts`, which exists to name the legacy side
+    of area 05's deletion in one place.
 - `core/frontend/terminal/terminalRenderer.ts`
   - select a Shipctl painter and fallback, not an xterm renderer.
 - `core/frontend/terminal/terminalRendererAddons.ts`
@@ -126,6 +133,64 @@ Do not add search or screen-reader live-terminal behavior merely because xterm
 can support it. Include either only when current product evidence or a named
 owner makes it a requirement. This migration cannot silently remove an existing
 accessibility behavior.
+
+The register is executable, not prose:
+`core/frontend/terminal/scenarios/capabilityRegister.ts` carries one entry per
+capability with a disposition and a proof, where a proof is a lane test, a
+scenario id, a written manual procedure, or nothing.
+`core/frontend/terminal/tests/terminalCapabilityRegister.test.ts` enforces the
+loop in both directions: a claim of implementation must carry a proof, a
+`changed` disposition must name its owner, a cited test file and a cited
+procedure file must exist, and every scenario the catalog builds must be claimed
+by some entry. A scenario that proves nothing is a demo, and the test says so.
+
+This ordering is the point. Without a frozen register, coverage becomes whatever
+somebody wrote a scenario for, which is the parity-by-assertion failure this
+area opens by forbidding. The harness in step 1a is the instrument; the register
+is the checklist that decides what the instrument must measure.
+
+### 1a. Reach packaged-only capabilities by inverting control
+
+Some criteria are properties of the shipped engine and cannot be reached from a
+test process at all. The webview cannot be driven from outside on macOS, so it
+drives itself: a dev-only harness inside the app runs the scenario catalog
+against the live surface and returns an NDJSON transcript.
+
+The pieces are `scenarios/scenarioContract.ts` (the record union),
+`scenarios/scenarioRunner.ts` (sequential execution; a throwing scenario becomes
+one failed result rather than a lost run), `scenarios/scenarioCatalog.ts` (the
+scenarios themselves, over a `TerminalSurfaceProbe` port), and
+`terminalScenarioHost.ts` (the composition root, outside `scenarios/`, where
+the live xterm, WebGL, and Tauri wiring is allowed to exist).
+
+Four constraints hold it in place:
+
+- **Memory is sampled from the host, not the page.** WebKit exposes no
+  `performance.memory`; that API is Chrome's. Process memory comes from the Rust
+  side through the existing `get_memory_stats` command and is correlated by
+  scenario id. Frame timing from `requestAnimationFrame` deltas inside the page
+  is fine, because that is the page's own fact.
+- **The seam inherits area 05's proof obligation.** A dev-only entry point that
+  survives into a release bundle is a second entry point. The guard is a bare
+  `import.meta.env.DEV` test so the bundler can fold it, and
+  `just check release-bundle` builds and scans to prove the fold happened. The
+  function-call form of that guard does not fold; that was verified by building
+  both ways.
+- **The import boundary is the evidence.** `just modularity boundaries` holds
+  `scenarios/` to its ports through a `scenario-port-only` rule with a single
+  recorded exception for the entry point's dynamic import of the host.
+  Unenforced, the harness would prove convenience rather than authority
+  placement.
+- **State what it cannot falsify.** A self-driven scenario proves that something
+  ran, did not crash, and recorded numbers. It does not prove the glyph was
+  right. `unicode.glyph-fits-span` and `input.ime` therefore stay `manual`, with
+  procedures in `docs/ops/terminal-glyph-review.md` and
+  `docs/ops/terminal-ime-review.md`, and a test that fails if either is ever
+  downgraded to a scenario proof — that downgrade would be a claim to have
+  automated human perception.
+
+No scenario applies a pass/fail threshold to a measured number. No authority in
+this plan sets one, so the scenarios record and the owner decides.
 
 ### 2. Define a narrow presentation interface
 
@@ -269,6 +334,29 @@ This area does not:
 12. xterm remains only on the legacy side of the area-05 switch and as a
     comparison oracle. No target-path fact is read from it.
 
+Five of these were read as blocked on browser capability: 4, 5, 6, 7, and 9.
+They are not one problem, and treating them as one is what made a browser lane
+look necessary. Each reaches its proof by a different route:
+
+- **5 and 6** are logic, not presentation. Command submission, hide and show,
+  theme, font, resize, and renderer recreation move behind ports in area 03 and
+  are proved in the existing Node lane against structural fakes. No DOM.
+- **7** — fallback after a real renderer failure — is a scenario. Losing a GPU
+  context is an engine fact; `renderer.gpu-loss` forces it in the packaged app
+  through `WEBGL_lose_context` and records whether the surface stayed usable and
+  whether a second model appeared.
+- **9** is a scenario plus a host sample: `measure.sustained-output` for frames
+  and buffer growth, `get_memory_stats` for process memory.
+- **4** does not fully reduce to either. A scenario can prove that the corpus
+  painted, that host spans were the ones used, and that nothing threw; only a
+  reader can prove the mark landed on the right base glyph. That part is the
+  recorded residue, and it is `docs/ops/terminal-glyph-review.md`. The same
+  split applies to real IME composition under criterion 5.
+
+That residue is the explicit owner decision this area asks for: two perceptual
+facts, each with a written procedure and a register entry, rather than an
+implied gap.
+
 ## How to validate
 
 Run component, interaction, CLI, and packaged-product scenarios, followed by
@@ -279,8 +367,13 @@ just test fast
 just test rust
 just test full
 just check all
+just check release-bundle
 just modularity boundaries
 ```
+
+Then run the packaged scenario harness in a dev build and file its NDJSON
+transcript in `research/`, dated. Run the two manual procedures on each shipped
+platform and file those results the same way.
 
 Add focused frontend tests for renderer-independent facts, hit testing,
 host-defined spans, IME, selection gestures, history windows, effects, viewport,
@@ -297,31 +390,52 @@ sed -n '5,8p' core/frontend/terminal/index.ts
 
 The comment states that React components are deliberately not exported, because
 mixing views into the entry point would make the capability's logic untestable
-in those lanes. The tree matches: no `.test.tsx` exists, no test imports a
-`.tsx`, and `package.json` carries no vitest, jest, jsdom, happy-dom, or React
-renderer.
+in those lanes. The tree matches: no `.test.tsx` exists and no test imports a
+`.tsx`. `package.json` carries no vitest, jest, jsdom, happy-dom, React
+renderer, playwright, puppeteer, or webdriver, and the decision below is that it
+must stay that way.
 
 So the working pattern is logic in `.ts`, xterm as an erased `import type`, and
-a structural fake. Only three modules value-import xterm — `terminalMeasure.ts`,
-`terminalRendererAddons.ts`, and `TerminalView.tsx` — while
-`terminalRenderer.ts`, `terminalTheme.ts` and `terminalOutputQueue.ts` take it
-as a type and are tested against fakes today.
+a structural fake. `terminalRenderer.ts`, `terminalTheme.ts` and
+`terminalOutputQueue.ts` take xterm as a type and are tested against fakes
+today.
 
-That splits the untested presentation facts by what each actually needs:
+An earlier revision of this section claimed that `terminalMeasure` "needs a DOM
+and nothing else". That was wrong, and the way it was wrong matters more than
+the fact. `terminalMeasure.ts` value-imported xterm, xterm ships UMD, and Node
+ESM cannot named-import it — so the module could not load in the lane whatever
+`document` was present, and neither could `@shipctl/core/terminal`, because the
+entry point re-exported it. The capability's own entry point had never been
+loaded by the lane it claims to serve. A DOM would not have found that; loading
+the module did.
 
-- `terminalMeasure` needs a DOM and nothing else. It is already a `.ts` file
-  that the lane can parse; only `document` is missing.
-- Browser input delivery, the hidden-surface early return, visibility in the
-  attachment dependencies, and cleanup disposal are React lifecycle facts inside
-  a `.tsx`. Testing them where they sit needs a JSX transform, a DOM, and a
-  React renderer. That is a repository-wide toolchain decision with a named
-  owner, not a task inside this area.
+The correction is a split, not a dependency:
 
-Do not adopt a second frontend toolchain to satisfy this area. Area 03 already
-moves that logic out of the component and behind a port, which is the same shape
-the existing fakes rely on. Sequence the work so those facts become testable in
-the lane that exists. Record any residue that still needs a new toolchain as an
-explicit owner decision rather than an implied one.
+- `terminalMeasure.ts` is pure size policy over an injected `TerminalSizeProbe`.
+  It loads and is tested in the lane.
+- `terminalXtermMeasure.ts` holds the hidden-xterm probe and stays out of the
+  entry point. It reaches consumers through `core/frontend/terminal/browser.ts`,
+  which names the legacy side of area 05's deletion.
+- The React lifecycle facts — engine start, resize observation, gesture
+  binding, reveal, and dispose order — are extracted to
+  `terminalContainerBinding.ts` behind `TerminalContainerPorts` and tested in
+  the lane against structural fakes. `TerminalView.tsx` keeps refs, two divs,
+  and two effects that delegate.
+
+**Decision — no DOM emulator enters the frontend test lane.** A happy-dom
+dependency was added and then backed out. The reason is not dependency size. A
+DOM emulator answers none of criteria 4, 7, or 9: those are properties of
+WKWebView, WebKitGTK, and WebView2, and an emulator's answers about occupancy,
+layout, hit testing, or focus would not be the shipped engine's answers. Having
+one in the lane invites those questions to be answered by an authority that does
+not count — a second presentation authority, the same defect as the second VT,
+one layer up. Playwright is excluded for the same reason on the same evidence:
+its WebKit is not WKWebView, and `tauri-driver` has no macOS support because
+Apple ships no WKWebView WebDriver.
+
+The residue that genuinely needs the packaged app is reached by inverting
+control instead: the app runs its own scenarios. See the capability register and
+scenario harness below.
 
 Add CLI integration scenarios through the control socket for semantic attach,
 resize, interaction, raw presentation, NDJSON, effects, disconnect, and exit.

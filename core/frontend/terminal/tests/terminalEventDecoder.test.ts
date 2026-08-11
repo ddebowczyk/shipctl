@@ -42,9 +42,24 @@ function valueFor(field: string, shape: FieldContract): unknown {
     case "string":
       return "reason";
     case "array":
+      if (field === "effects") return [{ kind: "bell" }];
       return [0, 27];
     case "object":
-      return field === "replay" ? { revision: 1, columns: 80, rows: 24, bytes: [27] } : {};
+      if (field === "replay") return { revision: 1, columns: 80, rows: 24, bytes: [27] };
+      if (field === "state") {
+        return {
+          columns: 80,
+          rows: 24,
+          screen: "primary",
+          scrollbackRows: 0,
+          cursor: {},
+          modes: {},
+          colors: {},
+          damage: {},
+          viewport: [],
+        };
+      }
+      return {};
     default:
       throw new Error(`contract uses an unhandled json type: ${shape.jsonType}`);
   }
@@ -117,6 +132,51 @@ test("a nested replay field is validated, not trusted", () => {
   const payload = sample("replay");
   payload.replay = { revision: 1, columns: 80, rows: 24, bytes: [300] };
   assert.throws(() => decodeTerminalEvent(payload), TerminalEventDecodeError);
+});
+
+test("the semantic state is validated, not trusted", () => {
+  const complete = sample("screen").state as Record<string, unknown>;
+  for (const field of Object.keys(complete)) {
+    const payload = sample("screen");
+    const state = { ...complete };
+    delete state[field];
+    payload.state = state;
+    assert.throws(
+      () => decodeTerminalEvent(payload),
+      TerminalEventDecodeError,
+      `screen.state.${field} may not be optional`,
+    );
+  }
+  const wrongType = sample("screen");
+  wrongType.state = { ...complete, viewport: {} };
+  assert.throws(() => decodeTerminalEvent(wrongType), TerminalEventDecodeError);
+});
+
+test("an occurrence without a kind is rejected", () => {
+  const payload = sample("screen");
+  payload.effects = [{ title: "no kind here" }];
+  assert.throws(() => decodeTerminalEvent(payload), TerminalEventDecodeError);
+  payload.effects = ["bell"];
+  assert.throws(() => decodeTerminalEvent(payload), TerminalEventDecodeError);
+  payload.effects = {};
+  assert.throws(() => decodeTerminalEvent(payload), TerminalEventDecodeError);
+});
+
+test("occurrences keep the order the host reported", () => {
+  const payload = sample("screen");
+  payload.effects = [{ kind: "title", title: "one" }, { kind: "bell" }, { kind: "title", title: "two" }];
+  const decoded = decodeTerminalEvent(payload);
+  assert.equal(decoded.event, "screen");
+  assert.deepEqual(
+    decoded.effects.map((effect) => effect.kind),
+    ["title", "bell", "title"],
+  );
+});
+
+test("the semantic path carries no child bytes", () => {
+  const decoded = decodeTerminalEvent(sample("screen"));
+  assert.equal(decoded.event, "screen");
+  assert.equal(JSON.stringify(decoded).includes("data"), false);
 });
 
 test("a non-object payload is rejected", () => {

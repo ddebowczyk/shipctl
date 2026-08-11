@@ -16,18 +16,25 @@ import type {
   UiState,
 } from "./types";
 import type {
+  TerminalAnchorId,
   TerminalAttachment,
   TerminalAttachmentId,
   TerminalCloseResult,
   TerminalColorTheme,
   TerminalDescriptor,
   TerminalId,
+  TerminalInput,
   TerminalLaunchRequest,
   TerminalMetadata,
   TerminalRegistryEvent,
   TerminalRegistrySubscriptionId,
   TerminalAttachmentBootstrap,
+  TerminalProjectedPoint,
+  TerminalProjectedSpace,
   TerminalRuntimeSnapshot,
+  TerminalSelectionRequest,
+  TerminalSelectionState,
+  TerminalTransport,
 } from "@shipctl/core/terminal";
 
 
@@ -221,12 +228,14 @@ export async function attachTerminal(
   terminalId: TerminalId,
   claimsResize: boolean,
   bootstrap: TerminalAttachmentBootstrap,
+  transport: TerminalTransport,
 ): Promise<TerminalAttachmentHandle> {
   const channel = new Channel<unknown>();
   channel.onmessage = bootstrap.deliver;
   const attachment = await invoke<TerminalAttachment>("attach_terminal", {
     terminalId,
     claimsResize,
+    transport,
     onEvent: channel,
   });
   return { ...attachment, activate: bootstrap.activate };
@@ -241,6 +250,76 @@ const terminalInputEncoder = new TextEncoder();
 export function writeTerminal(terminalId: TerminalId, data: string | Uint8Array): Promise<void> {
   const bytes = typeof data === "string" ? terminalInputEncoder.encode(data) : data;
   return invoke("write_terminal", { terminalId, data: Array.from(bytes) });
+}
+
+/**
+ * Report what a person did and let the host encode it.
+ *
+ * The answer is how many bytes the current modes made of it, and zero is a
+ * normal answer: a focus report or a mouse motion produces nothing unless the
+ * child asked for it.
+ */
+export function inputTerminal(terminalId: TerminalId, input: TerminalInput): Promise<number> {
+  return invoke("input_terminal", { terminalId, input });
+}
+
+/**
+ * Read the rows behind one terminal's viewport.
+ *
+ * The answer is handed back unchecked on purpose: the client model's decoder is
+ * the only door into client state, and typing it here would be a second, weaker
+ * reading of the host's shape.
+ */
+export function historyTerminal(
+  terminalId: TerminalId,
+  startRow: number,
+  rows: number,
+): Promise<unknown> {
+  return invoke("history_terminal", { terminalId, startRow, rows });
+}
+
+/**
+ * Pin one cell, so a client can keep naming that line while row numbers move.
+ *
+ * Unchecked for the same reason a history window is: the client model's decoder
+ * is the only door into client state.
+ */
+export function anchorTerminal(
+  terminalId: TerminalId,
+  space: TerminalProjectedSpace,
+  at: TerminalProjectedPoint,
+): Promise<unknown> {
+  return invoke("anchor_terminal", { terminalId, space, at });
+}
+
+/** Where an anchored line is now. Null for a handle the host does not hold. */
+export function resolveTerminalAnchor(
+  terminalId: TerminalId,
+  anchor: TerminalAnchorId,
+): Promise<unknown> {
+  return invoke("resolve_terminal_anchor", { terminalId, anchor });
+}
+
+/** Drop an anchor. The host holds one only while a client asks it to. */
+export function releaseTerminalAnchor(
+  terminalId: TerminalId,
+  anchor: TerminalAnchorId,
+): Promise<unknown> {
+  return invoke("release_terminal_anchor", { terminalId, anchor });
+}
+
+/**
+ * Ask the host to select, and receive what it holds.
+ *
+ * The request is an intent; the host decides which cells it covers and returns
+ * the text with the answer, so nothing here reconstructs a selection from the
+ * screen.
+ */
+export function selectTerminal(
+  terminalId: TerminalId,
+  request: TerminalSelectionRequest,
+): Promise<TerminalSelectionState> {
+  return invoke("select_terminal", { terminalId, request });
 }
 
 export function updateTerminalColorTheme(colorTheme: TerminalColorTheme): Promise<void> {

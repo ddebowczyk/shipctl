@@ -8,9 +8,10 @@ use std::sync::{Arc, Mutex};
 
 use shipctl_module_api::TerminalColorTheme;
 
+use super::input::TerminalInput;
 use super::projection::{
     ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
-    TerminalProjection,
+    TerminalProjection, TerminalSelectionRequest, TerminalSelectionState,
 };
 use super::record::TerminalRecord;
 use super::retention::TerminalRetentionPolicy;
@@ -19,7 +20,8 @@ use super::types::{
     TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId,
     TerminalCloseResult, TerminalDescriptor, TerminalError, TerminalErrorCode, TerminalExitReason,
     TerminalId, TerminalLaunchRequest, TerminalMetadata, TerminalRegistryEvent,
-    TerminalRegistrySubscriptionId, TerminalRuntimeSnapshot, TERMINAL_AGENT_REPORT_MAX_BYTES,
+    TerminalRegistrySubscriptionId, TerminalRuntimeSnapshot, TerminalTransport,
+    TERMINAL_AGENT_REPORT_MAX_BYTES,
 };
 
 pub trait TerminalRegistryEventSink: Send + Sync + 'static {
@@ -236,8 +238,34 @@ impl TerminalService {
         runtime(self.record(id)?.as_ref())?.release_anchor(anchor)
     }
 
+    /// Select by intent, and answer what the host holds.
+    ///
+    /// The client names a point, a word, a command's output or a movement, and
+    /// never a set of cells: which cells an intent covers depends on where rows
+    /// wrap, where a word ends, where the OSC 133 marks are and where history
+    /// begins. The selected text comes back with the answer for the same
+    /// reason — unwrapping a wrapped line and dropping the spacer half of a
+    /// wide grapheme are the host's facts.
+    pub fn select(
+        &self,
+        id: TerminalId,
+        request: TerminalSelectionRequest,
+    ) -> Result<TerminalSelectionState, TerminalError> {
+        runtime(self.record(id)?.as_ref())?.select(request)
+    }
+
+    /// Write exact bytes. Legacy: a client that decides its own bytes keeps a
+    /// second copy of the child's modes, which is what [`Self::input`] exists
+    /// to end.
     pub fn write(&self, id: TerminalId, data: &[u8]) -> Result<(), TerminalError> {
         runtime(self.record(id)?.as_ref())?.write(data.to_vec())
+    }
+
+    /// Report what a person did and let the host encode it from the modes the
+    /// child selected. Answers how many bytes that became, which is zero when
+    /// the current modes do not report the input.
+    pub fn input(&self, id: TerminalId, input: TerminalInput) -> Result<usize, TerminalError> {
+        runtime(self.record(id)?.as_ref())?.input(input)
     }
 
     pub fn resize(
@@ -281,11 +309,28 @@ impl TerminalService {
         Ok(())
     }
 
+    /// Attach on the byte path.
+    ///
+    /// Legacy: every caller of this is a client area 05 has still to move. The
+    /// transport is named at the one call below rather than defaulted inside
+    /// the actor, so the callers that must change are the callers of this
+    /// method and nothing else.
     pub fn attach(
         &self,
         id: TerminalId,
         sink: Arc<dyn TerminalEventSink>,
         claims_resize: bool,
+    ) -> Result<TerminalAttachment, TerminalError> {
+        self.attach_with(id, sink, claims_resize, TerminalTransport::Legacy)
+    }
+
+    /// Attach and say which encoding of the terminal to receive.
+    pub fn attach_with(
+        &self,
+        id: TerminalId,
+        sink: Arc<dyn TerminalEventSink>,
+        claims_resize: bool,
+        transport: TerminalTransport,
     ) -> Result<TerminalAttachment, TerminalError> {
         let runtime = runtime(self.record(id)?.as_ref())?;
         let attachment_id = TerminalAttachmentId::new();
@@ -301,7 +346,7 @@ impl TerminalService {
                         .remove(&attachment_id);
                 }
             });
-        match runtime.attach(attachment_id, sink, claims_resize, on_detached) {
+        match runtime.attach(attachment_id, sink, claims_resize, transport, on_detached) {
             Ok(attachment) => {
                 if !attachment.live {
                     self.attachments().remove(&attachment_id);
@@ -628,6 +673,7 @@ mod tests {
         match event {
             TerminalEvent::Output { sequence, .. }
             | TerminalEvent::Replay { sequence, .. }
+            | TerminalEvent::Screen { sequence, .. }
             | TerminalEvent::MetadataChanged { sequence, .. }
             | TerminalEvent::AgentActivityChanged { sequence, .. }
             | TerminalEvent::Exited { sequence, .. }
@@ -1181,6 +1227,67 @@ mod tests {
         }
         assert!(!live_output.contains("before-boundary"));
         assert!(live_output.contains("after-boundary"));
+        service.close(descriptor.id).unwrap();
+    }
+
+    /// Selecting is an operation a client reaches by terminal id.
+    ///
+    /// The runtime handle could already select; nothing keyed by terminal id
+    /// could, so the operation stopped short of every client boundary. What the
+    /// intent covers stays the host's — the text below is one word out of a
+    /// line the client never scanned — and a terminal the service does not hold
+    /// is an error rather than an empty selection.
+    #[cfg(unix)]
+    #[test]
+    fn selection_is_reachable_by_terminal_id_and_answers_the_hosts_own_text() {
+        let service = TerminalService::new("runtime-instance", TerminalRetentionPolicy::default());
+        let descriptor = service
+            .spawn(shell_request(
+                "stty -echo; printf 'alpha beta gamma\\r\\n'; while IFS= read -r line; do :; done",
+            ))
+            .unwrap();
+
+        let row = loop {
+            let projection = service.project(descriptor.id).unwrap();
+            if let Some(row) = projection
+                .viewport
+                .iter()
+                .position(|row| row.text().contains("alpha beta gamma"))
+            {
+                break u32::try_from(row).unwrap();
+            }
+            std::thread::yield_now();
+        };
+
+        let selected = service
+            .select(
+                descriptor.id,
+                TerminalSelectionRequest::Word {
+                    space: ProjectedSpace::Viewport,
+                    at: ProjectedPoint { column: 0, row },
+                },
+            )
+            .unwrap();
+        assert!(selected.active);
+        assert_eq!(
+            selected.text.as_deref(),
+            Some("alpha"),
+            "where the word ends is the host's answer, not the client's"
+        );
+
+        let cleared = service
+            .select(descriptor.id, TerminalSelectionRequest::Clear)
+            .unwrap();
+        assert!(!cleared.active && cleared.text.is_none());
+
+        assert_eq!(
+            service
+                .select(TerminalId::new(), TerminalSelectionRequest::All)
+                .unwrap_err()
+                .code,
+            TerminalErrorCode::NotFound
+        );
+
         service.close(descriptor.id).unwrap();
     }
 

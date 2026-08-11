@@ -15,10 +15,68 @@
 
 use std::sync::Arc;
 
+use super::effects::TerminalEffect;
+use super::projection::TerminalProjection;
 use super::types::{
     TerminalAttachmentId, TerminalDescriptor, TerminalError, TerminalErrorCode, TerminalEvent,
-    TerminalReplay, TerminalRevision,
+    TerminalReplay, TerminalRevision, TerminalTransport,
 };
+
+/// Which attachments an event is for.
+///
+/// The byte encoding and the semantic encoding of the same occurrence have
+/// disjoint audiences, so no attachment sees a fact twice and no attachment
+/// sees a gap in its sequence. Lifecycle is neither encoding: it means the same
+/// thing to both, and both must hear it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EventAudience {
+    Legacy,
+    Semantic,
+    Both,
+}
+
+impl EventAudience {
+    pub(crate) fn includes(self, transport: TerminalTransport) -> bool {
+        match self {
+            Self::Both => true,
+            Self::Legacy => transport == TerminalTransport::Legacy,
+            Self::Semantic => transport == TerminalTransport::Semantic,
+        }
+    }
+}
+
+/// Exhaustive over `TerminalEvent`: a new variant must state its audience here
+/// before it can be published at all.
+pub(crate) fn event_audience(event: &TerminalEvent) -> EventAudience {
+    match event {
+        TerminalEvent::Output { .. } | TerminalEvent::Replay { .. } => EventAudience::Legacy,
+        TerminalEvent::Screen { .. } => EventAudience::Semantic,
+        TerminalEvent::MetadataChanged { .. }
+        | TerminalEvent::AgentActivityChanged { .. }
+        | TerminalEvent::Exited { .. }
+        | TerminalEvent::ResyncRequired { .. }
+        | TerminalEvent::Detached { .. } => EventAudience::Both,
+    }
+}
+
+/// The semantic encoding of one occurrence.
+///
+/// It carries the same sequence as the byte encoding of the same occurrence,
+/// because it is the same occurrence. An attachment receives one or the other,
+/// never both.
+pub(crate) fn plan_semantic_state(
+    state: TerminalProjection,
+    effects: Vec<TerminalEffect>,
+    sequence: u64,
+    revision: TerminalRevision,
+) -> Vec<RuntimeEffect> {
+    vec![RuntimeEffect::Publish(TerminalEvent::Screen {
+        sequence,
+        revision,
+        state: Box::new(state),
+        effects,
+    })]
+}
 
 /// One ordered effect of a runtime operation. The actor applies these in order;
 /// the order is part of the decision, not of the application.
@@ -412,5 +470,33 @@ mod tests {
             subscriber_disposition(DeliveryOutcome::Disconnected),
             SubscriberDisposition::Remove
         );
+    }
+    /// Every event states who it is for, and the two encodings of one
+    /// occurrence never reach the same attachment. Without this, a client on
+    /// the semantic path would still receive the bytes it exists to stop
+    /// parsing.
+    #[test]
+    fn the_two_encodings_have_disjoint_audiences_and_lifecycle_has_both() {
+        use super::super::contract::{sample_event, TerminalEventKind};
+
+        for kind in TerminalEventKind::all() {
+            let event = sample_event(kind);
+            let audience = event_audience(&event);
+            let legacy = audience.includes(TerminalTransport::Legacy);
+            let semantic = audience.includes(TerminalTransport::Semantic);
+            assert!(
+                legacy || semantic,
+                "{kind:?} reaches nobody, so publishing it is dead work"
+            );
+            match kind {
+                TerminalEventKind::Output | TerminalEventKind::Replay => {
+                    assert!(legacy && !semantic, "{kind:?} is the byte path only")
+                }
+                TerminalEventKind::Screen => {
+                    assert!(semantic && !legacy, "{kind:?} is the semantic path only")
+                }
+                _ => assert!(legacy && semantic, "{kind:?} is lifecycle, so both hear it"),
+            }
+        }
     }
 }

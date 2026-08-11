@@ -681,6 +681,68 @@ fn mouse_encoding_follows_the_tracking_mode_and_format() {
     assert!(silent.is_empty(), "no tracking mode, no report");
 }
 
+/// The wheel is a button, and the encoder is what says which one.
+///
+/// A terminal has never had a scroll report of its own: X11 numbered the wheel
+/// as buttons four to seven, and every mouse format since has carried it that
+/// way. So a client that wants the wheel to reach the child does not need a new
+/// kind of event — it needs to know which button the wheel is, and to send a
+/// press. This asserts the numbers the pinned parser produces for those four
+/// buttons, so the client's mapping is checked against the encoder rather than
+/// against a reading of a specification.
+#[test]
+fn the_wheel_encodes_as_the_buttons_the_scroll_flag_names() {
+    let mut terminal = new_terminal(20, 4);
+    terminal.vt_write(b"\x1b[?1000h\x1b[?1006h");
+
+    let mut encoder = mouse::Encoder::new().expect("mouse encoder");
+    encoder.set_options_from_terminal(&terminal);
+    encoder.set_size(mouse::EncoderSize {
+        screen_width: 200,
+        screen_height: 80,
+        cell_width: 10,
+        cell_height: 20,
+        padding_top: 0,
+        padding_bottom: 0,
+        padding_right: 0,
+        padding_left: 0,
+    });
+
+    let mut event = mouse::Event::new().expect("mouse event");
+    event
+        .set_action(mouse::Action::Press)
+        .set_position(mouse::Position { x: 25.0, y: 21.0 });
+
+    // 64 is the scroll flag; the four wheel directions follow it in order.
+    for (button, code) in [
+        (mouse::Button::Four, 64),
+        (mouse::Button::Five, 65),
+        (mouse::Button::Six, 66),
+        (mouse::Button::Seven, 67),
+    ] {
+        event.set_button(Some(button));
+        let mut report = Vec::new();
+        encoder.encode_to_vec(&event, &mut report).expect("encode");
+        assert_eq!(
+            report,
+            format!("\x1b[<{code};3;2M").into_bytes(),
+            "the wheel reports as button {button:?} at the cell under the pointer"
+        );
+    }
+
+    // A wheel has no release, and the encoder does not invent one for it: a
+    // client that sent one would tell the child the wheel was let go.
+    event
+        .set_action(mouse::Action::Release)
+        .set_button(Some(mouse::Button::Four));
+    let mut release = Vec::new();
+    encoder.encode_to_vec(&event, &mut release).expect("encode");
+    assert_eq!(
+        release, b"\x1b[<64;3;2m",
+        "which is why the client sends presses only"
+    );
+}
+
 /// Focus reporting is mode-gated in the same way, and the encoding is the
 /// host's.
 #[test]

@@ -21,6 +21,7 @@ use shipctl_core::state::archive::{StateArchiveInspection, StateArchiveService};
 use shipctl_core::terminal::{
     TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId,
     TerminalCloseResult, TerminalDescriptor, TerminalEventSink, TerminalId, TerminalService,
+    TerminalTransport,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -222,6 +223,52 @@ impl ControlHandler for TauriControlHandler {
         })
     }
 
+    fn terminal_history(
+        &self,
+        id: TerminalId,
+        start_row: u32,
+        rows: u32,
+    ) -> Result<shipctl_core::terminal::projection::TerminalHistoryWindow, ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .project_history(id, start_row, rows)
+            .map_err(terminal_control_error)
+    }
+
+    fn terminal_anchor(
+        &self,
+        id: TerminalId,
+        space: shipctl_core::terminal::projection::ProjectedSpace,
+        at: shipctl_core::terminal::projection::ProjectedPoint,
+    ) -> Result<shipctl_core::terminal::projection::TerminalAnchor, ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .anchor(id, space, at)
+            .map_err(terminal_control_error)
+    }
+
+    fn terminal_resolve_anchor(
+        &self,
+        id: TerminalId,
+        anchor: shipctl_core::terminal::projection::TerminalAnchorId,
+    ) -> Result<Option<shipctl_core::terminal::projection::TerminalAnchor>, ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .resolve_anchor(id, anchor)
+            .map_err(terminal_control_error)
+    }
+
+    fn terminal_release_anchor(
+        &self,
+        id: TerminalId,
+        anchor: shipctl_core::terminal::projection::TerminalAnchorId,
+    ) -> Result<bool, ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .release_anchor(id, anchor)
+            .map_err(terminal_control_error)
+    }
+
     fn terminal_write(&self, id: TerminalId, data: Vec<u8>) -> Result<(), ControlError> {
         self.app
             .state::<TerminalService>()
@@ -246,14 +293,26 @@ impl ControlHandler for TauriControlHandler {
             .map_err(terminal_control_error)
     }
 
+    fn terminal_input(
+        &self,
+        id: TerminalId,
+        input: shipctl_core::terminal::input::TerminalInput,
+    ) -> Result<usize, ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .input(id, input)
+            .map_err(terminal_control_error)
+    }
+
     fn terminal_attach(
         &self,
         id: TerminalId,
         sink: Arc<dyn TerminalEventSink>,
+        encoding: TerminalTransport,
     ) -> Result<TerminalAttachment, ControlError> {
         self.app
             .state::<TerminalService>()
-            .attach(id, sink, false)
+            .attach_with(id, sink, false, encoding)
             .map_err(terminal_control_error)
     }
 

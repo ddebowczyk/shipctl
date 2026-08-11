@@ -33,6 +33,27 @@
       }
     },
     {
+      "tag": "screen",
+      "fields": {
+        "effects": {
+          "jsonType": "array",
+          "nullable": false
+        },
+        "revision": {
+          "jsonType": "number",
+          "nullable": false
+        },
+        "sequence": {
+          "jsonType": "number",
+          "nullable": false
+        },
+        "state": {
+          "jsonType": "object",
+          "nullable": false
+        }
+      }
+    },
+    {
       "tag": "metadata_changed",
       "fields": {
         "descriptor": {

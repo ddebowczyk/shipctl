@@ -1019,6 +1019,8 @@ fn print_version(format: OutputFormat) {
 
 #[cfg(test)]
 mod tests {
+    use shipctl_core::terminal::projection::ProjectedSpace;
+
     use super::*;
 
     #[test]
@@ -1109,6 +1111,43 @@ mod tests {
         assert_eq!(attach.terminal_id.to_string(), terminal_id);
         assert_eq!(attach.target.instance, "alpha");
         assert!(attach.raw);
+        assert_eq!(
+            shipctl_core::terminal::TerminalTransport::from(attach.encoding),
+            shipctl_core::terminal::TerminalTransport::Legacy,
+            "an attach that names no encoding asks for the one it always asked for"
+        );
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
+            "attach",
+            terminal_id,
+            "--instance=alpha",
+            "--encoding=semantic",
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::Attach(attach),
+        }) = parsed.command
+        else {
+            panic!("expected terminal attach")
+        };
+        assert_eq!(
+            shipctl_core::terminal::TerminalTransport::from(attach.encoding),
+            shipctl_core::terminal::TerminalTransport::Semantic
+        );
+        assert!(
+            Cli::try_parse_from([
+                "shipctl",
+                "terminals",
+                "attach",
+                terminal_id,
+                "--instance=alpha",
+                "--encoding=guess",
+            ])
+            .is_err(),
+            "an encoding the CLI cannot ask for is refused at the boundary"
+        );
 
         let parsed = Cli::try_parse_from([
             "shipctl",
@@ -1128,6 +1167,176 @@ mod tests {
         assert_eq!(write.base64.as_deref(), Some("AAEC/w=="));
         assert!(write.data.is_none());
         assert!(!write.stdin);
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
+            "input",
+            terminal_id,
+            "--instance=alpha",
+            r#"--json={"kind":"focus","gained":true}"#,
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::Input(input),
+        }) = parsed.command
+        else {
+            panic!("expected terminal input")
+        };
+        assert_eq!(
+            input.json.as_deref(),
+            Some(r#"{"kind":"focus","gained":true}"#)
+        );
+        assert!(!input.stdin);
+        for refused in [
+            vec![
+                "shipctl",
+                "terminals",
+                "input",
+                terminal_id,
+                "--instance=alpha",
+            ],
+            vec![
+                "shipctl",
+                "terminals",
+                "input",
+                terminal_id,
+                "--instance=alpha",
+                r#"--json={"kind":"focus","gained":true}"#,
+                "--stdin",
+            ],
+        ] {
+            assert!(
+                Cli::try_parse_from(refused).is_err(),
+                "one semantic input comes from one source"
+            );
+        }
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
+            "history",
+            terminal_id,
+            "--instance=alpha",
+            "--start-row=2",
+            "--rows=8",
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::History(history),
+        }) = parsed.command
+        else {
+            panic!("expected terminal history")
+        };
+        assert_eq!(history.start_row, 2);
+        assert_eq!(history.rows, 8);
+        assert!(!history.text);
+        for refused in [
+            vec![
+                "shipctl",
+                "terminals",
+                "history",
+                terminal_id,
+                "--instance=alpha",
+                "--start-row=0",
+            ],
+            vec![
+                "shipctl",
+                "terminals",
+                "history",
+                terminal_id,
+                "--instance=alpha",
+                "--rows=8",
+            ],
+        ] {
+            assert!(
+                Cli::try_parse_from(refused).is_err(),
+                "a window has no bounds this CLI is entitled to invent"
+            );
+        }
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
+            "anchor",
+            terminal_id,
+            "--instance=alpha",
+            "--space=history",
+            "--row=3",
+            "--column=0",
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::Anchor(anchor),
+        }) = parsed.command
+        else {
+            panic!("expected a terminal anchor")
+        };
+        assert_eq!(anchor.row, 3);
+        assert_eq!(anchor.column, 0);
+        assert!(matches!(
+            ProjectedSpace::from(anchor.space),
+            ProjectedSpace::History
+        ));
+        for refused in [
+            vec![
+                "shipctl",
+                "terminals",
+                "anchor",
+                terminal_id,
+                "--instance=alpha",
+                "--row=3",
+                "--column=0",
+            ],
+            vec![
+                "shipctl",
+                "terminals",
+                "anchor",
+                terminal_id,
+                "--instance=alpha",
+                "--space=history",
+                "--column=0",
+            ],
+        ] {
+            assert!(
+                Cli::try_parse_from(refused).is_err(),
+                "a cell with no space, or no row, is not a cell",
+            );
+        }
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
+            "resolve-anchor",
+            terminal_id,
+            "7",
+            "--instance=alpha",
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::ResolveAnchor(resolve),
+        }) = parsed.command
+        else {
+            panic!("expected an anchor resolve")
+        };
+        assert_eq!(resolve.anchor, 7);
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
+            "release-anchor",
+            terminal_id,
+            "7",
+            "--instance=alpha",
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::ReleaseAnchor(release),
+        }) = parsed.command
+        else {
+            panic!("expected an anchor release")
+        };
+        assert_eq!(release.anchor, 7);
 
         let parsed = Cli::try_parse_from([
             "shipctl",

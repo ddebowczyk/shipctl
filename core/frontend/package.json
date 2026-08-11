@@ -15,6 +15,7 @@
     "./settings": "./settings/index.ts",
     "./projects": "./projects/index.ts",
     "./terminal/views": "./terminal/views.ts",
+    "./terminal/browser": "./terminal/browser.ts",
     "./shared/views": "./shared/views.ts",
     "./projects/views": "./projects/views.ts",
     "./host": "./host/index.ts",

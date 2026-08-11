@@ -194,7 +194,17 @@ The refactor is complete only when all of the following are true:
 - raw output, replay ANSI, xterm, the byte queue, and the migration switch are
   removed; and
 - durable negative checks prove that no Shipctl transport carries child output
-  or replay ANSI and no frontend VT or width authority can return.
+  or replay ANSI, no frontend VT or width authority can return, and no release
+  bundle carries the dev-only scenario harness.
+
+Packaged-product scenarios are run by the app itself. No WebDriver reaches a
+macOS WKWebView, and no emulator's answers about a shipped engine would count,
+so the harness lives inside a dev build behind a folded `import.meta.env.DEV`
+guard and returns an NDJSON transcript. What it cannot reach is perceptual:
+glyph correctness and real IME composition stay recorded manual procedures with
+register entries, not implied gaps. Area 04 records the decision and its
+evidence; area 05 owns the negative check that keeps the harness out of a
+release.
 
 Backend PTY ingress and host-encoded PTY input remain valid internal byte
 boundaries. Locally generated CLI presentation ANSI also remains valid. The

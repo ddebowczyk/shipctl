@@ -113,3 +113,28 @@ test("allows classified platform listeners and rejects direct module event escap
     specifier: "@tauri-apps/api/event#emit",
   }]);
 });
+
+test("holds terminal scenarios to their port", async (t) => {
+  const root = await fixture({
+    // Sibling imports inside the harness are how a scenario is written.
+    "core/frontend/terminal/scenarios/scenarioCatalog.ts":
+      "import type { TerminalScenario } from './scenarioContract.ts'; export const all: TerminalScenario[] = [];",
+    "core/frontend/terminal/scenarios/scenarioContract.ts": "export type TerminalScenario = { id: string };",
+    // Reaching the renderer, a capability entrypoint, or xterm defeats the
+    // claim the harness exists to make.
+    "core/frontend/terminal/scenarios/leaky.ts":
+      "import { terminalCache } from '../terminalCache.ts'; import { Terminal } from '@xterm/xterm'; export const x = [terminalCache, Terminal];",
+    "core/frontend/terminal/terminalCache.ts": "export const terminalCache = new Map();",
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const diagnostics = await checkModuleBoundaries(root);
+  assert.deepEqual(
+    diagnostics.map(({ rule, specifier }) => ({ rule, specifier })),
+    [
+      { rule: "scenario-port-only", specifier: "../terminalCache.ts" },
+      { rule: "scenario-port-only", specifier: "@xterm/xterm" },
+    ],
+    "the sibling imports pass and both reaches out of the harness are reported",
+  );
+});

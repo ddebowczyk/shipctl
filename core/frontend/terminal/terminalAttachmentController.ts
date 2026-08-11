@@ -23,19 +23,25 @@
  *   reopened only once the surface holds the replay the host sent.
  */
 
+import type { TerminalClientModel, TerminalFrameOutcome } from "./terminalClientModel.ts";
+import type { TerminalInput } from "./terminalSemanticInput.ts";
 import type {
   TerminalAttachmentId,
   TerminalDescriptor,
   TerminalEvent,
   TerminalInputOutcome,
   TerminalReplay,
+  TerminalScreenState,
 } from "./types.ts";
 
 /** The host snapshot that opens an attachment. */
 export interface TerminalAttachmentSnapshot {
   readonly descriptor: TerminalDescriptor;
   readonly sequenceBoundary: number;
+  /** The byte path's baseline. Legacy; area 05 deletes it. */
   readonly replay: TerminalReplay;
+  /** The semantic path's baseline, and null on the byte path. */
+  readonly state: TerminalScreenState | null;
 }
 
 /** One open attachment. `activate` releases events buffered during the attach. */
@@ -60,8 +66,25 @@ export interface TerminalAttachmentPorts {
   releaseOutput(bytes: readonly number[]): void;
   /** Whether the host terminal currently accepts input. */
   acceptsInput(): boolean;
-  /** Submit input to the host, which is the final admission authority. */
+  /** Submit exact bytes. Legacy; area 05 deletes it with the byte path. */
   write(data: string): Promise<TerminalInputOutcome>;
+  /**
+   * Submit what a person did and let the host encode it.
+   *
+   * Optional only while the byte path still ships: a caller that has no
+   * semantic transport is refused rather than quietly written as bytes, since
+   * bytes chosen by a client are the second copy of the child's modes this
+   * path exists to end.
+   */
+  sendInput?(input: TerminalInput): Promise<TerminalInputOutcome>;
+  /**
+   * Read the rows behind the viewport, unchecked.
+   *
+   * Optional for the same reason {@link sendInput} is: the byte path has no
+   * such transport, and a client without one is refused rather than given a
+   * reconstruction of what scrolled away.
+   */
+  readHistory?(startRow: number, rows: number): Promise<unknown>;
   /** Record the live attachment id, or null while none is held. */
   publishAttachmentId(attachmentId: TerminalAttachmentId | null): void;
   /** Report an attach failure to the user. */
@@ -71,6 +94,16 @@ export interface TerminalAttachmentPorts {
    * scheduler they drain explicitly so no trace depends on timing.
    */
   schedule?(task: () => void): void;
+  /**
+   * The client model this attachment writes, on the semantic path.
+   *
+   * Supplying one selects that path: baselines and frames become state applied
+   * to this model, and no bytes are installed or released. The model outlives
+   * the controller — a reattachment writes the same model — so it is given
+   * here rather than created here, and disposing the controller does not
+   * dispose it.
+   */
+  model?: TerminalClientModel;
 }
 
 export class TerminalAttachmentController {
@@ -115,12 +148,78 @@ export class TerminalAttachmentController {
    * never has to choose between dropping a keystroke and raising an error.
    */
   async submitInput(data: string): Promise<TerminalInputOutcome> {
-    if (!this.acceptsInput()) {
-      // Either no attachment is held, or one is held whose baseline is not
-      // current: mid-replay, recovering, or past the host's exit.
-      return { status: "unavailable", reason: this.#lease ? "not_ready" : "detached" };
-    }
+    const refusal = this.#refusal();
+    if (refusal) return refusal;
     return this.#ports.write(data);
+  }
+
+  /**
+   * The same path, for input that names meaning instead of bytes.
+   *
+   * Readiness is decided the same way and for the same reason: a baseline that
+   * is not current is a screen the person is not looking at. What the input
+   * becomes is the host's, so nothing here inspects it.
+   */
+  async submitSemanticInput(input: TerminalInput): Promise<TerminalInputOutcome> {
+    const send = this.#ports.sendInput;
+    if (!send) {
+      // A wiring fault, not a lifecycle one. Reporting it as unavailable would
+      // read as "the terminal is busy" and hide a client with no semantic
+      // transport for as long as nobody looked at a keystroke.
+      return {
+        status: "failed",
+        error: new Error("This attachment has no semantic input transport"),
+      };
+    }
+    const refusal = this.#refusal();
+    if (refusal) return refusal;
+    return send(input);
+  }
+
+  /**
+   * Read a window of history into the model.
+   *
+   * Not an input path, so it is not refused for a baseline that is not current:
+   * a read of the host's retention is true whatever the attachment is doing,
+   * and it is exactly while recovering — or after the child exited — that a
+   * person still wants to see what scrolled away. The window is committed
+   * through the model's decoder, so a shape the host did not write leaves the
+   * model as it was.
+   */
+  async readHistory(startRow: number, rows: number): Promise<TerminalFrameOutcome> {
+    const read = this.#ports.readHistory;
+    if (!read) {
+      return {
+        status: "rejected",
+        reason: "invalid",
+        detail: "This attachment has no history transport",
+      };
+    }
+    const model = this.#ports.model;
+    if (!model) {
+      return {
+        status: "rejected",
+        reason: "invalid",
+        detail: "This attachment has no client model to hold history",
+      };
+    }
+    try {
+      return model.applyHistory(await read(startRow, rows));
+    } catch (error) {
+      return {
+        status: "rejected",
+        reason: "invalid",
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /** Why input may not be submitted now, or null when it may. */
+  #refusal(): TerminalInputOutcome | null {
+    if (this.acceptsInput()) return null;
+    // Either no attachment is held, or one is held whose baseline is not
+    // current: mid-replay, recovering, or past the host's exit.
+    return { status: "unavailable", reason: this.#lease ? "not_ready" : "detached" };
   }
 
   /** Open the attachment. Does nothing once attached or disposed. */
@@ -205,7 +304,7 @@ export class TerminalAttachmentController {
       this.#ports.observeDescriptor(lease.snapshot.descriptor);
       // The baseline must be installed before buffered events are released, so
       // the first live event lands on the state it was sequenced against.
-      this.#installReplay(lease.snapshot.replay, lease.snapshot.sequenceBoundary);
+      if (!this.#installBaseline(lease.snapshot)) return;
       this.#attached = true;
       lease.activate();
     } catch (error) {
@@ -218,6 +317,45 @@ export class TerminalAttachmentController {
         });
       }
     }
+  }
+
+  /**
+   * Install the baseline this attachment asked for.
+   *
+   * Returns false when the host answered with the encoding this attachment did
+   * not ask for. That is not a frame to drop: the attachment cannot be started
+   * on a baseline it cannot read, so it is reported and recovered instead.
+   */
+  #installBaseline(snapshot: TerminalAttachmentSnapshot): boolean {
+    const model = this.#ports.model;
+    if (!model) {
+      this.#installReplay(snapshot.replay, snapshot.sequenceBoundary);
+      return true;
+    }
+    if (snapshot.state === null) {
+      this.#ports.reportError(
+        new Error("The terminal attachment was given no state to start from"),
+      );
+      this.requestRecovery();
+      return false;
+    }
+    this.#inputReady = false;
+    this.#expectedSequence = snapshot.sequenceBoundary;
+    const outcome = model.installBaseline({
+      sequence: snapshot.sequenceBoundary,
+      revision: snapshot.descriptor.revision,
+      state: snapshot.state,
+      effects: [],
+    });
+    if (outcome.status !== "committed") {
+      this.#ports.reportError(new Error(`The terminal baseline was refused: ${outcome.detail}`));
+      this.requestRecovery();
+      return false;
+    }
+    // Nothing is re-parsed on this path, so the state the user would type into
+    // is on screen as soon as it is committed.
+    this.#inputReady = this.#ports.acceptsInput();
+    return true;
   }
 
   #installReplay(replay: TerminalReplay, sequenceBoundary: number): void {
@@ -258,6 +396,31 @@ export class TerminalAttachmentController {
       case "agent_activity_changed":
         // Descriptor projection is the runtime's concern, not the protocol's.
         return;
+      case "screen": {
+        const model = this.#ports.model;
+        if (!model) {
+          // This attachment asked the host for the byte encoding, so semantic
+          // state arriving here means the host sent an encoding this client did
+          // not ask for. Refuse the frame instead of dropping it in silence.
+          this.#ports.reportError(
+            new Error("The terminal attachment received semantic state on the byte stream"),
+          );
+          return;
+        }
+        const outcome = model.applyScreen({
+          sequence: event.sequence,
+          revision: event.revision,
+          state: event.state,
+          effects: event.effects,
+        });
+        if (outcome.status !== "committed") {
+          // The model is untouched, so the client's state is the last frame it
+          // could believe. It needs a baseline, not the next frame.
+          this.#ports.reportError(new Error(`The terminal frame was refused: ${outcome.detail}`));
+          this.requestRecovery();
+        }
+        return;
+      }
       default: {
         // A variant added to the host model without a decision here fails to
         // compile rather than being silently dropped.

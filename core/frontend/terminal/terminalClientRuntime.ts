@@ -3,12 +3,18 @@ import {
   type TerminalAttachmentBootstrap,
 } from "./terminalAttachmentBootstrap.ts";
 import {
+  anchorTerminal,
   attachTerminal,
   closeTerminal,
   detachTerminal,
   getErrorCode,
   listTerminals,
+  historyTerminal,
+  inputTerminal,
+  releaseTerminalAnchor,
   resizeTerminal,
+  resolveTerminalAnchor,
+  selectTerminal,
   spawnTerminal,
   subscribeTerminalRegistry,
   updateTerminalMetadata,
@@ -16,6 +22,7 @@ import {
   type TerminalAttachmentHandle,
   type TerminalRegistrySubscription,
 } from "@shipctl/core/platform";
+import type { TerminalInput } from "./terminalSemanticInput.ts";
 import { useTerminalStore } from "./useTerminalStore.ts";
 import {
   publishTerminalClosed,
@@ -24,6 +31,7 @@ import {
 } from "./terminalSessions.ts";
 import { mergeTerminalDescriptorActivity } from "./terminalAgentActivity.ts";
 import type {
+  TerminalAnchorId,
   TerminalAttachmentId,
   TerminalCloseOutcome,
   TerminalCloseResult,
@@ -33,7 +41,12 @@ import type {
   TerminalInputOutcome,
   TerminalLaunchRequest,
   TerminalMetadata,
+  TerminalProjectedPoint,
+  TerminalProjectedSpace,
   TerminalRegistryEvent,
+  TerminalSelectionRequest,
+  TerminalSelectionState,
+  TerminalTransport,
 } from "./types.ts";
 
 interface ObservedDescriptor {
@@ -59,9 +72,32 @@ export interface TerminalHostPort {
     terminalId: TerminalId,
     claimsResize: boolean,
     bootstrap: TerminalAttachmentBootstrap,
+    transport: TerminalTransport,
   ): Promise<TerminalAttachmentHandle>;
   detach(attachmentId: TerminalAttachmentId): Promise<void>;
   write(terminalId: TerminalId, data: string | Uint8Array): Promise<void>;
+  /** Semantic input. Answers how many bytes the child's modes made of it. */
+  input(terminalId: TerminalId, input: TerminalInput): Promise<number>;
+  /**
+   * The rows behind the viewport. Unchecked here: the client model's decoder
+   * is the only door into client state.
+   */
+  history(terminalId: TerminalId, startRow: number, rows: number): Promise<unknown>;
+  /** Pin one cell, so a client can keep naming that line. Unchecked. */
+  anchor(
+    terminalId: TerminalId,
+    space: TerminalProjectedSpace,
+    at: TerminalProjectedPoint,
+  ): Promise<unknown>;
+  /** Where an anchored line is now. Unchecked. */
+  resolveAnchor(terminalId: TerminalId, anchor: TerminalAnchorId): Promise<unknown>;
+  /** Drop an anchor. Unchecked. */
+  releaseAnchor(terminalId: TerminalId, anchor: TerminalAnchorId): Promise<unknown>;
+  /** Select by intent. The host decides which cells that covers. */
+  select(
+    terminalId: TerminalId,
+    request: TerminalSelectionRequest,
+  ): Promise<TerminalSelectionState>;
   resize(
     terminalId: TerminalId,
     attachmentId: TerminalAttachmentId,
@@ -79,6 +115,12 @@ const TAURI_TERMINAL_HOST: TerminalHostPort = {
   attach: attachTerminal,
   detach: detachTerminal,
   write: writeTerminal,
+  input: inputTerminal,
+  history: historyTerminal,
+  anchor: anchorTerminal,
+  resolveAnchor: resolveTerminalAnchor,
+  releaseAnchor: releaseTerminalAnchor,
+  select: selectTerminal,
   resize: resizeTerminal,
   close: closeTerminal,
 };
@@ -202,10 +244,20 @@ export class TerminalClientRuntime {
     return descriptor;
   }
 
+  /**
+   * Open an attachment in the encoding the caller names.
+   *
+   * The encoding has no default here on purpose. It is the one thing that
+   * decides whether this client interprets the child's bytes or reads the
+   * host's state, and a default is how that choice stayed invisible while the
+   * webview sat on the byte path. It dies with area 05, and so does the
+   * parameter.
+   */
   attach(
     terminalId: TerminalId,
     claimsResize: boolean,
     onEvent: (event: TerminalEvent) => void,
+    transport: TerminalTransport,
   ): Promise<TerminalAttachmentHandle> {
     return this.#host.attach(
       terminalId,
@@ -214,6 +266,7 @@ export class TerminalClientRuntime {
         this.observeEvent(terminalId, event);
         onEvent(event);
       }),
+      transport,
     );
   }
 
@@ -222,22 +275,97 @@ export class TerminalClientRuntime {
   }
 
   /**
-   * Submit input and report what happened.
+   * Submit exact bytes and report what happened.
+   *
+   * Legacy: a client that decides its own bytes keeps a second copy of the
+   * child's modes, which is what {@link input} exists to end.
+   */
+  async write(
+    terminalId: TerminalId,
+    data: string | Uint8Array,
+  ): Promise<TerminalInputOutcome> {
+    return this.#submit(terminalId, () => this.#host.write(terminalId, data));
+  }
+
+  /**
+   * Report what a person did and let the host encode it from the child's modes.
+   *
+   * The host answers with a byte count that this does not carry on: zero is a
+   * normal answer — a focus report or a mouse motion the child never asked for
+   * — and a caller that acted on it would be deciding, from the client side,
+   * what the terminal does with input.
+   */
+  async input(terminalId: TerminalId, input: TerminalInput): Promise<TerminalInputOutcome> {
+    return this.#submit(terminalId, () => this.#host.input(terminalId, input));
+  }
+
+  /**
+   * Read the rows behind the viewport.
+   *
+   * A read, so it does not pass through the input admission rule above: state
+   * outlives the child, and a terminal that has exited still has scrollback a
+   * person may want to read. The answer is passed on unchecked, because the
+   * client model decodes it fail-closed.
+   */
+  history(terminalId: TerminalId, startRow: number, rows: number): Promise<unknown> {
+    return this.#host.history(terminalId, startRow, rows);
+  }
+
+  /**
+   * Pin one cell, and keep the handle the host minted.
+   *
+   * Reads, like {@link history}: what a client points at outlives the child.
+   * The host holds the pin until it is released, so whoever asks for one owns
+   * releasing it.
+   */
+  anchor(
+    terminalId: TerminalId,
+    space: TerminalProjectedSpace,
+    at: TerminalProjectedPoint,
+  ): Promise<unknown> {
+    return this.#host.anchor(terminalId, space, at);
+  }
+
+  resolveAnchor(terminalId: TerminalId, anchor: TerminalAnchorId): Promise<unknown> {
+    return this.#host.resolveAnchor(terminalId, anchor);
+  }
+
+  releaseAnchor(terminalId: TerminalId, anchor: TerminalAnchorId): Promise<unknown> {
+    return this.#host.releaseAnchor(terminalId, anchor);
+  }
+
+  /**
+   * Ask the host to select, and receive what it holds.
+   *
+   * A host operation rather than an input, so it does not pass through the
+   * admission rule either: selecting is reading, and the answer carries the
+   * text because only the host can unwrap a wrapped line or drop the spacer
+   * half of a wide grapheme.
+   */
+  select(
+    terminalId: TerminalId,
+    request: TerminalSelectionRequest,
+  ): Promise<TerminalSelectionState> {
+    return this.#host.select(terminalId, request);
+  }
+
+  /**
+   * The one admission rule, for both input paths.
    *
    * A terminal that has exited, is closing, or is already gone is a normal
    * outcome, not an error: the keystroke simply raced the lifecycle. Only a
    * transport, validation, or host I/O failure is reported as a failure.
    */
-  async write(
+  async #submit(
     terminalId: TerminalId,
-    data: string | Uint8Array,
+    send: () => Promise<unknown>,
   ): Promise<TerminalInputOutcome> {
     const descriptor = this.descriptor(terminalId);
     if (!descriptor || descriptor.lifecycle !== "running") {
       return { status: "unavailable", reason: descriptor?.lifecycle ?? "not_found" };
     }
     try {
-      await this.#host.write(terminalId, data);
+      await send();
       return { status: "accepted" };
     } catch (error) {
       // The host is the final authority: the lifecycle may have changed since

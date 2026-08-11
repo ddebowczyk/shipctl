@@ -207,6 +207,10 @@ export function useTerminalActions(
           deliver({ type: "resync", reason: event.reason });
         }
       },
+      // A module observer is defined over the child's bytes, so it asks for
+      // them. Area 05 replaces this observation contract with the semantic one
+      // and deletes the argument.
+      "legacy",
     );
 
     deliver({ type: "replay", data: attachment.snapshot.replay.bytes });

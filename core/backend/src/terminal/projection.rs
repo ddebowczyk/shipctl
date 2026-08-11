@@ -16,8 +16,9 @@
 //! question with a printable answer.
 
 use libghostty_vt::{
-    render::{CellIterator, RowIterator},
+    render::{CellIterator, CursorVisualStyle, Dirty, RowIterator},
     screen::{CellContentTag, CellWide, GridRef, RowSemanticPrompt, Screen},
+    selection::Adjustment,
     style::{Palette, RgbColor, StyleColor},
     terminal::{Mode, Point, PointCoordinate, PointSpace},
     RenderState, Terminal,
@@ -53,8 +54,35 @@ pub struct TerminalProjection {
     pub cursor: ProjectedCursor,
     pub modes: ProjectedModes,
     pub colors: ProjectedColors,
+    /// What changed since the previous read.
+    pub damage: ProjectedDamage,
     /// The viewport, top row first.
     pub viewport: Vec<ProjectedRow>,
+}
+
+/// What changed since the previous projection read.
+///
+/// This is the host's answer, not an inference. When the host cannot prove
+/// which rows changed it says the whole frame changed, because a partial update
+/// that is wrong leaves stale cells on a screen and a full one only costs work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectedDamage {
+    pub scope: ProjectedDamageScope,
+    /// Viewport rows that changed, top row first. Meaningful when the scope is
+    /// partial; a full or clean frame says everything or nothing.
+    pub rows: Vec<u16>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectedDamageScope {
+    /// Nothing changed. A client that painted the last read is current.
+    Clean,
+    /// The rows listed changed and no others.
+    Partial,
+    /// Everything changed, or the host cannot say which part did.
+    Full,
 }
 
 /// Rows read out of retained history, and what history looked like when they
@@ -130,6 +158,103 @@ pub struct TerminalAnchor {
     pub active: Option<ProjectedPoint>,
 }
 
+/// How a selection endpoint moves when the client does not name a new cell.
+///
+/// A drag that leaves the window, a keyboard extension, and an autoscroll are
+/// all this: the client says which way, and the host decides which cell that
+/// reaches. A client that computed the destination itself would need to know
+/// where rows wrap and where history begins, which is the authority this plan
+/// keeps in one place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectedSelectionMove {
+    /// The previous non-empty cell, wrapping up onto the row above.
+    Left,
+    /// The next non-empty cell, wrapping down onto the row below.
+    Right,
+    Up,
+    Down,
+    /// The top-left cell of the screen.
+    Home,
+    /// The right edge of the last non-blank row.
+    End,
+    PageUp,
+    PageDown,
+    BeginningOfLine,
+    EndOfLine,
+}
+
+impl ProjectedSelectionMove {
+    pub(crate) fn adjustment(self) -> Adjustment {
+        match self {
+            Self::Left => Adjustment::Left,
+            Self::Right => Adjustment::Right,
+            Self::Up => Adjustment::Up,
+            Self::Down => Adjustment::Down,
+            Self::Home => Adjustment::Home,
+            Self::End => Adjustment::End,
+            Self::PageUp => Adjustment::PageUp,
+            Self::PageDown => Adjustment::PageDown,
+            Self::BeginningOfLine => Adjustment::BeginningOfLine,
+            Self::EndOfLine => Adjustment::EndOfLine,
+        }
+    }
+}
+
+/// What a client asks the host to select.
+///
+/// The client names an intent — this point, this word, that command's output,
+/// one step further in this direction — and never a set of cells. Which cells
+/// the intent covers depends on where rows wrap, where a word ends, where the
+/// OSC 133 marks are and where history begins, all of which the host holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum TerminalSelectionRequest {
+    /// A drag: the cell it started on and the cell it is on now.
+    Range {
+        space: ProjectedSpace,
+        from: ProjectedPoint,
+        to: ProjectedPoint,
+        /// Column-bounded rather than line-following.
+        rectangle: bool,
+    },
+    Word {
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    },
+    Line {
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    },
+    /// The output of the command the point falls in.
+    Output {
+        space: ProjectedSpace,
+        at: ProjectedPoint,
+    },
+    All,
+    /// Move the end of the current selection. This is the keyboard extension
+    /// and the drag that left the window, which is why it names no cell.
+    Extend {
+        movement: ProjectedSelectionMove,
+    },
+    Clear,
+}
+
+/// What the host holds after a selection request.
+///
+/// The text comes back with the answer because the host is the only place that
+/// can produce it: unwrapping a wrapped line and dropping the spacer half of a
+/// wide grapheme are its facts, not the client's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSelectionState {
+    /// Whether a selection exists. A request that matched nothing leaves this
+    /// false rather than reporting an empty one.
+    pub active: bool,
+    /// The selected text, or `None` when nothing is selected.
+    pub text: Option<String>,
+}
+
 /// The coordinate spaces a cell can be named in.
 ///
 /// The same cell has a different number in each of them, and which one is
@@ -180,6 +305,21 @@ pub enum ProjectedScreen {
     Alternate,
 }
 
+/// How the cursor is drawn.
+///
+/// The child asks for this with DECSCUSR, and the host resolves the ask against
+/// the configured default. A client that chose the shape itself would be
+/// deciding a terminal fact — which is why it is projected rather than read
+/// from the application's settings on the way to the painter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectedCursorShape {
+    Block,
+    BlockHollow,
+    Bar,
+    Underline,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectedCursor {
@@ -189,6 +329,10 @@ pub struct ProjectedCursor {
     /// The cursor sits past the last column and the next character wraps. A
     /// client cannot infer this from the cells.
     pub pending_wrap: bool,
+    pub shape: ProjectedCursorShape,
+    /// Whether this cursor blinks. Not whether it is lit: the phase is the
+    /// painter's, and no client would agree with another about it anyway.
+    pub blinking: bool,
 }
 
 /// The modes that decide how input is encoded and what a client may do on its
@@ -302,11 +446,18 @@ pub struct ProjectedCell {
 
 /// Reads the host's current state and copies it out.
 ///
-/// The parser is borrowed and not advanced: projecting changes nothing and can
-/// be done as often as a caller likes.
-pub fn project(terminal: &Terminal<'_, '_>) -> Result<TerminalProjection, String> {
+/// The parser is borrowed and not advanced. The render state is not: reading it
+/// consumes the damage the parser recorded, so the damage this projection
+/// reports is exactly what changed since the previous projection read through
+/// the same render state. A caller that wants an answer without disturbing that
+/// accounting uses its own render state and ignores the damage it reports.
+pub fn project<'alloc>(
+    terminal: &Terminal<'alloc, '_>,
+    render: &mut RenderState<'alloc>,
+) -> Result<TerminalProjection, String> {
     let columns = terminal.cols().map_err(read("terminal columns"))?;
     let rows = terminal.rows().map_err(read("terminal rows"))?;
+    let (viewport, damage, cursor_visual) = project_viewport(terminal, render)?;
     Ok(TerminalProjection {
         columns,
         rows,
@@ -317,14 +468,29 @@ pub fn project(terminal: &Terminal<'_, '_>) -> Result<TerminalProjection, String
         scrollback_rows: terminal
             .scrollback_rows()
             .map_err(read("scrollback rows"))?,
-        cursor: project_cursor(terminal)?,
+        cursor: project_cursor(terminal, cursor_visual)?,
         modes: project_modes(terminal)?,
         colors: project_colors(terminal)?,
-        viewport: project_viewport(terminal)?,
+        damage,
+        viewport,
     })
 }
 
-fn project_cursor(terminal: &Terminal<'_, '_>) -> Result<ProjectedCursor, String> {
+/// How the cursor looks, which only the render snapshot answers.
+///
+/// The parser holds the DECSCUSR request; resolving it against the configured
+/// default is the render state's, so both halves are read there and carried out
+/// to the projection together.
+#[derive(Debug, Clone, Copy)]
+struct CursorVisual {
+    shape: ProjectedCursorShape,
+    blinking: bool,
+}
+
+fn project_cursor(
+    terminal: &Terminal<'_, '_>,
+    visual: CursorVisual,
+) -> Result<ProjectedCursor, String> {
     Ok(ProjectedCursor {
         column: terminal.cursor_x().map_err(read("cursor column"))?,
         row: terminal.cursor_y().map_err(read("cursor row"))?,
@@ -334,6 +500,8 @@ fn project_cursor(terminal: &Terminal<'_, '_>) -> Result<ProjectedCursor, String
         pending_wrap: terminal
             .is_cursor_pending_wrap()
             .map_err(read("cursor pending wrap"))?,
+        shape: visual.shape,
+        blinking: visual.blinking,
     })
 }
 
@@ -373,9 +541,39 @@ fn project_colors(terminal: &Terminal<'_, '_>) -> Result<ProjectedColors, String
     })
 }
 
-fn project_viewport(terminal: &Terminal<'_, '_>) -> Result<Vec<ProjectedRow>, String> {
-    let mut state = RenderState::new().map_err(read("render state"))?;
+/// Reads the viewport and the damage that came with it.
+///
+/// The two are one read because the parser reports damage through the same
+/// snapshot that reports the rows, and because a caller that saw the rows has
+/// been told what changed and must not be told again. Both layers of the
+/// dependency's damage accounting are cleared here for that reason: the global
+/// one and the per-row one, which it documents as independent.
+fn project_viewport<'alloc>(
+    terminal: &Terminal<'alloc, '_>,
+    state: &mut RenderState<'alloc>,
+) -> Result<(Vec<ProjectedRow>, ProjectedDamage, CursorVisual), String> {
     let snapshot = state.update(terminal).map_err(read("render snapshot"))?;
+    let cursor_visual = CursorVisual {
+        shape: match snapshot
+            .cursor_visual_style()
+            .map_err(read("cursor visual style"))?
+        {
+            CursorVisualStyle::Bar => ProjectedCursorShape::Bar,
+            CursorVisualStyle::Underline => ProjectedCursorShape::Underline,
+            CursorVisualStyle::BlockHollow => ProjectedCursorShape::BlockHollow,
+            _ => ProjectedCursorShape::Block,
+        },
+        blinking: snapshot.cursor_blinking().map_err(read("cursor blink"))?,
+    };
+    let scope = match snapshot.dirty().map_err(read("render damage"))? {
+        Dirty::Clean => ProjectedDamageScope::Clean,
+        Dirty::Partial => ProjectedDamageScope::Partial,
+        _ => ProjectedDamageScope::Full,
+    };
+    snapshot
+        .set_dirty(Dirty::Clean)
+        .map_err(read("render damage reset"))?;
+    let mut damaged_rows = Vec::new();
     let mut row_iterator = RowIterator::new().map_err(read("row iterator"))?;
     let mut rows = row_iterator
         .update(&snapshot)
@@ -385,6 +583,10 @@ fn project_viewport(terminal: &Terminal<'_, '_>) -> Result<Vec<ProjectedRow>, St
     let mut projected = Vec::new();
     let mut row_index = 0u16;
     while let Some(row) = rows.next() {
+        if row.dirty().map_err(read("row damage"))? {
+            damaged_rows.push(row_index);
+            row.set_dirty(false).map_err(read("row damage reset"))?;
+        }
         let raw = row.raw_row().map_err(read("raw row"))?;
         let wrapped = raw.is_wrapped().map_err(read("row wrap"))?;
         let continuation = raw
@@ -439,7 +641,14 @@ fn project_viewport(terminal: &Terminal<'_, '_>) -> Result<Vec<ProjectedRow>, St
         });
         row_index += 1;
     }
-    Ok(projected)
+    Ok((
+        projected,
+        ProjectedDamage {
+            scope,
+            rows: damaged_rows,
+        },
+        cursor_visual,
+    ))
 }
 
 /// Reads a window of retained history.
@@ -640,6 +849,12 @@ mod tests {
         .expect("the pinned parser constructs a terminal")
     }
 
+    /// Reads through a render state of its own, so one test's damage
+    /// accounting never becomes another's.
+    fn project(terminal: &Terminal<'static, '_>) -> Result<TerminalProjection, String> {
+        super::project(terminal, &mut RenderState::new().expect("render state"))
+    }
+
     #[test]
     fn the_projection_carries_text_width_and_style() {
         let mut vt = terminal(24, 3);
@@ -713,6 +928,37 @@ mod tests {
         );
         assert_eq!(projection.cursor.row, 0);
         assert!(!projection.cursor.visible);
+    }
+
+    #[test]
+    fn the_shape_the_child_asked_for_is_the_shape_the_client_is_told() {
+        let mut vt = terminal(10, 4);
+        let projection = project(&vt).expect("the projection reads");
+        assert_eq!(projection.cursor.shape, ProjectedCursorShape::Block);
+        assert!(!projection.cursor.blinking);
+
+        // DECSCUSR. The odd parameter of each pair blinks, the even one does
+        // not, which is the only place either fact exists.
+        for (request, shape, blinking) in [
+            (b"\x1b[5 q".as_slice(), ProjectedCursorShape::Bar, true),
+            (b"\x1b[6 q".as_slice(), ProjectedCursorShape::Bar, false),
+            (
+                b"\x1b[3 q".as_slice(),
+                ProjectedCursorShape::Underline,
+                true,
+            ),
+            (b"\x1b[2 q".as_slice(), ProjectedCursorShape::Block, false),
+            (b"\x1b[1 q".as_slice(), ProjectedCursorShape::Block, true),
+        ] {
+            vt.vt_write(request);
+            let projection = project(&vt).expect("the projection reads");
+            assert_eq!(
+                (projection.cursor.shape, projection.cursor.blinking),
+                (shape, blinking),
+                "{} names one shape and one blink",
+                String::from_utf8_lossy(request)
+            );
+        }
     }
 
     #[test]
@@ -812,6 +1058,47 @@ mod tests {
         );
     }
 
+    /// Damage is a difference, so it is the one fact that depends on who is
+    /// asking and when. A render state kept across reads answers "since your
+    /// last read"; the rows it names are the rows that changed.
+    #[test]
+    fn damage_reports_what_changed_since_the_reader_last_looked() {
+        let mut vt = terminal(20, 4);
+        let mut render = RenderState::new().expect("render state");
+
+        vt.vt_write(b"first\r\nsecond");
+        let first = super::project(&vt, &mut render).expect("the projection reads");
+        assert_eq!(
+            first.damage.scope,
+            ProjectedDamageScope::Full,
+            "a reader that has seen nothing is told everything changed"
+        );
+
+        let unchanged = super::project(&vt, &mut render).expect("the projection reads");
+        assert_eq!(
+            unchanged.damage,
+            ProjectedDamage {
+                scope: ProjectedDamageScope::Clean,
+                rows: Vec::new()
+            },
+            "nothing happened between the two reads"
+        );
+
+        vt.vt_write(b"\x1b[3;1Hthird");
+        let changed = super::project(&vt, &mut render).expect("the projection reads");
+        assert_eq!(changed.damage.scope, ProjectedDamageScope::Partial);
+        assert_eq!(
+            changed.damage.rows,
+            vec![1, 2],
+            "the row written to, and the row the cursor left, both need repainting"
+        );
+        assert_eq!(changed.viewport[2].text().trim_end(), "third");
+
+        // The cells are still whole in a partial frame: damage says what to
+        // repaint, never what the projection left out.
+        assert_eq!(changed.viewport[0].text().trim_end(), "first");
+    }
+
     #[test]
     fn the_projection_survives_the_terminal_moving_on() {
         let mut vt = terminal(20, 4);
@@ -847,7 +1134,9 @@ mod tests {
         vt.set_selection(Some(&selection))
             .expect("the parser holds the selection");
 
-        let rendered = project_viewport(&vt).expect("the render path reads");
+        let (rendered, _, _) =
+            project_viewport(&vt, &mut RenderState::new().expect("render state"))
+                .expect("the render path reads");
         let read = grid_rows(&vt, ProjectedSpace::Active, 0, rendered.len() as u32)
             .expect("the grid path reads");
         assert_eq!(read, rendered, "the two readers disagree");

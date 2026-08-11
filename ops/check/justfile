@@ -23,5 +23,9 @@ version:
 instance-paths:
     node bin/check-instance-paths.mjs
 
+# Area 05's negative proof: the dev-only scenario harness must not ship.
+release-bundle:
+    node bin/check-release-bundle.mjs
+
 all:
     node bin/run-aggregate.mjs check

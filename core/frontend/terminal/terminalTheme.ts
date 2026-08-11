@@ -3,7 +3,8 @@ import { hexLuminance } from "@shipctl/core/appearance";
 import type { ShipctlTheme } from "@shipctl/core/appearance";
 import type { TerminalSettings } from "@shipctl/core/platform";
 import { resizeTerminal } from "@shipctl/core/platform";
-import { terminalCache } from "./terminalCache.ts";
+import { liveTerminalSessions, terminalCache } from "./terminalCache.ts";
+import type { TerminalSurfacePalette } from "./terminalCellSurface.ts";
 import { buildCSSFontFamily } from "@shipctl/core/appearance";
 import { preserveTerminalViewport } from "./terminalViewport.ts";
 import { TRANSITIONAL_RENDERER_SCROLLBACK_ROWS } from "./terminalRetention.ts";
@@ -39,6 +40,26 @@ export function blendOpaque(base: string, foreground: string, opacity: number): 
     mix(channel(base, offset), channel(foreground, offset)),
   );
   return `#${channels.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * The colours the chrome supplies to a semantic surface.
+ *
+ * The same four decisions {@link createTerminalTheme} makes for xterm, in the
+ * shape `terminalCellSurface.ts` paints with. The rest of an `ITheme` is the
+ * ANSI palette, and on the semantic path the host has already resolved every
+ * cell's colour against it: what the child left unsaid is all that is left for
+ * the application to answer.
+ */
+export function createTerminalSurfacePalette(theme: ShipctlTheme): TerminalSurfacePalette {
+  return {
+    foreground: theme.termForeground,
+    // A glass theme shows the window behind the terminal. The painter clears
+    // before it fills, so a transparent fill leaves those pixels cleared.
+    background: theme.isTransparent ? "transparent" : theme.appBg,
+    cursor: theme.termCursor,
+    selection: theme.termSelection,
+  };
 }
 
 export function createTerminalTheme(theme: ShipctlTheme): ITheme {
@@ -104,6 +125,13 @@ export function applyThemeToTerminals(theme: ShipctlTheme): void {
       entry.term.refresh(0, entry.term.rows - 1);
     });
   }
+
+  // The semantic path holds no engine in that cache, and no scroll state in the
+  // DOM either — which is the only reason the sweep above has to skip the
+  // hidden. A presentation reads the theme it paints with from the store the
+  // caller has already written, so what it is owed is the instruction to
+  // re-read, whether or not anyone is looking at it.
+  for (const session of liveTerminalSessions()) session.applyTheme();
 }
 
 export function applyTerminalSettings(settings: TerminalSettings): void {
@@ -143,4 +171,8 @@ export function applyTerminalSettings(settings: TerminalSettings): void {
       }
     });
   }
+
+  // The same instruction, and the resize with it: a semantic session measures
+  // the new cell and tells the host how much of the terminal now fits.
+  for (const session of liveTerminalSessions()) session.applySettings();
 }

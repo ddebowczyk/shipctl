@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -6,12 +7,16 @@ import {
   type TerminalAttachmentLease,
   type TerminalAttachmentPorts,
 } from "../terminalAttachmentController.ts";
+import { TerminalClientModel } from "../terminalClientModel.ts";
+import type { TerminalInput } from "../terminalSemanticInput.ts";
 import type {
   TerminalAttachmentId,
   TerminalDescriptor,
+  TerminalEffect,
   TerminalEvent,
   TerminalInputOutcome,
   TerminalReplay,
+  TerminalScreenState,
 } from "../types.ts";
 
 /** Flush every pending microtask without waiting on wall-clock time. */
@@ -20,7 +25,7 @@ function settle(): Promise<void> {
 }
 
 function descriptor(id: string): TerminalDescriptor {
-  return { id, lifecycle: "running" } as unknown as TerminalDescriptor;
+  return { id, lifecycle: "running", revision: 5 } as unknown as TerminalDescriptor;
 }
 
 function replay(bytes: readonly number[]): TerminalReplay {
@@ -37,7 +42,12 @@ interface PendingAttach {
   /** Events the host emitted before `activate()`, held like the real bootstrap. */
   readonly buffered: TerminalEvent[];
   deliver(event: TerminalEvent): void;
-  resolve(options?: { attachmentId?: string; boundary?: number; bytes?: readonly number[] }): void;
+  resolve(options?: {
+    attachmentId?: string;
+    boundary?: number;
+    bytes?: readonly number[];
+    state?: TerminalScreenState | null;
+  }): void;
   reject(error: unknown): void;
 }
 
@@ -53,7 +63,7 @@ class Harness {
   readonly ports: TerminalAttachmentPorts;
   #nextAttachment = 0;
 
-  constructor() {
+  constructor(model?: TerminalClientModel) {
     this.ports = {
       attach: (sink) => this.#attach(sink),
       detach: async (attachmentId) => {
@@ -76,6 +86,10 @@ class Harness {
         this.trace.push(`write:${data}`);
         return this.hostInputOutcome;
       },
+      sendInput: async (input) => {
+        this.trace.push(`input:${input.kind}`);
+        return this.hostInputOutcome;
+      },
       publishAttachmentId: (attachmentId) => {
         this.trace.push(`publish:${attachmentId ?? "none"}`);
       },
@@ -86,6 +100,7 @@ class Harness {
       schedule: (task) => {
         this.scheduled.push(task);
       },
+      model,
     };
   }
 
@@ -110,6 +125,7 @@ class Harness {
             descriptor: descriptor(attachmentId),
             sequenceBoundary: options.boundary ?? 10,
             replay: replay(options.bytes ?? [27]),
+            state: options.state ?? null,
           },
           activate: () => {
             this.trace.push(`activate:${attachmentId}`);
@@ -469,4 +485,188 @@ test("starting an attached controller does not open a second attachment", async 
   const { harness, controller } = await attached();
   await controller.start();
   assert.equal(harness.attaches.length, 1);
+});
+
+/**
+ * The semantic path. The state below is the frame the host itself wrote, so
+ * these traces run against the protocol rather than against a local invention.
+ */
+const hostFixture = JSON.parse(
+  readFileSync(new URL("../terminalScreenFixture.json", import.meta.url), "utf8"),
+) as { readonly state: TerminalScreenState; readonly effects: readonly TerminalEffect[] };
+
+function hostState(): TerminalScreenState {
+  return structuredClone(hostFixture.state);
+}
+
+function screen(sequence: number, state: TerminalScreenState = hostState()): TerminalEvent {
+  return { event: "screen", sequence, revision: 5, state, effects: [{ kind: "bell" }] } as unknown as TerminalEvent;
+}
+
+async function attachedSemantic(): Promise<{
+  harness: Harness;
+  controller: TerminalAttachmentController;
+  model: TerminalClientModel;
+}> {
+  const model = new TerminalClientModel();
+  const harness = new Harness(model);
+  const controller = new TerminalAttachmentController(harness.ports);
+  void controller.start();
+  await settle();
+  harness.latestAttach().resolve({ boundary: 10, state: hostState() });
+  await settle();
+  return { harness, controller, model };
+}
+
+test("a semantic attachment starts from state and installs no bytes", async () => {
+  const { harness, controller, model } = await attachedSemantic();
+
+  assert.deepEqual(harness.trace, [
+    "publish:none",
+    "stopOutput",
+    "attach:attachment-1",
+    "publish:attachment-1",
+    "descriptor:attachment-1",
+    "activate:attachment-1",
+  ]);
+  assert.equal(controller.attached, true);
+  assert.equal(model.state?.sequence, 10, "the model starts at the boundary the host named");
+  assert.equal(model.state?.screen.viewport[0].cells[2].bold, true);
+  assert.equal(
+    controller.acceptsInput(),
+    true,
+    "nothing is re-parsed, so the user may type as soon as the state is committed",
+  );
+});
+
+test("a semantic frame commits to the model and no bytes reach the surface", async () => {
+  const { harness, model } = await attachedSemantic();
+  harness.latestAttach().sink(screen(11));
+
+  assert.equal(model.state?.sequence, 11);
+  assert.deepEqual(
+    model.drainEffects().map((effect) => effect.kind),
+    ["bell"],
+    "the occurrences that shared the frame arrived with it",
+  );
+  assert.ok(
+    !harness.trace.some((entry) => entry.startsWith("output:") || entry.startsWith("installReplay")),
+    "the semantic path installs no replay and releases no bytes",
+  );
+});
+
+test("a frame the model refuses asks for a baseline instead of a next frame", async () => {
+  const { harness, model } = await attachedSemantic();
+  const broken = hostState() as unknown as Record<string, any>;
+  broken.viewport[0].cells[0].width = "huge";
+
+  harness.latestAttach().sink(screen(11, broken as unknown as TerminalScreenState));
+
+  assert.equal(model.state?.sequence, 10, "the model kept the state it could believe");
+  assert.equal(harness.errors.length, 1);
+  await harness.drain();
+  assert.equal(harness.attaches.length, 2, "a refused frame is a recovery, not a dropped frame");
+});
+
+test("a reattachment writes the same model, at the same sequence", async () => {
+  const { harness, controller, model } = await attachedSemantic();
+  const seen: number[] = [];
+  model.subscribe((state) => seen.push(state.sequence));
+
+  controller.requestRecovery();
+  await harness.drain();
+  harness.latestAttach().resolve({ attachmentId: "attachment-2", boundary: 10, state: hostState() });
+  await settle();
+
+  assert.equal(harness.attaches.length, 2);
+  assert.equal(model.disposed, false, "recovery replaces the attachment, not the terminal");
+  assert.equal(model.state?.sequence, 10);
+  assert.deepEqual(seen, [10, 10], "a baseline is installed whether or not it is newer");
+});
+
+test("a semantic attachment given no state refuses to start on a baseline it cannot read", async () => {
+  const model = new TerminalClientModel();
+  const harness = new Harness(model);
+  const controller = new TerminalAttachmentController(harness.ports);
+
+  void controller.start();
+  await settle();
+  harness.latestAttach().resolve({ boundary: 10, state: null });
+  await settle();
+
+  assert.equal(controller.attached, false);
+  assert.equal(model.state, null);
+  assert.equal(harness.errors.length, 1);
+  await harness.drain();
+  assert.equal(harness.attaches.length, 2);
+});
+
+test("a byte-path attachment still refuses semantic state", async () => {
+  const { harness } = await attached();
+  harness.latestAttach().sink(screen(11));
+
+  assert.equal(harness.errors.length, 1);
+  assert.ok(
+    !harness.trace.some((entry) => entry.startsWith("output:")),
+    "an encoding this attachment did not ask for reaches no surface",
+  );
+});
+
+/** One key press, in the host's vocabulary. */
+const KEY: TerminalInput = {
+  kind: "key",
+  action: "press",
+  code: "KeyC",
+  text: "c",
+  mods: { shift: false, alt: false, ctrl: true, meta: false, capsLock: false, numLock: false },
+  composing: false,
+};
+
+test("semantic input reaches the host as meaning, and no bytes are written", async () => {
+  const { harness, controller } = await attachedSemantic();
+
+  assert.deepEqual(await controller.submitSemanticInput(KEY), { status: "accepted" });
+  assert.deepEqual(
+    harness.trace.filter((entry) => entry.startsWith("input:") || entry.startsWith("write:")),
+    ["input:key"],
+  );
+
+  harness.hostInputOutcome = { status: "failed", error: new Error("bridge gone") };
+  const outcome = await controller.submitSemanticInput(KEY);
+  assert.equal(outcome.status, "failed", "a host failure must not be hidden");
+});
+
+test("semantic input is refused by the same readiness rule as bytes", async () => {
+  const { harness, controller } = await attachedSemantic();
+  controller.requestRecovery();
+
+  assert.deepEqual(await controller.submitSemanticInput(KEY), {
+    status: "unavailable",
+    reason: "not_ready",
+  });
+  assert.ok(!harness.trace.some((entry) => entry.startsWith("input:")));
+
+  controller.dispose();
+  assert.deepEqual(await controller.submitSemanticInput(KEY), {
+    status: "unavailable",
+    reason: "detached",
+  });
+});
+
+test("a client with no semantic transport is refused, not written as bytes", async () => {
+  const harness = new Harness(new TerminalClientModel());
+  const controller = new TerminalAttachmentController({
+    ...harness.ports,
+    sendInput: undefined,
+  });
+  void controller.start();
+  await settle();
+  harness.latestAttach().resolve({ boundary: 10, state: hostState() });
+  await settle();
+
+  // Failed, not unavailable: a missing transport is a wiring fault, and
+  // reporting it as a busy terminal would hide it behind a plausible reason.
+  const outcome = await controller.submitSemanticInput(KEY);
+  assert.equal(outcome.status, "failed");
+  assert.ok(!harness.trace.some((entry) => entry.startsWith("write:")));
 });

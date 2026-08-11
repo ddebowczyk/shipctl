@@ -11,6 +11,7 @@ import {
   bindTerminalSessionsRuntime,
   MODULE_TERMINAL_SESSIONS,
 } from "../terminalSessions.ts";
+import type { TerminalInput } from "../terminalSemanticInput.ts";
 import { useTerminalStore } from "../useTerminalStore.ts";
 import type {
   TerminalCloseResult,
@@ -79,6 +80,7 @@ class FakeHost implements TerminalHostPort {
   subscribeCalls = 0;
   closeCalls: TerminalId[] = [];
   writes: (string | Uint8Array)[] = [];
+  inputs: TerminalInput[] = [];
   subscribeError: unknown = null;
   writeError: unknown = null;
   disposed = false;
@@ -121,6 +123,12 @@ class FakeHost implements TerminalHostPort {
   async write(_terminalId: TerminalId, data: string | Uint8Array): Promise<void> {
     if (this.writeError) throw this.writeError;
     this.writes.push(data);
+  }
+
+  async input(_terminalId: TerminalId, input: TerminalInput): Promise<number> {
+    if (this.writeError) throw this.writeError;
+    this.inputs.push(input);
+    return input.kind === "key" ? 1 : 0;
   }
 
   async resize(): Promise<void> {}
@@ -377,4 +385,37 @@ test("a real host failure is reported as a failure", async () => {
     const outcome = await runtime.write(id, "ls");
     assert.equal(outcome.status, "failed", `${JSON.stringify(error)} was not reported`);
   }
+});
+
+test("semantic input reaches the host as meaning, and the byte count is not carried on", async () => {
+  const host = new FakeHost();
+  const runtime = new TerminalClientRuntime(host);
+  const id = terminalId();
+  runtime.observeDescriptor(descriptor(id, 1), "adopted");
+  const focus: TerminalInput = { kind: "focus", gained: true };
+
+  // The host encodes nothing for a focus report the child never asked for.
+  // That is an accepted input, not an unavailable one.
+  assert.deepEqual(await runtime.input(id, focus), { status: "accepted" });
+  assert.deepEqual(host.inputs, [focus]);
+  assert.deepEqual(host.writes, [], "meaning never becomes bytes on this side");
+});
+
+test("semantic input obeys the same lifecycle rule as bytes", async () => {
+  const host = new FakeHost();
+  const runtime = new TerminalClientRuntime(host);
+  const id = terminalId();
+  runtime.observeDescriptor(descriptor(id, 1), "adopted");
+  host.writeError = { code: "exited", message: "Terminal has exited" };
+
+  assert.deepEqual(await runtime.input(id, { kind: "focus", gained: false }), {
+    status: "unavailable",
+    reason: "exited",
+  });
+
+  const unknown = terminalId();
+  assert.deepEqual(await runtime.input(unknown, { kind: "focus", gained: false }), {
+    status: "unavailable",
+    reason: "not_found",
+  });
 });

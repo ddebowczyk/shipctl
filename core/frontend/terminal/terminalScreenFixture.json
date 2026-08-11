@@ -1,0 +1,2784 @@
+{
+  "event": "screen",
+  "sequence": 12,
+  "revision": 7,
+  "state": {
+    "columns": 40,
+    "rows": 8,
+    "screen": "primary",
+    "scrollbackRows": 0,
+    "cursor": {
+      "column": 5,
+      "row": 4,
+      "visible": true,
+      "pendingWrap": false,
+      "shape": "block",
+      "blinking": false
+    },
+    "modes": {
+      "wraparound": true,
+      "bracketedPaste": false,
+      "applicationCursorKeys": false,
+      "applicationKeypad": false,
+      "focusEvents": false,
+      "mouseTracking": false,
+      "insert": false,
+      "reverseVideo": false,
+      "origin": false
+    },
+    "colors": {
+      "foreground": {
+        "r": 230,
+        "g": 230,
+        "b": 230
+      },
+      "background": {
+        "r": 16,
+        "g": 16,
+        "b": 16
+      },
+      "palette": [
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        },
+        {
+          "r": 0,
+          "g": 0,
+          "b": 0
+        }
+      ]
+    },
+    "damage": {
+      "scope": "full",
+      "rows": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    "viewport": [
+      {
+        "wrapped": false,
+        "continuation": false,
+        "prompt": "prompt",
+        "cells": [
+          {
+            "text": "$",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": " ",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "b",
+            "width": "narrow",
+            "bold": true,
+            "foreground": {
+              "r": 10,
+              "g": 20,
+              "b": 30
+            },
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "o",
+            "width": "narrow",
+            "bold": true,
+            "foreground": {
+              "r": 10,
+              "g": 20,
+              "b": 30
+            },
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "l",
+            "width": "narrow",
+            "bold": true,
+            "foreground": {
+              "r": 10,
+              "g": 20,
+              "b": 30
+            },
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "d",
+            "width": "narrow",
+            "bold": true,
+            "foreground": {
+              "r": 10,
+              "g": 20,
+              "b": 30
+            },
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          }
+        ]
+      },
+      {
+        "wrapped": false,
+        "continuation": false,
+        "prompt": "prompt_continuation",
+        "cells": [
+          {
+            "text": "漢",
+            "width": "wide",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "spacer_tail",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "é",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          }
+        ]
+      },
+      {
+        "wrapped": false,
+        "continuation": false,
+        "prompt": "prompt_continuation",
+        "cells": [
+          {
+            "text": "l",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false,
+            "hyperlink": "https://example.com"
+          },
+          {
+            "text": "i",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false,
+            "hyperlink": "https://example.com"
+          },
+          {
+            "text": "n",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false,
+            "hyperlink": "https://example.com"
+          },
+          {
+            "text": "k",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false,
+            "hyperlink": "https://example.com"
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          }
+        ]
+      },
+      {
+        "wrapped": true,
+        "continuation": false,
+        "prompt": "prompt_continuation",
+        "cells": [
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          }
+        ]
+      },
+      {
+        "wrapped": false,
+        "continuation": true,
+        "prompt": "prompt_continuation",
+        "cells": [
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "w",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          }
+        ]
+      },
+      {
+        "wrapped": false,
+        "continuation": false,
+        "prompt": "none",
+        "cells": [
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          }
+        ]
+      },
+      {
+        "wrapped": false,
+        "continuation": false,
+        "prompt": "none",
+        "cells": [
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          }
+        ]
+      },
+      {
+        "wrapped": false,
+        "continuation": false,
+        "prompt": "none",
+        "cells": [
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          },
+          {
+            "text": "",
+            "width": "narrow",
+            "bold": false,
+            "foreground": null,
+            "background": null,
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "effects": [
+    {
+      "kind": "title",
+      "title": "shipctl"
+    },
+    {
+      "kind": "bell"
+    }
+  ]
+}

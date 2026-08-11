@@ -16,6 +16,16 @@ const HOST_PACKAGE = "@shipctl/core";
 const HOST_ROOTS = ["src", "core/frontend"];
 const COMPOSITION_FILES = new Set(["core/frontend/host/enabledModules.ts"]);
 const SRC_ENTRY_FILES = new Set(["src/main.tsx", "src/vite-env.d.ts"]);
+// The packaged-app scenario harness claims that the terminal surface can be
+// driven entirely through its port. That claim is only evidence if the
+// scenarios cannot reach past it, so the directory is held to its own siblings:
+// no xterm, no renderer, no DOM helper, no capability entrypoint. The one way
+// out is the dev-only entry, which loads the composition root that binds the
+// real surface — and that reach is named below rather than implied.
+const SCENARIO_ROOTS = ["core/frontend/terminal/scenarios"];
+const SCENARIO_IMPORT_EXCEPTIONS = new Set([
+  "core/frontend/terminal/scenarios/terminalScenarioEntry.ts->../terminalScenarioHost.ts",
+]);
 const CORE_DEEP_IMPORT_EXCEPTIONS = new Set([
   "core/frontend/host/index.ts->terminal/terminalSessions.ts",
   "core/frontend/host/moduleHostServices.ts->appearance/useThemeStore.ts",
@@ -263,10 +273,30 @@ export async function checkModuleBoundaries(root = process.cwd()) {
       }
     }
 
+    const scenarioRoot = SCENARIO_ROOTS.find((root) => isWithin(path.join(absoluteRoot, root), file));
+
     for (const entry of importSpecifiers(sourceFile)) {
       const matchedPackage = packageMatch(entry.specifier, packages);
       const isComposition = COMPOSITION_FILES.has(relativeFile);
       const isRelative = entry.specifier.startsWith(".");
+
+      if (scenarioRoot) {
+        const target = isRelative ? path.resolve(path.dirname(file), entry.specifier) : null;
+        const staysInside = target !== null
+          && isWithin(path.join(absoluteRoot, scenarioRoot), target);
+        if (!staysInside && !SCENARIO_IMPORT_EXCEPTIONS.has(`${relativeFile}->${entry.specifier}`)) {
+          diagnostics.push(diagnostic(
+            file,
+            entry,
+            "scenario-port-only",
+            "scenarios may reach the surface only through their port; a scenario that "
+              + "imports a renderer, a DOM helper or a capability entrypoint proves that it "
+              + "ran, not where authority sits",
+            absoluteRoot,
+          ));
+          continue;
+        }
+      }
 
       if (isRelative) {
         const target = path.resolve(path.dirname(file), entry.specifier);
