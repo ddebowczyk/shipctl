@@ -34,6 +34,7 @@ pub mod service;
 #[cfg(test)]
 mod traces;
 pub mod types;
+pub mod wire;
 
 pub use runtime::{TerminalEventSink, TerminalRuntimeHandle};
 pub use service::TerminalService;

@@ -156,14 +156,14 @@
       "x": 123.5,
       "y": 47.0,
       "surface": {
-        "screenWidth": 800,
-        "screenHeight": 480,
-        "cellWidth": 9,
-        "cellHeight": 18,
-        "paddingTop": 4,
-        "paddingBottom": 4,
-        "paddingLeft": 6,
-        "paddingRight": 6
+        "screenWidth": 800.0,
+        "screenHeight": 480.0,
+        "cellWidth": 9.0,
+        "cellHeight": 18.0,
+        "paddingTop": 4.0,
+        "paddingBottom": 4.0,
+        "paddingLeft": 6.0,
+        "paddingRight": 6.0
       },
       "anyButtonPressed": true
     }
@@ -185,14 +185,14 @@
       "x": 123.5,
       "y": 47.0,
       "surface": {
-        "screenWidth": 800,
-        "screenHeight": 480,
-        "cellWidth": 9,
-        "cellHeight": 18,
-        "paddingTop": 4,
-        "paddingBottom": 4,
-        "paddingLeft": 6,
-        "paddingRight": 6
+        "screenWidth": 800.0,
+        "screenHeight": 480.0,
+        "cellWidth": 9.0,
+        "cellHeight": 18.0,
+        "paddingTop": 4.0,
+        "paddingBottom": 4.0,
+        "paddingLeft": 6.0,
+        "paddingRight": 6.0
       },
       "anyButtonPressed": true
     }
@@ -214,14 +214,14 @@
       "x": 123.5,
       "y": 47.0,
       "surface": {
-        "screenWidth": 800,
-        "screenHeight": 480,
-        "cellWidth": 9,
-        "cellHeight": 18,
-        "paddingTop": 4,
-        "paddingBottom": 4,
-        "paddingLeft": 6,
-        "paddingRight": 6
+        "screenWidth": 800.0,
+        "screenHeight": 480.0,
+        "cellWidth": 9.0,
+        "cellHeight": 18.0,
+        "paddingTop": 4.0,
+        "paddingBottom": 4.0,
+        "paddingLeft": 6.0,
+        "paddingRight": 6.0
       },
       "anyButtonPressed": false
     }
@@ -243,14 +243,14 @@
       "x": 123.5,
       "y": 47.0,
       "surface": {
-        "screenWidth": 800,
-        "screenHeight": 480,
-        "cellWidth": 9,
-        "cellHeight": 18,
-        "paddingTop": 4,
-        "paddingBottom": 4,
-        "paddingLeft": 6,
-        "paddingRight": 6
+        "screenWidth": 800.0,
+        "screenHeight": 480.0,
+        "cellWidth": 9.0,
+        "cellHeight": 18.0,
+        "paddingTop": 4.0,
+        "paddingBottom": 4.0,
+        "paddingLeft": 6.0,
+        "paddingRight": 6.0
       },
       "anyButtonPressed": false
     }
@@ -272,14 +272,14 @@
       "x": 123.5,
       "y": 47.0,
       "surface": {
-        "screenWidth": 800,
-        "screenHeight": 480,
-        "cellWidth": 9,
-        "cellHeight": 18,
-        "paddingTop": 4,
-        "paddingBottom": 4,
-        "paddingLeft": 6,
-        "paddingRight": 6
+        "screenWidth": 800.0,
+        "screenHeight": 480.0,
+        "cellWidth": 9.0,
+        "cellHeight": 18.0,
+        "paddingTop": 4.0,
+        "paddingBottom": 4.0,
+        "paddingLeft": 6.0,
+        "paddingRight": 6.0
       },
       "anyButtonPressed": false
     }
@@ -301,14 +301,14 @@
       "x": 123.5,
       "y": 47.0,
       "surface": {
-        "screenWidth": 800,
-        "screenHeight": 480,
-        "cellWidth": 9,
-        "cellHeight": 18,
-        "paddingTop": 4,
-        "paddingBottom": 4,
-        "paddingLeft": 6,
-        "paddingRight": 6
+        "screenWidth": 800.0,
+        "screenHeight": 480.0,
+        "cellWidth": 9.0,
+        "cellHeight": 18.0,
+        "paddingTop": 4.0,
+        "paddingBottom": 4.0,
+        "paddingLeft": 6.0,
+        "paddingRight": 6.0
       },
       "anyButtonPressed": false
     }
@@ -330,14 +330,14 @@
       "x": 123.5,
       "y": 47.0,
       "surface": {
-        "screenWidth": 800,
-        "screenHeight": 480,
-        "cellWidth": 9,
-        "cellHeight": 18,
-        "paddingTop": 4,
-        "paddingBottom": 4,
-        "paddingLeft": 6,
-        "paddingRight": 6
+        "screenWidth": 800.0,
+        "screenHeight": 480.0,
+        "cellWidth": 9.0,
+        "cellHeight": 18.0,
+        "paddingTop": 4.0,
+        "paddingBottom": 4.0,
+        "paddingLeft": 6.0,
+        "paddingRight": 6.0
       },
       "anyButtonPressed": false
     }
@@ -359,14 +359,14 @@
       "x": 123.5,
       "y": 47.0,
       "surface": {
-        "screenWidth": 800,
-        "screenHeight": 480,
-        "cellWidth": 9,
-        "cellHeight": 18,
-        "paddingTop": 4,
-        "paddingBottom": 4,
-        "paddingLeft": 6,
-        "paddingRight": 6
+        "screenWidth": 800.0,
+        "screenHeight": 480.0,
+        "cellWidth": 9.0,
+        "cellHeight": 18.0,
+        "paddingTop": 4.0,
+        "paddingBottom": 4.0,
+        "paddingLeft": 6.0,
+        "paddingRight": 6.0
       },
       "anyButtonPressed": false
     }

@@ -161,6 +161,10 @@ pub struct TerminalSettings {
         alias = "allowedUrlSchemes"
     )]
     pub url_allowlist: Vec<String>,
+    /// Ask before forwarding paste text that the host classifies as unsafe.
+    /// This stays off unless the user enables it in the global config file.
+    #[serde(default, rename = "confirmUnsafePaste")]
+    pub confirm_unsafe_paste: bool,
 }
 
 fn default_cursor_style() -> String {
@@ -192,6 +196,7 @@ impl Default for TerminalSettings {
             font_family: default_font_family(),
             font_size: default_font_size(),
             url_allowlist: default_url_allowlist(),
+            confirm_unsafe_paste: false,
         }
     }
 }
@@ -465,5 +470,17 @@ mod tests {
             serde_yaml::from_str(&format!("scrollbackBytes: {}\n", RETENTION_MIN_BYTES)).unwrap();
         normalize_terminal_settings(&mut in_domain);
         assert_eq!(in_domain.scrollback_bytes, RETENTION_MIN_BYTES);
+    }
+
+    #[test]
+    fn unsafe_paste_confirmation_is_opt_in_and_round_trips_in_yaml() {
+        let default_settings: TerminalSettings = serde_yaml::from_str("{}").unwrap();
+        assert!(!default_settings.confirm_unsafe_paste);
+
+        let enabled: TerminalSettings = serde_yaml::from_str("confirmUnsafePaste: true\n").unwrap();
+        assert!(enabled.confirm_unsafe_paste);
+        assert!(serde_yaml::to_string(&enabled)
+            .unwrap()
+            .contains("confirmUnsafePaste: true"));
     }
 }

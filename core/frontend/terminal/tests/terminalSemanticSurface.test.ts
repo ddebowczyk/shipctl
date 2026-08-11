@@ -37,7 +37,7 @@ const fixture = JSON.parse(
 function hostFrame(sequence: number): TerminalScreenFrame {
   const event = decodeTerminalEvent(structuredClone(fixture));
   if (event.event !== "screen") throw new Error("the fixture is a screen frame");
-  return { sequence, revision: event.revision, state: event.state, effects: [] };
+  return { sequence, revision: event.revision, state: event.state };
 }
 
 function harness() {

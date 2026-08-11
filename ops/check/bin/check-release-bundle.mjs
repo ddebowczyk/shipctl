@@ -3,8 +3,8 @@
  * No scenario entry point survives a release build.
  *
  * The packaged-app scenario harness runs inside the shipped webview, which is
- * the only engine whose answers count for area 04's font, GPU and measurement
- * criteria. The cost of that choice is a new surface in the app, and area 05
+ * the only engine whose answers count for area 04's font, renderer and
+ * measurement criteria. The cost of that choice is a new surface in the app, and area 05
  * completes on deletion plus durable negative proof — so the harness has to be
  * provably absent from what ships, or the cutover trades a second VT for a
  * second entry point.
@@ -41,8 +41,8 @@ const FORBIDDEN_MARKERS = [
   "__shipctlTerminalScenarios",
   "runTerminalScenarios",
   "scenario-begin",
-  "renderer.gpu-loss",
-  "WEBGL_lose_context",
+  "renderer.primary-failure",
+  "automatic Canvas2D renderer recreation failed",
   "sustained output line",
 ];
 

@@ -76,6 +76,7 @@ export interface TerminalSessionAnchors {
 export interface TerminalSessionRuntime {
   attach(onEvent: (event: TerminalEvent) => void): Promise<TerminalAttachmentLease>;
   detach(attachmentId: TerminalAttachmentId): Promise<void>;
+  creditScreen?(attachmentId: TerminalAttachmentId, committedSequence: number): Promise<void>;
   observeDescriptor(descriptor: TerminalDescriptor): void;
   /** Submit exact bytes. Legacy; area 05 deletes it with the byte path. */
   write(data: string): Promise<TerminalInputOutcome>;
@@ -100,6 +101,8 @@ export interface TerminalSessionRuntime {
   /** Whether the host terminal currently accepts input. */
   acceptsInput(): boolean;
   resize(attachmentId: TerminalAttachmentId, size: TerminalGeometry): Promise<void>;
+  /** Record atomic client-model work. Semantic path only. */
+  recordModelCommit?(milliseconds: number): void;
 }
 
 /** Everything the reveal sequence waits on. */
@@ -166,6 +169,8 @@ export class TerminalViewSession {
   #historyRead: { request: TerminalHistoryRequest; sequence: number } | null = null;
   /** Holds the reader's line while row numbers move under it. */
   readonly #reading: TerminalReadingAnchor | null;
+  /** Consecutive pointer failures with the same cause make one user notice. */
+  #lastInputFailure: string | null = null;
   #disposed = false;
 
   constructor(ports: TerminalViewSessionPorts) {
@@ -203,6 +208,10 @@ export class TerminalViewSession {
     this.#controller = new TerminalAttachmentController({
       attach: (onEvent) => ports.runtime.attach(onEvent),
       detach: (attachmentId) => ports.runtime.detach(attachmentId),
+      creditScreen: ports.runtime.creditScreen
+        ? (attachmentId, committedSequence) =>
+            ports.runtime.creditScreen!(attachmentId, committedSequence)
+        : undefined,
       observeDescriptor: (descriptor) => ports.runtime.observeDescriptor(descriptor),
       model: ports.model,
       installReplay: (replay) => this.#installReplay(replay),
@@ -226,6 +235,7 @@ export class TerminalViewSession {
         }
         ports.notifyError("Couldn’t attach terminal", error);
       },
+      recordModelCommit: ports.runtime.recordModelCommit,
     });
   }
 
@@ -261,7 +271,18 @@ export class TerminalViewSession {
    */
   reveal(): void {
     if (this.#disposed) return;
+    this.#ports.surface.setVisible?.(true);
+    this.#controller.setScreenDemand(true);
     void this.#reveal();
+  }
+
+  /** Keep the attachment but stop paint work and semantic screen credits. */
+  conceal(): void {
+    if (this.#disposed) return;
+    this.#cancelSettle?.();
+    this.#cancelSettle = null;
+    this.#ports.surface.setVisible?.(false);
+    this.#controller.setScreenDemand(false);
   }
 
   /** The container may have changed size. */
@@ -458,11 +479,19 @@ export class TerminalViewSession {
   }
 
   #noteInput(outcome: TerminalInputOutcome): void {
-    if (this.#disposed || outcome.status === "unavailable") return;
+    if (this.#disposed) return;
+    if (outcome.status === "unavailable") {
+      this.#lastInputFailure = null;
+      return;
+    }
     if (outcome.status === "accepted") {
+      this.#lastInputFailure = null;
       this.#ports.surface.pin.noteInputAccepted();
       return;
     }
+    const failure = String(outcome.error);
+    if (failure === this.#lastInputFailure) return;
+    this.#lastInputFailure = failure;
     if (import.meta.env?.DEV) {
       console.error("Failed to write terminal input:", outcome.error);
     }

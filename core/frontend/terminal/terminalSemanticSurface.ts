@@ -45,6 +45,11 @@ import {
 } from "./terminalFontMetrics.ts";
 import type { TerminalGeometry } from "./terminalFitPlan.ts";
 import { resolveKeybindingPreset } from "./keybindingPresets.ts";
+import {
+  createTerminalImeLifecycle,
+  placeTerminalIme,
+  type TerminalImePlacement,
+} from "./terminalImePresentation.ts";
 import { createTerminalPointerRouter } from "./terminalPointerRouter.ts";
 import {
   semanticFocusInput,
@@ -118,6 +123,10 @@ export function createSemanticTerminalSurface(
     open() {
       ports.mount();
       ports.presenter.start();
+    },
+
+    setVisible(visible) {
+      ports.presenter.setVisible(visible);
     },
 
     setInputSink() {
@@ -267,6 +276,10 @@ export interface SemanticTerminalBinding {
   readonly presenter: TerminalCellPresenter;
   /** The live attachment id, for the terminal's other readers. */
   attachmentId(): TerminalAttachmentId | null;
+  /** Inject one primary-painter failure and report automatic recovery. */
+  failPrimaryRenderer(): Promise<boolean>;
+  /** Whether the current renderer generation has completed a frame. */
+  rendererHealthy(): boolean;
   /**
    * Display this presentation in another container.
    *
@@ -314,6 +327,12 @@ export interface SemanticTerminalBindingPorts {
   select(request: TerminalSelectionRequest): Promise<TerminalSelectionState | null>;
   /** Open what an OSC 8 hyperlink names. */
   openLink(uri: string): void;
+  /** Apply the configured host-backed review before submitting pasted text. */
+  reviewPaste(text: string, submit: () => void): void;
+  /** Report failed automatic recovery and offer a retry over the same model. */
+  rendererUnavailable(error: unknown, retry: () => void): void;
+  /** Record one complete canvas paint. */
+  recordPaint?(milliseconds: number): void;
 }
 
 /**
@@ -357,6 +376,7 @@ export function bindSemanticTerminal(
   // Tab stop would take the terminal away from anybody not using a pointer.
   keyboard.tabIndex = 0;
   keyboard.style.position = "absolute";
+  keyboard.style.zIndex = "1";
   keyboard.style.opacity = "0";
   keyboard.style.width = "1px";
   keyboard.style.height = "1px";
@@ -364,6 +384,8 @@ export function bindSemanticTerminal(
   keyboard.style.border = "none";
   keyboard.style.resize = "none";
   keyboard.style.overflow = "hidden";
+  keyboard.style.margin = "0";
+  keyboard.style.outline = "none";
 
   const context = canvas.getContext("2d");
   if (!context) {
@@ -373,20 +395,90 @@ export function bindSemanticTerminal(
 
   let font = currentFont();
   let palette = currentPalette();
+  let imePlacement: TerminalImePlacement | null = null;
+  let imeActive = false;
+
+  const syncImePresentation = () => {
+    if (imePlacement) {
+      keyboard.style.left = `${imePlacement.left}px`;
+      keyboard.style.top = `${imePlacement.top}px`;
+    }
+    if (!imeActive || !imePlacement) {
+      keyboard.style.opacity = "0";
+      keyboard.style.width = "1px";
+      keyboard.style.height = "1px";
+      return;
+    }
+    keyboard.style.opacity = "1";
+    keyboard.style.width = `${imePlacement.width}px`;
+    keyboard.style.height = `${imePlacement.height}px`;
+    keyboard.style.lineHeight = `${imePlacement.height}px`;
+    keyboard.style.font = `${font.sizePx}px ${font.family}`;
+    keyboard.style.color = palette.foreground;
+    keyboard.style.caretColor = palette.cursor;
+    keyboard.style.background = palette.background;
+  };
   const buildTarget = () =>
     createCanvasPaintTarget(context, {
       font: { family: font.family, sizePx: font.sizePx, ...RUN_WEIGHTS },
       devicePixelRatio: window.devicePixelRatio || 1,
     });
   let target = buildTarget();
+  let rendererGeneration = 0;
+  let paintedRendererGeneration = -1;
+  let failNextFrame = false;
+  let rendererNoticeOpen = false;
+  let injectedFailureResolve: ((recovered: boolean) => void) | null = null;
+  let presenter: TerminalCellPresenter;
+
+  const rebuildRenderer = () => {
+    // Reset the Canvas2D backing store before binding a fresh target. The
+    // terminal model is not involved: only disposable pixel resources change.
+    const backingWidth = canvas.width;
+    canvas.width = backingWidth;
+    target = buildTarget();
+    rendererGeneration += 1;
+    presenter.invalidate();
+  };
+
+  const reportRendererUnavailable = (error: unknown) => {
+    if (rendererNoticeOpen) return;
+    rendererNoticeOpen = true;
+    ports.rendererUnavailable(error, () => {
+      rendererNoticeOpen = false;
+      try {
+        rebuildRenderer();
+      } catch (retryError: unknown) {
+        reportRendererUnavailable(retryError);
+      }
+    });
+  };
+
+  const recoverRenderer = (error: unknown) => {
+    try {
+      rebuildRenderer();
+      injectedFailureResolve?.(true);
+    } catch (recoveryError: unknown) {
+      injectedFailureResolve?.(false);
+      reportRendererUnavailable(recoveryError ?? error);
+    } finally {
+      injectedFailureResolve = null;
+    }
+  };
 
   const measureCell = (): TerminalCellMetrics | null =>
     metricsContext ? measureTerminalCell(metricsContext, font) : null;
 
-  const presenter = new TerminalCellPresenter({
+  presenter = new TerminalCellPresenter({
     model,
     target: {
-      beginFrame: (size) => target.beginFrame(size),
+      beginFrame: (size) => {
+        if (failNextFrame) {
+          failNextFrame = false;
+          throw new Error("Injected Canvas2D painter failure");
+        }
+        target.beginFrame(size);
+      },
       clear: (rect) => target.clear(rect),
       fill: (rect, color) => target.fill(rect, color),
       drawRun: (run) => target.drawRun(run),
@@ -410,7 +502,12 @@ export function bindSemanticTerminal(
       // the CSS pixels the same frame occupies.
       canvas.style.width = `${plan.width}px`;
       canvas.style.height = `${plan.height}px`;
+      imePlacement = placeTerminalIme(plan);
+      syncImePresentation();
+      paintedRendererGeneration = rendererGeneration;
     },
+    observePaint: ports.recordPaint,
+    onFailure: recoverRenderer,
   });
 
   let attachmentId: TerminalAttachmentId | null = null;
@@ -438,12 +535,15 @@ export function bindSemanticTerminal(
     measureCell,
     applyTheme() {
       palette = currentPalette();
+      syncImePresentation();
     },
     applySettings() {
       font = currentFont();
       // The target holds the font it draws with, so it is rebuilt rather than
       // mutated: a target that kept the old family would keep drawing in it.
       target = buildTarget();
+      rendererGeneration += 1;
+      syncImePresentation();
     },
     publishAttachmentId(id) {
       attachmentId = id;
@@ -454,11 +554,20 @@ export function bindSemanticTerminal(
     },
   });
 
+  const ime = createTerminalImeLifecycle({
+    present: (state) => {
+      imeActive = state.active;
+      if (!state.active) keyboard.value = "";
+      syncImePresentation();
+    },
+    commit: (text) => surface.reportInput(semanticTextInput(text)),
+  });
+
   const onKey = (event: KeyboardEvent) => {
     // A composition owns the keys it is made of. Reporting them is right — the
     // host is told they are composing and encodes nothing — but refusing the
     // browser's default would take the keys away from the input method.
-    if (event.isComposing) {
+    if (ime.ownsKey(event.isComposing)) {
       const composing = semanticKeyInput(event);
       if (composing) surface.reportInput(composing);
       return;
@@ -485,6 +594,12 @@ export function bindSemanticTerminal(
   /** Start a composition from an empty field, whatever the copy left behind. */
   const onCompositionStart = () => {
     keyboard.value = "";
+    ime.start();
+  };
+
+  const onCompositionUpdate = (event: Event) => {
+    const preedit = (event as CompositionEvent).data;
+    ime.update(typeof preedit === "string" ? preedit : "");
   };
 
   const onTextInput = (event: Event) => {
@@ -492,8 +607,7 @@ export function bindSemanticTerminal(
     // Emptied whether or not there is text: what an input method leaves behind
     // is its own, and the terminal's state is the host's screen.
     keyboard.value = "";
-    if (typeof text !== "string" || text.length === 0) return;
-    surface.reportInput(semanticTextInput(text));
+    ime.finish(typeof text === "string" ? text : "");
   };
 
   const onPaste = (event: ClipboardEvent) => {
@@ -502,7 +616,7 @@ export function bindSemanticTerminal(
     event.preventDefault();
     const text = event.clipboardData?.getData("text");
     if (!text) return;
-    surface.reportInput(semanticPasteInput(text));
+    ports.reviewPaste(text, () => surface.reportInput(semanticPasteInput(text)));
   };
 
   /**
@@ -588,6 +702,7 @@ export function bindSemanticTerminal(
   keyboard.addEventListener("keydown", onKey);
   keyboard.addEventListener("keyup", onKey);
   keyboard.addEventListener("compositionstart", onCompositionStart);
+  keyboard.addEventListener("compositionupdate", onCompositionUpdate);
   keyboard.addEventListener("compositionend", onTextInput);
   keyboard.addEventListener("paste", onPaste);
   canvas.addEventListener("pointerdown", onPointer);
@@ -606,13 +721,27 @@ export function bindSemanticTerminal(
     model,
     presenter,
     attachmentId: () => attachmentId,
+    failPrimaryRenderer() {
+      if (!model.state || injectedFailureResolve) return Promise.resolve(false);
+      return new Promise<boolean>((resolve) => {
+        injectedFailureResolve = resolve;
+        failNextFrame = true;
+        presenter.invalidate();
+      });
+    },
+    rendererHealthy: () =>
+      injectedFailureResolve === null
+      && paintedRendererGeneration === rendererGeneration,
     attachTo(next) {
       host = next;
     },
     dispose() {
+      injectedFailureResolve?.(false);
+      injectedFailureResolve = null;
       keyboard.removeEventListener("keydown", onKey);
       keyboard.removeEventListener("keyup", onKey);
       keyboard.removeEventListener("compositionstart", onCompositionStart);
+      keyboard.removeEventListener("compositionupdate", onCompositionUpdate);
       keyboard.removeEventListener("compositionend", onTextInput);
       keyboard.removeEventListener("paste", onPaste);
       keyboard.removeEventListener("focus", onFocus);

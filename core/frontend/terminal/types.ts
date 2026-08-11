@@ -270,6 +270,8 @@ export interface TerminalScreenState {
   /** What changed since the host's previous read. */
   readonly damage: Record<string, unknown>;
   readonly viewport: readonly unknown[];
+  /** Presentation overlay. It is not part of canonical paint runs. */
+  readonly selection: readonly unknown[];
 }
 
 /**
@@ -302,6 +304,10 @@ export type TerminalEvent =
       readonly sequence: number;
       readonly revision: TerminalRevision;
       readonly state: TerminalScreenState;
+    }
+  | {
+      readonly event: "effects";
+      readonly sequence: number;
       readonly effects: readonly TerminalEffect[];
     }
   | {

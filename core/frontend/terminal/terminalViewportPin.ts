@@ -48,7 +48,7 @@ export class TerminalViewportPin {
    */
   constructor(
     surface: ViewportPinSurface,
-    schedule: (task: () => void) => void = queueMicrotask,
+    schedule: (task: () => void) => void = (task) => globalThis.queueMicrotask(task),
   ) {
     this.#surface = surface;
     this.#schedule = schedule;

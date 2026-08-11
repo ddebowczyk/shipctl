@@ -28,12 +28,72 @@ const repositoryRoot = path.resolve(fileURLToPath(new URL("../../../..", import.
 
 /** A probe that answers everything and does nothing. */
 const inertProbe: TerminalSurfaceProbe = {
-  loseGpuContext: () => false,
+  failPrimaryRenderer: () => Promise.resolve(true),
   surfaceUsable: () => true,
   secondModelPresent: () => false,
-  writeOutput: () => Promise.resolve(),
+  writeSustainedOutput: () => Promise.resolve(),
   bufferRows: () => 0,
   resize: () => Promise.resolve(),
+  publicationStats: () =>
+    Promise.resolve({
+      ptyReads: 0,
+      screenChanges: 0,
+      screenProjections: 0,
+      screenEncodes: 0,
+      screenEncodedBytes: 0,
+      screenRecipientDeliveries: 0,
+      effectEvents: 0,
+      effectEncodedBytes: 0,
+      currentScreenTransactions: 0,
+      currentScreenBytesQueued: 0,
+      peakScreenBytesQueued: 0,
+      currentEffectEventsQueued: 0,
+      currentEffectBytesQueued: 0,
+      peakEffectEventsQueued: 0,
+      peakEffectBytesQueued: 0,
+    }),
+  clientPerformanceStats: () => ({
+    decodeCount: 0,
+    decodeMilliseconds: 0,
+    modelCommitCount: 0,
+    modelCommitMilliseconds: 0,
+    paintCount: 0,
+    paintMilliseconds: 0,
+  }),
+  measureHiddenCatchup: () => Promise.resolve({
+    screenChangesWhileHidden: 1,
+    projectionsWhileHidden: 0,
+    encodesWhileHidden: 0,
+    modelCommitsWhileHidden: 0,
+    paintsWhileHidden: 0,
+    projectionsOnReveal: 1,
+    encodesOnReveal: 1,
+    modelCommitsOnReveal: 1,
+    paintsOnReveal: 1,
+    sequenceAdvance: 1,
+  }),
+  measureAttachmentFanout: () => Promise.resolve({
+    screenChanges: 1,
+    projections: 1,
+    encodes: 1,
+    encodedBytes: 1,
+    recipientDeliveries: 2,
+    currentScreenTransactions: 2,
+    currentScreenBytesQueued: 2,
+  }),
+  measureSlowClientRecovery: () => Promise.resolve({
+    screenChanges: 3,
+    projectionsBeforeRecovery: 1,
+    encodesBeforeRecovery: 1,
+    deliveriesBeforeRecovery: 1,
+    transactionsBeforeReplacement: 1,
+    transactionsAfterReplacement: 1,
+    bytesBeforeReplacement: 1,
+    bytesAfterReplacement: 1,
+    recoveredSequenceAdvance: 2,
+    effectEvents: 0,
+    effectEncodedBytes: 0,
+  }),
 };
 
 const catalog = createTerminalScenarios(inertProbe);
@@ -64,6 +124,18 @@ test("a deliberate change names the owner who decided it", () => {
     assert.ok(
       entry.owner && entry.owner.trim().length > 0,
       `${entry.id} changes product behaviour without naming an owner`,
+    );
+  }
+});
+
+test("a deliberate change cites the record of the decision", () => {
+  for (const entry of TERMINAL_CAPABILITY_REGISTER) {
+    if (entry.disposition !== "changed") continue;
+    assert.ok(
+      entry.decision && existsSync(path.join(repositoryRoot, entry.decision)),
+      `${entry.id} drops product behaviour and cites no decision record: ` +
+        `${entry.decision ?? "(none)"}. A role in an owner field is an entry ` +
+        "approving itself.",
     );
   }
 });

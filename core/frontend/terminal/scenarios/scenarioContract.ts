@@ -2,7 +2,7 @@
  * What a packaged-app scenario is.
  *
  * Area 04 has facts that no unit lane can reach: whether a glyph fits the span
- * the host gave it, whether the surface survives losing its GPU context, and
+ * the host gave it, whether the surface survives a primary-renderer failure, and
  * what the app actually costs while output streams. They need real font
  * rasterization, a real graphics stack, and the packaged binary — so they run
  * inside the shipped webview and report from there, rather than being driven

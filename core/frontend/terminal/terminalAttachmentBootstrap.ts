@@ -23,13 +23,16 @@ export interface TerminalAttachmentBootstrap {
 
 export function createTerminalAttachmentBootstrap(
   onEvent: (event: TerminalEvent) => void,
+  observeDecode?: (milliseconds: number) => void,
 ): TerminalAttachmentBootstrap {
   const buffered: TerminalEvent[] = [];
   let active = false;
 
   return {
     deliver(raw) {
+      const startedAt = performance.now();
       const event = decodeTerminalEvent(raw);
+      observeDecode?.(performance.now() - startedAt);
       if (active) onEvent(event);
       else buffered.push(event);
     },

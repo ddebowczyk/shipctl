@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS: TerminalSettings = {
   fontFamily: TERMINAL_FONT_FAMILY,
   fontSize: TERMINAL_FONT_SIZE,
   urlAllowlist: ["http", "https"],
+  confirmUnsafePaste: false,
 };
 
 interface TerminalSettingsStore {

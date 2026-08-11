@@ -268,18 +268,15 @@ pub enum TerminalEvent {
         sequence: u64,
         replay: TerminalReplay,
     },
-    /// The host's state, as meaning. Carries no child bytes and no ANSI.
-    ///
-    /// The effects travel beside the state, not inside it: a bell is not a
-    /// cell, and a title is not a row. They are ordered as the parser reported
-    /// them, and they belong to this occurrence — which is why they share its
-    /// frame instead of taking a sequence number of their own, because a
-    /// sequence a byte-path attachment never receives would make its stream
-    /// look like it had lost an event.
+    /// The host's replaceable state, as meaning. Carries no child bytes or ANSI.
     Screen {
         sequence: u64,
         revision: TerminalRevision,
-        state: Box<super::projection::TerminalProjection>,
+        state: std::sync::Arc<super::wire::TerminalScreenSnapshot>,
+    },
+    /// Ordered parser occurrences that a later screen must not replace.
+    Effects {
+        sequence: u64,
         effects: Vec<super::effects::TerminalEffect>,
     },
     MetadataChanged {
@@ -332,7 +329,7 @@ pub struct TerminalRuntimeSnapshot {
     /// It is written as null rather than omitted on the byte path: a client
     /// that must decide what a missing field meant is a client that can guess.
     #[serde(default)]
-    pub state: Option<Box<super::projection::TerminalProjection>>,
+    pub state: Option<std::sync::Arc<super::wire::TerminalScreenSnapshot>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

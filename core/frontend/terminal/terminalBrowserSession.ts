@@ -15,7 +15,7 @@
  * names.
  */
 
-import { getErrorMessage, openUrl } from "@shipctl/core/platform";
+import { getErrorMessage, isTerminalPasteSafe, openUrl } from "@shipctl/core/platform";
 import { useNoticeStore } from "@shipctl/core/shared";
 import {
   disposeTerminalModel,
@@ -29,6 +29,7 @@ import {
 import type { TerminalClientModel } from "./terminalClientModel.ts";
 import { TERMINAL_CLIENT_RUNTIME } from "./terminalClientRuntime.ts";
 import { notifyAgent } from "./notifications.ts";
+import { reportTerminalEffectOutcome } from "./terminalEffectOutcome.ts";
 import {
   observeGesturesWithListeners,
   observeResizeWithObserver,
@@ -46,6 +47,9 @@ import {
 } from "./terminalViewSession.ts";
 import { bindXtermTerminal, disposeXtermTerminal } from "./terminalXtermSurface.ts";
 import type { TerminalId, TerminalTransport } from "./types.ts";
+import { recordTerminalClientMetric } from "./terminalPerformanceMetrics.ts";
+import { reviewTerminalPaste } from "./terminalPasteReview.ts";
+import { useTerminalSettingsStore } from "./useTerminalSettingsStore.ts";
 
 const BROWSER_TIMING: TerminalViewSessionPorts["timing"] = {
   nextFrame: () =>
@@ -120,6 +124,10 @@ export function createBrowserTerminalSessionPorts(
   const host = {
     detach: (attachmentId: Parameters<typeof TERMINAL_CLIENT_RUNTIME.detach>[0]) =>
       TERMINAL_CLIENT_RUNTIME.detach(attachmentId),
+    creditScreen: (
+      attachmentId: Parameters<typeof TERMINAL_CLIENT_RUNTIME.creditScreen>[0],
+      committedSequence: number,
+    ) => TERMINAL_CLIENT_RUNTIME.creditScreen(attachmentId, committedSequence),
     observeDescriptor: (descriptor: Parameters<
       typeof TERMINAL_CLIENT_RUNTIME.observeDescriptor
     >[0]) => {
@@ -149,6 +157,44 @@ export function createBrowserTerminalSessionPorts(
           notifyError("Could not open the link", error);
         });
       },
+      reviewPaste: (text, submit) =>
+        reviewTerminalPaste(
+          {
+            confirmationEnabled: () =>
+              useTerminalSettingsStore.getState().settings.confirmUnsafePaste,
+            classify: isTerminalPasteSafe,
+            requestConfirmation: (accept, cancel) => {
+              useNoticeStore.getState().pushNotice(
+                {
+                  tone: "info",
+                  title: "Paste multiple lines?",
+                  message: "The pasted text can execute commands when inserted.",
+                  actions: [
+                    { label: "Paste", variant: "primary", onClick: accept },
+                    { label: "Cancel", variant: "secondary", onClick: cancel },
+                  ],
+                },
+                { durationMs: 0 },
+              );
+            },
+            reportFailure: (error) => notifyError("Could not review terminal paste", error),
+          },
+          text,
+          submit,
+        ),
+      rendererUnavailable: (error, retry) => {
+        useNoticeStore.getState().pushNotice(
+          {
+            tone: "error",
+            title: "Terminal renderer failed",
+            message: getErrorMessage(error),
+            actions: [{ label: "Retry", variant: "primary", onClick: retry }],
+          },
+          { durationMs: 0 },
+        );
+      },
+      recordPaint: (milliseconds) =>
+        recordTerminalClientMetric(terminalId, "paint", milliseconds),
     });
     return {
       surface,
@@ -166,6 +212,8 @@ export function createBrowserTerminalSessionPorts(
         sendInput: (input) => TERMINAL_CLIENT_RUNTIME.input(terminalId, input),
         readHistory: (startRow, rows) =>
           TERMINAL_CLIENT_RUNTIME.history(terminalId, startRow, rows),
+        recordModelCommit: (milliseconds) =>
+          recordTerminalClientMetric(terminalId, "modelCommit", milliseconds),
         anchors: {
           anchor: (space, at) => TERMINAL_CLIENT_RUNTIME.anchor(terminalId, space, at),
           resolveAnchor: (anchor) => TERMINAL_CLIENT_RUNTIME.resolveAnchor(terminalId, anchor),
@@ -173,14 +221,17 @@ export function createBrowserTerminalSessionPorts(
         },
       },
       timing: BROWSER_TIMING,
-      // A bell is the child asking for attention, and it reaches the same
-      // notification the byte path raises from xterm's own bell. The rest of
-      // what the host reports beside the screen has no client on this path
-      // yet: a title reaches the chrome through the descriptor whatever the
-      // transport, and a clipboard write is an owner decision (see the
-      // register's effect.clipboard-write).
       reportEffect: (effect) => {
-        if (effect.kind === "bell") void notifyAgent(terminalId, "Terminal bell");
+        reportTerminalEffectOutcome(effect, {
+          bell: () => void notifyAgent(terminalId, "Terminal bell"),
+          clipboardRefused: () => {
+            useNoticeStore.getState().pushNotice({
+              tone: "info",
+              title: "Terminal clipboard request not applied",
+              message: "The terminal asked Shipctl to change the clipboard. Shipctl refused it.",
+            });
+          },
+        });
       },
       notifyError,
     };

@@ -25,6 +25,10 @@ const fixture = JSON.parse(
   readFileSync(new URL("../terminalScreenFixture.json", import.meta.url), "utf8"),
 ) as Record<string, unknown>;
 
+const historyFixture = JSON.parse(
+  readFileSync(new URL("../terminalHistoryFixture.json", import.meta.url), "utf8"),
+) as Record<string, any>;
+
 /** The fixture as the client receives it: through the fail-closed decoder. */
 function hostFrame(): TerminalScreenFrame {
   const event = decodeTerminalEvent(structuredClone(fixture));
@@ -34,7 +38,6 @@ function hostFrame(): TerminalScreenFrame {
     sequence: event.sequence,
     revision: event.revision,
     state: event.state,
-    effects: event.effects,
   };
 }
 
@@ -87,6 +90,9 @@ test("the model reads what the host wrote, and recomputes none of it", () => {
 test("the occurrences arrive in the order the host reported them", () => {
   const model = new TerminalClientModel();
   assert.deepEqual(model.applyScreen(hostFrame()), { status: "committed" });
+  assert.deepEqual(model.applyEffects([{ kind: "title" }, { kind: "bell" }]), {
+    status: "committed",
+  });
   assert.deepEqual(
     model.drainEffects().map((effect) => effect.kind),
     ["title", "bell"],
@@ -96,13 +102,13 @@ test("the occurrences arrive in the order the host reported them", () => {
 
 test("a frame the host could not have written is refused whole", () => {
   const cases: [string, TerminalScreenFrame][] = [
-    ["an unknown cell width", damagedFrame((s) => (s.viewport[0].cells[0].width = "huge"))],
+    ["an unknown cell width", damagedFrame((s) => (s.viewport[0].runs[0].width = "huge"))],
     ["a missing cursor fact", damagedFrame((s) => delete s.cursor.pendingWrap)],
     ["a missing mode", damagedFrame((s) => delete s.modes.origin)],
     ["a colour channel out of range", damagedFrame((s) => (s.colors.palette[0].r = 300))],
     ["a row count the viewport contradicts", damagedFrame((s) => s.viewport.pop())],
     ["damage naming a row that does not exist", damagedFrame((s) => s.damage.rows.push(99))],
-    ["an absent optional colour", damagedFrame((s) => delete s.viewport[0].cells[0].foreground)],
+    ["an absent optional colour", damagedFrame((s) => delete s.viewport[0].runs[0].foreground)],
     ["a prompt mark the host does not use", damagedFrame((s) => (s.viewport[0].prompt = "later"))],
   ];
 
@@ -123,7 +129,7 @@ test("a rejected frame leaves the committed state exactly as it was", () => {
   model.drainEffects();
 
   const outcome = model.applyScreen({
-    ...damagedFrame((s) => (s.viewport[2].cells[0].width = "huge")),
+    ...damagedFrame((s) => (s.viewport[2].runs[0].width = "huge")),
     sequence: committed.sequence + 1,
   });
   assert.equal(outcome.status, "rejected");
@@ -177,7 +183,9 @@ test("occurrences that arrive with no surface mounted still arrive once", () => 
   const model = new TerminalClientModel();
   model.applyScreen(hostFrame());
   const later = hostFrame();
-  model.applyScreen({ ...later, sequence: 13, effects: [{ kind: "bell" }] });
+  model.applyEffects([{ kind: "title" }, { kind: "bell" }]);
+  model.applyScreen({ ...later, sequence: 13 });
+  model.applyEffects([{ kind: "bell" }]);
 
   assert.deepEqual(
     model.drainEffects().map((effect) => effect.kind),
@@ -240,7 +248,7 @@ test("a history window wakes the reader who is looking at it, and nobody else", 
   const window = {
     startRow: 0,
     historyRows: 6,
-    rows: (structuredClone(fixture) as Record<string, any>).state.viewport.slice(0, 2),
+    rows: structuredClone(historyFixture.rows.slice(0, 2)),
   };
 
   const following = new TerminalClientModel();

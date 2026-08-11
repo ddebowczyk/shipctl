@@ -53,6 +53,8 @@ export interface TerminalContainerBinding {
    * the surface up on every later call.
    */
   reveal(): void;
+  /** The container is hidden. Keep its session and attachment. */
+  conceal(): void;
   /** The view no longer represents this terminal. */
   dispose(): void;
   /** Whether a session has been opened. For tests and diagnostics. */
@@ -139,6 +141,11 @@ export function bindTerminalContainer(
         return;
       }
       session = ports.startSession(container);
+    },
+
+    conceal() {
+      if (disposed) return;
+      session?.conceal();
     },
 
     dispose() {

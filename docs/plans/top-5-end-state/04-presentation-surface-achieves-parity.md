@@ -251,7 +251,12 @@ rows. A hidden tab receives no paint work while its model continues updating.
 Dispatch occurrence effects through application integrations exactly once,
 independent of frame coalescing and surface visibility. Effects that require a
 user gesture, such as clipboard access, must expose a declared outcome rather
-than disappearing.
+than disappearing. Shipctl refuses OSC 52 clipboard writes with one visible
+notice. It does not request clipboard permission or apply the write.
+
+Only host-marked OSC 8 hyperlinks are active. Plain-text URL auto-detection is
+an approved product removal for the semantic terminal; no client or host URL
+matcher is added.
 
 Theme and font changes rebuild presentation resources and repaint current
 state. They do not change model identity or request replay.
@@ -341,10 +346,11 @@ look necessary. Each reaches its proof by a different route:
 - **5 and 6** are logic, not presentation. Command submission, hide and show,
   theme, font, resize, and renderer recreation move behind ports in area 03 and
   are proved in the existing Node lane against structural fakes. No DOM.
-- **7** — fallback after a real renderer failure — is a scenario. Losing a GPU
-  context is an engine fact; `renderer.gpu-loss` forces it in the packaged app
-  through `WEBGL_lose_context` and records whether the surface stayed usable and
-  whether a second model appeared.
+- **7** — fallback after a real renderer failure — is a scenario.
+  `renderer.primary-failure` injects a failure at the Canvas2D target boundary,
+  rebuilds presentation resources from the same model, and records whether the
+  surface stayed usable. It does not depend on a WebGL context that the primary
+  renderer does not use.
 - **9** is a scenario plus a host sample: `measure.sustained-output` for frames
   and buffer growth, `get_memory_stats` for process memory.
 - **4** does not fully reduce to either. A scenario can prove that the corpus

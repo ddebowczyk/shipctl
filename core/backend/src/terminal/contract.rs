@@ -50,6 +50,7 @@ pub enum TerminalEventKind {
     Output,
     Replay,
     Screen,
+    Effects,
     MetadataChanged,
     AgentActivityChanged,
     Exited,
@@ -64,6 +65,7 @@ impl TerminalEventKind {
             TerminalEvent::Output { .. } => Self::Output,
             TerminalEvent::Replay { .. } => Self::Replay,
             TerminalEvent::Screen { .. } => Self::Screen,
+            TerminalEvent::Effects { .. } => Self::Effects,
             TerminalEvent::MetadataChanged { .. } => Self::MetadataChanged,
             TerminalEvent::AgentActivityChanged { .. } => Self::AgentActivityChanged,
             TerminalEvent::Exited { .. } => Self::Exited,
@@ -78,7 +80,8 @@ impl TerminalEventKind {
         match self {
             Self::Output => Some(Self::Replay),
             Self::Replay => Some(Self::Screen),
-            Self::Screen => Some(Self::MetadataChanged),
+            Self::Screen => Some(Self::Effects),
+            Self::Effects => Some(Self::MetadataChanged),
             Self::MetadataChanged => Some(Self::AgentActivityChanged),
             Self::AgentActivityChanged => Some(Self::Exited),
             Self::Exited => Some(Self::ResyncRequired),
@@ -120,7 +123,12 @@ pub fn sample_event(kind: TerminalEventKind) -> TerminalEvent {
         TerminalEventKind::Screen => TerminalEvent::Screen {
             sequence: 3,
             revision: TerminalRevision(4),
-            state: Box::new(sample_projection()),
+            state: std::sync::Arc::new(super::wire::TerminalScreenSnapshot::from_projection(
+                sample_projection(),
+            )),
+        },
+        TerminalEventKind::Effects => TerminalEvent::Effects {
+            sequence: 4,
             effects: vec![TerminalEffect::Bell],
         },
         TerminalEventKind::MetadataChanged => TerminalEvent::MetadataChanged {
@@ -206,13 +214,14 @@ fn sample_screen_frame() -> TerminalEvent {
     trace.extend_from_slice(b"\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\r\n");
     trace.extend(std::iter::repeat_n(b'w', 45));
     trace.extend_from_slice(b"\x07");
-    let feed = engine.feed(&trace);
+    engine.feed(&trace);
 
     TerminalEvent::Screen {
         sequence: 12,
         revision: TerminalRevision(7),
-        state: Box::new(engine.project().expect("the fixture needs a projection")),
-        effects: feed.effects,
+        state: std::sync::Arc::new(super::wire::TerminalScreenSnapshot::from_projection(
+            engine.project().expect("the fixture needs a projection"),
+        )),
     }
 }
 
@@ -477,14 +486,14 @@ pub(super) struct NamedInput {
 pub(super) fn sample_inputs() -> Vec<NamedInput> {
     fn surface() -> TerminalSurfaceGeometry {
         TerminalSurfaceGeometry {
-            screen_width: 800,
-            screen_height: 480,
-            cell_width: 9,
-            cell_height: 18,
-            padding_top: 4,
-            padding_bottom: 4,
-            padding_left: 6,
-            padding_right: 6,
+            screen_width: 800.0,
+            screen_height: 480.0,
+            cell_width: 9.0,
+            cell_height: 18.0,
+            padding_top: 4.0,
+            padding_bottom: 4.0,
+            padding_left: 6.0,
+            padding_right: 6.0,
         }
     }
 
@@ -872,11 +881,13 @@ mod tests {
         );
     }
 
-    /// The rows behind the viewport are the same kind of row as the ones on it.
+    /// History and the compact viewport use different wire shapes but retain
+    /// the same semantic row facts.
     ///
-    /// This is the claim the whole history path rests on: if a history row were
-    /// missing a field the viewport reports, every client would have to hold a
-    /// second, poorer representation of what scrolled away.
+    /// History is an on-demand response. The live viewport is replaceable
+    /// frame state and uses runs to avoid repeating paint facts on every cell.
+    /// Both decode into the same client row model, so neither may omit a fact
+    /// the client cannot reconstruct.
     #[test]
     fn a_history_row_carries_everything_a_viewport_row_carries() {
         let window = sample_history_window();
@@ -908,8 +919,23 @@ mod tests {
         };
         assert_eq!(
             fields(&history),
+            std::collections::BTreeSet::from([
+                "cells".to_string(),
+                "continuation".to_string(),
+                "prompt".to_string(),
+                "wrapped".to_string(),
+            ]),
+            "history keeps its on-demand cell shape"
+        );
+        assert_eq!(
             fields(&viewport),
-            "history rows and viewport rows must be the same shape"
+            std::collections::BTreeSet::from([
+                "continuation".to_string(),
+                "prompt".to_string(),
+                "runs".to_string(),
+                "wrapped".to_string(),
+            ]),
+            "replaceable viewport state keeps its compact run shape"
         );
 
         // The facts a client cannot infer from text survive the scroll.
@@ -930,6 +956,25 @@ mod tests {
         assert!(
             cells.iter().any(|cell| cell["bold"] == true),
             "the styled run did not survive scrolling into history"
+        );
+
+        let runs: Vec<&JsonValue> = viewport
+            .as_array()
+            .expect("rows are an array")
+            .iter()
+            .flat_map(|row| row["runs"].as_array().expect("runs are an array"))
+            .collect();
+        assert!(
+            runs.iter().any(|run| run["width"] == "wide"),
+            "the compact viewport lost the wide-cell boundary"
+        );
+        assert!(
+            runs.iter().any(|run| run["hyperlink"].is_string()),
+            "the compact viewport lost the hyperlink"
+        );
+        assert!(
+            runs.iter().any(|run| run["bold"] == true),
+            "the compact viewport lost the styled run"
         );
     }
 

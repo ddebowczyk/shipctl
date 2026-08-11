@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -20,6 +21,7 @@ use crate::terminal::projection::{
     ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
     TerminalProjection,
 };
+use crate::terminal::wire::TerminalScreenSnapshot;
 use crate::terminal::{
     TerminalAgentActivity, TerminalAgentReportKind, TerminalAgentReportSource,
     TerminalAttachmentId, TerminalDescriptor, TerminalExit, TerminalId, TerminalRevision,
@@ -37,7 +39,7 @@ use crate::terminal::{
 /// the child's output. The build control-protocol version remains the
 /// compatibility check between executable roles; this version only describes
 /// the wire envelope.
-pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 9;
+pub const CONTROL_FRAME_SCHEMA_VERSION: u32 = 10;
 
 /// Maximum raw bytes accepted by one terminal control write. This preserves
 /// the replaced terminal ACK path's established 100,000-byte flow-control
@@ -482,7 +484,7 @@ pub struct TerminalAttachmentState {
     pub replay: TerminalReplayFrame,
     /// The semantic baseline, present exactly when the attachment asked for the
     /// semantic encoding. Nothing here is base64; it carries no child bytes.
-    pub state: Option<Box<TerminalProjection>>,
+    pub state: Option<Arc<TerminalScreenSnapshot>>,
 }
 
 /// One event from a detachable terminal subscription. The terminal sequence
@@ -515,7 +517,14 @@ pub enum TerminalControlEvent {
         attachment_id: TerminalAttachmentId,
         sequence: u64,
         revision: TerminalRevision,
-        state: Box<TerminalProjection>,
+        state: Arc<TerminalScreenSnapshot>,
+    },
+    /// Ordered occurrences are reliable and independent from replaceable
+    /// screen state.
+    Effects {
+        terminal_id: TerminalId,
+        attachment_id: TerminalAttachmentId,
+        sequence: u64,
         effects: Vec<TerminalEffect>,
     },
     MetadataChanged {

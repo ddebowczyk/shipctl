@@ -31,6 +31,10 @@ const fixture = JSON.parse(
   readFileSync(new URL("../terminalScreenFixture.json", import.meta.url), "utf8"),
 ) as Record<string, unknown>;
 
+const historyFixture = JSON.parse(
+  readFileSync(new URL("../terminalHistoryFixture.json", import.meta.url), "utf8"),
+) as Record<string, any>;
+
 /** The host's frame, at a sequence, with the damage the caller names. */
 function hostFrame(
   sequence: number,
@@ -44,19 +48,17 @@ function hostFrame(
   if (damage) state.damage = damage;
   if (scrollbackRows !== undefined) state.scrollbackRows = scrollbackRows;
   if (cursor) Object.assign(state.cursor, cursor);
-  return { sequence, revision: event.revision, state, effects: [] };
+  return { sequence, revision: event.revision, state };
 }
 
 /**
  * A window of history rows, built from the host's own rows.
  *
- * The rows are the fixture's viewport rows, so they are shaped exactly as the
- * host writes them and pass the same decoder the screen does.
+ * The rows are the host's history fixture, so they retain the history wire
+ * contract while screen publication uses compact runs.
  */
 function hostHistory(startRow: number, rows: number, historyRows: number): unknown {
-  const event = decodeTerminalEvent(structuredClone(fixture));
-  if (event.event !== "screen") throw new Error("the fixture is a screen frame");
-  const viewport = (structuredClone(event.state) as Record<string, any>).viewport as unknown[];
+  const viewport = structuredClone(historyFixture.rows) as unknown[];
   return {
     startRow,
     historyRows,
@@ -306,6 +308,53 @@ test("a presentation started against a live model shows what is already there", 
 
   assert.deepEqual(second, [ALL_ROWS]);
   assert.deepEqual(h.frames, [], "the first presentation is not repainted for it");
+});
+
+test("a paint-target failure keeps model state and permits a full recovery frame", () => {
+  const model = new TerminalClientModel();
+  const scheduled: (() => void)[] = [];
+  const frames: number[][] = [];
+  const failures: unknown[] = [];
+  let fail = true;
+  let presenter: TerminalCellPresenter;
+
+  presenter = new TerminalCellPresenter({
+    model,
+    target: {
+      beginFrame: () => {
+        if (!fail) return;
+        fail = false;
+        throw new Error("painter failed");
+      },
+      clear: () => {},
+      fill: () => {},
+      drawRun: () => {},
+      underline: () => {},
+      cursor: () => {},
+      endFrame: () => {},
+    },
+    metrics: () => METRICS,
+    palette: () => PALETTE,
+    schedule: (paint) => {
+      scheduled.push(paint);
+      return () => {};
+    },
+    onFrame: (plan) => frames.push([...plan.paintedRows]),
+    onFailure: (error) => {
+      failures.push(error);
+      presenter.invalidate();
+    },
+  });
+  presenter.start();
+  model.applyScreen(hostFrame(10));
+
+  scheduled.shift()?.();
+  assert.equal(failures.length, 1);
+  assert.deepEqual(frames, []);
+  assert.equal(model.state?.sequence, 10, "renderer failure cannot change the model");
+
+  scheduled.shift()?.();
+  assert.deepEqual(frames, [ALL_ROWS], "the replacement paints the held model in full");
 });
 
 test("a font that cannot be measured owes a frame instead of drawing one", () => {

@@ -35,10 +35,6 @@
     {
       "tag": "screen",
       "fields": {
-        "effects": {
-          "jsonType": "array",
-          "nullable": false
-        },
         "revision": {
           "jsonType": "number",
           "nullable": false
@@ -49,6 +45,19 @@
         },
         "state": {
           "jsonType": "object",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "tag": "effects",
+      "fields": {
+        "effects": {
+          "jsonType": "array",
+          "nullable": false
+        },
+        "sequence": {
+          "jsonType": "number",
           "nullable": false
         }
       }

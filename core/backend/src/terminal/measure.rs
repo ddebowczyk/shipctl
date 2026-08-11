@@ -27,12 +27,14 @@
 
 use std::time::{Duration, Instant};
 
-use super::projection::{
-    ProjectedCell, ProjectedColor, ProjectedDamageScope, ProjectedRow, ProjectedWidth,
-};
+use std::sync::Arc;
+
+use super::projection::ProjectedDamageScope;
 use super::replay::VtReplayEngine;
 use super::retention::TerminalRetentionPolicy;
 use super::traces;
+use super::types::{TerminalEvent, TerminalRevision};
+use super::wire::TerminalScreenSnapshot;
 
 /// The chunk the reader hands the parser. Mirrors
 /// `runtime::PTY_READ_CHUNK_BYTES`, which is what makes this a measurement of
@@ -54,65 +56,17 @@ struct Frame {
     feed: Duration,
     project: Duration,
     encode: Duration,
-    bytes: usize,
+    compact_bytes: usize,
+    screen_bytes: usize,
+    effect_bytes: usize,
+    /// The former per-cell projection, retained only as a comparison with the
+    /// transitional protocol. It is not the current event contract.
+    cell_projection_bytes: usize,
     /// Rows the host said changed in this frame, and what only those rows cost
     /// to encode. The frame carries the whole viewport either way; this is the
     /// size the same frame would have if it carried what it says changed.
     damaged_rows: usize,
     damaged_bytes: usize,
-    /// The same frame with adjacent cells of one style carried once, which is
-    /// what the client rebuilds anyway before it paints. Measured, not
-    /// proposed: it says what the cell-per-cell wire form costs.
-    run_bytes: usize,
-}
-
-/// A run of adjacent cells that share everything but their text. The fields are
-/// the ones `terminalCellPaint.ts` breaks a run on, so this is that decision
-/// moved to the wire rather than a new one.
-#[derive(serde::Serialize)]
-struct MeasuredRun<'cell> {
-    text: String,
-    columns: usize,
-    width: ProjectedWidth,
-    bold: bool,
-    foreground: &'cell Option<ProjectedColor>,
-    background: &'cell Option<ProjectedColor>,
-    selected: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hyperlink: &'cell Option<String>,
-}
-
-fn joins(run: &MeasuredRun<'_>, cell: &ProjectedCell) -> bool {
-    run.width == cell.width
-        && run.bold == cell.bold
-        && *run.foreground == cell.foreground
-        && *run.background == cell.background
-        && run.selected == cell.selected
-        && *run.hyperlink == cell.hyperlink
-}
-
-/// One row's cells as runs.
-fn runs(row: &ProjectedRow) -> Vec<MeasuredRun<'_>> {
-    let mut built: Vec<MeasuredRun<'_>> = Vec::new();
-    for cell in &row.cells {
-        match built.last_mut() {
-            Some(open) if joins(open, cell) => {
-                open.text.push_str(&cell.text);
-                open.columns += 1;
-            }
-            _ => built.push(MeasuredRun {
-                text: cell.text.clone(),
-                columns: 1,
-                width: cell.width,
-                bold: cell.bold,
-                foreground: &cell.foreground,
-                background: &cell.background,
-                selected: cell.selected,
-                hyperlink: &cell.hyperlink,
-            }),
-        }
-    }
-    built
 }
 
 fn mean(values: &[Duration]) -> Duration {
@@ -137,20 +91,16 @@ fn frames(columns: u16, rows: u16, output: &[u8]) -> Vec<Frame> {
     .expect("the sampled geometry is valid");
 
     let mut measured = Vec::new();
-    for chunk in output.chunks(CHUNK) {
+    for (index, chunk) in output.chunks(CHUNK).enumerate() {
         let started = Instant::now();
-        let _ = engine.feed(chunk);
+        let feed_result = engine.feed(chunk);
         let feed = started.elapsed();
 
         let started = Instant::now();
         let state = engine.project().expect("the host projects its own state");
         let project = started.elapsed();
 
-        let started = Instant::now();
-        let encoded = serde_json::to_vec(&state).expect("a projection encodes");
-        let encode = started.elapsed();
-
-        let changed: Vec<&ProjectedRow> = match state.damage.scope {
+        let changed: Vec<_> = match state.damage.scope {
             ProjectedDamageScope::Clean => Vec::new(),
             ProjectedDamageScope::Full => state.viewport.iter().collect(),
             ProjectedDamageScope::Partial => state
@@ -163,17 +113,44 @@ fn frames(columns: u16, rows: u16, output: &[u8]) -> Vec<Frame> {
         let damaged_bytes = serde_json::to_vec(&changed)
             .expect("the changed rows encode")
             .len();
-        let as_runs: Vec<Vec<MeasuredRun<'_>>> = state.viewport.iter().map(runs).collect();
-        let run_bytes = serde_json::to_vec(&as_runs).expect("the runs encode").len();
+        let damaged_rows = changed.len();
+        drop(changed);
+        let cell_projection_bytes = serde_json::to_vec(&state)
+            .expect("the former cell projection encodes")
+            .len();
+
+        let sequence = u64::try_from(index + 1).expect("the workload fits in u64");
+        let started = Instant::now();
+        let screen = TerminalEvent::Screen {
+            sequence,
+            revision: TerminalRevision(sequence),
+            state: Arc::new(TerminalScreenSnapshot::from_projection(state)),
+        };
+        let screen_bytes = serde_json::to_vec(&screen)
+            .expect("the compact screen event encodes")
+            .len();
+        let effect_bytes = if feed_result.effects.is_empty() {
+            0
+        } else {
+            serde_json::to_vec(&TerminalEvent::Effects {
+                sequence,
+                effects: feed_result.effects,
+            })
+            .expect("the occurrence event encodes")
+            .len()
+        };
+        let encode = started.elapsed();
 
         measured.push(Frame {
             feed,
             project,
             encode,
-            bytes: encoded.len(),
-            damaged_rows: changed.len(),
+            compact_bytes: screen_bytes + effect_bytes,
+            screen_bytes,
+            effect_bytes,
+            cell_projection_bytes,
+            damaged_rows,
             damaged_bytes,
-            run_bytes,
         });
     }
     measured
@@ -184,10 +161,15 @@ fn report(label: &str, columns: u16, rows: u16, output: &[u8]) {
     let feeds: Vec<Duration> = measured.iter().map(|frame| frame.feed).collect();
     let projects: Vec<Duration> = measured.iter().map(|frame| frame.project).collect();
     let encodes: Vec<Duration> = measured.iter().map(|frame| frame.encode).collect();
-    let bytes: usize = measured.iter().map(|frame| frame.bytes).sum();
+    let compact_bytes: usize = measured.iter().map(|frame| frame.compact_bytes).sum();
+    let screen_bytes: usize = measured.iter().map(|frame| frame.screen_bytes).sum();
+    let effect_bytes: usize = measured.iter().map(|frame| frame.effect_bytes).sum();
+    let cell_projection_bytes: usize = measured
+        .iter()
+        .map(|frame| frame.cell_projection_bytes)
+        .sum();
     let changed_bytes: usize = measured.iter().map(|frame| frame.damaged_bytes).sum();
     let changed_rows: usize = measured.iter().map(|frame| frame.damaged_rows).sum();
-    let run_bytes: usize = measured.iter().map(|frame| frame.run_bytes).sum();
     let per_frame = mean(&projects) + mean(&encodes);
     let count = measured.len().max(1);
 
@@ -195,20 +177,23 @@ fn report(label: &str, columns: u16, rows: u16, output: &[u8]) {
         "{label:<20} {columns:>3}x{rows:<3} frames {frames:>4}  \
          feed {feed:>9.3?}  project {project:>9.3?}  encode {encode:>9.3?}  \
          slowest project {worst:>9.3?}  cost/frame {cost:>9.3?}  \
-         json/frame {json:>7} B ({per_cell:>3} B/cell)  \
+         compact event/frame {compact:>7} B ({per_cell:>3} B/cell)  \
+         screen {screen:>7} B effects {effects:>5} B  \
          changed rows/frame {rows_changed:>5.1}  those rows {changed:>7} B  \
-         as runs {as_runs:>7} B  total {total:>9} B",
+         former cell projection {cells:>7} B  total {total:>9} B",
         frames = measured.len(),
         feed = mean(&feeds),
         project = mean(&projects),
         encode = mean(&encodes),
         worst = slowest(&projects),
-        json = bytes / count,
-        per_cell = bytes / count / usize::from(columns) / usize::from(rows),
+        compact = compact_bytes / count,
+        screen = screen_bytes / count,
+        effects = effect_bytes / count,
+        per_cell = compact_bytes / count / usize::from(columns) / usize::from(rows),
         rows_changed = changed_rows as f64 / count as f64,
         changed = changed_bytes / count,
-        as_runs = run_bytes / count,
-        total = bytes,
+        cells = cell_projection_bytes / count,
+        total = compact_bytes,
         cost = per_frame,
     );
 }

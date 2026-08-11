@@ -19,6 +19,7 @@ function settings(scrollbackBytes: number): TerminalSettings {
     fontFamily: "MesloLGS NF",
     fontSize: 14,
     urlAllowlist: ["http", "https"],
+    confirmUnsafePaste: false,
   };
 }
 

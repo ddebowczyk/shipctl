@@ -15,8 +15,6 @@
 
 use std::sync::Arc;
 
-use super::effects::TerminalEffect;
-use super::projection::TerminalProjection;
 use super::types::{
     TerminalAttachmentId, TerminalDescriptor, TerminalError, TerminalErrorCode, TerminalEvent,
     TerminalReplay, TerminalRevision, TerminalTransport,
@@ -50,32 +48,13 @@ impl EventAudience {
 pub(crate) fn event_audience(event: &TerminalEvent) -> EventAudience {
     match event {
         TerminalEvent::Output { .. } | TerminalEvent::Replay { .. } => EventAudience::Legacy,
-        TerminalEvent::Screen { .. } => EventAudience::Semantic,
+        TerminalEvent::Screen { .. } | TerminalEvent::Effects { .. } => EventAudience::Semantic,
         TerminalEvent::MetadataChanged { .. }
         | TerminalEvent::AgentActivityChanged { .. }
         | TerminalEvent::Exited { .. }
         | TerminalEvent::ResyncRequired { .. }
         | TerminalEvent::Detached { .. } => EventAudience::Both,
     }
-}
-
-/// The semantic encoding of one occurrence.
-///
-/// It carries the same sequence as the byte encoding of the same occurrence,
-/// because it is the same occurrence. An attachment receives one or the other,
-/// never both.
-pub(crate) fn plan_semantic_state(
-    state: TerminalProjection,
-    effects: Vec<TerminalEffect>,
-    sequence: u64,
-    revision: TerminalRevision,
-) -> Vec<RuntimeEffect> {
-    vec![RuntimeEffect::Publish(TerminalEvent::Screen {
-        sequence,
-        revision,
-        state: Box::new(state),
-        effects,
-    })]
 }
 
 /// One ordered effect of a runtime operation. The actor applies these in order;
@@ -492,7 +471,7 @@ mod tests {
                 TerminalEventKind::Output | TerminalEventKind::Replay => {
                     assert!(legacy && !semantic, "{kind:?} is the byte path only")
                 }
-                TerminalEventKind::Screen => {
+                TerminalEventKind::Screen | TerminalEventKind::Effects => {
                     assert!(semantic && !legacy, "{kind:?} is the semantic path only")
                 }
                 _ => assert!(legacy && semantic, "{kind:?} is lifecycle, so both hear it"),

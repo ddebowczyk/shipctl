@@ -2,16 +2,18 @@ use std::process::Command;
 use std::sync::Arc;
 
 use shipctl_module_api::TerminalColorTheme;
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, Response};
 use tauri::State;
 
-use crate::terminal::input::TerminalInput;
+use crate::terminal::input::{paste_is_safe, TerminalInput};
 use crate::terminal::projection::{
     ProjectedPoint, ProjectedSpace, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
     TerminalSelectionRequest, TerminalSelectionState,
 };
 use crate::terminal::retention::TerminalRetentionPolicy;
-use crate::terminal::runtime::TerminalEventSink;
+use crate::terminal::runtime::{
+    PublishedTerminalEvent, TerminalEventSink, TerminalPublicationStats,
+};
 use crate::terminal::service::{TerminalRegistryEventSink, TerminalService};
 use crate::terminal::types::{
     TerminalAttachment, TerminalAttachmentId, TerminalCloseResult, TerminalDescriptor,
@@ -21,6 +23,38 @@ use crate::terminal::types::{
 };
 use crate::workspace::config::{normalize_terminal_settings, TerminalSettings};
 use crate::workspace::manager::WorkspaceManager;
+
+struct TauriTerminalEventSink {
+    on_event: Channel<Response>,
+}
+
+impl TerminalEventSink for TauriTerminalEventSink {
+    fn publish(
+        &self,
+        _terminal_id: crate::terminal::types::TerminalId,
+        event: TerminalEvent,
+    ) -> Result<(), String> {
+        let json = serde_json::to_string(&event)
+            .map_err(|error| format!("Terminal event encoding failed: {error}"))?;
+        self.on_event
+            .send(Response::new(json))
+            .map_err(|error| format!("Terminal attachment channel closed: {error}"))
+    }
+
+    fn commits_screen_on_publish(&self) -> bool {
+        false
+    }
+
+    fn publish_preencoded(
+        &self,
+        _terminal_id: crate::terminal::types::TerminalId,
+        event: PublishedTerminalEvent,
+    ) -> Result<(), String> {
+        self.on_event
+            .send(Response::new(event.json().to_owned()))
+            .map_err(|error| format!("Terminal attachment channel closed: {error}"))
+    }
+}
 
 /// Final explicit spawn surface. It returns durable host state and does not
 /// require a renderer channel; callers attach independently.
@@ -54,6 +88,17 @@ pub fn get_terminal_snapshot(
 ) -> Result<TerminalRuntimeSnapshot, String> {
     terminals
         .snapshot(terminal_id)
+        .map_err(|error| error.to_string())
+}
+
+/// Read publication observations without changing the terminal or its demand.
+#[tauri::command]
+pub fn get_terminal_publication_stats(
+    terminal_id: TerminalId,
+    terminals: State<'_, TerminalService>,
+) -> Result<TerminalPublicationStats, String> {
+    terminals
+        .publication_stats(terminal_id)
         .map_err(|error| error.to_string())
 }
 
@@ -201,14 +246,10 @@ pub fn attach_terminal(
     terminal_id: TerminalId,
     claims_resize: bool,
     transport: TerminalTransport,
-    on_event: Channel<TerminalEvent>,
+    on_event: Channel<Response>,
     terminals: State<'_, TerminalService>,
 ) -> Result<TerminalAttachment, String> {
-    let sink: Arc<dyn TerminalEventSink> = Arc::new(move |_id, event| {
-        on_event
-            .send(event)
-            .map_err(|error| format!("Terminal attachment channel closed: {error}"))
-    });
+    let sink: Arc<dyn TerminalEventSink> = Arc::new(TauriTerminalEventSink { on_event });
     terminals
         .attach_with(terminal_id, sink, claims_resize, transport)
         .map_err(|error| error.to_string())
@@ -222,6 +263,17 @@ pub fn detach_terminal(
     terminals
         .detach(attachment_id)
         .map_err(|error| error.to_string())
+}
+
+/// Grant one more replaceable semantic screen after the renderer committed
+/// the named frame. Lifecycle and effect events do not consume this credit.
+#[tauri::command]
+pub fn credit_terminal_screen(
+    attachment_id: TerminalAttachmentId,
+    committed_sequence: u64,
+    terminals: State<'_, TerminalService>,
+) -> Result<(), TerminalError> {
+    terminals.credit_screen(attachment_id, committed_sequence)
 }
 
 /// Subscribe before listing to close the create/exit race during renderer
@@ -314,6 +366,12 @@ pub fn save_terminal_settings(
         settings,
         retention_revision: committed.revision,
     })
+}
+
+/// Classify paste text with the host's terminal-input policy.
+#[tauri::command]
+pub fn is_terminal_paste_safe(text: &str) -> bool {
+    paste_is_safe(text)
 }
 
 #[derive(serde::Serialize)]

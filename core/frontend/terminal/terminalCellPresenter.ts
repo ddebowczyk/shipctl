@@ -83,6 +83,10 @@ export interface TerminalCellPresenterPorts {
   defer(task: () => void, delayMs: number): () => void;
   /** Called after each painted frame, for a caller that tracks what is shown. */
   onFrame?(plan: TerminalPaintPlan): void;
+  /** Record planning and drawing for one complete frame. */
+  observePaint?(milliseconds: number): void;
+  /** Recover a paint-target failure without treating it as terminal state. */
+  onFailure?(error: unknown): void;
 }
 
 /**
@@ -167,7 +171,7 @@ export class TerminalCellPresenter {
     this.#cancelFrame?.();
     this.#cancelFrame = null;
     this.#pending = false;
-    this.#paint();
+    this.#attemptPaint();
   }
 
   /** Stop presenting. The model, and the terminal, are untouched. */
@@ -236,11 +240,21 @@ export class TerminalCellPresenter {
     this.#cancelFrame = this.#ports.schedule(() => {
       this.#cancelFrame = null;
       this.#pending = false;
-      this.#paint();
+      this.#attemptPaint();
     });
   }
 
+  #attemptPaint(): void {
+    try {
+      this.#paint();
+    } catch (error: unknown) {
+      if (!this.#ports.onFailure) throw error;
+      this.#ports.onFailure(error);
+    }
+  }
+
   #paint(): void {
+    const startedAt = performance.now();
     const model = this.#ports.model;
     const state = model.state;
     // Nothing to show yet, or nothing owed. Either way, no frame: an empty
@@ -280,6 +294,7 @@ export class TerminalCellPresenter {
     });
 
     paintTerminalFrame(this.#ports.target, plan, this.#ports.palette());
+    this.#ports.observePaint?.(performance.now() - startedAt);
 
     // Cleared only once the frame is drawn: a target that throws leaves the
     // damage owed rather than silently dropping it.

@@ -12,7 +12,6 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use shipctl_module_api::TerminalColorTheme;
 
 use super::contract::MAX_EXACT_JSON_INTEGER;
-use super::effects::TerminalEffect;
 use super::input::TerminalInput;
 use super::process::{ProcessTerminator, TERMINATION_GRACE_PERIOD};
 use super::projection::{
@@ -20,9 +19,8 @@ use super::projection::{
     TerminalProjection, TerminalSelectionRequest, TerminalSelectionState,
 };
 use super::publication::{
-    event_audience, plan_child_output, plan_child_reply, plan_replay_transition,
-    plan_semantic_state, resize_admission, subscriber_disposition, DeliveryOutcome, RuntimeEffect,
-    RuntimeLiveness, SubscriberDisposition,
+    event_audience, plan_child_output, plan_child_reply, plan_replay_transition, resize_admission,
+    subscriber_disposition, DeliveryOutcome, RuntimeEffect, RuntimeLiveness, SubscriberDisposition,
 };
 use super::record::TerminalRecord;
 use super::replay::{validate_dimensions, VtReplayEngine};
@@ -33,6 +31,7 @@ use super::types::{
     TerminalLaunchRequest, TerminalLaunchTarget, TerminalMetadata, TerminalReplay,
     TerminalRevision, TerminalRuntimeSnapshot, TerminalTransport,
 };
+use super::wire::TerminalScreenSnapshot;
 
 type TerminalDescriptorSink = Arc<dyn Fn(super::types::TerminalDescriptor) + Send + Sync>;
 
@@ -52,6 +51,72 @@ const PTY_OUTPUT_QUEUE_CAPACITY: usize = 1;
 
 pub trait TerminalEventSink: Send + Sync + 'static {
     fn publish(&self, terminal_id: TerminalId, event: TerminalEvent) -> Result<(), String>;
+
+    /// Publish an event whose JSON was encoded once before attachment fan-out.
+    /// Typed sinks keep their existing contract. Tauri sends the cached JSON
+    /// directly, so a second webview does not serialize the screen again.
+    fn publish_preencoded(
+        &self,
+        terminal_id: TerminalId,
+        event: PublishedTerminalEvent,
+    ) -> Result<(), String> {
+        self.publish(terminal_id, event.event().clone())
+    }
+
+    /// A successful synchronous publish is a client commit. The Tauri webview
+    /// overrides this because channel admission is earlier than model commit.
+    fn commits_screen_on_publish(&self) -> bool {
+        true
+    }
+}
+
+/// One typed event and its canonical JSON encoding, shared by all attachments.
+#[derive(Clone)]
+pub struct PublishedTerminalEvent {
+    event: TerminalEvent,
+    json: Arc<str>,
+}
+
+/// Cumulative publication evidence from one terminal runtime.
+///
+/// These are observations, not limits or gates. A scenario reads two samples
+/// and reports their difference for the workload between them.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalPublicationStats {
+    pub pty_reads: u64,
+    pub screen_changes: u64,
+    pub screen_projections: u64,
+    pub screen_encodes: u64,
+    pub screen_encoded_bytes: u64,
+    pub screen_recipient_deliveries: u64,
+    pub effect_events: u64,
+    pub effect_encoded_bytes: u64,
+    pub current_screen_transactions: u64,
+    pub current_screen_bytes_queued: u64,
+    pub peak_screen_bytes_queued: u64,
+    pub current_effect_events_queued: u64,
+    pub current_effect_bytes_queued: u64,
+    pub peak_effect_events_queued: u64,
+    pub peak_effect_bytes_queued: u64,
+}
+
+impl PublishedTerminalEvent {
+    fn encode(event: TerminalEvent) -> Result<Self, serde_json::Error> {
+        let json = serde_json::to_string(&event)?;
+        Ok(Self {
+            event,
+            json: Arc::from(json),
+        })
+    }
+
+    pub fn event(&self) -> &TerminalEvent {
+        &self.event
+    }
+
+    pub fn json(&self) -> &str {
+        &self.json
+    }
 }
 
 impl<F> TerminalEventSink for F
@@ -151,6 +216,10 @@ impl TerminalRuntimeHandle {
         self.request(|reply| RuntimeCommand::Snapshot { reply })
     }
 
+    pub fn publication_stats(&self) -> Result<TerminalPublicationStats, TerminalError> {
+        self.request(|reply| RuntimeCommand::PublicationStats { reply })
+    }
+
     /// The host's semantic state, read through the actor so it is consistent
     /// with every other ordered operation.
     pub fn project(&self) -> Result<TerminalProjection, TerminalError> {
@@ -237,6 +306,19 @@ impl TerminalRuntimeHandle {
         })
     }
 
+    /// Commit the last semantic screen and grant credit for one newer screen.
+    pub fn credit_screen(
+        &self,
+        attachment_id: TerminalAttachmentId,
+        committed_sequence: u64,
+    ) -> Result<(), TerminalError> {
+        self.request(|reply| RuntimeCommand::CreditScreen {
+            attachment_id,
+            committed_sequence,
+            reply,
+        })
+    }
+
     pub fn wait_for_exit(&self) -> Result<TerminalExit, TerminalError> {
         self.request(|reply| RuntimeCommand::WaitForExit { reply })
     }
@@ -309,6 +391,9 @@ enum RuntimeCommand {
     Snapshot {
         reply: Sender<Result<TerminalRuntimeSnapshot, TerminalError>>,
     },
+    PublicationStats {
+        reply: Sender<Result<TerminalPublicationStats, TerminalError>>,
+    },
     Project {
         reply: Sender<Result<TerminalProjection, TerminalError>>,
     },
@@ -350,6 +435,11 @@ enum RuntimeCommand {
         attachment_id: TerminalAttachmentId,
         reply: Sender<Result<(), TerminalError>>,
     },
+    CreditScreen {
+        attachment_id: TerminalAttachmentId,
+        committed_sequence: u64,
+        reply: Sender<Result<(), TerminalError>>,
+    },
     WaitForExit {
         reply: Sender<Result<TerminalExit, TerminalError>>,
     },
@@ -384,12 +474,38 @@ struct ClosingState {
 }
 
 struct Subscriber {
-    events: Sender<TerminalEvent>,
-    control: Sender<TerminalEvent>,
+    events: Sender<PublishedTerminalEvent>,
+    control: Sender<PublishedTerminalEvent>,
     /// Which encoding this attachment asked for. The actor produces the other
     /// encoding only while somebody is listening for it.
     transport: TerminalTransport,
+    /// The baseline or frame the client must commit before it can receive one more.
+    screen_in_flight: Option<u64>,
+    screen_bytes_queued: u64,
+    screen_credit: bool,
+    last_screen_sequence: u64,
+    effect_events_queued: u64,
+    effect_bytes_queued: u64,
     on_detached: Arc<dyn Fn(TerminalAttachmentId) + Send + Sync>,
+}
+
+struct SubscriberCommit {
+    attachment_id: TerminalAttachmentId,
+    screen_sequence: Option<u64>,
+    effect_bytes: u64,
+}
+
+#[derive(Clone)]
+struct CachedScreen {
+    sequence: u64,
+    /// The projected state before any damage widening, so an attachment that
+    /// arrives later can be served the same screen without a second projection.
+    state: Arc<TerminalScreenSnapshot>,
+    event: PublishedTerminalEvent,
+    /// The state this event's damage is measured from. A reader holding that
+    /// state or a later one can use the difference; an older reader cannot.
+    /// An event that names every row is measured from nothing, so it is zero.
+    damage_from: u64,
 }
 
 enum SubscriberStatus {
@@ -443,9 +559,22 @@ struct RuntimeActor {
     subscribers: HashMap<TerminalAttachmentId, Subscriber>,
     subscriber_status_sender: Sender<SubscriberStatus>,
     subscriber_status_receiver: Receiver<SubscriberStatus>,
+    subscriber_commit_sender: Sender<SubscriberCommit>,
+    subscriber_commit_receiver: Receiver<SubscriberCommit>,
     resize_authority: Option<TerminalAttachmentId>,
     child_pid: Option<u32>,
     sequence: u64,
+    /// The latest sequence that changed semantic screen state.
+    screen_sequence: u64,
+    screen_revision: TerminalRevision,
+    /// The screen sequence the host's dirty flags were last cleared at.
+    ///
+    /// Reading damage consumes it, so the next read reports what changed after
+    /// this state and nothing before it. An attachment that holds an older
+    /// state is owed more than that difference names.
+    projected_screen_sequence: u64,
+    screen_cache: Option<CachedScreen>,
+    publication_stats: TerminalPublicationStats,
     closing: Option<ClosingState>,
     exit_waiters: Vec<Sender<Result<TerminalExit, TerminalError>>>,
     exited: bool,
@@ -503,6 +632,8 @@ impl RuntimeActor {
         child: ChildAttachment,
     ) -> Self {
         let (subscriber_status_sender, subscriber_status_receiver) = unbounded();
+        let (subscriber_commit_sender, subscriber_commit_receiver) = unbounded();
+        let screen_revision = record.descriptor().revision;
         Self {
             record,
             command_receiver,
@@ -514,9 +645,16 @@ impl RuntimeActor {
             subscribers: HashMap::new(),
             subscriber_status_sender,
             subscriber_status_receiver,
+            subscriber_commit_sender,
+            subscriber_commit_receiver,
             resize_authority: None,
             child_pid: child.child_pid,
             sequence: 0,
+            screen_sequence: 0,
+            projected_screen_sequence: 0,
+            screen_revision,
+            screen_cache: None,
+            publication_stats: TerminalPublicationStats::default(),
             closing: None,
             exit_waiters: Vec::new(),
             exited: false,
@@ -567,6 +705,13 @@ impl RuntimeActor {
                 }
                 Err(TryRecvError::Disconnected) | Err(TryRecvError::Empty) => {}
             }
+            match self.subscriber_commit_receiver.try_recv() {
+                Ok(commit) => {
+                    progressed = true;
+                    self.handle_subscriber_commit(commit);
+                }
+                Err(TryRecvError::Disconnected) | Err(TryRecvError::Empty) => {}
+            }
             self.escalate_if_due();
             if progressed {
                 continue;
@@ -585,6 +730,9 @@ impl RuntimeActor {
                     recv(self.subscriber_status_receiver) -> status => if let Ok(status) = status {
                         self.handle_subscriber_status(status);
                     },
+                    recv(self.subscriber_commit_receiver) -> commit => if let Ok(commit) = commit {
+                        self.handle_subscriber_commit(commit);
+                    },
                     recv(crossbeam_channel::after(remaining)) -> _ => self.escalate_if_due(),
                 }
             } else {
@@ -598,6 +746,9 @@ impl RuntimeActor {
                     },
                     recv(self.subscriber_status_receiver) -> status => if let Ok(status) = status {
                         self.handle_subscriber_status(status);
+                    },
+                    recv(self.subscriber_commit_receiver) -> commit => if let Ok(commit) = commit {
+                        self.handle_subscriber_commit(commit);
                     },
                 }
             }
@@ -647,11 +798,20 @@ impl RuntimeActor {
                 let result = self.snapshot();
                 let _ = reply.send(result);
             }
+            RuntimeCommand::PublicationStats { reply } => {
+                let _ = reply.send(Ok(self.publication_stats()));
+            }
             RuntimeCommand::Project { reply } => {
                 // Reading the host's state publishes nothing and advances no
                 // sequence. An exited terminal still answers: its final state is
                 // exactly what a caller asks about.
                 let result = self.vt.project().map_err(io_error);
+                if result.is_ok() {
+                    // This read did take the damage, though. Say so, or an
+                    // attached client would later be told only what changed
+                    // after an inspection it never saw.
+                    self.projected_screen_sequence = self.screen_sequence;
+                }
                 let _ = reply.send(result);
             }
             RuntimeCommand::History {
@@ -677,6 +837,11 @@ impl RuntimeActor {
             }
             RuntimeCommand::Select { request, reply } => {
                 let result = self.vt.apply_selection(request).map_err(io_error);
+                if result.is_ok() {
+                    let sequence = self.next_sequence();
+                    let revision = self.record.note_replay_change().revision;
+                    self.note_screen_change(sequence, revision);
+                }
                 let _ = reply.send(result);
             }
             RuntimeCommand::Input { input, reply } => {
@@ -723,6 +888,14 @@ impl RuntimeActor {
             } => {
                 self.detach_subscriber(attachment_id, "detached by client");
                 let _ = reply.send(Ok(()));
+            }
+            RuntimeCommand::CreditScreen {
+                attachment_id,
+                committed_sequence,
+                reply,
+            } => {
+                let result = self.credit_screen(attachment_id, committed_sequence);
+                let _ = reply.send(result);
             }
             RuntimeCommand::WaitForExit { reply } => {
                 if let Some(exit) = self.record.exit() {
@@ -846,8 +1019,7 @@ impl RuntimeActor {
         let revision = descriptor.revision;
         self.apply(plan_replay_transition(descriptor, replay, sequence))
             .map_err(io_error)?;
-        // A resize on the semantic path is state, not a replay to re-parse.
-        self.publish_semantic_state(sequence, revision, Vec::new());
+        self.note_screen_change(sequence, revision);
         Ok(())
     }
 
@@ -885,7 +1057,7 @@ impl RuntimeActor {
                 bytes: Arc::from(&[][..]),
             },
             descriptor,
-            state: Some(Box::new(state)),
+            state: Some(Arc::new(TerminalScreenSnapshot::from_projection(state))),
         })
     }
 
@@ -919,9 +1091,7 @@ impl RuntimeActor {
         let sequence = self.next_sequence();
         let revision = descriptor.revision;
         let applied = self.apply(plan_replay_transition(descriptor, replay, sequence));
-        // A theme change on the semantic path is state too: the colours the
-        // client paints with are a fact it reads, not ANSI it replays.
-        self.publish_semantic_state(sequence, revision, Vec::new());
+        self.note_screen_change(sequence, revision);
         applied
     }
 
@@ -949,8 +1119,10 @@ impl RuntimeActor {
             attachment_id,
             sink,
             self.subscriber_status_sender.clone(),
+            self.subscriber_commit_sender.clone(),
             transport,
             on_detached,
+            snapshot.sequence_boundary,
         )?;
         self.subscribers.insert(attachment_id, subscriber);
         if claims_resize {
@@ -963,57 +1135,209 @@ impl RuntimeActor {
         })
     }
 
-    /// Whether anybody is listening on the semantic path.
-    ///
-    /// Projecting the host's state costs real work, so it is done when it has a
-    /// reader and not otherwise.
-    fn has_semantic_attachment(&self) -> bool {
-        self.subscribers
-            .values()
-            .any(|subscriber| subscriber.transport == TerminalTransport::Semantic)
+    fn credit_screen(
+        &mut self,
+        attachment_id: TerminalAttachmentId,
+        committed_sequence: u64,
+    ) -> Result<(), TerminalError> {
+        let subscriber = self.subscribers.get_mut(&attachment_id).ok_or_else(|| {
+            TerminalError::new(
+                TerminalErrorCode::NotFound,
+                "Terminal attachment is not live",
+            )
+        })?;
+        if subscriber.transport != TerminalTransport::Semantic {
+            return Err(TerminalError::new(
+                TerminalErrorCode::InvalidRequest,
+                "Screen credit is valid only for a semantic attachment",
+            ));
+        }
+        if subscriber.screen_in_flight != Some(committed_sequence) {
+            return Err(TerminalError::new(
+                TerminalErrorCode::InvalidRequest,
+                "Screen credit did not commit the attachment's in-flight screen",
+            ));
+        }
+        subscriber.screen_in_flight = None;
+        subscriber.screen_bytes_queued = 0;
+        subscriber.screen_credit = true;
+        self.publish_available_screens();
+        Ok(())
     }
 
-    /// Publish the semantic encoding of the occurrence that just happened.
+    /// Record a new replaceable state and satisfy every waiting reader once.
+    fn note_screen_change(&mut self, sequence: u64, revision: TerminalRevision) {
+        self.publication_stats.screen_changes += 1;
+        self.screen_sequence = sequence;
+        self.screen_revision = revision;
+        self.screen_cache = None;
+        self.publish_available_screens();
+    }
+
+    /// Project only when at least one semantic attachment has credit.
     ///
-    /// A projection failure is logged and dropped rather than raised: the
-    /// occurrence has already happened, and the legacy audience has already
-    /// been told. The semantic audience learns the state at the next
-    /// occurrence, or by asking.
-    fn publish_semantic_state(
+    /// All attachments that can take this state share the same immutable
+    /// snapshot. An attachment loses its credit before the event enters its
+    /// worker, so it cannot queue a second complete screen.
+    /// Encode one screen for delivery and keep it for the attachments that need
+    /// the same state.
+    ///
+    /// The cache keeps the projected state, not only the bytes, so a later
+    /// reader that is owed a full repaint can be served without a second
+    /// projection — a second projection would report a difference nobody asked
+    /// for and take it away from everyone else.
+    fn cache_screen(
         &mut self,
-        sequence: u64,
-        revision: TerminalRevision,
-        effects: Vec<TerminalEffect>,
-    ) {
-        if !self.has_semantic_attachment() {
+        state: Arc<TerminalScreenSnapshot>,
+        damage_from: u64,
+        repaint_all: bool,
+    ) -> Option<CachedScreen> {
+        let published = if repaint_all {
+            Arc::new(state.repainted())
+        } else {
+            Arc::clone(&state)
+        };
+        let event = match PublishedTerminalEvent::encode(TerminalEvent::Screen {
+            sequence: self.screen_sequence,
+            revision: self.screen_revision,
+            state: published,
+        }) {
+            Ok(event) => event,
+            Err(error) => {
+                log::error!(
+                    target: LOG_TARGET,
+                    "terminal {} could not encode screen at sequence {}: {error}",
+                    self.record.id(),
+                    self.screen_sequence
+                );
+                return None;
+            }
+        };
+        self.publication_stats.screen_encodes += 1;
+        self.publication_stats.screen_encoded_bytes += event.json().len() as u64;
+        let cached = CachedScreen {
+            sequence: self.screen_sequence,
+            state,
+            event,
+            damage_from: if repaint_all { 0 } else { damage_from },
+        };
+        self.screen_cache = Some(cached.clone());
+        Some(cached)
+    }
+
+    fn publish_available_screens(&mut self) {
+        let recipients = self
+            .subscribers
+            .iter()
+            .filter_map(|(id, subscriber)| {
+                (subscriber.transport == TerminalTransport::Semantic
+                    && subscriber.screen_credit
+                    && subscriber.last_screen_sequence < self.screen_sequence)
+                    .then_some(*id)
+            })
+            .collect::<Vec<_>>();
+        if recipients.is_empty() {
             return;
         }
-        match self.vt.project() {
-            Ok(state) => {
-                let _ = self.apply(plan_semantic_state(state, effects, sequence, revision));
+
+        // Damage is a difference, measured from the state the host's dirty flags
+        // were last cleared at. A reader holding an older state changed rows the
+        // difference does not name, so it is owed the whole screen. One encoding
+        // still serves everybody in that round: naming every row is correct for
+        // a reader that is current, only larger to paint.
+        let current = self
+            .screen_cache
+            .as_ref()
+            .filter(|cached| cached.sequence == self.screen_sequence);
+        let damage_from =
+            current.map_or(self.projected_screen_sequence, |cached| cached.damage_from);
+        let repaint_all = recipients.iter().any(|attachment_id| {
+            self.subscribers
+                .get(attachment_id)
+                .is_some_and(|subscriber| damage_from > subscriber.last_screen_sequence)
+        });
+
+        let event = match self.screen_cache.clone() {
+            Some(cached) if cached.sequence == self.screen_sequence && !repaint_all => cached,
+            // The cached state is current; only the damage it carries is too
+            // narrow for the attachment that just asked. Encode it again rather
+            // than project again: this state's damage is already spent.
+            Some(cached) if cached.sequence == self.screen_sequence => {
+                match self.cache_screen(cached.state, damage_from, true) {
+                    Some(cached) => cached,
+                    None => return,
+                }
             }
-            Err(error) => log::warn!(
-                target: LOG_TARGET,
-                "terminal {} could not project its state at sequence {sequence}: {error}",
-                self.record.id()
-            ),
+            _ => match self.vt.project() {
+                Ok(projection) => {
+                    self.publication_stats.screen_projections += 1;
+                    self.projected_screen_sequence = self.screen_sequence;
+                    let state = Arc::new(TerminalScreenSnapshot::from_projection(projection));
+                    match self.cache_screen(state, damage_from, repaint_all) {
+                        Some(cached) => cached,
+                        None => return,
+                    }
+                }
+                Err(error) => {
+                    log::warn!(
+                        target: LOG_TARGET,
+                        "terminal {} could not project credited state at sequence {}: {error}",
+                        self.record.id(),
+                        self.screen_sequence
+                    );
+                    return;
+                }
+            },
+        };
+        let screen_sequence = event.sequence;
+        let event = event.event;
+
+        let mut disconnected = Vec::new();
+        for attachment_id in recipients {
+            let Some(subscriber) = self.subscribers.get_mut(&attachment_id) else {
+                continue;
+            };
+            // Semantic workers are unbounded for reliable occurrences. A full
+            // screen cannot accumulate here because credit is consumed now.
+            match subscriber.events.try_send(event.clone()) {
+                Ok(()) => {
+                    self.publication_stats.screen_recipient_deliveries += 1;
+                    subscriber.screen_credit = false;
+                    subscriber.screen_in_flight = Some(screen_sequence);
+                    subscriber.screen_bytes_queued = event.json().len() as u64;
+                    subscriber.last_screen_sequence = screen_sequence;
+                }
+                Err(TrySendError::Disconnected(_)) => disconnected.push(attachment_id),
+                Err(TrySendError::Full(_)) => {
+                    unreachable!("a semantic attachment uses an unbounded reliable event lane")
+                }
+            }
         }
+        for attachment_id in disconnected {
+            self.remove_subscriber(attachment_id);
+        }
+        self.observe_queue_peaks();
     }
 
     fn handle_output(&mut self, output: ReaderEvent) {
         match output {
             ReaderEvent::Data(data) => {
+                self.publication_stats.pty_reads += 1;
                 let feed = self.vt.feed(&data);
                 let sequence = self.next_sequence();
                 let revision = self.record.note_output();
                 // Output is published whether or not the child could be
                 // answered: the bytes arrived either way.
                 let _ = self.apply(plan_child_output(&data, feed.responses, sequence, revision));
-                // The same occurrence, told as meaning. It carries the same
-                // sequence because it is the same occurrence, and it reaches a
-                // different set of attachments. The effects the parse reported
-                // travel with it, in the order the parse reported them.
-                self.publish_semantic_state(sequence, revision, feed.effects);
+                // Occurrences are reliable and independent of replaceable
+                // screen state. A quiet parse creates no semantic event.
+                if !feed.effects.is_empty() {
+                    self.publish(TerminalEvent::Effects {
+                        sequence,
+                        effects: feed.effects,
+                    });
+                }
+                self.note_screen_change(sequence, revision);
             }
             ReaderEvent::Exited {
                 code,
@@ -1120,13 +1444,36 @@ impl RuntimeActor {
     fn publish(&mut self, event: TerminalEvent) {
         let sequence = event_sequence(&event);
         let audience = event_audience(&event);
+        let event = match PublishedTerminalEvent::encode(event) {
+            Ok(event) => event,
+            Err(error) => {
+                log::error!(
+                    target: LOG_TARGET,
+                    "terminal {} could not encode event at sequence {sequence}: {error}",
+                    self.record.id()
+                );
+                return;
+            }
+        };
+        let effect_bytes = matches!(event.event(), TerminalEvent::Effects { .. })
+            .then_some(event.json().len() as u64);
+        if let Some(bytes) = effect_bytes {
+            self.publication_stats.effect_events += 1;
+            self.publication_stats.effect_encoded_bytes += bytes;
+        }
         let mut lost = Vec::new();
-        for (attachment_id, subscriber) in &self.subscribers {
+        for (attachment_id, subscriber) in &mut self.subscribers {
             if !audience.includes(subscriber.transport) {
                 continue;
             }
             let outcome = match subscriber.events.try_send(event.clone()) {
-                Ok(()) => DeliveryOutcome::Delivered,
+                Ok(()) => {
+                    if let Some(bytes) = effect_bytes {
+                        subscriber.effect_events_queued += 1;
+                        subscriber.effect_bytes_queued += bytes;
+                    }
+                    DeliveryOutcome::Delivered
+                }
                 Err(TrySendError::Full(_)) => DeliveryOutcome::Full,
                 Err(TrySendError::Disconnected(_)) => DeliveryOutcome::Disconnected,
             };
@@ -1140,11 +1487,13 @@ impl RuntimeActor {
                         "terminal {} attachment {attachment_id:?} fell behind at sequence {sequence} and must resync",
                         self.record.id()
                     );
-                    let _ = subscriber.control.try_send(TerminalEvent::ResyncRequired {
+                    let control = PublishedTerminalEvent::encode(TerminalEvent::ResyncRequired {
                         sequence,
                         reason: "attachment mailbox exceeded the established 100000-byte flow-control budget"
                             .to_string(),
-                    });
+                    })
+                    .expect("terminal control events are JSON values");
+                    let _ = subscriber.control.try_send(control);
                     lost.push(*attachment_id);
                 }
                 SubscriberDisposition::Remove => {
@@ -1157,6 +1506,7 @@ impl RuntimeActor {
                 }
             }
         }
+        self.observe_queue_peaks();
         for attachment_id in lost {
             self.remove_subscriber(attachment_id);
         }
@@ -1168,10 +1518,12 @@ impl RuntimeActor {
                 self.resize_authority = None;
             }
             let sequence = self.next_sequence();
-            let _ = subscriber.control.try_send(TerminalEvent::Detached {
+            let event = PublishedTerminalEvent::encode(TerminalEvent::Detached {
                 sequence,
                 reason: reason.to_string(),
-            });
+            })
+            .expect("terminal control events are JSON values");
+            let _ = subscriber.control.try_send(event);
             (subscriber.on_detached)(attachment_id);
         }
     }
@@ -1198,6 +1550,61 @@ impl RuntimeActor {
                 self.remove_subscriber(attachment_id);
             }
         }
+    }
+
+    fn handle_subscriber_commit(&mut self, commit: SubscriberCommit) {
+        if let Some(subscriber) = self.subscribers.get_mut(&commit.attachment_id) {
+            if commit.effect_bytes > 0 {
+                subscriber.effect_events_queued = subscriber.effect_events_queued.saturating_sub(1);
+                subscriber.effect_bytes_queued = subscriber
+                    .effect_bytes_queued
+                    .saturating_sub(commit.effect_bytes);
+            }
+        }
+        if let Some(sequence) = commit.screen_sequence {
+            let _ = self.credit_screen(commit.attachment_id, sequence);
+        }
+    }
+
+    fn publication_stats(&self) -> TerminalPublicationStats {
+        let mut stats = self.publication_stats.clone();
+        stats.current_screen_transactions = self
+            .subscribers
+            .values()
+            .filter(|subscriber| subscriber.screen_in_flight.is_some())
+            .count() as u64;
+        stats.current_effect_events_queued = self
+            .subscribers
+            .values()
+            .map(|subscriber| subscriber.effect_events_queued)
+            .sum();
+        stats.current_screen_bytes_queued = self
+            .subscribers
+            .values()
+            .map(|subscriber| subscriber.screen_bytes_queued)
+            .sum();
+        stats.current_effect_bytes_queued = self
+            .subscribers
+            .values()
+            .map(|subscriber| subscriber.effect_bytes_queued)
+            .sum();
+        stats
+    }
+
+    fn observe_queue_peaks(&mut self) {
+        let current = self.publication_stats();
+        self.publication_stats.peak_effect_events_queued = self
+            .publication_stats
+            .peak_effect_events_queued
+            .max(current.current_effect_events_queued);
+        self.publication_stats.peak_screen_bytes_queued = self
+            .publication_stats
+            .peak_screen_bytes_queued
+            .max(current.current_screen_bytes_queued);
+        self.publication_stats.peak_effect_bytes_queued = self
+            .publication_stats
+            .peak_effect_bytes_queued
+            .max(current.current_effect_bytes_queued);
     }
 
     fn next_sequence(&mut self) -> u64 {
@@ -1329,23 +1736,32 @@ fn spawn_subscriber(
     attachment_id: TerminalAttachmentId,
     sink: Arc<dyn TerminalEventSink>,
     status: Sender<SubscriberStatus>,
+    commit: Sender<SubscriberCommit>,
     transport: TerminalTransport,
     on_detached: Arc<dyn Fn(TerminalAttachmentId) + Send + Sync>,
+    baseline_sequence: u64,
 ) -> Result<Subscriber, TerminalError> {
-    let (event_sender, event_receiver) = bounded(ATTACHMENT_MAILBOX_EVENTS);
+    let (event_sender, event_receiver) = match transport {
+        TerminalTransport::Legacy => bounded(ATTACHMENT_MAILBOX_EVENTS),
+        // Semantic state is credit-gated before it reaches this lane. What is
+        // left is reliable lifecycle and occurrence data, which cannot be
+        // replaced or discarded under an invented byte limit.
+        TerminalTransport::Semantic => unbounded(),
+    };
     let (control_sender, control_receiver) = bounded(1);
+    let commits_screen_on_publish = sink.commits_screen_on_publish();
     thread::Builder::new()
         .name(format!("terminal-attachment-{attachment_id:?}"))
         .spawn(move || {
             'worker: loop {
                 match control_receiver.try_recv() {
                     Ok(event) => {
-                        let _ = sink.publish(terminal_id, event);
+                        let _ = sink.publish_preencoded(terminal_id, event);
                         break;
                     }
                     Err(TryRecvError::Disconnected) => {
                         for event in event_receiver.iter() {
-                            if sink.publish(terminal_id, event).is_err() {
+                            if sink.publish_preencoded(terminal_id, event).is_err() {
                                 break;
                             }
                         }
@@ -1357,16 +1773,30 @@ fn spawn_subscriber(
                 crossbeam_channel::select_biased! {
                     recv(control_receiver) -> control => match control {
                         Ok(event) => {
-                            let _ = sink.publish(terminal_id, event);
+                            let _ = sink.publish_preencoded(terminal_id, event);
                             break 'worker;
                         }
                         Err(_) => continue 'worker,
                     },
                     recv(event_receiver) -> event => match event {
                         Ok(event) => {
-                            if sink.publish(terminal_id, event).is_err() {
+                            let screen_sequence = match event.event() {
+                                TerminalEvent::Screen { sequence, .. } => Some(*sequence),
+                                _ => None,
+                            };
+                            let effect_bytes = matches!(event.event(), TerminalEvent::Effects { .. })
+                                .then_some(event.json().len() as u64)
+                                .unwrap_or(0);
+                            if sink.publish_preencoded(terminal_id, event).is_err() {
                                 break 'worker;
                             }
+                            let _ = commit.send(SubscriberCommit {
+                                attachment_id,
+                                screen_sequence: commits_screen_on_publish
+                                    .then_some(screen_sequence)
+                                    .flatten(),
+                                effect_bytes,
+                            });
                         }
                         Err(_) => continue 'worker,
                     },
@@ -1384,6 +1814,14 @@ fn spawn_subscriber(
         events: event_sender,
         control: control_sender,
         transport,
+        screen_in_flight: (transport == TerminalTransport::Semantic).then_some(baseline_sequence),
+        // The baseline crosses as the attach command response, outside the
+        // subscriber event lane, so this lane holds no encoded bytes for it.
+        screen_bytes_queued: 0,
+        screen_credit: false,
+        last_screen_sequence: baseline_sequence,
+        effect_events_queued: 0,
+        effect_bytes_queued: 0,
         on_detached,
     })
 }
@@ -1393,6 +1831,7 @@ fn event_sequence(event: &TerminalEvent) -> u64 {
         TerminalEvent::Output { sequence, .. }
         | TerminalEvent::Replay { sequence, .. }
         | TerminalEvent::Screen { sequence, .. }
+        | TerminalEvent::Effects { sequence, .. }
         | TerminalEvent::MetadataChanged { sequence, .. }
         | TerminalEvent::AgentActivityChanged { sequence, .. }
         | TerminalEvent::Exited { sequence, .. }
@@ -1459,7 +1898,9 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
 
-    use crate::terminal::effects::{TerminalClipboardContent, TerminalClipboardLocation};
+    use crate::terminal::effects::{
+        TerminalClipboardContent, TerminalClipboardLocation, TerminalEffect,
+    };
     use crate::terminal::input::{
         TerminalKeyAction, TerminalKeyEvent, TerminalModifiers, TerminalMouseAction,
         TerminalMouseButton, TerminalMouseEvent, TerminalSurfaceGeometry,
@@ -1518,6 +1959,7 @@ mod tests {
                     TerminalEvent::Output { .. } => "output",
                     TerminalEvent::Replay { .. } => "replay",
                     TerminalEvent::Screen { .. } => "screen",
+                    TerminalEvent::Effects { .. } => "effects",
                     TerminalEvent::MetadataChanged { .. } => "metadata",
                     TerminalEvent::AgentActivityChanged { .. } => "agent",
                     TerminalEvent::Exited { .. } => "exited",
@@ -1540,6 +1982,51 @@ mod tests {
         fn publish(&self, _terminal_id: TerminalId, event: TerminalEvent) -> Result<(), String> {
             self.0.lock().unwrap().push(event);
             Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct ManualEventLog(EventLog);
+
+    impl TerminalEventSink for ManualEventLog {
+        fn publish(&self, terminal_id: TerminalId, event: TerminalEvent) -> Result<(), String> {
+            self.0.publish(terminal_id, event)
+        }
+
+        fn commits_screen_on_publish(&self) -> bool {
+            false
+        }
+    }
+
+    /// A sink that keeps the identity of the actor's shared state and JSON.
+    #[derive(Clone, Default)]
+    struct SharedEventLog(Arc<Mutex<Vec<(usize, usize, u64)>>>);
+
+    impl TerminalEventSink for SharedEventLog {
+        fn publish(&self, _terminal_id: TerminalId, _event: TerminalEvent) -> Result<(), String> {
+            unreachable!("the runtime gives this sink its pre-encoded event")
+        }
+
+        fn publish_preencoded(
+            &self,
+            _terminal_id: TerminalId,
+            event: PublishedTerminalEvent,
+        ) -> Result<(), String> {
+            if let TerminalEvent::Screen {
+                sequence, state, ..
+            } = event.event()
+            {
+                self.0.lock().unwrap().push((
+                    event.json().as_ptr() as usize,
+                    Arc::as_ptr(state) as usize,
+                    *sequence,
+                ));
+            }
+            Ok(())
+        }
+
+        fn commits_screen_on_publish(&self) -> bool {
+            false
         }
     }
 
@@ -1663,6 +2150,14 @@ mod tests {
             transport: TerminalTransport,
         ) -> (TerminalAttachmentId, EventLog) {
             let (attachment, events) = self.attach_returning(claims_resize, transport);
+            if transport == TerminalTransport::Semantic {
+                self.handle
+                    .credit_screen(
+                        attachment.attachment_id,
+                        attachment.snapshot.sequence_boundary,
+                    )
+                    .expect("the baseline was committed by the test client");
+            }
             (attachment.attachment_id, events)
         }
 
@@ -1686,6 +2181,34 @@ mod tests {
                 )
                 .expect("attach needs no child");
             (attachment, events)
+        }
+
+        fn attach_shared(&self, events: SharedEventLog) -> TerminalAttachment {
+            let attachment_id = TerminalAttachmentId::new();
+            let detached = Arc::clone(&self.detached);
+            self.handle
+                .attach(
+                    attachment_id,
+                    Arc::new(events),
+                    false,
+                    TerminalTransport::Semantic,
+                    Arc::new(move |id| detached.lock().unwrap().push(id)),
+                )
+                .expect("attach needs no child")
+        }
+
+        fn attach_manual(&self, events: ManualEventLog) -> TerminalAttachment {
+            let attachment_id = TerminalAttachmentId::new();
+            let detached = Arc::clone(&self.detached);
+            self.handle
+                .attach(
+                    attachment_id,
+                    Arc::new(events),
+                    false,
+                    TerminalTransport::Semantic,
+                    Arc::new(move |id| detached.lock().unwrap().push(id)),
+                )
+                .expect("attach needs no child")
         }
 
         /// Closes the command channel, which is the actor's stop condition.
@@ -1714,6 +2237,16 @@ mod tests {
             thread::sleep(std::time::Duration::from_millis(1));
         }
         panic!("expected {count} events, saw {:?}", events.kinds());
+    }
+
+    fn wait_for_shared_events(events: &SharedEventLog, count: usize) {
+        for _ in 0..2_000 {
+            if events.0.lock().unwrap().len() >= count {
+                return;
+            }
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("expected {count} shared events");
     }
 
     /// Waits for a fact the actor holds, rather than for events about it.
@@ -1931,6 +2464,269 @@ mod tests {
         assert_eq!(semantic.kinds(), vec!["exited"]);
     }
 
+    #[test]
+    fn screen_credit_replaces_intermediate_state_and_never_drops_occurrences() {
+        let harness = ActorHarness::start();
+        let events = ManualEventLog::default();
+        let attachment = harness.attach_manual(events.clone());
+        harness
+            .handle
+            .credit_screen(
+                attachment.attachment_id,
+                attachment.snapshot.sequence_boundary,
+            )
+            .expect("the client committed its baseline");
+
+        harness.send(ReaderEvent::Data(b"first".to_vec()));
+        wait_for_events(&events.0, 1);
+        let first_sequence = match events.0 .0.lock().unwrap().first() {
+            Some(TerminalEvent::Screen { sequence, .. }) => *sequence,
+            other => panic!("expected one screen, got {other:?}"),
+        };
+
+        for index in 0..12 {
+            harness.send(ReaderEvent::Data(format!("-{index}").into_bytes()));
+        }
+        harness.send(ReaderEvent::Data(b"\x1b]0;latest title\x1b\\".to_vec()));
+        harness.send(ReaderEvent::Data(b"\x07-tail".to_vec()));
+        harness
+            .handle
+            .snapshot()
+            .expect("the command is an output barrier");
+        wait_for_events(&events.0, 3);
+
+        assert_eq!(
+            events.0.kinds(),
+            vec!["screen", "effects", "effects"],
+            "screen state waited for credit while every occurrence stayed ordered",
+        );
+
+        harness
+            .handle
+            .credit_screen(attachment.attachment_id, first_sequence)
+            .expect("the client committed the only in-flight screen");
+        wait_for_events(&events.0, 4);
+        let published = events.0.taken();
+        let latest = match published.last() {
+            Some(TerminalEvent::Screen { state, .. }) => state,
+            other => panic!("expected the latest replacement screen, got {other:?}"),
+        };
+        assert!(
+            latest
+                .viewport
+                .iter()
+                .any(|row| row.text().contains("tail")),
+            "the next credit receives current state, not the first skipped state",
+        );
+        assert_eq!(
+            published
+                .iter()
+                .filter(|event| matches!(event, TerminalEvent::Screen { .. }))
+                .count(),
+            2,
+            "one committed screen allowed exactly one newer screen in flight",
+        );
+    }
+
+    /// Reading damage consumes it, and pacing means two attachments read at
+    /// different times. A client that did not receive a published state must
+    /// not be told only what changed after that state: the rows it missed would
+    /// stay on its screen as they were before.
+    #[test]
+    fn a_client_that_missed_a_published_state_is_told_every_row_that_changed() {
+        let harness = ActorHarness::start();
+        let fast = ManualEventLog::default();
+        let slow = ManualEventLog::default();
+        let fast_attachment = harness.attach_manual(fast.clone());
+        let slow_attachment = harness.attach_manual(slow.clone());
+        for attachment in [&fast_attachment, &slow_attachment] {
+            harness
+                .handle
+                .credit_screen(
+                    attachment.attachment_id,
+                    attachment.snapshot.sequence_boundary,
+                )
+                .expect("the client committed its baseline");
+        }
+
+        // Both clients receive the state that put text on row 0.
+        harness.send(ReaderEvent::Data(b"\x1b[1;1Hrow-one".to_vec()));
+        wait_for_events(&fast.0, 1);
+        wait_for_events(&slow.0, 1);
+        let first_sequence = match fast.0 .0.lock().unwrap().first() {
+            Some(TerminalEvent::Screen { sequence, .. }) => *sequence,
+            other => panic!("expected a screen, got {other:?}"),
+        };
+
+        // Only the fast client commits, so only it receives the state that put
+        // text on row 3.
+        harness
+            .handle
+            .credit_screen(fast_attachment.attachment_id, first_sequence)
+            .expect("the fast client committed");
+        harness.send(ReaderEvent::Data(b"\x1b[4;1Hrow-four".to_vec()));
+        wait_for_events(&fast.0, 2);
+        let second_sequence = match fast.0 .0.lock().unwrap().last() {
+            Some(TerminalEvent::Screen { sequence, .. }) => *sequence,
+            other => panic!("expected a screen, got {other:?}"),
+        };
+        harness
+            .handle
+            .credit_screen(fast_attachment.attachment_id, second_sequence)
+            .expect("the fast client committed again");
+        harness.send(ReaderEvent::Data(b"\x1b[6;1Hrow-six".to_vec()));
+        wait_for_events(&fast.0, 3);
+
+        // A further state, with nobody holding credit, so nothing projects.
+        harness.send(ReaderEvent::Data(b"\x1b[8;1Hrow-eight".to_vec()));
+        harness
+            .handle
+            .snapshot()
+            .expect("the command is an output barrier");
+
+        // The slow client commits the only state it ever saw and receives the
+        // current one. Rows 3 and 5 changed in the states it never received, so
+        // a difference measured from row 7's state would leave them stale.
+        harness
+            .handle
+            .credit_screen(slow_attachment.attachment_id, first_sequence)
+            .expect("the slow client committed");
+        wait_for_events(&slow.0, 2);
+        let published = slow.0.taken();
+        let damage = match published.last() {
+            Some(TerminalEvent::Screen { state, .. }) => state.damage.clone(),
+            other => panic!("expected the current screen, got {other:?}"),
+        };
+        assert_eq!(
+            damage.scope,
+            ProjectedDamageScope::Full,
+            "a client that skipped a state is owed every row, not a difference \
+             measured from a state it never held"
+        );
+    }
+
+    /// The inspection path answers a caller that has painted nothing, but it
+    /// reads the same dirty flags an attached client's next frame is measured
+    /// from. A `shipctl` painter looking at a terminal the app is showing must
+    /// not take rows away from the app's next frame.
+    #[test]
+    fn inspecting_a_terminal_does_not_take_damage_away_from_an_attached_client() {
+        let harness = ActorHarness::start();
+        let client = ManualEventLog::default();
+        let attachment = harness.attach_manual(client.clone());
+        harness
+            .handle
+            .credit_screen(
+                attachment.attachment_id,
+                attachment.snapshot.sequence_boundary,
+            )
+            .expect("the client committed its baseline");
+
+        harness.send(ReaderEvent::Data(b"\x1b[1;1Hrow-one".to_vec()));
+        wait_for_events(&client.0, 1);
+        let received = match client.0 .0.lock().unwrap().first() {
+            Some(TerminalEvent::Screen { sequence, .. }) => *sequence,
+            other => panic!("expected a screen, got {other:?}"),
+        };
+        harness
+            .handle
+            .credit_screen(attachment.attachment_id, received)
+            .expect("the client committed the state it received");
+
+        // A change the client cannot be sent yet, then an inspection that reads
+        // — and so clears — the host's record of that change.
+        harness.send(ReaderEvent::Data(b"\x1b[4;1Hrow-four".to_vec()));
+        wait_for_events(&client.0, 2);
+        let received = match client.0 .0.lock().unwrap().last() {
+            Some(TerminalEvent::Screen { sequence, .. }) => *sequence,
+            other => panic!("expected a screen, got {other:?}"),
+        };
+        harness.send(ReaderEvent::Data(b"\x1b[6;1Hrow-six".to_vec()));
+        harness
+            .handle
+            .project()
+            .expect("an inspection reads the current state");
+
+        client.0.taken();
+        harness
+            .handle
+            .credit_screen(attachment.attachment_id, received)
+            .expect("the client committed again");
+        wait_for_events(&client.0, 1);
+        let damage = match client.0.taken().last() {
+            Some(TerminalEvent::Screen { state, .. }) => state.damage.clone(),
+            other => panic!("expected the current screen, got {other:?}"),
+        };
+        assert_eq!(
+            damage.scope,
+            ProjectedDamageScope::Full,
+            "row 5 changed before the inspection consumed the difference, so \
+             the client is owed the screen rather than what changed after it"
+        );
+    }
+
+    #[test]
+    fn attachments_share_one_compacted_state_and_one_json_encoding() {
+        let harness = ActorHarness::start();
+        let first = SharedEventLog::default();
+        let second = SharedEventLog::default();
+        let first_attachment = harness.attach_shared(first.clone());
+        let second_attachment = harness.attach_shared(second.clone());
+
+        harness
+            .handle
+            .credit_screen(
+                first_attachment.attachment_id,
+                first_attachment.snapshot.sequence_boundary,
+            )
+            .expect("the first client committed its baseline");
+        harness.send(ReaderEvent::Data(b"shared".to_vec()));
+        wait_for_shared_events(&first, 1);
+
+        let before_late_credit = harness
+            .handle
+            .publication_stats()
+            .expect("publication observations are readable");
+        assert_eq!(before_late_credit.screen_projections, 1);
+        assert_eq!(before_late_credit.screen_encodes, 1);
+        assert_eq!(before_late_credit.screen_recipient_deliveries, 1);
+
+        harness
+            .handle
+            .credit_screen(
+                second_attachment.attachment_id,
+                second_attachment.snapshot.sequence_boundary,
+            )
+            .expect("the late client committed its baseline");
+        wait_for_shared_events(&second, 1);
+
+        let first_identity = first.0.lock().unwrap()[0];
+        let second_identity = second.0.lock().unwrap()[0];
+        assert_eq!(
+            first_identity.0, second_identity.0,
+            "the JSON Arc is shared"
+        );
+        assert_eq!(
+            first_identity.1, second_identity.1,
+            "the compact state Arc is shared"
+        );
+        assert_eq!(
+            first_identity.2, second_identity.2,
+            "both readers received one state"
+        );
+        let stats = harness
+            .handle
+            .publication_stats()
+            .expect("publication observations are readable");
+        assert_eq!(stats.pty_reads, 1);
+        assert_eq!(stats.screen_changes, 1);
+        assert_eq!(stats.screen_projections, 1);
+        assert_eq!(stats.screen_encodes, 1);
+        assert_eq!(stats.screen_recipient_deliveries, 2);
+        assert!(stats.screen_encoded_bytes > 0);
+        assert_eq!(stats.current_screen_transactions, 2);
+    }
+
     /// Area 01 criterion 6, on the production path: a client reports what the
     /// person did, and the actor decides what bytes that is from the modes the
     /// child selected. Nothing here is a keymap the client could hold, because
@@ -1985,7 +2781,7 @@ mod tests {
             .expect("the actor encodes a key");
         assert_eq!(harness.child_inbox.taken(), b"+");
         harness.send(ReaderEvent::Data(b"\x1b[?66h\x1b[?1035l".to_vec()));
-        wait_for_events(&events, 1);
+        wait_for_events(&events, 2);
         harness
             .handle
             .input(key("NumpadAdd", TerminalModifiers::default(), Some("+")))
@@ -1999,7 +2795,7 @@ mod tests {
         // The Kitty keyboard protocol is another such command, and it changes
         // the encoding of keys the legacy mode has no way to report.
         harness.send(ReaderEvent::Data(b"\x1b[>1u".to_vec()));
-        wait_for_events(&events, 1);
+        wait_for_events(&events, 3);
         harness
             .handle
             .input(key("Escape", TerminalModifiers::default(), None))
@@ -2064,14 +2860,14 @@ mod tests {
 
         // The pointer says nothing until the child asks to hear about it.
         let surface = TerminalSurfaceGeometry {
-            screen_width: 800,
-            screen_height: 480,
-            cell_width: 10,
-            cell_height: 20,
-            padding_top: 0,
-            padding_bottom: 0,
-            padding_left: 0,
-            padding_right: 0,
+            screen_width: 800.0,
+            screen_height: 480.0,
+            cell_width: 10.0,
+            cell_height: 20.0,
+            padding_top: 0.0,
+            padding_bottom: 0.0,
+            padding_left: 0.0,
+            padding_right: 0.0,
         };
         let press = TerminalInput::Mouse(TerminalMouseEvent {
             action: TerminalMouseAction::Press,
@@ -2093,7 +2889,7 @@ mod tests {
         assert!(harness.child_inbox.taken().is_empty());
 
         harness.send(ReaderEvent::Data(b"\x1b[?1000h\x1b[?1006h".to_vec()));
-        wait_for_events(&events, 1);
+        wait_for_events(&events, 2);
         harness
             .handle
             .input(press)
@@ -2133,7 +2929,7 @@ mod tests {
             0
         );
         harness.send(ReaderEvent::Data(b"\x1b[?1004h".to_vec()));
-        wait_for_events(&events, 1);
+        wait_for_events(&events, 3);
         harness
             .handle
             .input(TerminalInput::Focus { gained: true })
@@ -2273,10 +3069,14 @@ mod tests {
         wait_for_events(&semantic, 1);
         wait_for_events(&legacy, 1);
 
-        let effects = match &semantic.taken()[0] {
-            TerminalEvent::Screen { effects, .. } => effects.clone(),
-            other => panic!("expected Screen, got {other:?}"),
-        };
+        let effects = semantic
+            .taken()
+            .into_iter()
+            .find_map(|event| match event {
+                TerminalEvent::Effects { effects, .. } => Some(effects),
+                _ => None,
+            })
+            .expect("expected ordered effects");
         assert_eq!(
             effects,
             vec![
@@ -2313,16 +3113,10 @@ mod tests {
         }
 
         // Screen state is not where an occurrence goes: nothing above turned
-        // into a cell, and the next chunk carries its own occurrences only.
+        // into a cell, and a plain next chunk carries no effects event.
         harness.send(ReaderEvent::Data(b"plain".to_vec()));
         wait_for_events(&semantic, 1);
-        match &semantic.taken()[0] {
-            TerminalEvent::Screen { effects, .. } => assert!(
-                effects.is_empty(),
-                "occurrences belong to the parse that reported them"
-            ),
-            other => panic!("expected Screen, got {other:?}"),
-        }
+        assert_eq!(semantic.kinds(), vec!["screen"]);
     }
 
     /// Area 01 criterion 4: a resize and a theme change are state transitions
@@ -2383,7 +3177,7 @@ mod tests {
             "no ANSI reconstruction reached the semantic subscriber"
         );
         let colours = match semantic.taken().pop() {
-            Some(TerminalEvent::Screen { state, .. }) => state.colors,
+            Some(TerminalEvent::Screen { state, .. }) => state.colors.clone(),
             other => panic!("expected Screen, got {other:?}"),
         };
         assert_eq!(

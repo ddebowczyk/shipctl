@@ -4,6 +4,7 @@ import { TerminalClientModel } from "./terminalClientModel.ts";
 import type { TerminalRendererState } from "./terminalRenderer.ts";
 import type { SemanticTerminalBinding } from "./terminalSemanticSurface.ts";
 import type { TerminalViewSession } from "./terminalViewSession.ts";
+import { forgetTerminalClientPerformanceStats } from "./terminalPerformanceMetrics.ts";
 import type { TerminalViewportPin } from "./terminalViewportPin.ts";
 import type { TerminalAttachmentId, TerminalId } from "./types.ts";
 
@@ -51,6 +52,7 @@ export function terminalModel(terminalId: TerminalId): TerminalClientModel {
 export function disposeTerminalModel(terminalId: TerminalId): void {
   terminalModels.get(terminalId)?.dispose();
   terminalModels.delete(terminalId);
+  forgetTerminalClientPerformanceStats(terminalId);
 }
 
 /**
@@ -95,6 +97,11 @@ const terminalSessions = new Map<TerminalId, TerminalViewSession>();
 
 export function setTerminalSession(terminalId: TerminalId, session: TerminalViewSession): void {
   terminalSessions.set(terminalId, session);
+}
+
+/** The live semantic session for one displayed terminal, or null while hidden from React. */
+export function terminalSession(terminalId: TerminalId): TerminalViewSession | null {
+  return terminalSessions.get(terminalId) ?? null;
 }
 
 export function forgetTerminalSession(terminalId: TerminalId): void {

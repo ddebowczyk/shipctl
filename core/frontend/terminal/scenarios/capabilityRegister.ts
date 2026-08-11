@@ -55,8 +55,15 @@ export interface CapabilityEntry {
   readonly capability: string;
   readonly disposition: CapabilityDisposition;
   readonly proof: CapabilityProof;
-  /** Required for `changed`: who decided, and where the decision is recorded. */
+  /** Required for `changed`: who decided. */
   readonly owner?: string;
+  /**
+   * Required for `changed`: the file that records the decision.
+   *
+   * A name on its own is an assertion that somebody agreed. The record is what
+   * a reader can check, and what stops an entry from approving itself.
+   */
+  readonly decision?: string;
   readonly note?: string;
 }
 
@@ -304,14 +311,13 @@ export const TERMINAL_CAPABILITY_REGISTER: readonly CapabilityEntry[] = [
     proof: { by: "lane", test: "core/frontend/terminal/tests/terminalRenderer.test.ts" },
   },
   {
-    id: "renderer.gpu-loss-fallback",
-    capability: "Losing the GPU context leaves a usable terminal, with no "
+    id: "renderer.primary-failure-recovery",
+    capability: "A primary-painter failure leaves a usable terminal, with no "
       + "second model and no xterm fallback",
     disposition: "blocking",
-    proof: { by: "scenario", id: "renderer.gpu-loss" },
-    note: "The scenario now runs against the surface the product binds, and "
-      + "the probe reports what a semantic terminal can answer rather than "
-      + "reaching for an engine that is no longer there. Blocking until it has "
+    proof: { by: "scenario", id: "renderer.primary-failure" },
+    note: "The scenario injects a Canvas2D painter failure and requires a full "
+      + "repaint from the same model. Blocking until it has "
       + "been run in the packaged app and the numbers are recorded.",
   },
 
@@ -374,22 +380,20 @@ export const TERMINAL_CAPABILITY_REGISTER: readonly CapabilityEntry[] = [
     proof: { by: "manual", procedure: "docs/ops/terminal-ime-review.md" },
     note: "Not falsifiable by a scenario. Synthetic composition events prove "
       + "the handler, not the input method. The semantic surface now has "
-      + "something for the review to run against: composition arrives in a "
-      + "focused text area, the commit leaves as {kind:text} and the field is "
-      + "emptied. Where the candidate window appears is not settled — the "
-      + "field is at the container's origin, not at the cursor.",
+      + "a cursor-positioned editing host, visible pre-edit presentation, "
+      + "cancellation, and exact-once semantic commit. The packaged review "
+      + "must still prove the real input method and candidate window.",
   },
   {
     id: "input.paste",
     capability: "Paste intent delivers clipboard text once",
     disposition: "blocking",
-    proof: { by: "none" },
-    note: "The surface production binds takes the platform's paste event in "
-      + "its text area, refuses the browser's own insertion, and reports "
-      + "{kind:paste} so the host brackets it or does not, by the child's mode. "
-      + "Once, because the field never receives the text. Blocking on one thing "
-      + "only: the host answers whether a payload is safe "
-      + "(input.rs::paste_is_safe) and no client asks yet.",
+    proof: { by: "manual", procedure: "docs/ops/terminal-interaction-review.md" },
+    note: "The optional confirmUnsafePaste setting defaults to false. When it "
+      + "is enabled, the browser asks the host classifier and holds unsafe "
+      + "text for Paste or Cancel. Focused tests prove the disabled, safe, "
+      + "accepted, cancelled, and failed-classification paths. The packaged "
+      + "interaction review remains.",
   },
   {
     id: "input.pointer-selection",
@@ -416,15 +420,14 @@ export const TERMINAL_CAPABILITY_REGISTER: readonly CapabilityEntry[] = [
     capability: "The selected text reaches the clipboard by the platform's own "
       + "copy gesture",
     disposition: "blocking",
-    proof: { by: "none" },
+    proof: { by: "manual", procedure: "docs/ops/terminal-interaction-review.md" },
     note: "Enumerated late: the product has it through xterm, and no entry "
       + "named it. The host is the only place the text exists — it unwraps a "
       + "wrapped line — so the semantic surface holds the text the selection "
       + "answer returned in its focused text area, selected. Which gesture "
       + "copies stays the platform's, and this client reads no shortcut and "
-      + "writes to no clipboard. Blocking on one thing: only a person can "
-      + "confirm the gesture on each platform, and no procedure is written for "
-      + "them to follow.",
+      + "writes to no clipboard. A person must confirm the platform gesture "
+      + "and wrapped-line result with the packaged interaction procedure.",
   },
   {
     id: "input.mouse-reporting",
@@ -485,8 +488,14 @@ export const TERMINAL_CAPABILITY_REGISTER: readonly CapabilityEntry[] = [
     id: "effect.clipboard-write",
     capability: "Clipboard effects report a declared outcome rather than "
       + "failing silently when the gesture requirement is unmet",
-    disposition: "blocking",
-    proof: { by: "none" },
+    disposition: "implemented",
+    proof: {
+      by: "lane",
+      test: "core/frontend/terminal/tests/terminalSemanticSession.test.ts",
+    },
+    note: "Each OSC 52 clipboard-write effect produces one visible refusal. "
+      + "The semantic client does not call a clipboard API or expose the "
+      + "requested contents.",
   },
   {
     id: "effect.title",
@@ -509,13 +518,13 @@ export const TERMINAL_CAPABILITY_REGISTER: readonly CapabilityEntry[] = [
   {
     id: "links.plain-text",
     capability: "A URL written in plain output is a link",
-    disposition: "blocking",
-    proof: { by: "none" },
-    note: "The product has it: the xterm surface loads the web-links addon, "
-      + "which finds URLs with a pattern of its own. The semantic path marks "
-      + "only what the host marked, so this needs either the host to project "
-      + "the match or an owner to decide the behaviour is dropped. A pattern "
-      + "written into the client would be the client deciding what is a link.",
+    disposition: "changed",
+    proof: { by: "lane", test: "core/frontend/terminal/tests/terminalLinkTargets.test.ts" },
+    owner: "Dariusz Debowczyk, product owner, 2026-08-11",
+    decision: "docs/ops/terminal-link-behavior.md",
+    note: "Approved removal for the semantic terminal. Only OSC 8 links are "
+      + "active. Plain output stays plain because the host did not mark it as "
+      + "a link.",
   },
 
   // ---- History -------------------------------------------------------------
@@ -583,14 +592,29 @@ export const TERMINAL_CAPABILITY_REGISTER: readonly CapabilityEntry[] = [
   {
     id: "measure.sustained-output",
     capability: "Sustained output is measured in the packaged app",
-    disposition: "blocking",
+    disposition: "implemented",
     proof: { by: "scenario", id: "measure.sustained-output" },
   },
   {
     id: "measure.hidden-catchup",
     capability: "A hidden tab keeps its model current and repaints on reveal",
     disposition: "implemented",
-    proof: { by: "lane", test: "core/frontend/terminal/tests/terminalViewSession.test.ts" },
+    proof: { by: "scenario", id: "measure.hidden-catchup" },
+    note: "The unit lane proves the control flow. The packaged scenario is the "
+      + "required proof that the mounted Tauri path does no hidden screen work "
+      + "and resumes from current state after demand returns.",
+  },
+  {
+    id: "measure.attachment-fanout",
+    capability: "Multiple semantic attachments share one encoded screen state",
+    disposition: "implemented",
+    proof: { by: "scenario", id: "measure.attachment-fanout" },
+  },
+  {
+    id: "measure.slow-client-recovery",
+    capability: "A slow semantic attachment keeps one frame and resumes at newest state",
+    disposition: "implemented",
+    proof: { by: "scenario", id: "measure.slow-client-recovery" },
   },
 
   // ---- Accessibility ---------------------------------------------------------
@@ -598,13 +622,13 @@ export const TERMINAL_CAPABILITY_REGISTER: readonly CapabilityEntry[] = [
     id: "a11y.keyboard-focus",
     capability: "The terminal is reachable and escapable by keyboard",
     disposition: "blocking",
-    proof: { by: "none" },
+    proof: { by: "manual", procedure: "docs/ops/terminal-interaction-review.md" },
     note: "Current product behaviour; the migration cannot silently drop it. "
       + "The semantic surface takes keys in a text area, and that field now "
       + "carries the Tab stop xterm's own helper field carries "
-      + "(tabIndex = 0) — parity, not a choice made here. Blocking because no "
-      + "lane can mount a webview to press Tab, so a person confirms the stop "
-      + "and the way back out, and no procedure is written for them yet.",
+      + "(tabIndex = 0) — parity, not a choice made here. No lane can mount a "
+      + "webview to press Tab, so a person confirms the stop and the way back "
+      + "out with the packaged interaction procedure.",
   },
   {
     id: "a11y.screen-reader",

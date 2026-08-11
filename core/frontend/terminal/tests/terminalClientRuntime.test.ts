@@ -74,6 +74,26 @@ function descriptor(
   };
 }
 
+function coreDescriptor(
+  id: TerminalId,
+  revision: number,
+  lifecycle: TerminalDescriptor["lifecycle"] = "running",
+  exitCode = 0,
+): TerminalDescriptor {
+  const value = descriptor(id, revision, lifecycle);
+  return {
+    ...value,
+    exit: lifecycle === "exited"
+      ? { code: exitCode, reason: "process_exit", observedAtMs: 2 }
+      : null,
+    metadata: { ...value.metadata, owner: { type: "core" } },
+  };
+}
+
+function settle(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 class FakeHost implements TerminalHostPort {
   listed: TerminalDescriptor[] = [];
   listCalls = 0;
@@ -277,6 +297,38 @@ test("an exit followed by a removal reports exit then close, once each", async (
   stop();
 
   assert.deepEqual(events.map((event) => event.type), ["exited", "closed"]);
+});
+
+test("a clean core shell exit closes its retained host record and tab", async () => {
+  const host = new FakeHost();
+  const runtime = new TerminalClientRuntime(host);
+  const id = terminalId();
+  runtime.observeDescriptor(coreDescriptor(id, 1), "adopted");
+  host.onClose = (closed) => {
+    runtime.observeRegistryEvent({ event: "removed", terminalId: closed });
+  };
+
+  runtime.observeDescriptor(coreDescriptor(id, 2, "exited"));
+  await settle();
+
+  assert.deepEqual(host.closeCalls, [id]);
+  assert.equal(runtime.descriptor(id), undefined);
+  assert.equal(useTerminalStore.getState().findTabByTerminalId(id), undefined);
+});
+
+test("a failed core shell and a module session keep their final output tabs", async () => {
+  const host = new FakeHost();
+  const runtime = new TerminalClientRuntime(host);
+  const failedCore = terminalId();
+  const moduleSession = terminalId();
+
+  runtime.observeDescriptor(coreDescriptor(failedCore, 2, "exited", 7), "adopted");
+  runtime.observeDescriptor(descriptor(moduleSession, 2, "exited"), "adopted");
+  await settle();
+
+  assert.deepEqual(host.closeCalls, []);
+  assert.ok(runtime.descriptor(failedCore));
+  assert.ok(runtime.descriptor(moduleSession));
 });
 
 test("an older or duplicate observation changes nothing", async () => {

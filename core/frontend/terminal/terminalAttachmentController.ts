@@ -47,6 +47,8 @@ export interface TerminalAttachmentSnapshot {
 /** One open attachment. `activate` releases events buffered during the attach. */
 export interface TerminalAttachmentLease {
   readonly attachmentId: TerminalAttachmentId;
+  /** Whether the host still has a running child and an event subscriber. */
+  readonly live: boolean;
   readonly snapshot: TerminalAttachmentSnapshot;
   activate(): void;
 }
@@ -56,6 +58,8 @@ export interface TerminalAttachmentPorts {
   attach(onEvent: (event: TerminalEvent) => void): Promise<TerminalAttachmentLease>;
   /** Close an attachment. Failure is not recoverable and is ignored. */
   detach(attachmentId: TerminalAttachmentId): Promise<void>;
+  /** Grant one more semantic screen after this client committed one. */
+  creditScreen?(attachmentId: TerminalAttachmentId, committedSequence: number): Promise<void>;
   /** Publish a descriptor carried by an attachment snapshot. */
   observeDescriptor(descriptor: TerminalDescriptor): void;
   /** Reset the surface to this replay baseline and accept output again. */
@@ -104,6 +108,8 @@ export interface TerminalAttachmentPorts {
    * dispose it.
    */
   model?: TerminalClientModel;
+  /** Record atomic semantic model work for packaged-path evidence. */
+  recordModelCommit?(milliseconds: number): void;
 }
 
 export class TerminalAttachmentController {
@@ -113,16 +119,21 @@ export class TerminalAttachmentController {
   /** Rises on every attach cycle and on disposal; older callbacks are ignored. */
   #generation = 0;
   #expectedSequence = 0;
+  #semanticSequence = 0;
+  #screenCredit: number | null = null;
+  #screenDemand = true;
   #lease: TerminalAttachmentLease | null = null;
   #attached = false;
   #attaching = false;
   #recoveryPending = false;
   #inputReady = false;
+  /** A final read-only attachment must never enter the recovery loop. */
+  #terminalEnded = false;
   #disposed = false;
 
   constructor(ports: TerminalAttachmentPorts) {
     this.#ports = ports;
-    this.#schedule = ports.schedule ?? queueMicrotask;
+    this.#schedule = ports.schedule ?? ((task) => globalThis.queueMicrotask(task));
   }
 
   /** The live attachment id, or null while none is held. */
@@ -133,6 +144,13 @@ export class TerminalAttachmentController {
   /** True once a snapshot has been installed and the event stream is live. */
   get attached(): boolean {
     return this.#attached;
+  }
+
+  /** Visible semantic clients grant screen credit; hidden clients keep state bounded. */
+  setScreenDemand(demand: boolean): void {
+    if (this.#disposed || demand === this.#screenDemand) return;
+    this.#screenDemand = demand;
+    if (demand) this.#grantScreenCredit();
   }
 
   /** Whether input may be sent: an attachment is held and its baseline is current. */
@@ -236,8 +254,9 @@ export class TerminalAttachmentController {
    * raised while a cycle is running collapse into one following cycle.
    */
   requestRecovery(): void {
-    if (this.#disposed) return;
+    if (this.#disposed || this.#terminalEnded) return;
     this.#inputReady = false;
+    this.#screenCredit = null;
     this.#recoveryPending = true;
     this.#schedule(() => {
       if (this.#disposed || this.#attaching || !this.#recoveryPending) return;
@@ -266,6 +285,7 @@ export class TerminalAttachmentController {
     this.#recoveryPending = false;
     this.#attached = false;
     this.#inputReady = false;
+    this.#terminalEnded = true;
     const lease = this.#lease;
     this.#lease = null;
     this.#ports.publishAttachmentId(null);
@@ -281,6 +301,7 @@ export class TerminalAttachmentController {
     this.#lease = null;
     this.#attached = false;
     this.#inputReady = false;
+    this.#terminalEnded = false;
     this.#recoveryPending = false;
     this.#ports.publishAttachmentId(null);
     this.#ports.stopOutput();
@@ -300,6 +321,7 @@ export class TerminalAttachmentController {
       }
 
       this.#lease = lease;
+      this.#terminalEnded = !lease.live;
       this.#ports.publishAttachmentId(lease.attachmentId);
       this.#ports.observeDescriptor(lease.snapshot.descriptor);
       // The baseline must be installed before buffered events are released, so
@@ -341,12 +363,14 @@ export class TerminalAttachmentController {
     }
     this.#inputReady = false;
     this.#expectedSequence = snapshot.sequenceBoundary;
+    this.#semanticSequence = snapshot.sequenceBoundary;
+    const startedAt = performance.now();
     const outcome = model.installBaseline({
       sequence: snapshot.sequenceBoundary,
       revision: snapshot.descriptor.revision,
       state: snapshot.state,
-      effects: [],
     });
+    this.#ports.recordModelCommit?.(performance.now() - startedAt);
     if (outcome.status !== "committed") {
       this.#ports.reportError(new Error(`The terminal baseline was refused: ${outcome.detail}`));
       this.requestRecovery();
@@ -355,6 +379,8 @@ export class TerminalAttachmentController {
     // Nothing is re-parsed on this path, so the state the user would type into
     // is on screen as soon as it is committed.
     this.#inputReady = this.#ports.acceptsInput();
+    this.#screenCredit = snapshot.sequenceBoundary;
+    this.#grantScreenCredit();
     return true;
   }
 
@@ -372,11 +398,16 @@ export class TerminalAttachmentController {
 
   #observe(generation: number, event: TerminalEvent): void {
     if (this.#disposed || this.#generation !== generation) return;
-    if (event.sequence !== this.#expectedSequence + 1) {
+    const semantic = this.#ports.model !== undefined;
+    if (
+      (!semantic && event.sequence !== this.#expectedSequence + 1)
+      || (semantic && event.sequence < this.#semanticSequence)
+    ) {
       this.requestRecovery();
       return;
     }
-    this.#expectedSequence = event.sequence;
+    if (semantic) this.#semanticSequence = event.sequence;
+    else this.#expectedSequence = event.sequence;
 
     switch (event.event) {
       case "output":
@@ -386,11 +417,17 @@ export class TerminalAttachmentController {
         this.#installReplay(event.replay, event.sequence);
         return;
       case "resync_required":
-      case "detached":
         this.requestRecovery();
         return;
+      case "detached":
+        // A detach after process exit ends a final read-only attachment. It is
+        // not evidence that a new live baseline exists to recover from.
+        if (!this.#terminalEnded) this.requestRecovery();
+        return;
       case "exited":
+        this.#terminalEnded = true;
         this.#inputReady = false;
+        this.#screenCredit = null;
         return;
       case "metadata_changed":
       case "agent_activity_changed":
@@ -407,16 +444,37 @@ export class TerminalAttachmentController {
           );
           return;
         }
+        const startedAt = performance.now();
         const outcome = model.applyScreen({
           sequence: event.sequence,
           revision: event.revision,
           state: event.state,
-          effects: event.effects,
         });
+        this.#ports.recordModelCommit?.(performance.now() - startedAt);
         if (outcome.status !== "committed") {
           // The model is untouched, so the client's state is the last frame it
           // could believe. It needs a baseline, not the next frame.
           this.#ports.reportError(new Error(`The terminal frame was refused: ${outcome.detail}`));
+          this.requestRecovery();
+          return;
+        }
+        this.#screenCredit = event.sequence;
+        this.#grantScreenCredit();
+        return;
+      }
+      case "effects": {
+        const model = this.#ports.model;
+        if (!model) {
+          this.#ports.reportError(
+            new Error("The terminal attachment received semantic effects on the byte stream"),
+          );
+          return;
+        }
+        const startedAt = performance.now();
+        const outcome = model.applyEffects(event.effects);
+        this.#ports.recordModelCommit?.(performance.now() - startedAt);
+        if (outcome.status !== "committed") {
+          this.#ports.reportError(new Error(`The terminal effects were refused: ${outcome.detail}`));
           this.requestRecovery();
         }
         return;
@@ -429,5 +487,29 @@ export class TerminalAttachmentController {
         return;
       }
     }
+  }
+
+  #grantScreenCredit(): void {
+    const committedSequence = this.#screenCredit;
+    const lease = this.#lease;
+    if (this.#terminalEnded || !this.#screenDemand || committedSequence === null || !lease) return;
+    const credit = this.#ports.creditScreen;
+    if (!credit) {
+      this.#ports.reportError(new Error("This semantic attachment has no screen-credit transport"));
+      this.requestRecovery();
+      return;
+    }
+    this.#screenCredit = null;
+    const generation = this.#generation;
+    void credit(lease.attachmentId, committedSequence).catch((error: unknown) => {
+      if (
+        this.#disposed
+        || this.#terminalEnded
+        || this.#generation !== generation
+        || this.#lease !== lease
+      ) return;
+      this.#ports.reportError(error);
+      this.requestRecovery();
+    });
   }
 }

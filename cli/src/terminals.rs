@@ -524,12 +524,12 @@ fn run_attach(args: TerminalAttachArgs) -> ExitCode {
 fn raw_baseline(
     encoding: TerminalTransport,
     replay_base64: &str,
-    state: Option<&TerminalProjection>,
+    state: Option<&shipctl_core::terminal::wire::TerminalScreenSnapshot>,
 ) -> Result<Vec<u8>, ControlError> {
     match encoding {
         TerminalTransport::Legacy => decode_server_bytes(replay_base64),
         TerminalTransport::Semantic => match state {
-            Some(projection) => Ok(painter::paint(projection)),
+            Some(snapshot) => Ok(painter::paint_snapshot(snapshot)),
             None => Err(ControlError::new(
                 "terminal.attach.event_invalid",
                 "The semantic terminal attachment was given no state to start from",
@@ -598,14 +598,16 @@ fn raw_event(
         TerminalControlEvent::Replay { replay, .. } if !semantic => {
             decode_server_bytes(&replay.data_base64).map(Some)
         }
-        TerminalControlEvent::Screen { state, effects, .. } if semantic => {
-            let mut bytes = painter::paint(state);
-            bytes.extend_from_slice(&painter::paint_effects(effects));
-            Ok(Some(bytes))
+        TerminalControlEvent::Screen { state, .. } if semantic => {
+            Ok(Some(painter::paint_snapshot(state)))
+        }
+        TerminalControlEvent::Effects { effects, .. } if semantic => {
+            Ok(Some(painter::paint_effects(effects)))
         }
         TerminalControlEvent::Output { .. }
         | TerminalControlEvent::Replay { .. }
-        | TerminalControlEvent::Screen { .. } => Err(ControlError::new(
+        | TerminalControlEvent::Screen { .. }
+        | TerminalControlEvent::Effects { .. } => Err(ControlError::new(
             "terminal.attach.event_invalid",
             "The terminal attachment received the encoding it did not ask for",
         )),
@@ -652,6 +654,8 @@ fn render_raw_error(error: &ControlError) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::args::{RuntimeRootArgs, TerminalTargetArgs};
 
@@ -746,18 +750,28 @@ mod tests {
         );
     }
 
-    fn screen_event(state: Box<TerminalProjection>) -> TerminalControlEvent {
+    fn screen_event(
+        state: Arc<shipctl_core::terminal::wire::TerminalScreenSnapshot>,
+    ) -> TerminalControlEvent {
         TerminalControlEvent::Screen {
             terminal_id: TerminalId::default(),
             attachment_id: Default::default(),
             sequence: 3,
             revision: shipctl_core::terminal::TerminalRevision(4),
             state,
+        }
+    }
+
+    fn effects_event() -> TerminalControlEvent {
+        TerminalControlEvent::Effects {
+            terminal_id: TerminalId::default(),
+            attachment_id: Default::default(),
+            sequence: 4,
             effects: vec![shipctl_core::terminal::effects::TerminalEffect::Bell],
         }
     }
 
-    fn sample_state() -> Box<TerminalProjection> {
+    fn sample_state() -> Arc<shipctl_core::terminal::wire::TerminalScreenSnapshot> {
         match shipctl_core::terminal::contract::sample_event(
             shipctl_core::terminal::contract::TerminalEventKind::Screen,
         ) {
@@ -784,9 +798,13 @@ mod tests {
             .unwrap()
             .expect("a screen frame changes the picture");
         assert!(String::from_utf8_lossy(&painted).contains(&expected_row));
+
+        let effects = raw_event(TerminalTransport::Semantic, &effects_event())
+            .unwrap()
+            .expect("a bell is an occurrence the raw client reports");
         assert!(
-            painted.ends_with(&[0x07]),
-            "the bell the host recorded is rung after the picture it came with"
+            effects.ends_with(&[0x07]),
+            "the bell is reliable without being coupled to replaceable screen state"
         );
     }
 

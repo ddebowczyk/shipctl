@@ -26,6 +26,7 @@
 use super::effects::TerminalEffect;
 use super::projection::TerminalProjection;
 use super::projection::{ProjectedCell, ProjectedColor, ProjectedRow, ProjectedWidth};
+use super::wire::{ProjectedRun, ProjectedRunRow, TerminalScreenSnapshot};
 
 /// Where the painter gets column occupancy from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +52,35 @@ struct PaintedStyle {
 /// Paint one frame of host state for the caller's terminal.
 pub fn paint(projection: &TerminalProjection) -> Vec<u8> {
     paint_with(projection, Occupancy::HostSupplied)
+}
+
+/// Paint the compact wire shape without reconstructing a second terminal
+/// model. Cell occupancy stays explicit in each run.
+pub fn paint_snapshot(snapshot: &TerminalScreenSnapshot) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut style = PaintedStyle::default();
+    out.extend_from_slice(b"\x1b[0m\x1b[2J");
+
+    let mut row = 0;
+    while row < snapshot.viewport.len() {
+        out.extend_from_slice(format!("\x1b[{};1H", row + 1).as_bytes());
+        loop {
+            paint_run_row(&mut out, &mut style, &snapshot.viewport[row]);
+            let flows = snapshot.viewport[row].wrapped
+                && snapshot
+                    .viewport
+                    .get(row + 1)
+                    .is_some_and(|next| next.continuation);
+            if !flows {
+                break;
+            }
+            row += 1;
+        }
+        row += 1;
+    }
+
+    finish_frame(&mut out, &mut style, snapshot.cursor);
+    out
 }
 
 /// Paint the occurrences that came with a frame, in the order the host sent
@@ -100,21 +130,22 @@ pub(super) fn paint_with(projection: &TerminalProjection, occupancy: Occupancy) 
         row += 1;
     }
 
-    set_style(&mut out, &mut style, &PaintedStyle::default());
-    out.extend_from_slice(
-        format!(
-            "\x1b[{};{}H",
-            projection.cursor.row + 1,
-            projection.cursor.column + 1
-        )
-        .as_bytes(),
-    );
-    out.extend_from_slice(if projection.cursor.visible {
+    finish_frame(&mut out, &mut style, projection.cursor);
+    out
+}
+
+fn finish_frame(
+    out: &mut Vec<u8>,
+    style: &mut PaintedStyle,
+    cursor: super::projection::ProjectedCursor,
+) {
+    set_style(out, style, &PaintedStyle::default());
+    out.extend_from_slice(format!("\x1b[{};{}H", cursor.row + 1, cursor.column + 1).as_bytes());
+    out.extend_from_slice(if cursor.visible {
         b"\x1b[?25h"
     } else {
         b"\x1b[?25l"
     });
-    out
 }
 
 fn paint_row(
@@ -132,6 +163,35 @@ fn paint_row(
         }
         set_style(out, style, &cell_style(cell));
         out.extend_from_slice(glyph(cell).as_bytes());
+    }
+}
+
+fn paint_run_row(out: &mut Vec<u8>, style: &mut PaintedStyle, row: &ProjectedRunRow) {
+    for run in &row.runs {
+        paint_run(out, style, run);
+    }
+}
+
+fn paint_run(out: &mut Vec<u8>, style: &mut PaintedStyle, run: &ProjectedRun) {
+    if run.width == ProjectedWidth::SpacerTail {
+        return;
+    }
+    set_style(
+        out,
+        style,
+        &PaintedStyle {
+            bold: run.bold,
+            foreground: run.foreground,
+            background: run.background,
+            hyperlink: run.hyperlink.clone(),
+        },
+    );
+    for glyph in &run.glyphs {
+        out.extend_from_slice(if glyph.is_empty() {
+            b" "
+        } else {
+            glyph.as_bytes()
+        });
     }
 }
 

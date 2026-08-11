@@ -158,7 +158,7 @@ test("reverse video swaps the two defaults and changes no cell", () => {
 
 test("a selected cell takes the chrome's selection colour", () => {
   const { calls } = paint(hostScreen((state) => {
-    for (const cell of state.viewport[2].cells.slice(0, 4)) cell.selected = true;
+    state.selection = [{ row: 2, spans: [{ start: 0, end: 4 }] }];
   }));
 
   const selection = calls.filter(

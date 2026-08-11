@@ -15,7 +15,9 @@ use super::projection::{
 };
 use super::record::TerminalRecord;
 use super::retention::TerminalRetentionPolicy;
-use super::runtime::{TerminalCloseTicket, TerminalEventSink, TerminalRuntimeHandle};
+use super::runtime::{
+    TerminalCloseTicket, TerminalEventSink, TerminalPublicationStats, TerminalRuntimeHandle,
+};
 use super::types::{
     TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId,
     TerminalCloseResult, TerminalDescriptor, TerminalError, TerminalErrorCode, TerminalExitReason,
@@ -186,6 +188,14 @@ impl TerminalService {
 
     pub fn snapshot(&self, id: TerminalId) -> Result<TerminalRuntimeSnapshot, TerminalError> {
         runtime(self.record(id)?.as_ref())?.snapshot()
+    }
+
+    /// Cumulative publication observations for one terminal runtime.
+    pub fn publication_stats(
+        &self,
+        id: TerminalId,
+    ) -> Result<TerminalPublicationStats, TerminalError> {
+        runtime(self.record(id)?.as_ref())?.publication_stats()
     }
 
     /// What the host believes about this terminal, as owned values.
@@ -371,6 +381,26 @@ impl TerminalService {
             return Ok(());
         };
         runtime.detach(attachment_id)
+    }
+
+    /// Grant one more replaceable semantic-screen publication after the
+    /// client committed the frame named by `committed_sequence`.
+    pub fn credit_screen(
+        &self,
+        attachment_id: TerminalAttachmentId,
+        committed_sequence: u64,
+    ) -> Result<(), TerminalError> {
+        let id = self
+            .attachments()
+            .get(&attachment_id)
+            .copied()
+            .ok_or_else(|| {
+                TerminalError::new(
+                    TerminalErrorCode::NotFound,
+                    format!("Terminal attachment {attachment_id:?} was not found"),
+                )
+            })?;
+        runtime(self.record(id)?.as_ref())?.credit_screen(attachment_id, committed_sequence)
     }
 
     pub fn subscribe_registry(
@@ -674,6 +704,7 @@ mod tests {
             TerminalEvent::Output { sequence, .. }
             | TerminalEvent::Replay { sequence, .. }
             | TerminalEvent::Screen { sequence, .. }
+            | TerminalEvent::Effects { sequence, .. }
             | TerminalEvent::MetadataChanged { sequence, .. }
             | TerminalEvent::AgentActivityChanged { sequence, .. }
             | TerminalEvent::Exited { sequence, .. }

@@ -128,6 +128,10 @@ export function saveTerminalSettings(settings: TerminalSettings): Promise<Termin
   return invoke("save_terminal_settings", { settings });
 }
 
+export function isTerminalPasteSafe(text: string): Promise<boolean> {
+  return invoke("is_terminal_paste_safe", { text });
+}
+
 export function getSidebarSettings(): Promise<SidebarSettings> {
   return invoke("get_sidebar_settings");
 }
@@ -217,6 +221,31 @@ export function getTerminalSnapshot(
   return invoke("get_terminal_snapshot", { terminalId });
 }
 
+/** Cumulative host observations. They are measurements, not product limits. */
+export interface TerminalPublicationStats {
+  readonly ptyReads: number;
+  readonly screenChanges: number;
+  readonly screenProjections: number;
+  readonly screenEncodes: number;
+  readonly screenEncodedBytes: number;
+  readonly screenRecipientDeliveries: number;
+  readonly effectEvents: number;
+  readonly effectEncodedBytes: number;
+  readonly currentScreenTransactions: number;
+  readonly currentScreenBytesQueued: number;
+  readonly peakScreenBytesQueued: number;
+  readonly currentEffectEventsQueued: number;
+  readonly currentEffectBytesQueued: number;
+  readonly peakEffectEventsQueued: number;
+  readonly peakEffectBytesQueued: number;
+}
+
+export function getTerminalPublicationStats(
+  terminalId: TerminalId,
+): Promise<TerminalPublicationStats> {
+  return invoke("get_terminal_publication_stats", { terminalId });
+}
+
 /**
  * Open a host attachment.
  *
@@ -243,6 +272,13 @@ export async function attachTerminal(
 
 export function detachTerminal(attachmentId: TerminalAttachmentId): Promise<void> {
   return invoke("detach_terminal", { attachmentId });
+}
+
+export function creditTerminalScreen(
+  attachmentId: TerminalAttachmentId,
+  committedSequence: number,
+): Promise<void> {
+  return invoke("credit_terminal_screen", { attachmentId, committedSequence });
 }
 
 const terminalInputEncoder = new TextEncoder();

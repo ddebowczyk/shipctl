@@ -20,6 +20,9 @@ export interface TerminalSurface {
   /** Mount into the view's container. Idempotent across sessions. */
   open(): void;
 
+  /** Suspend or resume presentation work while preserving terminal state. */
+  setVisible?(visible: boolean): void;
+
   /** Install the sink for locally produced input, or null to close it. */
   setInputSink(sink: ((data: string) => void) | null): void;
 

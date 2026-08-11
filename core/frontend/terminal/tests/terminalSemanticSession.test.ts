@@ -15,6 +15,7 @@ import { test } from "node:test";
 import type { TerminalAttachmentLease } from "../terminalAttachmentController.ts";
 import { TerminalClientModel } from "../terminalClientModel.ts";
 import { decodeTerminalEvent } from "../terminalEventDecoder.ts";
+import { reportTerminalEffectOutcome } from "../terminalEffectOutcome.ts";
 import type { TerminalInput } from "../terminalSemanticInput.ts";
 import type { TerminalSurface } from "../terminalSurface.ts";
 import { TerminalViewportPin } from "../terminalViewportPin.ts";
@@ -136,6 +137,9 @@ class Harness {
         detach: async (id) => {
           this.trace.push(`detach:${id}`);
         },
+        creditScreen: async (_id, sequence) => {
+          this.trace.push(`credit:${sequence}`);
+        },
         observeDescriptor: () => this.trace.push("descriptor"),
         write: async (data) => {
           this.trace.push(`write:${data}`);
@@ -184,6 +188,12 @@ class Harness {
       },
       reportEffect: (effect) => {
         this.effects.push(effect.kind);
+        reportTerminalEffectOutcome(effect, {
+          bell: () => {},
+          clipboardRefused: () => {
+            this.notices.push("Terminal clipboard request not applied");
+          },
+        });
       },
       notifyError: (title, error) => {
         this.notices.push(`${title}: ${String(error)}`);
@@ -246,7 +256,7 @@ test("the attachment's baseline becomes model state, with no bytes anywhere", as
   assert.deepEqual(h.notices, []);
 });
 
-test("a host frame advances the model, and a gap is not guessed at", async () => {
+test("a replaceable host frame may jump to the newest committed sequence", async () => {
   const h = new Harness();
   startTerminalViewSession(h.ports);
   await h.frame();
@@ -254,10 +264,10 @@ test("a host frame advances the model, and a gap is not guessed at", async () =>
   h.emit?.(screenEvent(1));
   assert.equal(h.model.state?.sequence, 1);
 
-  // A frame that is not the next one is a gap. The session recovers rather
-  // than applying it, so the model keeps the last state it could believe.
+  // Quiet intermediate screens are replaceable. The complete newer frame is
+  // committed without asking the host to reconstruct each intermediate one.
   h.emit?.(screenEvent(5));
-  assert.equal(h.model.state?.sequence, 1, "the model is untouched by a frame out of order");
+  assert.equal(h.model.state?.sequence, 5);
 });
 
 test("what happened beside the screen is handed on once, in order", async () => {
@@ -273,6 +283,11 @@ test("what happened beside the screen is handed on once, in order", async () => 
   assert.deepEqual(h.effects, []);
 
   h.emit?.(screenEvent(1));
+  h.emit?.({
+    event: "effects",
+    sequence: 1,
+    effects: [{ kind: "title" }, { kind: "bell" }],
+  });
   await settle();
   assert.deepEqual(h.effects, ["title", "bell"]);
 
@@ -281,6 +296,27 @@ test("what happened beside the screen is handed on once, in order", async () => 
   h.model.setViewportIntent({ followBottom: true, historyAnchor: null });
   await settle();
   assert.deepEqual(h.effects, []);
+});
+
+test("one clipboard-write effect produces one explicit refusal", async () => {
+  const h = new Harness();
+  startTerminalViewSession(h.ports);
+  await h.frame();
+
+  h.emit?.(screenEvent(1));
+  h.emit?.({
+    event: "effects",
+    sequence: 1,
+    effects: [{ kind: "clipboard", location: "standard", contents: [] }],
+  });
+  await settle();
+
+  assert.deepEqual(h.effects, ["clipboard"]);
+  assert.deepEqual(h.notices, ["Terminal clipboard request not applied"]);
+
+  h.model.setViewportIntent({ followBottom: true, historyAnchor: null });
+  await settle();
+  assert.deepEqual(h.notices, ["Terminal clipboard request not applied"]);
 });
 
 test("local input leaves as what a person did", async () => {

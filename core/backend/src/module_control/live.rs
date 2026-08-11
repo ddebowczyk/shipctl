@@ -424,7 +424,7 @@ impl ModuleControlService {
             }
         }
         let mut module_ids = BTreeSet::new();
-        let mut contribution_ids = BTreeSet::new();
+        let mut contribution_identities = BTreeSet::new();
         let mut modules = BTreeMap::new();
 
         for module in input.modules {
@@ -446,11 +446,12 @@ impl ModuleControlService {
                 if contribution.id.trim().is_empty()
                     || !contribution.id.contains('.')
                     || contribution.kind.trim().is_empty()
-                    || !contribution_ids.insert(contribution.id.clone())
+                    || !contribution_identities
+                        .insert((contribution.kind.clone(), contribution.id.clone()))
                 {
                     return Err(snapshot_error(format!(
-                        "Contribution {} has an invalid or duplicate identity",
-                        contribution.id
+                        "Contribution {}:{} has an invalid or duplicate identity",
+                        contribution.kind, contribution.id
                     )));
                 }
                 contributions.push(ModuleContribution {
@@ -892,6 +893,53 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code == MODULE_ACTIVE));
         assert_eq!(service.status().revision_lag, Some(0));
+    }
+
+    #[test]
+    fn contribution_identity_includes_kind_and_id() {
+        let (_root, first_service, _artifact) = service();
+        let receipt = first_service
+            .publish_frontend_snapshot(FrontendRuntimeSnapshotInput {
+                schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+                modules: vec![FrontendModuleRuntimeInput {
+                    module_id: "shipctl.test".to_string(),
+                    contributions: vec![
+                        FrontendContributionInput {
+                            id: "test.message".to_string(),
+                            kind: "message_contract".to_string(),
+                        },
+                        FrontendContributionInput {
+                            id: "test.message".to_string(),
+                            kind: "message_handler".to_string(),
+                        },
+                    ],
+                }],
+                startup_modules: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(receipt.contribution_count, 2);
+
+        let (_root, second_service, _artifact) = service();
+        let error = second_service
+            .publish_frontend_snapshot(FrontendRuntimeSnapshotInput {
+                schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+                modules: vec![FrontendModuleRuntimeInput {
+                    module_id: "shipctl.test".to_string(),
+                    contributions: vec![
+                        FrontendContributionInput {
+                            id: "test.message".to_string(),
+                            kind: "message_contract".to_string(),
+                        },
+                        FrontendContributionInput {
+                            id: "test.message".to_string(),
+                            kind: "message_contract".to_string(),
+                        },
+                    ],
+                }],
+                startup_modules: Vec::new(),
+            })
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), SNAPSHOT_INVALID);
     }
 
     #[test]

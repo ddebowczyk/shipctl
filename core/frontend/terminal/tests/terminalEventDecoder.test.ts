@@ -57,6 +57,7 @@ function valueFor(field: string, shape: FieldContract): unknown {
           colors: {},
           damage: {},
           viewport: [],
+          selection: [],
         };
       }
       return {};
@@ -153,7 +154,7 @@ test("the semantic state is validated, not trusted", () => {
 });
 
 test("an occurrence without a kind is rejected", () => {
-  const payload = sample("screen");
+  const payload = sample("effects");
   payload.effects = [{ title: "no kind here" }];
   assert.throws(() => decodeTerminalEvent(payload), TerminalEventDecodeError);
   payload.effects = ["bell"];
@@ -163,10 +164,10 @@ test("an occurrence without a kind is rejected", () => {
 });
 
 test("occurrences keep the order the host reported", () => {
-  const payload = sample("screen");
+  const payload = sample("effects");
   payload.effects = [{ kind: "title", title: "one" }, { kind: "bell" }, { kind: "title", title: "two" }];
   const decoded = decodeTerminalEvent(payload);
-  assert.equal(decoded.event, "screen");
+  assert.equal(decoded.event, "effects");
   assert.deepEqual(
     decoded.effects.map((effect) => effect.kind),
     ["title", "bell", "title"],

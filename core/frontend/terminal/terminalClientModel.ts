@@ -227,6 +227,88 @@ function rowAt(raw: unknown, path: string): TerminalRowModel {
   };
 }
 
+function selectionAt(
+  raw: Record<string, unknown>,
+  rows: number,
+  columns: number,
+): readonly ReadonlySet<number>[] {
+  const selected = Array.from({ length: rows }, () => new Set<number>());
+  let previousRow = -1;
+  for (const [rowIndex, rawRow] of arrayAt(raw, "selection", "state").entries()) {
+    const selectionRow = objectAt(rawRow, `state.selection[${rowIndex}]`);
+    const row = countAt(selectionRow, "row", `state.selection[${rowIndex}]`);
+    if (row >= rows || row <= previousRow) {
+      reject(`state.selection[${rowIndex}].row is not a new row of this viewport`);
+    }
+    previousRow = row;
+    let previousEnd = 0;
+    for (const [spanIndex, rawSpan] of arrayAt(
+      selectionRow,
+      "spans",
+      `state.selection[${rowIndex}]`,
+    ).entries()) {
+      const path = `state.selection[${rowIndex}].spans[${spanIndex}]`;
+      const span = objectAt(rawSpan, path);
+      const start = countAt(span, "start", path);
+      const end = countAt(span, "end", path);
+      if (start < previousEnd || start >= end || end > columns) {
+        reject(`${path} is not a bounded, ordered selection span`);
+      }
+      for (let column = start; column < end; column += 1) selected[row].add(column);
+      previousEnd = end;
+    }
+  }
+  return selected;
+}
+
+function runRowAt(
+  raw: unknown,
+  path: string,
+  selected: ReadonlySet<number>,
+  columns: number,
+): TerminalRowModel {
+  const row = objectAt(raw, path);
+  const cells: TerminalCellModel[] = [];
+  for (const [runIndex, rawRun] of arrayAt(row, "runs", path).entries()) {
+    const runPath = `${path}.runs[${runIndex}]`;
+    const run = objectAt(rawRun, runPath);
+    const width = memberAt(run, "width", runPath, [
+      "narrow",
+      "wide",
+      "spacer_tail",
+      "spacer_head",
+    ]);
+    const bold = boolAt(run, "bold", runPath);
+    const foreground = optionalColorAt(run, "foreground", runPath);
+    const background = optionalColorAt(run, "background", runPath);
+    const hyperlink = run.hyperlink === undefined ? null : stringAt(run, "hyperlink", runPath);
+    const glyphs = arrayAt(run, "glyphs", runPath);
+    if (glyphs.length === 0) reject(`${runPath}.glyphs is empty`);
+    for (const [glyphIndex, glyph] of glyphs.entries()) {
+      if (typeof glyph !== "string") reject(`${runPath}.glyphs[${glyphIndex}] is not a string`);
+      const column = cells.length;
+      cells.push({
+        text: glyph,
+        width,
+        bold,
+        foreground,
+        background,
+        selected: selected.has(column),
+        hyperlink,
+      });
+    }
+  }
+  if (cells.length !== columns) {
+    reject(`${path} holds ${cells.length} cells and the host reported ${columns}`);
+  }
+  return {
+    wrapped: boolAt(row, "wrapped", path),
+    continuation: boolAt(row, "continuation", path),
+    prompt: memberAt(row, "prompt", path, ["none", "prompt", "prompt_continuation"]),
+    cells,
+  };
+}
+
 /**
  * Decode one host screen state, completely, or throw.
  *
@@ -241,8 +323,9 @@ export function decodeScreenState(raw: TerminalScreenState | unknown): TerminalS
   const damage = objectAt(state.damage, "state.damage");
   const columns = countAt(state, "columns", "state");
   const rows = countAt(state, "rows", "state");
+  const selection = selectionAt(state, rows, columns);
   const viewport = arrayAt(state, "viewport", "state").map((row, index) =>
-    rowAt(row, `state.viewport[${index}]`),
+    runRowAt(row, `state.viewport[${index}]`, selection[index], columns),
   );
   if (viewport.length !== rows) {
     reject(`state.viewport holds ${viewport.length} rows and the host reported ${rows}`);
@@ -436,7 +519,6 @@ export interface TerminalScreenFrame {
   readonly sequence: number;
   readonly revision: number;
   readonly state: TerminalScreenState | unknown;
-  readonly effects: readonly TerminalEffect[];
 }
 
 /** Where the client is looking. Renderer-independent: rows, never pixels. */
@@ -523,9 +605,6 @@ export class TerminalClientModel {
       if (!Number.isInteger(frame.revision) || frame.revision <= 0) {
         reject("the frame carries no revision");
       }
-      for (const [index, effect] of frame.effects.entries()) {
-        if (typeof effect?.kind !== "string") reject(`effects[${index}] has no kind`);
-      }
     } catch (error) {
       return {
         status: "rejected",
@@ -534,14 +613,12 @@ export class TerminalClientModel {
       };
     }
 
-    // Committed together: state and the occurrences that share its frame.
     this.#state = { screen, sequence: frame.sequence, revision: frame.revision };
     // The window was read against the screen this frame replaces. Whatever
     // pushed the screen on may have evicted lines, and eviction renumbers
     // history without saying so, so the rows held no longer answer for the
     // numbers they are filed under. They are read again rather than assumed.
     this.#history = null;
-    this.#effects.push(...frame.effects);
     for (const listener of [...this.#listeners]) listener(this.#state, screen.damage);
     return { status: "committed" };
   }
@@ -578,8 +655,30 @@ export class TerminalClientModel {
     // The whole state is replaced, and a history window read against the old
     // one is part of what it replaces.
     this.#history = null;
-    this.#effects.push(...frame.effects);
     for (const listener of [...this.#listeners]) listener(this.#state, FULL_REPAINT);
+    return { status: "committed" };
+  }
+
+  /** Commit ordered occurrences without coupling them to replaceable state. */
+  applyEffects(effects: readonly TerminalEffect[]): TerminalFrameOutcome {
+    if (this.#disposed) {
+      return { status: "rejected", reason: "invalid", detail: "the model is disposed" };
+    }
+    try {
+      for (const [index, effect] of effects.entries()) {
+        if (typeof effect?.kind !== "string") reject(`effects[${index}] has no kind`);
+      }
+    } catch (error) {
+      return {
+        status: "rejected",
+        reason: "invalid",
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+    this.#effects.push(...effects);
+    if (this.#state) {
+      for (const listener of [...this.#listeners]) listener(this.#state, { scope: "clean", rows: [] });
+    }
     return { status: "committed" };
   }
 

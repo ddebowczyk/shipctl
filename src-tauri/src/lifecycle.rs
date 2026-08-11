@@ -316,6 +316,17 @@ impl ControlHandler for TauriControlHandler {
             .map_err(terminal_control_error)
     }
 
+    fn terminal_credit_screen(
+        &self,
+        attachment_id: TerminalAttachmentId,
+        committed_sequence: u64,
+    ) -> Result<(), ControlError> {
+        self.app
+            .state::<TerminalService>()
+            .credit_screen(attachment_id, committed_sequence)
+            .map_err(terminal_control_error)
+    }
+
     fn terminal_detach(&self, attachment_id: TerminalAttachmentId) -> Result<(), ControlError> {
         self.app
             .state::<TerminalService>()

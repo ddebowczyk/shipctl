@@ -38,8 +38,8 @@ export default function TerminalView({ terminalId, visible }: TerminalViewProps)
   }, [terminalId]);
 
   useEffect(() => {
-    if (!visible) return;
-    bindingRef.current?.reveal();
+    if (visible) bindingRef.current?.reveal();
+    else bindingRef.current?.conceal();
   }, [terminalId, visible]);
 
   return (

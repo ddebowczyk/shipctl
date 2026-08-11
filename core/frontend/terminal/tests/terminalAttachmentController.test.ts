@@ -44,6 +44,7 @@ interface PendingAttach {
   deliver(event: TerminalEvent): void;
   resolve(options?: {
     attachmentId?: string;
+    live?: boolean;
     boundary?: number;
     bytes?: readonly number[];
     state?: TerminalScreenState | null;
@@ -57,6 +58,7 @@ class Harness {
   readonly attaches: PendingAttach[] = [];
   readonly scheduled: (() => void)[] = [];
   readonly errors: unknown[] = [];
+  readonly credits: [TerminalAttachmentId, number][] = [];
   hostAcceptsInput = true;
   hostInputOutcome: TerminalInputOutcome = { status: "accepted" };
 
@@ -68,6 +70,9 @@ class Harness {
       attach: (sink) => this.#attach(sink),
       detach: async (attachmentId) => {
         this.trace.push(`detach:${attachmentId}`);
+      },
+      creditScreen: async (attachmentId, committedSequence) => {
+        this.credits.push([attachmentId, committedSequence]);
       },
       observeDescriptor: (value) => {
         this.trace.push(`descriptor:${value.id}`);
@@ -119,10 +124,15 @@ class Harness {
       deliver: (event) => pending.buffered.push(event),
       resolve: (options = {}) => {
         const attachmentId = (options.attachmentId ?? id) as TerminalAttachmentId;
+        const live = options.live ?? true;
         resolveLease({
           attachmentId,
+          live,
           snapshot: {
-            descriptor: descriptor(attachmentId),
+            descriptor: {
+              ...descriptor(attachmentId),
+              lifecycle: live ? "running" : "exited",
+            },
             sequenceBoundary: options.boundary ?? 10,
             replay: replay(options.bytes ?? [27]),
             state: options.state ?? null,
@@ -430,6 +440,22 @@ test("an exit closes input while the attachment stays open", async () => {
   assert.equal(controller.attachmentId, "attachment-1", "an exit does not reattach");
 });
 
+test("an exit followed by detach is terminal, not a recovery request", async () => {
+  const { harness } = await attached();
+  const sink = harness.latestAttach().sink;
+
+  sink({
+    event: "exited",
+    sequence: 11,
+    descriptor: { ...descriptor("attachment-1"), lifecycle: "exited" },
+  } as TerminalEvent);
+  sink({ event: "detached", sequence: 12, reason: "process exited" } as TerminalEvent);
+  await harness.drain();
+
+  assert.equal(harness.attaches.length, 1, "a completed process cannot be reattached as live");
+  assert.equal(harness.errors.length, 0);
+});
+
 test("input submitted with no attachment never reaches the host", async () => {
   const harness = new Harness();
   const controller = new TerminalAttachmentController(harness.ports);
@@ -493,14 +519,14 @@ test("starting an attached controller does not open a second attachment", async 
  */
 const hostFixture = JSON.parse(
   readFileSync(new URL("../terminalScreenFixture.json", import.meta.url), "utf8"),
-) as { readonly state: TerminalScreenState; readonly effects: readonly TerminalEffect[] };
+) as { readonly state: TerminalScreenState };
 
 function hostState(): TerminalScreenState {
   return structuredClone(hostFixture.state);
 }
 
 function screen(sequence: number, state: TerminalScreenState = hostState()): TerminalEvent {
-  return { event: "screen", sequence, revision: 5, state, effects: [{ kind: "bell" }] } as unknown as TerminalEvent;
+  return { event: "screen", sequence, revision: 5, state } as unknown as TerminalEvent;
 }
 
 async function attachedSemantic(): Promise<{
@@ -539,9 +565,33 @@ test("a semantic attachment starts from state and installs no bytes", async () =
   );
 });
 
+test("a final read-only semantic attachment does not grant credit or recover", async () => {
+  const model = new TerminalClientModel();
+  const harness = new Harness(model);
+  const controller = new TerminalAttachmentController(harness.ports);
+  controller.setScreenDemand(true);
+
+  void controller.start();
+  await settle();
+  harness.hostAcceptsInput = false;
+  harness.latestAttach().resolve({ live: false, boundary: 10, state: hostState() });
+  await harness.drain();
+
+  assert.equal(controller.attached, true, "the final screen stays readable");
+  assert.equal(controller.acceptsInput(), false);
+  assert.deepEqual(harness.credits, [], "an exited terminal has no subscriber to credit");
+  assert.equal(harness.attaches.length, 1, "the final snapshot cannot start a recovery loop");
+  assert.equal(harness.errors.length, 0);
+});
+
 test("a semantic frame commits to the model and no bytes reach the surface", async () => {
   const { harness, model } = await attachedSemantic();
   harness.latestAttach().sink(screen(11));
+  harness.latestAttach().sink({
+    event: "effects",
+    sequence: 11,
+    effects: [{ kind: "bell" }],
+  });
 
   assert.equal(model.state?.sequence, 11);
   assert.deepEqual(
@@ -558,7 +608,7 @@ test("a semantic frame commits to the model and no bytes reach the surface", asy
 test("a frame the model refuses asks for a baseline instead of a next frame", async () => {
   const { harness, model } = await attachedSemantic();
   const broken = hostState() as unknown as Record<string, any>;
-  broken.viewport[0].cells[0].width = "huge";
+  broken.viewport[0].runs[0].width = "huge";
 
   harness.latestAttach().sink(screen(11, broken as unknown as TerminalScreenState));
 

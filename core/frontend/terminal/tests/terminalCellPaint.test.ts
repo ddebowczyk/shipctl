@@ -72,8 +72,8 @@ test("the span of a grapheme does not follow the length of its text", () => {
   // that measured text would get wrong in the opposite direction: a wide cell
   // holding one code point, and a narrow cell holding four.
   const screen = hostScreen((state) => {
-    state.viewport[1].cells[0].text = "x";
-    state.viewport[1].cells[2].text = "á̂̃";
+    state.viewport[1].runs[0].glyphs[0] = "x";
+    state.viewport[1].runs[2].glyphs[0] = "á̂̃";
   });
   const plan = planTerminalPaint(screen, { metrics: METRICS, repaint: "full" });
   const [wide, rest] = spansOn(plan, 1);

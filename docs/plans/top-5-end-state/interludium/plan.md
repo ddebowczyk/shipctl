@@ -147,3 +147,34 @@ This intervention is complete when:
 This sequence fixes representation and demand first. It preserves the existing
 model and painter. It postpones binary codecs and sophisticated deltas until
 evidence requires them.
+
+## Execution result — 2026-08-11
+
+This interlude is implemented and proved for compact JSON. The exact packaged
+transcript is filed at
+`research/notes/terminal-compact-json-packaged-profile-20260811-1349.md`.
+
+- The complete run wire contract preserves host cell boundaries and all screen
+  facts, and the decoder rejects malformed frames before model mutation.
+- Publication is credit-driven. A rapid 2,000-line run produced 69 PTY reads,
+  71 screen changes, and 51 projections and encodes.
+- One attachment held at most one screen transaction. Three later screen
+  changes did not change its queued transaction count or bytes, and recovery
+  resumed two sequences ahead.
+- Hidden output produced five screen changes with no projection, encode, model
+  commit, or paint after the protocol-derived one outstanding credit was
+  consumed.
+- Two attachments shared one projection and one 3,694-byte JSON encoding.
+- The mounted workload encoded 205,134 screen bytes in total and observed a
+  15,143-byte peak screen queue. This removes the former 185–956 KB-per-frame
+  amplification as the reason to consider binary.
+
+Raw binary is postponed. Compact JSON has not shown a material wire problem.
+The mounted run did sample one 770 ms frame gap that its decode, model-commit,
+and paint timers do not explain. A long-task or event-dispatch profile is the
+next performance investigation; it is separate from the completed compact-wire
+intervention and must not become an invented frame threshold.
+
+Area 05 remains blocked. GPU-loss recovery skipped on the mounted canvas, and
+other area-04 manual proofs remain open. The byte rollback path must stay until
+those blockers close.

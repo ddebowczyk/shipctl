@@ -107,6 +107,7 @@ function screenState(raw: Record<string, unknown>, field: string): TerminalScree
   nested(state, "colors");
   nested(state, "damage");
   array(state, "viewport");
+  array(state, "selection");
   return state as unknown as TerminalScreenState;
 }
 
@@ -145,6 +146,7 @@ export const TERMINAL_EVENT_TAGS = [
   "output",
   "replay",
   "screen",
+  "effects",
   "metadata_changed",
   "agent_activity_changed",
   "exited",
@@ -194,6 +196,11 @@ export function decodeTerminalEvent(raw: unknown): TerminalEvent {
         sequence: exactCounter(payload, "sequence"),
         revision: exactCounter(payload, "revision") as TerminalRevision,
         state: screenState(payload, "state"),
+      };
+    case "effects":
+      return {
+        event: "effects",
+        sequence: exactCounter(payload, "sequence"),
         effects: effects(payload, "effects"),
       };
     case "metadata_changed":

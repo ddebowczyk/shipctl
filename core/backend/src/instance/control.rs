@@ -200,6 +200,13 @@ pub trait ControlHandler: Send + Sync + 'static {
     ) -> Result<TerminalAttachment, ControlError> {
         Err(terminal_control_unavailable())
     }
+    fn terminal_credit_screen(
+        &self,
+        _attachment_id: TerminalAttachmentId,
+        _committed_sequence: u64,
+    ) -> Result<(), ControlError> {
+        Err(terminal_control_unavailable())
+    }
     fn terminal_detach(&self, _attachment_id: TerminalAttachmentId) -> Result<(), ControlError> {
         Err(terminal_control_unavailable())
     }
@@ -1140,6 +1147,16 @@ fn handle_terminal_attachment(
         let _ = handler.terminal_detach(attachment.attachment_id);
         return Err(error);
     }
+    if encoding == TerminalTransport::Semantic {
+        if let Err(_error) = handler.terminal_credit_screen(
+            attachment.attachment_id,
+            attachment.snapshot.sequence_boundary,
+        ) {
+            closed.store(true, Ordering::SeqCst);
+            let _ = handler.terminal_detach(attachment.attachment_id);
+            return Err(std::io::Error::from(std::io::ErrorKind::Other));
+        }
+    }
     if !attachment.live {
         write_completion_frame(
             &mut writer_guard,
@@ -1233,7 +1250,6 @@ fn terminal_event_frame(
             sequence,
             revision,
             state,
-            effects,
         } => (
             TerminalControlEvent::Screen {
                 terminal_id,
@@ -1241,6 +1257,14 @@ fn terminal_event_frame(
                 sequence,
                 revision,
                 state,
+            },
+            false,
+        ),
+        TerminalEvent::Effects { sequence, effects } => (
+            TerminalControlEvent::Effects {
+                terminal_id,
+                attachment_id,
+                sequence,
                 effects,
             },
             false,
@@ -2592,6 +2616,12 @@ fn terminal_event_identity(
             sequence,
             ..
         }
+        | TerminalControlEvent::Effects {
+            terminal_id,
+            attachment_id,
+            sequence,
+            ..
+        }
         | TerminalControlEvent::MetadataChanged {
             terminal_id,
             attachment_id,
@@ -3172,6 +3202,16 @@ mod tests {
         ) -> Result<TerminalAttachment, ControlError> {
             self.terminals
                 .attach_with(id, sink, false, encoding)
+                .map_err(terminal_control_error)
+        }
+
+        fn terminal_credit_screen(
+            &self,
+            attachment_id: TerminalAttachmentId,
+            committed_sequence: u64,
+        ) -> Result<(), ControlError> {
+            self.terminals
+                .credit_screen(attachment_id, committed_sequence)
                 .map_err(terminal_control_error)
         }
 
@@ -3817,11 +3857,34 @@ mod tests {
         assert!(seen_screens > 0);
         // The state is presentable as it stands: the CLI painter turns it into
         // local output with no access to what the child wrote.
-        let output = crate::terminal::painter::paint(&painted);
+        let output = crate::terminal::painter::paint_snapshot(&painted);
         assert!(
             String::from_utf8_lossy(&output).contains("seen:over-the-socket"),
             "the painted picture does not show what the host holds"
         );
+
+        // A painter is not a one-frame client. State is paced by demand now, so
+        // the second line proves the server keeps asking for the next state on
+        // this attachment's behalf; a client that never writes on this
+        // connection has no other way to ask.
+        directory
+            .write_terminal("terminal-semantic", terminal.id, b"and-the-next-line\n")
+            .unwrap();
+        loop {
+            match semantic.next_event().unwrap() {
+                Some(TerminalControlEvent::Screen { state, .. }) => {
+                    if state
+                        .viewport
+                        .iter()
+                        .any(|row| row.text().contains("seen:and-the-next-line"))
+                    {
+                        break;
+                    }
+                }
+                Some(_) => continue,
+                None => panic!("the semantic attachment ended before the second line arrived"),
+            }
+        }
 
         handler.terminals.close(terminal.id).unwrap();
         drop(server);

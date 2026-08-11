@@ -72,6 +72,30 @@ test("scrolling down follows output again only once the end is reached", () => {
   assert.equal(h.pin.pinnedToBottom, true);
 });
 
+test("the default scheduler calls WebKit's queueMicrotask with its global receiver", async (t) => {
+  const original = globalThis.queueMicrotask;
+  let receiver: unknown;
+  globalThis.queueMicrotask = function (
+    this: typeof globalThis,
+    task: () => void,
+  ): void {
+    receiver = this;
+    original.call(globalThis, task);
+  };
+  t.after(() => {
+    globalThis.queueMicrotask = original;
+  });
+
+  const surface = new FakeSurface();
+  surface.bottom = 0;
+  const pin = new TerminalViewportPin(surface);
+  pin.noteWheel(1);
+  await new Promise<void>((resolve) => original.call(globalThis, resolve));
+
+  assert.equal(receiver, globalThis);
+  assert.equal(pin.pinnedToBottom, true);
+});
+
 test("a backward viewport key with no scrollback keeps following output", () => {
   const h = new Harness();
 

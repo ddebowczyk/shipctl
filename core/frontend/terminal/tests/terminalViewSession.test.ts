@@ -417,6 +417,26 @@ test("input the host could not take is reported", async () => {
 
   assert.deepEqual(h.notices, ["Couldn’t write to terminal: Error: pipe closed"]);
 
+  await h.type("b");
+  assert.deepEqual(
+    h.notices,
+    ["Couldn’t write to terminal: Error: pipe closed"],
+    "consecutive failures with one cause make one notice",
+  );
+
+  h.inputOutcome = { status: "accepted" };
+  await h.type("c");
+  h.inputOutcome = { status: "failed", error: new Error("pipe closed") };
+  await h.type("d");
+  assert.deepEqual(
+    h.notices,
+    [
+      "Couldn’t write to terminal: Error: pipe closed",
+      "Couldn’t write to terminal: Error: pipe closed",
+    ],
+    "an accepted input closes the failure and a later occurrence is reported",
+  );
+
   session.dispose();
 });
 

@@ -68,6 +68,7 @@ export interface TerminalSettings {
   fontFamily: string;
   fontSize: number;
   urlAllowlist: string[];
+  confirmUnsafePaste: boolean;
 }
 
 /**

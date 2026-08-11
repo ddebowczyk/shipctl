@@ -6,6 +6,7 @@ import {
   anchorTerminal,
   attachTerminal,
   closeTerminal,
+  creditTerminalScreen,
   detachTerminal,
   getErrorCode,
   listTerminals,
@@ -23,6 +24,7 @@ import {
   type TerminalRegistrySubscription,
 } from "@shipctl/core/platform";
 import type { TerminalInput } from "./terminalSemanticInput.ts";
+import { recordTerminalClientMetric } from "./terminalPerformanceMetrics.ts";
 import { useTerminalStore } from "./useTerminalStore.ts";
 import {
   publishTerminalClosed,
@@ -75,6 +77,7 @@ export interface TerminalHostPort {
     transport: TerminalTransport,
   ): Promise<TerminalAttachmentHandle>;
   detach(attachmentId: TerminalAttachmentId): Promise<void>;
+  creditScreen(attachmentId: TerminalAttachmentId, committedSequence: number): Promise<void>;
   write(terminalId: TerminalId, data: string | Uint8Array): Promise<void>;
   /** Semantic input. Answers how many bytes the child's modes made of it. */
   input(terminalId: TerminalId, input: TerminalInput): Promise<number>;
@@ -114,6 +117,7 @@ const TAURI_TERMINAL_HOST: TerminalHostPort = {
   subscribeRegistry: subscribeTerminalRegistry,
   attach: attachTerminal,
   detach: detachTerminal,
+  creditScreen: creditTerminalScreen,
   write: writeTerminal,
   input: inputTerminal,
   history: historyTerminal,
@@ -153,6 +157,8 @@ export class TerminalClientRuntime {
   #removals = new Map<TerminalId, number>();
   /** Terminals whose exit has been announced to modules exactly once. */
   #announcedExit = new Set<TerminalId>();
+  /** Clean core shells whose host removal has already been requested. */
+  #retiringCleanExit = new Set<TerminalId>();
   #observation = 0;
   #registrySubscription: TerminalRegistrySubscription | null = null;
   #registryStarting: Promise<void> | null = null;
@@ -265,13 +271,20 @@ export class TerminalClientRuntime {
       createTerminalAttachmentBootstrap((event) => {
         this.observeEvent(terminalId, event);
         onEvent(event);
-      }),
+      }, (milliseconds) => recordTerminalClientMetric(terminalId, "decode", milliseconds)),
       transport,
     );
   }
 
   detach(attachmentId: TerminalAttachmentId): Promise<void> {
     return this.#host.detach(attachmentId);
+  }
+
+  creditScreen(
+    attachmentId: TerminalAttachmentId,
+    committedSequence: number,
+  ): Promise<void> {
+    return this.#host.creditScreen(attachmentId, committedSequence);
   }
 
   /**
@@ -422,6 +435,7 @@ export class TerminalClientRuntime {
     this.#removals.delete(descriptor.id);
     useTerminalStore.getState().upsertTerminalDescriptor(merged);
     this.#publishProjection(merged, event);
+    this.#retireCleanCoreExit(merged);
     return true;
   }
 
@@ -432,6 +446,7 @@ export class TerminalClientRuntime {
     this.#removals.set(terminalId, ++this.#observation);
     this.#descriptors.delete(terminalId);
     this.#announcedExit.delete(terminalId);
+    this.#retiringCleanExit.delete(terminalId);
     useTerminalStore.getState().removeTerminalDescriptor(terminalId);
     if (!descriptor) return false;
     publishTerminalClosed(descriptor);
@@ -489,8 +504,39 @@ export class TerminalClientRuntime {
       else if (prior.revision < descriptor.revision) {
         this.#publishProjection(descriptor, "updated");
       }
+      this.#retireCleanCoreExit(descriptor);
     }
     return descriptors;
+  }
+
+  /**
+   * Remove a normal interactive shell after its child exits successfully.
+   *
+   * The host stays authoritative: this asks its existing idempotent close
+   * operation to remove the retained record, and the registry's `removed`
+   * event removes the tab. Module sessions keep their owner lifecycle, and a
+   * non-zero exit keeps its final screen for diagnosis.
+   */
+  #retireCleanCoreExit(descriptor: TerminalDescriptor): void {
+    if (
+      descriptor.lifecycle !== "exited"
+      || descriptor.exit?.reason !== "process_exit"
+      || descriptor.exit.code !== 0
+      || descriptor.metadata.owner.type !== "core"
+      || this.#retiringCleanExit.has(descriptor.id)
+    ) return;
+
+    this.#retiringCleanExit.add(descriptor.id);
+    void this.close(descriptor.id).then((outcome) => {
+      if (outcome.status === "unconfirmed") {
+        this.#retiringCleanExit.delete(descriptor.id);
+      }
+    }).catch((error: unknown) => {
+      this.#retiringCleanExit.delete(descriptor.id);
+      if (import.meta.env?.DEV) {
+        console.error("Failed to retire cleanly exited terminal:", error);
+      }
+    });
   }
 
   /** Module lifecycle events follow committed transitions, and exit once. */
