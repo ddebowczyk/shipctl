@@ -6,7 +6,7 @@ use shipctl_core::instance::control::terminal_control_error;
 use shipctl_core::instance::{
     ActiveWorkBlocker, CapabilityCommand, ControlError, ControlHandler, ControlRequestId,
     ControlResponseResult, ControlStream, MessageCommand, ModuleCommand, ModuleControlStatus,
-    OperationCommand, ScheduleCommand, TerminalInspectResult,
+    OperationCommand, ScheduleCommand,
 };
 use shipctl_core::message_bus::{
     diagnose_message_runtime, MessageBusBridgeService, MessageModuleInspection,
@@ -18,10 +18,9 @@ use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::projects::watcher::GitWatcher;
 use shipctl_core::scheduler::{SchedulerControlError, SchedulerService};
 use shipctl_core::state::archive::{StateArchiveInspection, StateArchiveService};
-use shipctl_core::terminal::{
-    TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachment, TerminalAttachmentId,
-    TerminalCloseResult, TerminalDescriptor, TerminalEventSink, TerminalId, TerminalService,
-    TerminalTransport,
+use shipctl_core::terminal_host::{
+    TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachmentId, TerminalCloseResult,
+    TerminalDescriptor, TerminalEventSink, TerminalId, TerminalRawAttachment, TerminalService,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -214,58 +213,14 @@ impl ControlHandler for TauriControlHandler {
             .map_err(terminal_control_error)
     }
 
-    fn terminal_inspect(&self, id: TerminalId) -> Result<TerminalInspectResult, ControlError> {
-        let terminals = self.app.state::<TerminalService>();
-        Ok(TerminalInspectResult {
-            terminal_id: id,
-            descriptor: terminals.get(id).map_err(terminal_control_error)?,
-            projection: terminals.project(id).map_err(terminal_control_error)?,
-        })
-    }
-
-    fn terminal_history(
+    fn terminal_driver_request(
         &self,
         id: TerminalId,
-        start_row: u32,
-        rows: u32,
-    ) -> Result<shipctl_core::terminal::projection::TerminalHistoryWindow, ControlError> {
+        request: serde_json::Value,
+    ) -> Result<serde_json::Value, ControlError> {
         self.app
             .state::<TerminalService>()
-            .project_history(id, start_row, rows)
-            .map_err(terminal_control_error)
-    }
-
-    fn terminal_anchor(
-        &self,
-        id: TerminalId,
-        space: shipctl_core::terminal::projection::ProjectedSpace,
-        at: shipctl_core::terminal::projection::ProjectedPoint,
-    ) -> Result<shipctl_core::terminal::projection::TerminalAnchor, ControlError> {
-        self.app
-            .state::<TerminalService>()
-            .anchor(id, space, at)
-            .map_err(terminal_control_error)
-    }
-
-    fn terminal_resolve_anchor(
-        &self,
-        id: TerminalId,
-        anchor: shipctl_core::terminal::projection::TerminalAnchorId,
-    ) -> Result<Option<shipctl_core::terminal::projection::TerminalAnchor>, ControlError> {
-        self.app
-            .state::<TerminalService>()
-            .resolve_anchor(id, anchor)
-            .map_err(terminal_control_error)
-    }
-
-    fn terminal_release_anchor(
-        &self,
-        id: TerminalId,
-        anchor: shipctl_core::terminal::projection::TerminalAnchorId,
-    ) -> Result<bool, ControlError> {
-        self.app
-            .state::<TerminalService>()
-            .release_anchor(id, anchor)
+            .request_driver(id, request)
             .map_err(terminal_control_error)
     }
 
@@ -293,37 +248,14 @@ impl ControlHandler for TauriControlHandler {
             .map_err(terminal_control_error)
     }
 
-    fn terminal_input(
-        &self,
-        id: TerminalId,
-        input: shipctl_core::terminal::input::TerminalInput,
-    ) -> Result<usize, ControlError> {
-        self.app
-            .state::<TerminalService>()
-            .input(id, input)
-            .map_err(terminal_control_error)
-    }
-
-    fn terminal_attach(
+    fn terminal_attach_raw(
         &self,
         id: TerminalId,
         sink: Arc<dyn TerminalEventSink>,
-        encoding: TerminalTransport,
-    ) -> Result<TerminalAttachment, ControlError> {
+    ) -> Result<TerminalRawAttachment, ControlError> {
         self.app
             .state::<TerminalService>()
-            .attach_with(id, sink, false, encoding)
-            .map_err(terminal_control_error)
-    }
-
-    fn terminal_credit_screen(
-        &self,
-        attachment_id: TerminalAttachmentId,
-        committed_sequence: u64,
-    ) -> Result<(), ControlError> {
-        self.app
-            .state::<TerminalService>()
-            .credit_screen(attachment_id, committed_sequence)
+            .attach_raw(id, sink, false)
             .map_err(terminal_control_error)
     }
 

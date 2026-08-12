@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { useTerminalStore } from "../terminal/index.ts";
+import { useTerminalStore } from "../terminal-host/index.ts";
 import { useUIStore } from "../shared/index.ts";
 import { Circle, FolderInput, FolderTree, GitBranch, List, PanelsTopLeft, SquareTerminal } from "lucide-react";
-import type { PanelContribution } from "@shipctl/module-api";
+import { terminalDriverId, type PanelContribution, type TerminalDriverId } from "@shipctl/module-api";
 import { handleActionKey } from "../shared/index.ts";
 import { useRepoStore } from "../projects/index.ts";
 import {
@@ -27,7 +27,7 @@ function panelIcon(panel: PanelContribution, size: number) {
   return <Icon size={size} />;
 }
 
-function NewSessionButton({ onNewShell, panels, onOpenPanel, onOpenInEditor }: { onNewShell: () => void; panels: readonly PanelContribution[]; onOpenPanel: (panel: PanelContribution) => void; onOpenInEditor: () => void }) {
+function NewSessionButton({ onNewTerminal, panels, onOpenPanel, onOpenInEditor }: { onNewTerminal: (driverId: TerminalDriverId) => void; panels: readonly PanelContribution[]; onOpenPanel: (panel: PanelContribution) => void; onOpenInEditor: () => void }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -48,7 +48,16 @@ function NewSessionButton({ onNewShell, panels, onOpenPanel, onOpenInEditor }: {
   }, [open]);
 
   const menuItems = [
-    { key: "terminal", meta: tabKindMeta.terminal, action: onNewShell },
+    {
+      key: "semantic-terminal",
+      meta: { ...tabKindMeta.terminal, label: "Semantic terminal" },
+      action: () => onNewTerminal(terminalDriverId("semantic-terminal")),
+    },
+    {
+      key: "thin-terminal",
+      meta: { ...tabKindMeta.terminal, label: "TTY terminal" },
+      action: () => onNewTerminal(terminalDriverId("thin-terminal")),
+    },
     ...panels
       .filter((panel) => panel.scope === "project" && panel.newSession)
       .sort((left, right) => (left.newSession?.order ?? 0) - (right.newSession?.order ?? 0))
@@ -123,7 +132,7 @@ function TabIcon({ tab, panels }: { tab: UnifiedTab; panels: readonly PanelContr
 
 interface TabBarProps {
   onClose: (tabId: string) => void;
-  onNewShell: () => void;
+  onNewTerminal: (driverId: TerminalDriverId) => void;
   panels: readonly PanelContribution[];
   onOpenPanel: (panel: PanelContribution) => void;
   onOpenInEditor: () => void;
@@ -134,7 +143,7 @@ interface TabBarProps {
 
 export default function TabBar({
   onClose,
-  onNewShell,
+  onNewTerminal,
   panels,
   onOpenPanel,
   onOpenInEditor,
@@ -376,7 +385,7 @@ export default function TabBar({
           );
         })}
 
-        <NewSessionButton onNewShell={onNewShell} panels={panels} onOpenPanel={onOpenPanel} onOpenInEditor={onOpenInEditor} />
+        <NewSessionButton onNewTerminal={onNewTerminal} panels={panels} onOpenPanel={onOpenPanel} onOpenInEditor={onOpenInEditor} />
       </div>
       {projectName && (
         <span className="tab-bar__breadcrumb">

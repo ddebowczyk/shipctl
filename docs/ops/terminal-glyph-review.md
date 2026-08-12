@@ -10,7 +10,7 @@ base glyph, that a fallback font is legible, or that a wide cell looked wide.
 Those are perceptual facts, and a reader is the instrument.
 
 This procedure is the proof cited by `unicode.glyph-fits-span` in
-`core/frontend/terminal/scenarios/capabilityRegister.ts`.
+`modules/semantic-terminal/frontend/src/scenarios/capabilityRegister.ts`.
 
 ## When to run it
 

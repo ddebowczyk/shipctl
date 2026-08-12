@@ -14,25 +14,22 @@ const MODULE_PLATFORM_EVENT_LISTENERS = new Map([
 // needs the same treatment as a relative reach into src/.
 const HOST_PACKAGE = "@shipctl/core";
 const HOST_ROOTS = ["src", "core/frontend"];
-const COMPOSITION_FILES = new Set(["core/frontend/host/enabledModules.ts"]);
-const SRC_ENTRY_FILES = new Set(["src/main.tsx", "src/vite-env.d.ts"]);
-// The packaged-app scenario harness claims that the terminal surface can be
-// driven entirely through its port. That claim is only evidence if the
-// scenarios cannot reach past it, so the directory is held to its own siblings:
-// no xterm, no renderer, no DOM helper, no capability entrypoint. The one way
-// out is the dev-only entry, which loads the composition root that binds the
-// real surface — and that reach is named below rather than implied.
-const SCENARIO_ROOTS = ["core/frontend/terminal/scenarios"];
-const SCENARIO_IMPORT_EXCEPTIONS = new Set([
-  "core/frontend/terminal/scenarios/terminalScenarioEntry.ts->../terminalScenarioHost.ts",
+const COMPOSITION_FILES = new Set([
+  "core/frontend/host/enabledModules.ts",
 ]);
+const SRC_ENTRY_FILES = new Set(["src/main.tsx", "src/vite-env.d.ts"]);
+// Terminal scenario harnesses, when present, can only use their local contract
+// and the explicitly named composition entry. This preserves the port-only
+// rule without restoring the retired terminal capability.
+const SCENARIO_ROOTS = ["core/frontend/terminal-host/scenarios"];
+const SCENARIO_IMPORT_EXCEPTIONS = new Set();
 const CORE_DEEP_IMPORT_EXCEPTIONS = new Set([
-  "core/frontend/host/index.ts->terminal/terminalSessions.ts",
+  "core/frontend/host/index.ts->terminal-host/terminalSessions.ts",
   "core/frontend/host/moduleHostServices.ts->appearance/useThemeStore.ts",
   "core/frontend/host/moduleHostServices.ts->projects/useProjectSettingsStore.ts",
   "core/frontend/host/moduleHostServices.ts->projects/useRepoStore.ts",
-  "core/frontend/host/moduleHostServices.ts->terminal/terminalSessions.ts",
-  "core/frontend/host/moduleHostServices.ts->terminal/useTerminalStore.ts",
+  "core/frontend/host/moduleHostServices.ts->terminal-host/terminalSessions.ts",
+  "core/frontend/host/moduleHostServices.ts->terminal-host/useTerminalStore.ts",
   "core/frontend/host/projectFacts.ts->projects/projectFacts.ts",
 ]);
 

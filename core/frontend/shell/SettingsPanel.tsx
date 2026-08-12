@@ -3,17 +3,17 @@ import { getIdentifier, getName, getTauriVersion, getVersion } from "@tauri-apps
 import { Upload, ChevronDown, Check } from "lucide-react";
 import { EDITOR_OPTIONS } from "../settings/index.ts";
 import { DARK_THEMES, LIGHT_THEMES, TRANSPARENT_THEMES } from "../appearance/index.ts";
-import { KEYBINDING_PRESETS } from "../terminal/index.ts";
+import { KEYBINDING_PRESETS } from "../terminal-host/index.ts";
 import { useEditorStore } from "../settings/index.ts";
 import { useThemeStore } from "../appearance/index.ts";
-import { useKeybindingStore } from "../terminal/index.ts";
+import { useKeybindingStore } from "../terminal-host/index.ts";
 import { useProjectSettingsStore } from "../projects/index.ts";
 import { useRepoStore } from "../projects/index.ts";
 import {
   formatRetentionBudget,
   RETENTION_PRESET_BYTES,
   useTerminalSettingsStore,
-} from "../terminal/index.ts";
+} from "../terminal-host/index.ts";
 import { useUpdateStore } from "./useUpdateStore.ts";
 import {
   FONT_SIZE_OPTIONS,

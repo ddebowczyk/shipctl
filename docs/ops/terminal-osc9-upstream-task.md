@@ -12,9 +12,10 @@ gap 1.
 
 ## Why it is needed
 
-`core/frontend/terminal/TerminalView.tsx` registers an xterm OSC 9 handler and
-calls `notifyAgent`. Closure area 5 removes xterm as the parser, which removes
-that handler. The host must produce the payload instead, and the pinned
+The former xterm path was moved to
+`modules/thin-terminal/frontend/src/ThinTerminalPresentation.tsx`; it does not
+interpret OSC 9. The semantic-terminal module needs the parser to produce the
+payload instead, and the pinned
 `libghostty-vt` does not expose it.
 
 Two clocks, and they do not start together. The payload is *needed* at closure
@@ -122,13 +123,13 @@ bindings regenerated, and a safe `Terminal::on_*` wrapper added. Today
 6. Open the Ghostty pull request once vouched and accepted, with the AI
    disclosure.
 7. After the merge, bump the rev and open the `libghostty-rs` pull request.
-8. Bump `core/backend/Cargo.toml` and run the upgrade gate in
+8. Bump `modules/semantic-terminal/backend/Cargo.toml` and run the upgrade gate in
    [terminal-vt-dependency.md](terminal-vt-dependency.md).
 
 ## How this task ends
 
 `the_desktop_notification_payload_is_not_exposed` in
-`core/backend/src/terminal/compat.rs` asserts the limit, so it fails as soon as
+`modules/semantic-terminal/backend/src/compat.rs` asserts the limit, so it fails as soon as
 the payload becomes readable. That failure is the signal to delete the test,
 delete gap 1 from the dependency page, delete this file, and remove any local
 patch.

@@ -3,7 +3,9 @@ import { assistantsModule } from "@shipctl/module-assistants";
 import { commandsModule } from "@shipctl/module-commands";
 import { gitModule } from "@shipctl/module-git";
 import { portsModule } from "@shipctl/module-ports";
+import { semanticTerminalModule } from "@shipctl/module-semantic-terminal";
 import { skillsModule } from "@shipctl/module-skills";
+import { thinTerminalModule } from "@shipctl/module-thin-terminal";
 import { todosModule } from "@shipctl/module-todos";
 import { usageModule } from "@shipctl/module-usage";
 
@@ -18,5 +20,7 @@ export const ENABLED_MODULES = [
   ...(import.meta.env.VITE_SHIPCTL_COMMANDS_MODULE === "disabled" ? [] : [commandsModule]),
   todosModule,
   skillsModule,
+  semanticTerminalModule,
+  thinTerminalModule,
   ...(import.meta.env.VITE_SHIPCTL_GIT_MODULE === "disabled" ? [] : [gitModule]),
 ] as const satisfies readonly ShipctlModule[];

@@ -23,7 +23,7 @@ wrappers over that logic.
 ## What is *not* here
 
 `src-tauri/` is the Tauri shell and holds no capability logic. It has four files
-plus a `modules/` directory:
+plus a small module-composition directory:
 
 - `main.rs` — the binary entry point
 - `lib.rs` — builds the app: constructs the managers from this crate, puts them
@@ -32,21 +32,17 @@ plus a `modules/` directory:
 - `lifecycle.rs` — `shutdown_and_quit`, which spans the terminal capability, the
   projects watcher and the app handle at once, so it belongs to the composing
   shell rather than to any one capability
-- `modules/` — one file per pluggable module, each exposing a single
-  `host_services()` that bridges this crate's capabilities to that module's API,
-  behind its own feature flag
+- `modules/` — the feature-gated build inventory and the explicit plugin
+  composition list. Module-owned host adapters live in
+  `modules/<name>/host/`, beside the module they adapt.
 
-**An adapter in `src-tauri/src/modules/` exists only to hand over host-owned
-state.** The `TerminalService` qualifies: terminals live for the whole app and no
-module can own one. A module's own files, its own config, its own subprocesses
-do *not* qualify — those live in the module crate, even when they touch the
-filesystem or the Keychain. If a host-side authority trait would be implemented
-purely by free functions with no host state behind them, the functions belong in
-the module and the trait should not exist. `pi_config` was the worked example of
-getting this wrong: 210 lines of `~/.pi/agent` handling sat in `src-tauri/`
-behind a `PiConfigAuthority` trait, so the host depended on the module's types
-while the module depended on the host for the implementation. It now lives in
-`modules/assistants/backend/src/pi_config.rs` and the trait is gone.
+**A module-owned host adapter lives in `modules/<name>/host/`.** It translates
+host services, such as `TerminalService`, to the module's narrow authority
+traits and exposes `install(...)`. The shell calls that public function but
+does not contain the adapter implementation. A module's own files, config, and
+subprocesses remain in its module crate. Tauri ACL manifests are the one build
+constraint: the app crate keeps each installed plugin as a direct optional
+dependency so `tauri::generate_context!()` can discover its permissions.
 
 If a change to `src-tauri/src/*.rs` is about *what the app does* rather than
 *how it is assembled*, it is in the wrong crate.

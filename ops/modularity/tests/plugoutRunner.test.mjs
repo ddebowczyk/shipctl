@@ -83,7 +83,6 @@ for (const id of ["todos", "ports", "skills", "git", "commands", "assistants", "
       "core/frontend/host/enabledModules.ts",
       "src-tauri/Cargo.toml",
       "src-tauri/src/lib.rs",
-      "src-tauri/src/modules/git.rs",
       "src-tauri/src/modules/mod.rs",
       "src-tauri/tauri.conf.json",
       "profiles",
@@ -98,7 +97,6 @@ for (const id of ["todos", "ports", "skills", "git", "commands", "assistants", "
     if (manifest.profile && !manifest.profile.includes("-disabled/")) {
       copy(root, "ops/modularity/fixtures/module-fixture");
     }
-    for (const hostGlue of manifest.backend?.host_glue ?? []) copy(root, hostGlue);
 
     prepareSourceAbsent(root, manifest);
     assertSourceAbsent(root, manifest);
@@ -107,8 +105,8 @@ for (const id of ["todos", "ports", "skills", "git", "commands", "assistants", "
     if (manifest.profile) {
       assert.equal(existsSync(path.join(root, path.dirname(manifest.profile))), false);
     }
-    for (const hostGlue of manifest.backend?.host_glue ?? []) {
-      assert.equal(existsSync(path.join(root, hostGlue)), false);
+    if (manifest.backend?.host) {
+      assert.equal(existsSync(path.join(root, manifest.backend.host.path)), false);
     }
   });
 }

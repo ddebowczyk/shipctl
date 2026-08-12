@@ -1,0 +1,17 @@
+[package]
+name = "shipctl-module-usage-host"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "shipctl_module_usage_host"
+path = "src/lib.rs"
+
+[dependencies]
+shipctl-core = { path = "../../../core/backend" }
+shipctl-module-api = { path = "../../api/backend" }
+shipctl-module-usage = { package = "tauri-plugin-shipctl-usage", path = "../backend" }
+serde_json = "1.0"
+tauri = { version = "2.11.5", default-features = false }

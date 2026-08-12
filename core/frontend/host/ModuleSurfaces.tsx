@@ -15,7 +15,7 @@ import type {
 } from "@shipctl/module-api";
 
 import { contributedPanelTabId } from "@shipctl/core/platform";
-import { useTerminalStore } from "@shipctl/core/terminal";
+import { useTerminalStore } from "@shipctl/core/terminal-host";
 import { useUIStore } from "@shipctl/core/shared";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";
 import {

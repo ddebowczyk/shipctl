@@ -12,7 +12,7 @@ properties of the platform's input method and the webview together — and both
 differ per platform.
 
 This procedure is the proof cited by `input.ime` in
-`core/frontend/terminal/scenarios/capabilityRegister.ts`.
+`modules/semantic-terminal/frontend/src/scenarios/capabilityRegister.ts`.
 
 ## When to run it
 

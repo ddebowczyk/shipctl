@@ -16,11 +16,12 @@ import { useNoticeStore } from "../shared/useNoticeStore.ts";
 import { useProjectSettingsStore } from "../projects/useProjectSettingsStore.ts";
 import { useRepoStore } from "../projects/useRepoStore.ts";
 import { useThemeStore } from "../appearance/useThemeStore.ts";
-import { useTerminalStore } from "../terminal/useTerminalStore.ts";
+import { useTerminalStore } from "../terminal-host/useTerminalStore.ts";
 import { modulePanelContributions, moduleSkillsProvider } from "./moduleComposition.ts";
 import { createProjectCapabilityDataPort } from "./projectCapabilityData.ts";
 import { createGlobalCapabilityDataPort } from "./globalCapabilityData.ts";
-import { MODULE_TERMINAL_SESSIONS } from "../terminal/terminalSessions.ts";
+import { MODULE_TERMINAL_SESSIONS } from "../terminal-host/terminalSessions.ts";
+import { terminalPresentationPort } from "@shipctl/core/terminal-host";
 
 let settingsSource: ReturnType<typeof useProjectSettingsStore.getState> | null = null;
 let settingsSnapshot: ModuleSettingsSnapshot = {
@@ -105,6 +106,7 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
   globalData,
   projectData,
   terminalSessions: MODULE_TERMINAL_SESSIONS,
+  terminalPresentation: terminalPresentationPort,
   settings: {
     getSnapshot: getSettingsSnapshot,
     subscribe: (listener) => useProjectSettingsStore.subscribe(listener),

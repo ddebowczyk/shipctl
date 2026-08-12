@@ -320,11 +320,11 @@ test("generic host project chrome has no direct Git state dependency", () => {
     "../../../../core/frontend/shell/AppShell.tsx",
     "../../../../core/frontend/shell/TabBar.tsx",
     "../../../../core/frontend/projects/projectMoveMenu.tsx",
-    "../../../../core/frontend/terminal/AgentSessionList.tsx",
+    "../../../../core/frontend/terminal-host/AgentSessionList.tsx",
     "../../../../core/frontend/host/ModuleSessionButton.tsx",
     "../../../../core/frontend/projects/ProjectList.tsx",
     "../../../../core/frontend/shell/Sidebar.tsx",
-    "../../../../core/frontend/terminal/TerminalItem.tsx",
+    "../../../../core/frontend/terminal-host/TerminalItem.tsx",
     "../../../../core/frontend/projects/useProjectWatcher.ts",
     "../../../../core/frontend/projects/projectGrouping.ts",
   ];

@@ -36,12 +36,19 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
         .build()?;
 
     // -- File --
-    let new_terminal = MenuItem::with_id(
+    let new_semantic_terminal = MenuItem::with_id(
         app,
-        "new_terminal",
-        "New Terminal",
+        "new_semantic_terminal",
+        "New Semantic Terminal",
         true,
         Some("CmdOrCtrl+T"),
+    )?;
+    let new_thin_terminal = MenuItem::with_id(
+        app,
+        "new_thin_terminal",
+        "New Thin Terminal",
+        true,
+        Some("CmdOrCtrl+Alt+T"),
     )?;
     let new_session = MenuItem::with_id(
         app,
@@ -66,7 +73,8 @@ pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
     )?;
 
     let file_menu = SubmenuBuilder::new(app, "File")
-        .item(&new_terminal)
+        .item(&new_semantic_terminal)
+        .item(&new_thin_terminal)
         .item(&new_session)
         .item(&new_commands)
         .separator()

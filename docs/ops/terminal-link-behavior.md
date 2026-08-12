@@ -4,7 +4,7 @@ Shipctl's terminal makes a link out of what the host marked as a link, and
 nothing else. A URL written in plain output stays plain text.
 
 This page is the recorded decision behind the `links.plain-text` entry in
-`core/frontend/terminal/scenarios/capabilityRegister.ts`, whose disposition is
+`modules/semantic-terminal/frontend/src/scenarios/capabilityRegister.ts`, whose disposition is
 `changed`.
 
 ## The decision
@@ -25,8 +25,8 @@ select and copy, like any other text.
 OSC 8 hyperlinks are unaffected. A program that marks a link gets a link: the
 host projects the marked run, the client paints its underline, and a click
 opens it through the platform opener. That path is covered by
-`core/frontend/terminal/tests/terminalLinkTargets.test.ts` and
-`core/frontend/terminal/tests/terminalPointerRouter.test.ts`.
+`modules/semantic-terminal/frontend/src/presentation/terminalLinkTargets.ts` and
+`modules/semantic-terminal/frontend/src/presentation/terminalPointerRouter.ts`.
 
 ## Why the behavior was not reproduced
 

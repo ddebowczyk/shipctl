@@ -12,8 +12,8 @@ The evidence is executable and lives in the code:
 
 | Evidence | Location |
 |---|---|
-| Semantic compatibility corpus | `core/backend/src/terminal/compat.rs` |
-| Measured retention behavior | `core/backend/src/terminal/retention.rs` |
+| Semantic compatibility corpus | `modules/semantic-terminal/backend/src/compat.rs` |
+| Measured retention behavior | `modules/semantic-terminal/backend/src/retention.rs` |
 | Replay round-trip proof | `research/20260809-124553-fut-tty/vt-proof/` |
 
 ## Verdict: **feasible**
@@ -26,7 +26,7 @@ Nothing in the inventory depends on unsafe bindings, on undocumented behavior,
 or on reading ANSI formatter output.
 
 The formatter stays where it is today — the replay transport in
-`core/backend/src/terminal/replay.rs` — and is not part of the future semantic
+`modules/semantic-terminal/backend/src/replay.rs` — and is not part of the future semantic
 read boundary. The compensations that file carries (blank wrap continuations,
 per-cell hyperlink reprints, cursor-cell restoration) exist because the
 *formatter* cannot express those states in a byte stream. The semantic API
@@ -35,7 +35,7 @@ the formatter from the read path.
 
 ### Inventory and evidence
 
-Every row is a test in `core/backend/src/terminal/compat.rs` unless noted.
+Every row is a test in `modules/semantic-terminal/backend/src/compat.rs` unless noted.
 
 | Required fact or operation | Evidence |
 |---|---|
@@ -59,7 +59,7 @@ Every row is a test in `core/backend/src/terminal/compat.rs` unless noted.
 | Focus reporting | `focus_events_encode_only_when_the_child_asked_for_them` |
 | Word, line, range, and command-output selection, with copied text | `word_line_range_and_output_selections_produce_owned_text` |
 | Copied facts outlive the FFI call | `facts_copied_out_stay_valid_after_the_terminal_moves_on` |
-| `max_scrollback` retention behavior | `core/backend/src/terminal/retention.rs` (the single authority; the corpus deliberately does not restate it) |
+| `max_scrollback` retention behavior | `modules/semantic-terminal/backend/src/retention.rs` (the single authority; the corpus deliberately does not restate it) |
 
 ## Gap ledger
 
@@ -67,9 +67,9 @@ Every row is a test in `core/backend/src/terminal/compat.rs` unless noted.
 
 - **Required behavior.** Turn a coding agent's OSC 9 notification into a native
   desktop notification. The product does this today:
-  `core/frontend/terminal/TerminalView.tsx` registers an xterm OSC 9 handler and
-  calls `notifyAgent`. Removing xterm as the parser removes that handler, so the
-  host must produce the payload instead.
+  `modules/thin-terminal/frontend/src/ThinTerminalPresentation.tsx` is the raw
+  xterm path and does not interpret OSC 9. The semantic-terminal module cannot
+  receive the payload until the parser exposes it.
 - **Observed API limit.** The parser recognizes the command and nothing more.
   There is no `Terminal::on_*` callback for it, and
   `osc::CommandType::ShowDesktopNotification` carries no payload field. Proven by
@@ -86,9 +86,8 @@ Every row is a test in `core/backend/src/terminal/compat.rs` unless noted.
   a callback. It is additive and breaks no ABI.
 - **Approved plan (2026-08-10).** Open the upstream change now, while nothing
   depends on it. Carry a local binding-only patch only if the single-VT closure
-  removes xterm as the parser before the upstream change merges. Until then
-  OSC 9 needs no patch at all, because the xterm handler in
-  `core/frontend/terminal/TerminalView.tsx` still produces the payload.
+  removes xterm as the parser before the upstream change merges. Until then,
+  semantic-terminal cannot produce an OSC 9 notification from parser state.
 - **Removal trigger.** `the_desktop_notification_payload_is_not_exposed` fails
   as soon as upstream exposes the payload. Follow step 5 of the upgrade
   procedure: delete this entry, the test, and any carried patch.
@@ -104,7 +103,7 @@ Every row is a test in `core/backend/src/terminal/compat.rs` unless noted.
 
 `max_scrollback` is a byte budget with a geometry-derived page floor and
 page-granular eviction, and there is no complete-row trim in the public API. The
-measurements are in `core/backend/src/terminal/retention.rs`. The product setting
+measurements are in `modules/semantic-terminal/backend/src/retention.rs`. The product setting
 was therefore defined as a byte budget rather than a row count, so no dependency
 extension is required. The API's own naming and prose remain misleading; the
 tests, not the prose, are the authority.
@@ -182,7 +181,7 @@ library. Consequences:
   than documentation.
 - **Nothing is thread-safe.** Every type is `!Send` and `!Sync`. The runtime
   already respects this: `VtReplayEngine` is constructed inside the terminal
-  runtime thread (`core/backend/src/terminal/runtime.rs`) and never crosses a
+  runtime thread (`core/backend/src/terminal_host/runtime.rs`) and never crosses a
   thread boundary. Any future semantic transport must copy facts out rather than
   move the parser.
 - **Grid references are borrows.** `GridRef`, `Selection`, `title()`, and

@@ -11,7 +11,6 @@ backend:
   cargo_feature: fixture-module
   dependency_alias: shipctl-module-fixture
   plugin_init: "shipctl_module_fixture::init()"
-  host_glue: []
 tauri:
   capability_identifier: fixture
   permissions:

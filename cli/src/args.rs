@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
-use shipctl_core::terminal::projection::ProjectedSpace;
-use shipctl_core::terminal::{TerminalAgentReportKind, TerminalId, TerminalTransport};
+use shipctl_core::terminal_host::{TerminalAgentReportKind, TerminalId};
+use shipctl_module_semantic_terminal::projection::ProjectedSpace;
 use uuid::Uuid;
 
 use crate::output::OutputFormat;
@@ -288,15 +288,9 @@ pub struct TerminalAttachArgs {
     /// Opaque terminal UUID returned by `terminals list`.
     pub terminal_id: TerminalId,
 
-    /// Write the terminal directly to stdout: the child's bytes on the bytes
-    /// encoding, and the painted picture of the host's state on the semantic
-    /// one.
+    /// Write exact child bytes directly to stdout.
     #[arg(long)]
     pub raw: bool,
-
-    /// Which encoding of the terminal to receive.
-    #[arg(long, value_enum, default_value_t = TerminalEncodingArg::Bytes)]
-    pub encoding: TerminalEncodingArg,
 
     #[command(flatten)]
     pub target: TerminalTargetArgs,
@@ -324,24 +318,6 @@ pub struct TerminalInputArgs {
 
     #[command(flatten)]
     pub target: TerminalTargetArgs,
-}
-
-/// Which encoding of a terminal an attachment asks the host for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum TerminalEncodingArg {
-    /// The child's bytes and ANSI replay. Legacy: area 05 deletes it.
-    Bytes,
-    /// The host's state as meaning. No child bytes and no ANSI.
-    Semantic,
-}
-
-impl From<TerminalEncodingArg> for TerminalTransport {
-    fn from(value: TerminalEncodingArg) -> Self {
-        match value {
-            TerminalEncodingArg::Bytes => Self::Legacy,
-            TerminalEncodingArg::Semantic => Self::Semantic,
-        }
-    }
 }
 
 #[derive(Debug, Args)]

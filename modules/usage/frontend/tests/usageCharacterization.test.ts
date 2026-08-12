@@ -197,7 +197,7 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
     "platform",
     "projects",
     "settings",
-    "terminal",
+    "terminal_host",
     "appearance",
   ].map((capability) => source(`../../../../core/backend/src/${capability}/commands.rs`)).join("\n");
   const client = source("../src/client.ts");

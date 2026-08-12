@@ -15,7 +15,7 @@ see `../backend/README.md`.
 | `platform/` | Tauri IPC bindings, the types those calls exchange with Rust, error extraction | nothing |
 | `shared/` | building blocks that more than one capability already imports: notices, UI state, `ContextMenu`, `a11y`, tab-kind metadata, well-known surface ids | `platform` |
 | `appearance/` | themes, custom themes, fonts (`fonts/`), `globals.css`, terminal colour derivation | `platform` |
-| `terminal/` | host terminal projection, xterm views/replay, terminal + keybinding stores, module session adoption | `platform`, `shared`, `appearance` |
+| `terminal-host/` | terminal session state, tab chrome, generic raw attachment, and the presentation port used by terminal modules | `platform`, `shared`, `appearance` |
 | `settings/` | user preferences not owned by another capability: editor choice and its logos (`logos/`) | `platform` |
 | `projects/` | repositories, grouping for the navigation, per-project settings, module-contributed project facts | `platform`, `shared` |
 | `host/` | module activation and composition, `ModuleHostServices`, panel and global-surface registries, module session chrome | every capability above |
@@ -28,9 +28,9 @@ of `src/` alongside `vite-env.d.ts`. If you find yourself importing
 `@shipctl/core/shell` from a capability, the thing you want has to move down into a
 capability instead — see rule 4 below.
 
-The host runtime imports **concrete capability files**, never capability
-barrels: `@shipctl/core/terminal` pulls in `@xterm/xterm`, which is CommonJS and
-breaks the vite-SSR test lanes.
+The host runtime imports concrete capability files rather than broad barrels.
+This keeps browser presentation dependencies out of capability logic and the
+vite-SSR test lanes.
 
 ## Where does a new file go?
 
@@ -65,8 +65,8 @@ are a workspace package rather than a `tsconfig` path alias.
 
 **`index.ts` is JSX-free; `views.ts` carries React.** The `node --test` lanes run
 through Node's type stripping, which handles `.ts` but not `.tsx`. A capability
-with components therefore exports two entry points: `@shipctl/core/terminal` for
-logic and `@shipctl/core/terminal/views` for components. Re-exports inside these
+with components therefore exports two entry points: `@shipctl/core/terminal-host` for
+logic and `@shipctl/core/terminal-host/views` for components. Re-exports inside these
 files carry explicit `.ts`/`.tsx` extensions, because Node's ESM resolver does
 not guess them.
 

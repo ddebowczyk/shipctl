@@ -28,7 +28,7 @@ use shipctl_core::state::providers::{
     LegacyStateSnapshotProvider, UiSnapshotProvider, WorkspaceSnapshotProvider,
 };
 use shipctl_core::state::ui::UiStateStore;
-use shipctl_core::terminal::TerminalService;
+use shipctl_core::terminal_host::TerminalService;
 use shipctl_core::workspace::manager::WorkspaceManager;
 use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
 
@@ -91,11 +91,22 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     let terminals = {
         let mut settings = workspace.load_terminal_settings().unwrap_or_default();
         shipctl_core::workspace::config::normalize_terminal_settings(&mut settings);
-        TerminalService::new(
+        let mut drivers = shipctl_module_api::TerminalDriverRegistry::default();
+        #[cfg(feature = "semantic-terminal-module")]
+        shipctl_module_semantic_terminal_host::register_native_driver(&mut drivers);
+        drivers
+            .register_browser_driver(shipctl_module_api::TerminalDriverDescriptor {
+                id: shipctl_module_api::TerminalDriverId::new("thin-terminal")
+                    .expect("thin-terminal has a valid static driver id"),
+                native_interpretation: false,
+            })
+            .expect("the thin terminal driver registers once");
+        TerminalService::with_driver_registry(
             context.instance_id.to_string(),
-            shipctl_core::terminal::retention::TerminalRetentionPolicy::from_bytes(
+            shipctl_core::terminal_host::retention::TerminalRetentionPolicy::from_bytes(
                 settings.scrollback_bytes,
             ),
+            drivers,
         )
     };
     let ui_state = UiStateStore::new_with_barrier(paths.ui_state.clone(), durable_writes.clone());
@@ -166,6 +177,17 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         if let Err(error) = app.handle().plugin(
             tauri_plugin_log::Builder::default()
                 .level(configured_log_level())
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("shipctl".into()),
+                    })
+                    .filter(|metadata| !is_notice_log_target(metadata.target())),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("shipctl-notices".into()),
+                    })
+                    .filter(|metadata| is_notice_log_target(metadata.target())),
+                ])
                 .build(),
         ) {
             eprintln!("Logging warning: {error}");
@@ -224,31 +246,22 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         shipctl_core::settings::commands::save_keybinding_settings,
         shipctl_core::settings::commands::get_sidebar_settings,
         shipctl_core::settings::commands::open_in_editor,
-        shipctl_core::terminal::commands::get_terminal_settings,
-        shipctl_core::terminal::commands::save_terminal_settings,
-        shipctl_core::terminal::commands::is_terminal_paste_safe,
-        shipctl_core::terminal::commands::get_memory_stats,
-        shipctl_core::terminal::commands::spawn_terminal,
-        shipctl_core::terminal::commands::list_terminals,
-        shipctl_core::terminal::commands::get_terminal,
-        shipctl_core::terminal::commands::get_terminal_snapshot,
-        shipctl_core::terminal::commands::get_terminal_publication_stats,
-        shipctl_core::terminal::commands::attach_terminal,
-        shipctl_core::terminal::commands::detach_terminal,
-        shipctl_core::terminal::commands::credit_terminal_screen,
-        shipctl_core::terminal::commands::subscribe_terminal_registry,
-        shipctl_core::terminal::commands::unsubscribe_terminal_registry,
-        shipctl_core::terminal::commands::write_terminal,
-        shipctl_core::terminal::commands::input_terminal,
-        shipctl_core::terminal::commands::history_terminal,
-        shipctl_core::terminal::commands::anchor_terminal,
-        shipctl_core::terminal::commands::resolve_terminal_anchor,
-        shipctl_core::terminal::commands::release_terminal_anchor,
-        shipctl_core::terminal::commands::select_terminal,
-        shipctl_core::terminal::commands::resize_terminal,
-        shipctl_core::terminal::commands::close_terminal,
-        shipctl_core::terminal::commands::update_terminal_color_theme,
-        shipctl_core::terminal::commands::update_terminal_metadata,
+        shipctl_core::terminal_host::commands::get_terminal_settings,
+        shipctl_core::terminal_host::commands::save_terminal_settings,
+        shipctl_core::terminal_host::commands::get_memory_stats,
+        shipctl_core::terminal_host::commands::spawn_terminal,
+        shipctl_core::terminal_host::commands::list_terminals,
+        shipctl_core::terminal_host::commands::get_terminal,
+        shipctl_core::terminal_host::commands::get_terminal_publication_stats,
+        shipctl_core::terminal_host::commands::attach_raw_terminal,
+        shipctl_core::terminal_host::commands::detach_terminal,
+        shipctl_core::terminal_host::commands::subscribe_terminal_registry,
+        shipctl_core::terminal_host::commands::unsubscribe_terminal_registry,
+        shipctl_core::terminal_host::commands::write_terminal,
+        shipctl_core::terminal_host::commands::resize_terminal,
+        shipctl_core::terminal_host::commands::close_terminal,
+        shipctl_core::terminal_host::commands::update_terminal_color_theme,
+        shipctl_core::terminal_host::commands::update_terminal_metadata,
         shipctl_core::appearance::commands::list_monospace_families,
         shipctl_core::appearance::commands::load_font_family,
         shipctl_core::platform::commands::get_username,
@@ -325,6 +338,12 @@ fn configured_log_level() -> log::LevelFilter {
         .unwrap_or(log::LevelFilter::Info)
 }
 
+const NOTICE_LOG_TARGET: &str = "webview:shipctl.notice";
+
+fn is_notice_log_target(target: &str) -> bool {
+    target == NOTICE_LOG_TARGET
+}
+
 fn parse_log_level(value: &str) -> Option<log::LevelFilter> {
     match value.trim().to_ascii_lowercase().as_str() {
         "off" => Some(log::LevelFilter::Off),
@@ -346,5 +365,12 @@ mod tests {
         assert_eq!(parse_log_level("trace"), Some(log::LevelFilter::Trace));
         assert_eq!(parse_log_level(" DEBUG "), Some(log::LevelFilter::Debug));
         assert_eq!(parse_log_level("verbose"), None);
+    }
+
+    #[test]
+    fn routes_notice_diagnostics_to_their_own_log() {
+        assert!(is_notice_log_target("webview:shipctl.notice"));
+        assert!(!is_notice_log_target("webview:shipctl.terminal"));
+        assert!(!is_notice_log_target("shipctl::terminal_host"));
     }
 }

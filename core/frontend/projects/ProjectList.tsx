@@ -3,7 +3,7 @@ import type { RepoInfo, RepoGroup, TerminalTabData } from "@shipctl/core/platfor
 import { open } from "@tauri-apps/plugin-dialog";
 import { SquareTerminal } from "lucide-react";
 import { tabKindMeta } from "@shipctl/core/shared/views";
-import { useTerminalStore } from "@shipctl/core/terminal";
+import { useTerminalStore } from "@shipctl/core/terminal-host";
 import { useRepoStore } from "./useRepoStore.ts";
 import { useNoticeStore } from "@shipctl/core/shared";
 import { getErrorMessage } from "@shipctl/core/platform";
@@ -11,7 +11,7 @@ import ProjectItem from "./ProjectItem.tsx";
 import GroupHeader from "./GroupHeader.tsx";
 import { CollapsibleSection } from "@shipctl/core/shared/views";
 import { ModuleSessionList } from "@shipctl/core/host/views";
-import { TerminalList } from "@shipctl/core/terminal/views";
+import { TerminalList } from "@shipctl/core/terminal-host/views";
 import {
   useProjectFactsMap,
 } from "@shipctl/core/host";

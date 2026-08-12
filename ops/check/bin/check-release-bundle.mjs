@@ -10,8 +10,8 @@
  * second entry point.
  *
  * The guard is `import.meta.env.DEV` in
- * `core/frontend/terminal/scenarios/terminalScenarioEntry.ts`, which Vite folds
- * to a literal so Rollup drops the branch and the dynamic import beneath it.
+ * the module composition root, which Vite folds to a literal so Rollup drops
+ * the development-only branch and its dynamic import.
  * That is reasoning; this is the check.
  *
  *   node ops/check/bin/check-release-bundle.mjs
@@ -47,7 +47,7 @@ const FORBIDDEN_MARKERS = [
 ];
 
 /** Where each marker must still be findable, so a rename fails loudly. */
-const SOURCE_ROOTS = ["core/frontend/terminal"];
+const SOURCE_ROOTS = ["modules/semantic-terminal/frontend/src"];
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });

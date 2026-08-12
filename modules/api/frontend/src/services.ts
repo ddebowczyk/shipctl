@@ -156,6 +156,47 @@ export interface ModuleTerminalColorTheme {
   readonly palette: readonly string[];
 }
 
+/** The host-owned browser facts a terminal presentation may read. */
+export interface ModuleTerminalPresentationSnapshot {
+  readonly font: {
+    readonly family: string;
+    readonly sizePx: number;
+    readonly lineHeight: number;
+  };
+  readonly palette: {
+    readonly foreground: string;
+    readonly background: string;
+    readonly cursor: string;
+    readonly selection: string;
+  };
+  readonly keybindings: {
+    readonly shiftEnterNewline: boolean;
+    readonly optionDeleteWord: boolean;
+    readonly cmdKClear: boolean;
+  };
+  /** Whether the browser presentation blinks its visible cursor. */
+  readonly cursorBlink: boolean;
+  readonly confirmUnsafePaste: boolean;
+}
+
+/**
+ * Browser support supplied by the terminal host, without a renderer or
+ * terminal-state type. A presentation owns its DOM and protocol; the host
+ * owns preferences, notices, links, and desktop notifications.
+ */
+export interface ModuleTerminalPresentationPort {
+  getSnapshot(): ModuleTerminalPresentationSnapshot;
+  subscribe(listener: () => void): () => void;
+  errorCode(error: unknown): string | null;
+  recordMetric(terminalId: string, metric: string, milliseconds: number): void;
+  recordDiagnostic(
+    terminalId: string,
+    event: string,
+    facts?: Readonly<Record<string, string | number | boolean | null>>,
+  ): void;
+  notifyBell(terminalId: string, message: string): void;
+}
+
 export interface ModuleManagedTerminalStartContext {
   readonly moduleSessionId: string;
   readonly columns: number;
@@ -228,12 +269,13 @@ export type ModuleTerminalSessionLifecycleEvent =
     };
 
 /**
- * An opt-in, detachable observation of a module-owned terminal. Replay is the
- * host's canonical VT screen state; data contains subsequent process bytes.
+ * An opt-in, detachable observation of a module-owned terminal. It carries
+ * exact process bytes only; a terminal implementation owns any replay or
+ * screen state.
  */
 export type ModuleTerminalSessionObservationEvent =
   | {
-      readonly type: "replay" | "data";
+      readonly type: "data";
       readonly data: readonly number[];
     }
   | {
@@ -281,6 +323,7 @@ export interface ModuleHostServices {
   readonly globalData: ModuleGlobalDataPort;
   readonly projectData: ModuleProjectDataPort;
   readonly terminalSessions: ModuleTerminalSessionsPort;
+  readonly terminalPresentation?: ModuleTerminalPresentationPort;
   readonly settings: ModuleSettingsPort;
   readonly skills: ModuleSkillsPort;
   readonly notices: ModuleNoticesPort;

@@ -1,0 +1,13 @@
+---
+schema_version: 1
+id: thin-terminal
+frontend:
+  package: "@shipctl/module-thin-terminal"
+  path: modules/thin-terminal/frontend
+  composition_symbol: thinTerminalModule
+backend: null
+tauri: null
+profile: null
+tests:
+  frontend: modules/thin-terminal/frontend/tests
+  backend: null

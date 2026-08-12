@@ -115,7 +115,7 @@ local shell command as the only proof of an implementation boundary.
 
 Run the semantic release measurement only as a report:
 
-    cargo test -p shipctl-core --lib --release terminal::measure -- --ignored --nocapture
+    cargo test -p tauri-plugin-shipctl-semantic-terminal --lib --release measure -- --ignored --nocapture
 
 After the source moves, update that command and its documentation to the
 semantic-terminal crate path. The measurement still reports facts; it does not

@@ -107,7 +107,7 @@ export type {
   ModuleMessageHandlers,
   PreparedModuleMessageActivation,
 } from "./moduleMessageContext.ts";
-export { bindTerminalSessionDimensions } from "../terminal/terminalSessions.ts";
+export { bindTerminalSessionDimensions } from "../terminal-host/terminalSessions.ts";
 export {
   ModuleArtifactLoadError,
   assertDigestQualifiedArtifactUrl,

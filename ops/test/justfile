@@ -12,21 +12,12 @@ fast:
     cd ../.. && pnpm exec node --test core/frontend/host/tests/globalSurfaces.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/git/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/panelPersistence.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/host/tests/panelRegistry.test.ts core/frontend/host/tests/panelPersistence.test.ts core/frontend/terminal/tests/panelTabs.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/host/tests/panelRegistry.test.ts core/frontend/host/tests/panelPersistence.test.ts core/frontend/terminal-host/tests/panelTabs.test.ts
     cd ../.. && pnpm exec node --test modules/ports/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/projectCapabilityData.test.ts core/frontend/host/tests/globalCapabilityData.test.ts
-    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalAgentActivity.test.ts core/frontend/terminal/tests/terminalSessions.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalRenderer.test.ts core/frontend/terminal/tests/terminalTheme.test.ts core/frontend/terminal/tests/terminalScrollPin.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalFitPlan.test.ts core/frontend/terminal/tests/terminalViewport.test.ts core/frontend/terminal/tests/terminalOscNotification.test.ts core/frontend/terminal/tests/keybindingPresets.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalViewportPin.test.ts core/frontend/terminal/tests/terminalFitScheduler.test.ts core/frontend/terminal/tests/terminalViewSession.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalContainerBinding.test.ts core/frontend/terminal/tests/terminalContainerAdapters.test.ts core/frontend/terminal/tests/terminalMeasure.test.ts core/frontend/terminal/tests/terminalFontMetrics.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalEntryPoint.test.ts core/frontend/terminal/tests/terminalCapabilityRegister.test.ts core/frontend/terminal/tests/terminalScenarioRunner.test.ts core/frontend/terminal/tests/terminalScenarioEntry.test.ts
-    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalOutputQueue.test.ts
-    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalRetention.test.ts core/frontend/terminal/tests/terminalPasteReview.test.ts core/frontend/terminal/tests/terminalImePresentation.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalEventDecoder.test.ts core/frontend/terminal/tests/terminalAttachmentBootstrap.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalProjection.test.ts core/frontend/terminal/tests/terminalTypes.test.ts core/frontend/terminal/tests/terminalViewportComposition.test.ts core/frontend/terminal/tests/terminalReadingAnchor.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/terminal/tests/terminalClientModel.test.ts core/frontend/terminal/tests/terminalCellPaint.test.ts core/frontend/terminal/tests/terminalCellSurface.test.ts core/frontend/terminal/tests/terminalCanvasTarget.test.ts core/frontend/terminal/tests/terminalCellPresenter.test.ts core/frontend/terminal/tests/terminalSemanticInput.test.ts core/frontend/terminal/tests/terminalHistoryWindow.test.ts core/frontend/terminal/tests/terminalSemanticSurface.test.ts core/frontend/terminal/tests/terminalSelectionGestures.test.ts core/frontend/terminal/tests/terminalLinkTargets.test.ts core/frontend/terminal/tests/terminalPointerRouter.test.ts
-    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal/tests/terminalAttachmentController.test.ts core/frontend/terminal/tests/terminalClientRuntime.test.ts core/frontend/terminal/tests/terminalSemanticSession.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal-host/tests/*.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 modules/semantic-terminal/frontend/tests/*.test.ts
+    cd ../.. && pnpm exec node --test modules/thin-terminal/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/projectActions.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/host/tests/projectActions.test.ts core/frontend/host/tests/projectFacts.test.ts core/frontend/host/tests/moduleComposition.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/skills/frontend/tests/*.test.ts

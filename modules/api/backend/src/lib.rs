@@ -6,6 +6,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod terminal_host;
+pub use terminal_host::*;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;

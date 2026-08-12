@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { GlobalNavigationContribution } from "@shipctl/module-api";
 import type { RepoInfo, RepoGroup } from "../platform/index.ts";
-import { useTerminalStore } from "../terminal/index.ts";
+import { useTerminalStore } from "../terminal-host/index.ts";
 import {
   useProjectFactsMap,
 } from "../host/index.ts";
@@ -12,7 +12,7 @@ import { useProjectSettingsStore } from "../projects/index.ts";
 import { useSidebarSettingsStore } from "./useSidebarSettingsStore.ts";
 import { ProjectList } from "../projects/views.ts";
 import SidebarFooter from "./SidebarFooter.tsx";
-import { AgentSessionList, type AgentSessionItem } from "../terminal/views.ts";
+import { AgentSessionList, type AgentSessionItem } from "../terminal-host/views.ts";
 import { SidebarSectionToggle } from "../shared/views.ts";
 
 interface SidebarProps {

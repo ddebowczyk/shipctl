@@ -20,6 +20,8 @@ export type {
   ModuleNoticesPort,
   ModuleProjectDataPort,
   ModuleTerminalDimensions,
+  ModuleTerminalPresentationPort,
+  ModuleTerminalPresentationSnapshot,
   ModuleTerminalColorTheme,
   ModuleTerminalId,
   ModuleJsonValue,
@@ -78,6 +80,19 @@ export type {
   ShipctlModule,
   SkillsProviderContribution,
 } from "./module";
+export { terminalDriverId } from "./terminalHost.ts";
+export type {
+  RawTerminalAttachment,
+  RawTerminalOccurrence,
+  TerminalDriverId,
+  TerminalHostDescriptor,
+  TerminalHostLaunchRequest,
+  TerminalHostLifecycle,
+  TerminalHostLifecycleEvent,
+  TerminalHostPort,
+  TerminalPresentationProps,
+  TerminalPresentationProvider,
+} from "./terminalHost.ts";
 export {
   JSON_SCHEMA_DRAFT_2020_12,
   MESSAGE_CONTRACT_SCHEMA_VERSION,
@@ -89,7 +104,7 @@ export {
   parseMessageObservation,
   parseMessageRouteSnapshot,
   parsePublishReceipt,
-} from "./messages";
+} from "./messages.ts";
 export type {
   BroadcastMessagePublisher,
   BroadcastMessageSubscription,
@@ -124,7 +139,7 @@ export {
   SCHEDULE_SCHEMA_VERSION,
   ScheduleInspectionParseError,
   parseScheduleInspection,
-} from "./schedules";
+} from "./schedules.ts";
 export type {
   ScheduleDefinitionInspection,
   ScheduleDeliveryOutcome,
@@ -142,7 +157,7 @@ export {
   CAPABILITY_DIAGNOSTIC_CODES,
   CapabilityContractParseError,
   parseCapabilityManifest,
-} from "./capabilities";
+} from "./capabilities.ts";
 export type {
   CapabilityAgentAccess,
   CapabilityAgentWatchAccess,

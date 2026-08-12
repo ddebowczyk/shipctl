@@ -11,7 +11,6 @@ import {
   readJson,
   removeCargoDefaultFeature,
   removeNativeModuleFeatureFromScripts,
-  replaceOnce,
   verifyModulePlugout,
   writeJson,
 } from "./module-plugout.mjs";
@@ -36,6 +35,36 @@ function removeLine(root, relativePath, line) {
     throw new Error(`Expected one manifest-derived line in ${relativePath}: ${line}`);
   }
   writeFileSync(file, source.replace(marker, ""));
+}
+
+function backendDependencies(backend) {
+  const dependencies = [{
+    crate: backend.crate,
+    path: backend.path,
+    dependencyAlias: backend.dependency_alias ?? backend.crate,
+  }];
+  if (backend.host) {
+    dependencies.push({
+      crate: backend.host.crate,
+      path: backend.host.path,
+      dependencyAlias: backend.host.dependency_alias,
+    });
+  }
+  return dependencies;
+}
+
+function cargoDependencyLine(dependency) {
+  const packageProperty = dependency.dependencyAlias === dependency.crate
+    ? ""
+    : `package = "${dependency.crate}", `;
+  return `${dependency.dependencyAlias} = { ${packageProperty}path = "../${dependency.path}", optional = true }`;
+}
+
+function cargoFeatureLine(backend) {
+  const dependencies = backendDependencies(backend)
+    .map(({ dependencyAlias }) => `"dep:${dependencyAlias}"`)
+    .join(", ");
+  return `${backend.cargo_feature} = [${dependencies}]`;
 }
 
 function removeFeatureStatements(root, backend) {
@@ -226,6 +255,29 @@ function assertManifestContract(root, manifest) {
       if (!cargo.features?.[backend.cargo_feature]?.includes(`dep:${backend.dependency_alias}`)) {
         fail(`${backend.cargo_feature} must enable dep:${backend.dependency_alias}`);
       }
+      if (backend.host) {
+        const hostPackagePath = path.join(backend.host.path, "Cargo.toml");
+        if (!exists(hostPackagePath)) fail(`${hostPackagePath} does not exist`);
+        if (structured(hostPackagePath, "toml").package?.name !== backend.host.crate) {
+          fail(`${hostPackagePath} package does not match ${backend.host.crate}`);
+        }
+        const hostDependency = cargo.dependencies?.[backend.host.dependency_alias];
+        if (!hostDependency) {
+          fail(`src-tauri/Cargo.toml is missing dependency ${backend.host.dependency_alias}`);
+        }
+        if (hostDependency.path !== `../${backend.host.path}`) {
+          fail(`${backend.host.dependency_alias} path does not match ${backend.host.path}`);
+        }
+        if ((hostDependency.package ?? backend.host.dependency_alias) !== backend.host.crate) {
+          fail(`${backend.host.dependency_alias} package does not match ${backend.host.crate}`);
+        }
+        if (hostDependency.optional !== true) {
+          fail(`${backend.host.dependency_alias} must be optional`);
+        }
+        if (!cargo.features[backend.cargo_feature].includes(`dep:${backend.host.dependency_alias}`)) {
+          fail(`${backend.cargo_feature} must enable dep:${backend.host.dependency_alias}`);
+        }
+      }
       if (manifest.profile?.includes("-disabled/") && !cargo.features?.default?.includes(backend.cargo_feature)) {
         fail(`default Cargo features must include ${backend.cargo_feature}`);
       }
@@ -235,15 +287,10 @@ function assertManifestContract(root, manifest) {
       if (!moduleHost.includes(`#[cfg(feature = "${backend.cargo_feature}")]`)) {
         fail(`${moduleHostPath} is missing the ${backend.cargo_feature} cfg gate`);
       }
-      if (!compact(moduleHost).includes(compact(`builder.plugin(${backend.plugin_init})`))) {
-        fail(`${moduleHostPath} is missing plugin init ${backend.plugin_init}`);
+      const install = backend.install ?? `builder.plugin(${backend.plugin_init})`;
+      if (!compact(moduleHost).includes(compact(install))) {
+        fail(`${moduleHostPath} is missing module install ${install}`);
       }
-      if ((backend.host_glue ?? []).length > 0 && !moduleHost.includes(`pub mod ${manifest.id.replaceAll("-", "_")};`)) {
-        fail(`${moduleHostPath} is missing pub mod ${manifest.id.replaceAll("-", "_")};`);
-      }
-    }
-    for (const hostGlue of backend.host_glue ?? []) {
-      if (!exists(hostGlue)) fail(`${hostGlue} does not exist`);
     }
   }
 
@@ -363,27 +410,12 @@ export function prepareSourceAbsent(root, manifest) {
     if (cargo.features?.default?.includes(backend.cargo_feature)) {
       removeCargoDefaultFeature(root, backend.cargo_feature);
     }
-    removeLine(
-      root,
-      "src-tauri/Cargo.toml",
-      `${backend.cargo_feature} = ["dep:${backend.dependency_alias}"]`,
-    );
-    removeLine(
-      root,
-      "src-tauri/Cargo.toml",
-      `${backend.dependency_alias} = { package = "${backend.crate}", path = "../${backend.path}", optional = true }`,
-    );
+    removeLine(root, "src-tauri/Cargo.toml", cargoFeatureLine(backend));
+    for (const dependency of backendDependencies(backend)) {
+      removeLine(root, "src-tauri/Cargo.toml", cargoDependencyLine(dependency));
+    }
     removeFeatureStatements(root, backend);
     removeInverseCfgStatement(root, backend);
-    for (const hostGlue of backend.host_glue) rmSync(path.join(root, hostGlue), { force: true });
-    if (backend.host_glue.length > 0) {
-      replaceOnce(
-        root,
-        "src-tauri/src/modules/mod.rs",
-        `#[cfg(feature = "${backend.cargo_feature}")]\npub mod ${manifest.id.replaceAll("-", "_")};\n`,
-        "",
-      );
-    }
   }
 
   rmSync(path.join(root, path.dirname(manifest.frontend.path)), { recursive: true, force: true });
@@ -411,6 +443,7 @@ export function prepareSourceAbsent(root, manifest) {
     manifest.frontend.package,
     manifest.frontend.path,
     manifest.backend?.path,
+    manifest.backend?.host?.path,
   ].filter(Boolean);
   for (const [script, command] of Object.entries(packageJson.scripts ?? {})) {
     if (scriptNamePattern.test(script) || commandMarkers.some((marker) => command.includes(marker))) {
@@ -432,12 +465,14 @@ export function prepareSourceAbsent(root, manifest) {
 export function sourceAbsentPatterns(manifest) {
   const patterns = [manifest.frontend.package, manifest.frontend.composition_symbol];
   if (manifest.backend) {
-    patterns.push(
-      manifest.backend.crate,
-      manifest.backend.dependency_alias,
-      manifest.backend.dependency_alias.replaceAll("-", "_"),
-      manifest.backend.cargo_feature,
-    );
+    for (const dependency of backendDependencies(manifest.backend)) {
+      patterns.push(
+        dependency.crate,
+        dependency.dependencyAlias,
+        dependency.dependencyAlias.replaceAll("-", "_"),
+      );
+    }
+    patterns.push(manifest.backend.cargo_feature);
   }
   if (manifest.tauri) {
     const permissionNamespaces = manifest.tauri.permissions.map((permission) => permission.split(":")[0]);

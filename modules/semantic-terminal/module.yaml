@@ -1,0 +1,26 @@
+---
+schema_version: 1
+id: semantic-terminal
+frontend:
+  package: "@shipctl/module-semantic-terminal"
+  path: modules/semantic-terminal/frontend
+  composition_symbol: semanticTerminalModule
+backend:
+  crate: tauri-plugin-shipctl-semantic-terminal
+  path: modules/semantic-terminal/backend
+  cargo_feature: semantic-terminal-module
+  dependency_alias: shipctl-module-semantic-terminal
+  install: >-
+    shipctl_module_semantic_terminal_host::install(
+      builder,
+      terminals.clone()
+    )
+  host:
+    crate: shipctl-module-semantic-terminal-host
+    path: modules/semantic-terminal/host
+    dependency_alias: shipctl-module-semantic-terminal-host
+tauri: null
+profile: null
+tests:
+  frontend: modules/semantic-terminal/frontend/tests
+  backend: cargo test --manifest-path modules/semantic-terminal/backend/Cargo.toml

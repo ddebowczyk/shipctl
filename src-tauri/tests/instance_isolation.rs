@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use shipctl_core::instance::{InstanceContext, InstanceLaunchOptions};
 use shipctl_core::state::ui::UiStateStore;
-use shipctl_core::terminal::retention::TerminalRetentionPolicy;
-use shipctl_core::terminal::{TerminalId, TerminalService};
+use shipctl_core::terminal_host::retention::TerminalRetentionPolicy;
+use shipctl_core::terminal_host::{TerminalId, TerminalService};
 use shipctl_core::workspace::config::EditorSettings;
 use shipctl_core::workspace::manager::WorkspaceManager;
 use shipctl_module_assistants::{

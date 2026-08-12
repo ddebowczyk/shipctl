@@ -61,7 +61,8 @@ commands:
     aggregate: check
   - name: release-bundle
     summary: Reject a release bundle that carries the dev-only scenario harness.
-    lane: slow
+    lane: fast
+    aggregate: check
   - name: all
     summary: Run every declared fast check.
     lane: fast

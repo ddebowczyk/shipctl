@@ -60,6 +60,12 @@ fn current_membership() -> Vec<BuildModuleMembership> {
             false,
             frontend_enabled(option_env!("VITE_SHIPCTL_COMMANDS_MODULE")),
         ),
+        membership(
+            "shipctl.semantic-terminal",
+            cfg!(feature = "semantic-terminal-module"),
+            true,
+        ),
+        membership("shipctl.thin-terminal", false, true),
     ]
 }
 
@@ -141,6 +147,12 @@ mod tests {
             assert!(
                 frontend_profile.contains(&format!("{short_id}Module")),
                 "frontend static profile omitted {module_id}"
+            );
+        }
+        for module_name in ["semanticTerminalModule", "thinTerminalModule"] {
+            assert!(
+                frontend_profile.contains(module_name),
+                "frontend static profile omitted {module_name}"
             );
         }
     }

@@ -6,6 +6,7 @@ import type {
 } from "./panels";
 import type { ModuleHostServices, ModuleSkillsPort } from "./services";
 import type { ModuleMessageContributions, ModuleMessages } from "./messages";
+import type { TerminalPresentationProvider } from "./terminalHost.ts";
 import type {
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
@@ -65,6 +66,8 @@ export interface ShipctlModule {
   readonly projectLifecycle?: ModuleProjectLifecycle;
   readonly scheduledTasks?: readonly ModuleScheduledTask[];
   readonly messages?: ModuleMessageContributions;
+  /** Build-installed terminal presentations. One terminal selects one driver. */
+  readonly terminalPresentations?: readonly TerminalPresentationProvider[];
   /** Runs in module registration order before native process shutdown begins. */
   beforeShutdown?(services: ModuleHostServices): void | Promise<void>;
   activate?(host: ModuleHost): void | ModuleDeactivation;

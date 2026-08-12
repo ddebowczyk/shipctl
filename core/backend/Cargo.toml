@@ -20,7 +20,6 @@ tauri = { version = "2.11.5", features = ["macos-private-api"] }
 portable-pty = "0.9"
 crossbeam-channel = "0.5"
 base64 = "0.22"
-libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "72ac98f292879bf9f788fcbb11238c562a1eebe6", default-features = false }
 dirs = "6.0"
 libc = "0.2"
 notify = { version = "8", features = ["macos_fsevent"] }

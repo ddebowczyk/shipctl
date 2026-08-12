@@ -1,5 +1,10 @@
 # Presentation surface achieves parity
 
+> Status: superseded by [the terminal extraction plan](../extract-terminal-code/README.md).
+> Its semantic presentation material remains evidence for
+> `modules/semantic-terminal`; it is not a requirement to remove the explicit
+> thin-terminal implementation.
+
 ## Outcome
 
 Shipctl has presentation-only adapters for both product surfaces:
@@ -138,7 +143,7 @@ The register is executable, not prose:
 `core/frontend/terminal/scenarios/capabilityRegister.ts` carries one entry per
 capability with a disposition and a proof, where a proof is a lane test, a
 scenario id, a written manual procedure, or nothing.
-`core/frontend/terminal/tests/terminalCapabilityRegister.test.ts` enforces the
+`modules/semantic-terminal/frontend/tests/terminalCapabilityRegister.test.ts` enforces the
 loop in both directions: a claim of implementation must carry a proof, a
 `changed` disposition must name its owner, a cited test file and a cited
 procedure file must exist, and every scenario the catalog builds must be claimed

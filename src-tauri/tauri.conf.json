@@ -133,6 +133,27 @@
             "shipctl-usage:allow-get-project-alias-review-queue",
             "shipctl-usage:allow-refresh-usage-data"
           ]
+        },
+        {
+          "identifier": "semantic-terminal",
+          "description": "Enables the semantic terminal module commands",
+          "windows": ["main"],
+          "permissions": [
+            "shipctl-semantic-terminal:allow-get-semantic-terminal-snapshot",
+            "shipctl-semantic-terminal:allow-attach-semantic-terminal",
+            "shipctl-semantic-terminal:allow-credit-semantic-terminal-screen",
+            "shipctl-semantic-terminal:allow-detach-semantic-terminal",
+            "shipctl-semantic-terminal:allow-resize-semantic-terminal",
+            "shipctl-semantic-terminal:allow-input-semantic-terminal",
+            "shipctl-semantic-terminal:allow-history-semantic-terminal",
+            "shipctl-semantic-terminal:allow-anchor-semantic-terminal",
+            "shipctl-semantic-terminal:allow-resolve-semantic-terminal-anchor",
+            "shipctl-semantic-terminal:allow-release-semantic-terminal-anchor",
+            "shipctl-semantic-terminal:allow-select-semantic-terminal",
+            "shipctl-semantic-terminal:allow-is-semantic-terminal-paste-safe",
+            "shipctl-semantic-terminal:allow-get-semantic-terminal-publication-stats",
+            "shipctl-semantic-terminal:allow-get-semantic-terminal-app-memory"
+          ]
         }
       ],
       "csp": {

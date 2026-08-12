@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::terminal::retention::{TerminalRetentionPolicy, RETENTION_DEFAULT_BYTES};
+use crate::terminal_host::retention::{TerminalRetentionPolicy, RETENTION_DEFAULT_BYTES};
 use std::collections::{HashMap, HashSet};
 
 // ── Global config (~/.shipctl/config.yml) ───────────────────────────
@@ -343,7 +343,6 @@ mod tests {
         normalize_terminal_settings, GlobalConfig, ProjectSettings, TerminalSettings,
         WorkspaceConfig, RETENTION_DEFAULT_BYTES,
     };
-    use crate::terminal::retention::{RETENTION_MAX_BYTES, RETENTION_MIN_BYTES};
 
     #[test]
     fn global_config_preserves_capability_owned_top_level_values() {
@@ -456,20 +455,18 @@ mod tests {
         assert_eq!(settings.scrollback_bytes, RETENTION_DEFAULT_BYTES);
     }
 
-    /// Any persisted byte value reaches the approved domain at load time, so
-    /// no later reader has to clamp it again.
+    /// The host preserves a byte budget. A selected driver decides whether it
+    /// has a narrower valid range.
     #[test]
-    fn persisted_byte_budgets_are_clamped_into_the_approved_domain_at_load() {
+    fn persisted_byte_budgets_remain_driver_owned_values() {
         let mut too_large: TerminalSettings =
-            serde_yaml::from_str(&format!("scrollbackBytes: {}\n", RETENTION_MAX_BYTES * 4))
-                .unwrap();
+            serde_yaml::from_str(&format!("scrollbackBytes: {}\n", usize::MAX)).unwrap();
         normalize_terminal_settings(&mut too_large);
-        assert_eq!(too_large.scrollback_bytes, RETENTION_MAX_BYTES);
+        assert_eq!(too_large.scrollback_bytes, usize::MAX);
 
-        let mut in_domain: TerminalSettings =
-            serde_yaml::from_str(&format!("scrollbackBytes: {}\n", RETENTION_MIN_BYTES)).unwrap();
+        let mut in_domain: TerminalSettings = serde_yaml::from_str("scrollbackBytes: 0\n").unwrap();
         normalize_terminal_settings(&mut in_domain);
-        assert_eq!(in_domain.scrollback_bytes, RETENTION_MIN_BYTES);
+        assert_eq!(in_domain.scrollback_bytes, 0);
     }
 
     #[test]

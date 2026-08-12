@@ -10,9 +10,17 @@ backend:
   path: modules/assistants/backend
   cargo_feature: assistants-module
   dependency_alias: shipctl-module-assistants
-  plugin_init: "shipctl_module_assistants::init(crate::modules::assistants::host_services(terminals.clone()), paths.assistant_sessions.clone(), durable_writes.clone())"
-  host_glue:
-    - src-tauri/src/modules/assistants.rs
+  install: >-
+    shipctl_module_assistants_host::install(
+      builder,
+      terminals.clone(),
+      paths.assistant_sessions.clone(),
+      durable_writes.clone()
+    )
+  host:
+    crate: shipctl-module-assistants-host
+    path: modules/assistants/host
+    dependency_alias: shipctl-module-assistants-host
 tauri:
   capability_identifier: assistants
   permissions:

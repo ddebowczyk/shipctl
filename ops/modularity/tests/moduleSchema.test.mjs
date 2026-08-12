@@ -10,7 +10,7 @@ const modularityRoot = fileURLToPath(new URL("..", import.meta.url));
 const schema = join(modularityRoot, "schema", "module.schema.yaml");
 const fixtures = join(modularityRoot, "tests", "fixtures", "module-manifests");
 
-test("simple and host-glue module manifests satisfy the schema", () => {
+test("simple and host-adapter module manifests satisfy the schema", () => {
   for (const name of ["todos.yaml", "ports.yaml"]) {
     const result = spawnSync("ys", ["-f", schema, join(fixtures, name)], {
       encoding: "utf8",

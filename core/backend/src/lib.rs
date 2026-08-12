@@ -19,5 +19,5 @@ pub mod projects;
 pub mod scheduler;
 pub mod settings;
 pub mod state;
-pub mod terminal;
+pub mod terminal_host;
 pub mod workspace;

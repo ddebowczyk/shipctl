@@ -157,6 +157,11 @@ looks up the registered presentation, and renders it. It reports a clear
 unavailable-driver error if the descriptor names no installed presentation.
 It contains no xterm import, no canvas painter, and no semantic event decoder.
 
+A semantic presentation may use only the semantic-terminal module's namespaced
+plugin client for semantic commands and attachment data. It receives the common
+host port for lifecycle, raw attachment, byte write, and physical resize. The
+core host does not expose a generic Tauri invoke handle to a presentation.
+
 Move the current ModuleTerminalSessionsPort adapter into terminal-host. Its
 public promise changes from "the host owns PTY, xterm, tab placement, and
 focus" to "the host owns PTY, tab placement, focus, and physical resize".
@@ -177,11 +182,11 @@ types:
     TerminalObservation
     TerminalDriverError
 
-The host passes one ordered PTY-byte occurrence to the selected
-TerminalDriverSession. The session can return provider events. A semantic
-driver can return a host-serialised parser reply because it is the selected
-terminal interpreter. The host appends that reply to the one PTY writer in
-actor order.
+When the selected implementation registers a native driver, the host passes
+one ordered PTY-byte occurrence to its TerminalDriverSession. The session can
+return provider events. A semantic driver can return a host-serialised parser
+reply because it is the selected terminal interpreter. The host appends that
+reply to the one PTY writer in actor order.
 
 The thin observer uses a separate observer interface. Its result type contains
 only TerminalObservation values. It has no reply bytes, resize operation,

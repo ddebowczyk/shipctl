@@ -70,7 +70,7 @@ without either importing the other's implementation.
        read PTY bytes
        assign the next ordered occurrence
        publish the byte occurrence to raw attachments
-       deliver the same occurrence to the selected native driver
+       deliver the same occurrence to the selected native driver, if it has one
 
    It must not call Ghostty directly. The selected driver is responsible for
    interpretation.

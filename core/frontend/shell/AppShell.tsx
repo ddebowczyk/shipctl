@@ -2,18 +2,22 @@ import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Sidebar from "./Sidebar.tsx";
 import TabBar from "./TabBar.tsx";
-import { TerminalView, TerminalErrorBoundary } from "../terminal/views.ts";
+import { TerminalErrorBoundary, TerminalSlot } from "../terminal-host/views.ts";
+import {
+  terminalHostAdapter,
+  terminalPresentationRegistry,
+} from "../terminal-host/index.ts";
+import { terminalDriverId, type TerminalDriverId, type TerminalHostDescriptor } from "@shipctl/module-api";
 import { NoticeCenter } from "../shared/views.ts";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useRepoStore } from "../projects/index.ts";
-import { TERMINAL_CLIENT_RUNTIME, useTerminalStore } from "../terminal/index.ts";
+import { TERMINAL_CLIENT_RUNTIME, useTerminalStore } from "../terminal-host/index.ts";
 import { BUILTIN_GLOBAL_SURFACE_IDS } from "../shared/index.ts";
 import { useUIStore } from "../shared/index.ts";
 import { useShallow } from "zustand/shallow";
-import { useTerminalActions } from "../terminal/index.ts";
+import { useTerminalActions } from "../terminal-host/index.ts";
 import { useThemeApplicator } from "./useThemeApplicator.ts";
 import { useProjectWatcher } from "../projects/index.ts";
-import { computeTerminalSize } from "../terminal/browser.ts";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { BUILTIN_GLOBAL_SURFACE_LOADERS } from "./builtinGlobalSurfaceLoaders.ts";
@@ -27,9 +31,9 @@ import {
 } from "../platform/index.ts";
 import { useThemeStore } from "../appearance/index.ts";
 import { useEditorStore } from "../settings/index.ts";
-import { useTerminalSettingsStore } from "../terminal/index.ts";
+import { useTerminalSettingsStore } from "../terminal-host/index.ts";
 import { useUpdateStore } from "./useUpdateStore.ts";
-import { initNotifications } from "../terminal/index.ts";
+import { initNotifications } from "../terminal-host/index.ts";
 import { getErrorMessage } from "../platform/index.ts";
 import { useNoticeStore } from "../shared/index.ts";
 import {
@@ -60,6 +64,7 @@ import {
 } from "../host/index.ts";
 
 import type { TabCycleDirection, TerminalTabData, UiState, UnifiedTab } from "../platform/index.ts";
+import type { TerminalId } from "@shipctl/core/terminal-host";
 
 // Stable empty arrays to avoid infinite re-render loops with zustand v5's
 // useSyncExternalStore — selectors must return the same reference for the same state.
@@ -70,6 +75,22 @@ const MODULE_PANEL_CONTRIBUTIONS = PANEL_REGISTRY.list()
 const GLOBAL_SURFACE_REGISTRY = createEnabledGlobalSurfaceRegistry(
   BUILTIN_GLOBAL_SURFACE_LOADERS,
 );
+const TERMINAL_PRESENTATION_REGISTRY = terminalPresentationRegistry(ENABLED_MODULES);
+const SEMANTIC_TERMINAL_DRIVER_ID = terminalDriverId("semantic-terminal");
+const DEFAULT_TERMINAL_DIMENSIONS = { cols: 80, rows: 24 } as const;
+
+function terminalSlotDescriptor(terminalId: TerminalId): TerminalHostDescriptor {
+  const descriptor = TERMINAL_CLIENT_RUNTIME.descriptor(terminalId);
+  return {
+    id: terminalId,
+    driverId: descriptor?.driverId ?? SEMANTIC_TERMINAL_DRIVER_ID,
+    lifecycle: descriptor?.lifecycle ?? "starting",
+    columns: descriptor?.columns ?? 0,
+    rows: descriptor?.rows ?? 0,
+    label: descriptor?.metadata.label ?? "Terminal",
+    projectPath: descriptor?.metadata.projectPath ?? null,
+  };
+}
 
 function fallbackWorkspaceName(repoPath: string) {
   return repoPath.split("/").filter(Boolean).pop() ?? "Project";
@@ -85,7 +106,6 @@ export default function AppShell() {
   const initialProjectAttemptedRef = useRef(false);
   const durableUiStateRef = useRef<UiState | null>(null);
   const [durableUiStateLoaded, setDurableUiStateLoaded] = useState(false);
-  const terminalContainerRef = useRef<HTMLDivElement>(null);
   const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
   const lastTabCycleAtRef = useRef(0);
 
@@ -145,13 +165,10 @@ export default function AppShell() {
     if (activeRepoPath) useTerminalStore.getState().cycleTab(activeRepoPath, direction);
   }, [activeRepoPath]);
 
-  const getTerminalDimensions = useCallback(() => {
-    const el = terminalContainerRef.current;
-    if (!el || el.clientWidth === 0 || el.clientHeight === 0) {
-      return { cols: 80, rows: 24 };
-    }
-    return computeTerminalSize(el.clientWidth, el.clientHeight);
-  }, []);
+  const getTerminalDimensions = useCallback(
+    () => ({ cols: DEFAULT_TERMINAL_DIMENSIONS.cols, rows: DEFAULT_TERMINAL_DIMENSIONS.rows }),
+    [],
+  );
 
   useEffect(() => bindTerminalSessionDimensions(() => {
     const { cols, rows } = getTerminalDimensions();
@@ -173,7 +190,7 @@ export default function AppShell() {
     [repos],
   );
   useProjectWatcher(projectPaths);
-  // Collect only PTY-backed tabs for TerminalView rendering (panel tabs have no terminal)
+  // Collect only PTY-backed tabs for terminal presentation (panel tabs have no terminal)
   const allTerminalTabs = useMemo(() => {
     const all: Array<{ tab: TerminalTabData; projectPath: string }> = [];
     for (const [projectPath, ps] of Object.entries(projectState)) {
@@ -575,10 +592,10 @@ export default function AppShell() {
     useUIStore.getState().closeGlobalSurface();
   }, [activeRepoPath, pushNotice]);
 
-  const handleNewShell = useCallback(() => {
+  const handleNewShell = useCallback((driverId: TerminalDriverId = SEMANTIC_TERMINAL_DRIVER_ID) => {
     useUIStore.getState().closeGlobalSurface();
     const { cols, rows } = getTerminalDimensions();
-    spawnBlankShell(cols, rows);
+    void spawnBlankShell(driverId, cols, rows);
   }, [spawnBlankShell, getTerminalDimensions]);
 
   const handleOpenInEditor = useCallback(async (repoPath: string) => {
@@ -697,8 +714,11 @@ export default function AppShell() {
         case "previous_tab":
           cycleTabs(-1);
           break;
-        case "new_terminal":
-          handleNewShell();
+        case "new_semantic_terminal":
+          handleNewShell(SEMANTIC_TERMINAL_DRIVER_ID);
+          break;
+        case "new_thin_terminal":
+          handleNewShell(terminalDriverId("thin-terminal"));
           break;
         case "new_session":
           handleNewModuleSession();
@@ -816,7 +836,7 @@ export default function AppShell() {
             onSelectProjectTab={handleSelectSidebarProjectTab}
             onCloseTab={handleCloseTab}
             onMoveTab={handleMoveTab}
-            onNewShell={handleNewShell}
+            onNewShell={() => handleNewShell()}
             onRenameGroup={handleRenameGroup}
             onDeleteGroup={handleDeleteGroup}
             onMoveToGroup={handleMoveToGroup}
@@ -828,7 +848,7 @@ export default function AppShell() {
         <div className="workspace-panel">
           <TabBar
             onClose={handleCloseTab}
-            onNewShell={handleNewShell}
+            onNewTerminal={handleNewShell}
             panels={MODULE_PANEL_CONTRIBUTIONS}
             onOpenPanel={(panel) => {
               if (activeRepoPath) {
@@ -841,7 +861,7 @@ export default function AppShell() {
             onDragProjectChange={setTabDropProjectPath}
           />
 
-          <div ref={terminalContainerRef} className="terminal-stage">
+          <div className="terminal-stage">
             {activeGlobalSurfaceId && (
               <GlobalSurfaceHost
                 registry={GLOBAL_SURFACE_REGISTRY}
@@ -886,8 +906,11 @@ export default function AppShell() {
                 }}
               >
                 <TerminalErrorBoundary>
-                  <TerminalView
-                    terminalId={tab.terminalId}
+                  <TerminalSlot
+                    descriptor={terminalSlotDescriptor(tab.terminalId)}
+                    host={terminalHostAdapter}
+                    registry={TERMINAL_PRESENTATION_REGISTRY}
+                    services={MODULE_HOST_SERVICES}
                     visible={!showGlobalSurface && projectPath === activeRepoPath && tab.id === activeTabId}
                   />
                 </TerminalErrorBoundary>

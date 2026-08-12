@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "core/backend",
     "modules/*/backend",
+    "modules/*/host",
     "examples/module-fixture/backend",
     "examples/rapid-terminal-probe",
 ]

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-credit-semantic-terminal-screen"
+description = "Enables the credit_semantic_terminal_screen command without any pre-configured scope."
+commands.allow = ["credit_semantic_terminal_screen"]
+
+[[permission]]
+identifier = "deny-credit-semantic-terminal-screen"
+description = "Denies the credit_semantic_terminal_screen command without any pre-configured scope."
+commands.deny = ["credit_semantic_terminal_screen"]

@@ -4,7 +4,7 @@ import type {
   TerminalLifecycle,
   TerminalRevision,
   TerminalViewId,
-} from "@shipctl/core/terminal";
+} from "@shipctl/core/terminal-host";
 
 // ── Config types (match Rust structs) ────────────────────────────────
 

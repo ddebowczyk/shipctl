@@ -44,21 +44,41 @@ properties:
       plugin_init:
         type: string
         minLength: 1
-      host_glue:
-        type: array
-        uniqueItems: true
-        items:
-          type: string
-          pattern: ^src-tauri/src/modules/[a-z0-9_/-]+\.rs$
+      install:
+        type: string
+        minLength: 1
+      host:
+        type: object
+        additionalProperties: false
+        required: [crate, path, dependency_alias]
+        properties:
+          crate:
+            type: string
+            pattern: ^[a-z][a-z0-9-]*$
+          path:
+            type: string
+            pattern: ^modules/[a-z0-9-]+/host$
+          dependency_alias:
+            type: string
+            pattern: ^[a-z][a-z0-9-]*$
     allOf:
       - if:
           anyOf:
             - required: [cargo_feature]
             - required: [dependency_alias]
             - required: [plugin_init]
-            - required: [host_glue]
+            - required: [install]
+            - required: [host]
         then:
-          required: [cargo_feature, dependency_alias, plugin_init, host_glue]
+          allOf:
+            - required: [cargo_feature, dependency_alias]
+            - anyOf:
+                - required: [plugin_init]
+                - required: [install]
+      - if:
+          required: [host]
+        then:
+          required: [install]
   tauri:
     type: object
     additionalProperties: false

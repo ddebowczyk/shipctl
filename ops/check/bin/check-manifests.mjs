@@ -129,23 +129,44 @@ export function validateManifests(root) {
           if (!Array.isArray(feature) || !feature.includes(`dep:${backend.dependency_alias}`)) {
             fail(id, `${backend.cargo_feature} must enable dep:${backend.dependency_alias}`);
           }
+          const host = backend.host;
+          if (host) {
+            const hostPackagePath = path.join(root, host.path, "Cargo.toml");
+            if (!existsSync(hostPackagePath)) {
+              fail(id, `${host.path}/Cargo.toml does not exist`);
+            } else if (readStructured(hostPackagePath, "toml").package?.name !== host.crate) {
+              fail(id, `${host.path}/Cargo.toml package does not match ${host.crate}`);
+            }
+            const hostDependency = cargo.dependencies?.[host.dependency_alias];
+            if (!hostDependency) {
+              fail(id, `src-tauri/Cargo.toml is missing dependency ${host.dependency_alias}`);
+            } else {
+              const expectedPath = `../${host.path}`;
+              if (hostDependency.path !== expectedPath) {
+                fail(id, `${host.dependency_alias} path must be ${expectedPath}`);
+              }
+              if ((hostDependency.package ?? host.dependency_alias) !== host.crate) {
+                fail(id, `${host.dependency_alias} package must be ${host.crate}`);
+              }
+              if (hostDependency.optional !== true) {
+                fail(id, `${host.dependency_alias} must be optional`);
+              }
+            }
+            if (!feature?.includes(`dep:${host.dependency_alias}`)) {
+              fail(id, `${backend.cargo_feature} must enable dep:${host.dependency_alias}`);
+            }
+          }
           if (manifest.profile?.includes("-disabled/") && !cargo.features?.default?.includes(backend.cargo_feature)) {
             fail(id, `default Cargo features must include ${backend.cargo_feature}`);
           }
           if (!moduleHost.includes(`#[cfg(feature = "${backend.cargo_feature}")]`)) {
             fail(id, `src-tauri/src/modules/mod.rs is missing the ${backend.cargo_feature} cfg gate`);
           }
-          if (!compact(moduleHost).includes(compact(`builder.plugin(${backend.plugin_init})`))) {
-            fail(id, `src-tauri/src/modules/mod.rs is missing plugin init ${backend.plugin_init}`);
+          const install = backend.install ?? `builder.plugin(${backend.plugin_init})`;
+          if (!compact(moduleHost).includes(compact(install))) {
+            fail(id, `src-tauri/src/modules/mod.rs is missing module install ${install}`);
           }
         }
-      }
-
-      for (const hostGlue of backend.host_glue ?? []) {
-        if (!existsSync(path.join(root, hostGlue))) fail(id, `${hostGlue} does not exist`);
-      }
-      if ((backend.host_glue ?? []).length > 0 && !moduleHost.includes(`pub mod ${id.replaceAll("-", "_")};`)) {
-        fail(id, `src-tauri/src/modules/mod.rs is missing pub mod ${id.replaceAll("-", "_")};`);
       }
     }
 

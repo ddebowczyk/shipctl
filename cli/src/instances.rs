@@ -11,8 +11,8 @@ use shipctl_core::instance::{
     StopOutcome,
 };
 use shipctl_core::instance::{
-    TerminalAttachmentClient, TerminalCloseControlResult, TerminalInspectResult,
-    TerminalListResult, TerminalWriteResult,
+    TerminalAttachmentClient, TerminalCloseControlResult, TerminalDriverResult, TerminalListResult,
+    TerminalWriteResult,
 };
 use shipctl_core::message_bus::{
     MessageDiagnosticReport, MessageRuntimeInspection, RUNTIME_UNAVAILABLE,
@@ -29,7 +29,7 @@ use shipctl_core::scheduler::{
 };
 use shipctl_core::state::archive::inspect_archive;
 use shipctl_core::state::archive::StateArchiveInspection;
-use shipctl_core::terminal::{TerminalDescriptor, TerminalId, TerminalTransport};
+use shipctl_core::terminal_host::{TerminalDescriptor, TerminalId};
 use uuid::Uuid;
 
 use crate::APP_VERSION;
@@ -626,82 +626,25 @@ pub fn get_terminal(
     directory(runtime_root).get_terminal(selector, terminal_id)
 }
 
-pub fn inspect_terminal(
+pub fn request_terminal_driver(
     runtime_root: Option<&Path>,
     selector: &str,
     terminal_id: TerminalId,
-) -> Result<TerminalInspectResult, ControlError> {
+    request: serde_json::Value,
+) -> Result<TerminalDriverResult, ControlError> {
     let (runtime_root, _) = resolve_runtime_root(runtime_root)
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
-    directory(runtime_root).inspect_terminal(selector, terminal_id)
+    directory(runtime_root).request_terminal_driver(selector, terminal_id, request)
 }
 
 pub fn attach_terminal(
     runtime_root: Option<&Path>,
     selector: &str,
     terminal_id: TerminalId,
-    encoding: TerminalTransport,
 ) -> Result<TerminalAttachmentClient, ControlError> {
     let (runtime_root, _) = resolve_runtime_root(runtime_root)
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
-    directory(runtime_root).attach_terminal(selector, terminal_id, encoding)
-}
-
-pub fn input_terminal(
-    runtime_root: Option<&Path>,
-    selector: &str,
-    terminal_id: TerminalId,
-    input: shipctl_core::terminal::input::TerminalInput,
-) -> Result<shipctl_core::instance::TerminalInputResult, ControlError> {
-    let (runtime_root, _) = resolve_runtime_root(runtime_root)
-        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
-    directory(runtime_root).input_terminal(selector, terminal_id, input)
-}
-
-pub fn history_terminal(
-    runtime_root: Option<&Path>,
-    selector: &str,
-    terminal_id: TerminalId,
-    start_row: u32,
-    rows: u32,
-) -> Result<shipctl_core::instance::TerminalHistoryResult, ControlError> {
-    let (runtime_root, _) = resolve_runtime_root(runtime_root)
-        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
-    directory(runtime_root).history_terminal(selector, terminal_id, start_row, rows)
-}
-
-pub fn anchor_terminal(
-    runtime_root: Option<&Path>,
-    selector: &str,
-    terminal_id: TerminalId,
-    space: shipctl_core::terminal::projection::ProjectedSpace,
-    at: shipctl_core::terminal::projection::ProjectedPoint,
-) -> Result<shipctl_core::instance::TerminalAnchorResult, ControlError> {
-    let (runtime_root, _) = resolve_runtime_root(runtime_root)
-        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
-    directory(runtime_root).anchor_terminal(selector, terminal_id, space, at)
-}
-
-pub fn resolve_terminal_anchor(
-    runtime_root: Option<&Path>,
-    selector: &str,
-    terminal_id: TerminalId,
-    anchor: shipctl_core::terminal::projection::TerminalAnchorId,
-) -> Result<shipctl_core::instance::TerminalAnchorResolution, ControlError> {
-    let (runtime_root, _) = resolve_runtime_root(runtime_root)
-        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
-    directory(runtime_root).resolve_terminal_anchor(selector, terminal_id, anchor)
-}
-
-pub fn release_terminal_anchor(
-    runtime_root: Option<&Path>,
-    selector: &str,
-    terminal_id: TerminalId,
-    anchor: shipctl_core::terminal::projection::TerminalAnchorId,
-) -> Result<shipctl_core::instance::TerminalAnchorReleaseResult, ControlError> {
-    let (runtime_root, _) = resolve_runtime_root(runtime_root)
-        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
-    directory(runtime_root).release_terminal_anchor(selector, terminal_id, anchor)
+    directory(runtime_root).attach_terminal(selector, terminal_id)
 }
 
 pub fn write_terminal(
@@ -718,7 +661,7 @@ pub fn write_terminal(
 pub fn report_terminal_agent(
     runtime_root: Option<&Path>,
     selector: &str,
-    report: shipctl_core::terminal::TerminalAgentReportRequest,
+    report: shipctl_core::terminal_host::TerminalAgentReportRequest,
 ) -> Result<shipctl_core::instance::TerminalAgentReportResult, ControlError> {
     let (runtime_root, _) = resolve_runtime_root(runtime_root)
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;

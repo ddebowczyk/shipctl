@@ -7,7 +7,7 @@ shipped surface.
 
 This procedure is the manual proof cited by `selection.copy` and
 `a11y.keyboard-focus` in
-`core/frontend/terminal/scenarios/capabilityRegister.ts`. It also supplies the
+`modules/semantic-terminal/frontend/src/scenarios/capabilityRegister.ts`. It also supplies the
 packaged checks for the optional unsafe-paste guard.
 
 ## When to run it

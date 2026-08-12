@@ -10,9 +10,11 @@ backend:
   path: modules/skills/backend
   cargo_feature: skills-module
   dependency_alias: shipctl-module-skills
-  plugin_init: "shipctl_module_skills::init(crate::modules::skills::host_services(workspace.clone()))"
-  host_glue:
-    - src-tauri/src/modules/skills.rs
+  install: "shipctl_module_skills_host::install(builder, workspace.clone())"
+  host:
+    crate: shipctl-module-skills-host
+    path: modules/skills/host
+    dependency_alias: shipctl-module-skills-host
 tauri:
   capability_identifier: skills
   permissions:

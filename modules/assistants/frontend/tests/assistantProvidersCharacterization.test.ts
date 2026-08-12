@@ -74,7 +74,7 @@ test("resume preserves provider identity, placement, and quick-exit recovery", (
 
 test("tab close and natural exit retain the current restore-record semantics", () => {
   const runtime = source("../src/runtime.ts");
-  const terminalActions = source("../../../../core/frontend/terminal/useTerminalActions.ts");
+  const terminalActions = source("../../../../core/frontend/terminal-host/useTerminalActions.ts");
 
   assert.match(runtime, /event\.type === "stop-requested"[\s\S]*if \(metadata\.record\) await discardSession\(metadata\.record\.recordId\)/s);
   assert.match(runtime, /event\.type === "closed"[\s\S]*metadataBySession\.delete\(event\.session\.id\)/s);
@@ -145,7 +145,7 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   const moduleEntry = source("../src/index.ts");
   const composition = source("../../../../core/frontend/host/enabledModules.ts");
   const shell = source("../../../../core/frontend/shell/AppShell.tsx");
-  const terminalActions = source("../../../../core/frontend/terminal/useTerminalActions.ts");
+  const terminalActions = source("../../../../core/frontend/terminal-host/useTerminalActions.ts");
   const nativeHost = source("../../../../src-tauri/src/lib.rs");
   const nativeComposition = source("../../../../src-tauri/src/modules/mod.rs");
   const terminalAdapter = source("../../../../src-tauri/src/modules/assistants.rs");

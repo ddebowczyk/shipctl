@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-select-semantic-terminal"
+description = "Enables the select_semantic_terminal command without any pre-configured scope."
+commands.allow = ["select_semantic_terminal"]
+
+[[permission]]
+identifier = "deny-select-semantic-terminal"
+description = "Denies the select_semantic_terminal command without any pre-configured scope."
+commands.deny = ["select_semantic_terminal"]

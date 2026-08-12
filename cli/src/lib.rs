@@ -1019,7 +1019,7 @@ fn print_version(format: OutputFormat) {
 
 #[cfg(test)]
 mod tests {
-    use shipctl_core::terminal::projection::ProjectedSpace;
+    use shipctl_module_semantic_terminal::projection::ProjectedSpace;
 
     use super::*;
 
@@ -1111,31 +1111,6 @@ mod tests {
         assert_eq!(attach.terminal_id.to_string(), terminal_id);
         assert_eq!(attach.target.instance, "alpha");
         assert!(attach.raw);
-        assert_eq!(
-            shipctl_core::terminal::TerminalTransport::from(attach.encoding),
-            shipctl_core::terminal::TerminalTransport::Legacy,
-            "an attach that names no encoding asks for the one it always asked for"
-        );
-
-        let parsed = Cli::try_parse_from([
-            "shipctl",
-            "terminals",
-            "attach",
-            terminal_id,
-            "--instance=alpha",
-            "--encoding=semantic",
-        ])
-        .unwrap();
-        let Some(CliCommand::Terminals {
-            command: args::TerminalsCommand::Attach(attach),
-        }) = parsed.command
-        else {
-            panic!("expected terminal attach")
-        };
-        assert_eq!(
-            shipctl_core::terminal::TerminalTransport::from(attach.encoding),
-            shipctl_core::terminal::TerminalTransport::Semantic
-        );
         assert!(
             Cli::try_parse_from([
                 "shipctl",
@@ -1143,10 +1118,10 @@ mod tests {
                 "attach",
                 terminal_id,
                 "--instance=alpha",
-                "--encoding=guess",
+                "--encoding=semantic",
             ])
             .is_err(),
-            "an encoding the CLI cannot ask for is refused at the boundary"
+            "the raw control attachment has no presentation selector"
         );
 
         let parsed = Cli::try_parse_from([

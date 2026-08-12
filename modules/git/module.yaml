@@ -10,9 +10,11 @@ backend:
   path: modules/git/backend
   cargo_feature: git-module
   dependency_alias: shipctl-module-git
-  plugin_init: "shipctl_module_git::init(crate::modules::git::host_services(workspace.clone()))"
-  host_glue:
-    - src-tauri/src/modules/git.rs
+  install: "shipctl_module_git_host::install(builder, workspace.clone())"
+  host:
+    crate: shipctl-module-git-host
+    path: modules/git/host
+    dependency_alias: shipctl-module-git-host
 tauri:
   capability_identifier: git
   permissions:

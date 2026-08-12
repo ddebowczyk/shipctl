@@ -1,22 +1,24 @@
 use std::env;
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 use shipctl_core::instance::{
     ControlError, TerminalControlEvent, TERMINAL_CONTROL_WRITE_MAX_BYTES,
 };
-use shipctl_core::terminal::input::TerminalInput;
-use shipctl_core::terminal::painter;
-use shipctl_core::terminal::projection::{
-    ProjectedPoint, ProjectedRow, TerminalAnchorId, TerminalProjection,
-};
-use shipctl_core::terminal::{
+use shipctl_core::terminal_host::{
     TerminalAgentReportRequest, TerminalAgentReportSource, TerminalDescriptor, TerminalId,
-    TerminalLifecycle, TerminalTransport,
+    TerminalLifecycle,
 };
+use shipctl_module_semantic_terminal::input::TerminalInput;
+use shipctl_module_semantic_terminal::projection::{
+    ProjectedPoint, ProjectedRow, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
+};
+use shipctl_module_semantic_terminal::wire::{ProjectedRunRow, TerminalScreenSnapshot};
+use shipctl_module_semantic_terminal::SemanticDriverRequest;
 
 use crate::args::{
     TerminalAnchorArgs, TerminalAnchorIdArgs, TerminalAttachArgs, TerminalHistoryArgs,
@@ -51,6 +53,50 @@ struct TerminalSummary {
     label: String,
     lifecycle: TerminalLifecycle,
     cwd: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalInspectView {
+    terminal_id: TerminalId,
+    descriptor: TerminalDescriptor,
+    projection: TerminalScreenSnapshot,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalHistoryView {
+    terminal_id: TerminalId,
+    window: TerminalHistoryWindow,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalAnchorView {
+    terminal_id: TerminalId,
+    anchor: TerminalAnchor,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalAnchorResolutionView {
+    terminal_id: TerminalId,
+    anchor: Option<TerminalAnchor>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalAnchorReleaseView {
+    terminal_id: TerminalId,
+    anchor: TerminalAnchorId,
+    released: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalInputView {
+    terminal_id: TerminalId,
+    encoded_bytes: usize,
 }
 
 #[derive(Serialize)]
@@ -128,14 +174,30 @@ pub fn run(command: TerminalsCommand, output: OutputFormat) -> ExitCode {
 
 fn run_inspect(args: TerminalInspectArgs, output: OutputFormat) -> ExitCode {
     let operation = "terminals.inspect";
-    let result = crate::instances::inspect_terminal(
+    let descriptor = crate::instances::get_terminal(
         args.target.runtime.runtime_root.as_deref(),
         &args.target.instance,
         args.terminal_id,
     );
-    let result = match result {
+    let descriptor = match descriptor {
         Ok(result) => result,
         Err(error) => return crate::emit_failure(output, operation, &error, false),
+    };
+    let projection = match semantic_request(
+        args.target.runtime.runtime_root.as_deref(),
+        &args.target.instance,
+        args.terminal_id,
+        SemanticDriverRequest::Snapshot { baseline: false },
+    )
+    .and_then(decode_semantic_response)
+    {
+        Ok(result) => result,
+        Err(error) => return crate::emit_failure(output, operation, &error, false),
+    };
+    let result = TerminalInspectView {
+        terminal_id: args.terminal_id,
+        descriptor,
+        projection,
     };
     if args.text {
         return print_viewport_text(&result.projection);
@@ -146,8 +208,21 @@ fn run_inspect(args: TerminalInspectArgs, output: OutputFormat) -> ExitCode {
 
 /// Renders the viewport the way a reader sees it: one line per row, with the
 /// padding the grid stores on the right of each row removed.
-fn print_viewport_text(projection: &TerminalProjection) -> ExitCode {
-    print_rows_text(&projection.viewport)
+fn print_viewport_text(projection: &TerminalScreenSnapshot) -> ExitCode {
+    print_snapshot_rows_text(&projection.viewport)
+}
+
+fn print_snapshot_rows_text(rows: &[ProjectedRunRow]) -> ExitCode {
+    let mut stdout = io::stdout().lock();
+    for row in rows {
+        if writeln!(stdout, "{}", row.text().trim_end()).is_err() {
+            return ExitCode::FAILURE;
+        }
+    }
+    if stdout.flush().is_err() {
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
 }
 
 /// Rows as a reader sees them. History rows and viewport rows are the same
@@ -173,16 +248,23 @@ fn print_rows_text(rows: &[ProjectedRow]) -> ExitCode {
 /// list is.
 fn run_history(args: TerminalHistoryArgs, output: OutputFormat) -> ExitCode {
     let operation = "terminals.history";
-    let result = crate::instances::history_terminal(
+    let window = semantic_request(
         args.target.runtime.runtime_root.as_deref(),
         &args.target.instance,
         args.terminal_id,
-        args.start_row,
-        args.rows,
-    );
-    let result = match result {
+        SemanticDriverRequest::History {
+            start_row: args.start_row,
+            rows: args.rows,
+        },
+    )
+    .and_then(decode_semantic_response);
+    let window = match window {
         Ok(result) => result,
         Err(error) => return crate::emit_failure(output, operation, &error, false),
+    };
+    let result = TerminalHistoryView {
+        terminal_id: args.terminal_id,
+        window,
     };
     if args.text {
         return print_rows_text(&result.window.rows);
@@ -200,16 +282,23 @@ fn run_history(args: TerminalHistoryArgs, output: OutputFormat) -> ExitCode {
 /// releases it.
 fn run_anchor(args: TerminalAnchorArgs, output: OutputFormat) -> ExitCode {
     let operation = "terminals.anchor";
-    let result = crate::instances::anchor_terminal(
+    let anchor = semantic_request(
         args.target.runtime.runtime_root.as_deref(),
         &args.target.instance,
         args.terminal_id,
-        args.space.into(),
-        ProjectedPoint {
-            column: args.column,
-            row: args.row,
+        SemanticDriverRequest::Anchor {
+            space: args.space.into(),
+            at: ProjectedPoint {
+                column: args.column,
+                row: args.row,
+            },
         },
-    );
+    )
+    .and_then(decode_semantic_response);
+    let result = anchor.map(|anchor| TerminalAnchorView {
+        terminal_id: args.terminal_id,
+        anchor,
+    });
     match result {
         Ok(result) => crate::emit_success(output, operation, TERMINAL_ANCHORED, false, result)
             .unwrap_or_else(|message| crate::emit_render_failure(output, operation, message)),
@@ -224,12 +313,19 @@ fn run_anchor(args: TerminalAnchorArgs, output: OutputFormat) -> ExitCode {
 /// has since restarted, is a fact about the caller's handle.
 fn run_resolve_anchor(args: TerminalAnchorIdArgs, output: OutputFormat) -> ExitCode {
     let operation = "terminals.resolve-anchor";
-    let result = crate::instances::resolve_terminal_anchor(
+    let anchor = semantic_request(
         args.target.runtime.runtime_root.as_deref(),
         &args.target.instance,
         args.terminal_id,
-        TerminalAnchorId(args.anchor),
-    );
+        SemanticDriverRequest::ResolveAnchor {
+            id: TerminalAnchorId(args.anchor),
+        },
+    )
+    .and_then(decode_semantic_response);
+    let result = anchor.map(|anchor| TerminalAnchorResolutionView {
+        terminal_id: args.terminal_id,
+        anchor,
+    });
     match result {
         Ok(result) => {
             let empty = result.anchor.is_none();
@@ -244,12 +340,19 @@ fn run_resolve_anchor(args: TerminalAnchorIdArgs, output: OutputFormat) -> ExitC
 /// the way closing an already closed terminal is.
 fn run_release_anchor(args: TerminalAnchorIdArgs, output: OutputFormat) -> ExitCode {
     let operation = "terminals.release-anchor";
-    let result = crate::instances::release_terminal_anchor(
+    let anchor = TerminalAnchorId(args.anchor);
+    let released = semantic_request(
         args.target.runtime.runtime_root.as_deref(),
         &args.target.instance,
         args.terminal_id,
-        TerminalAnchorId(args.anchor),
-    );
+        SemanticDriverRequest::ReleaseAnchor { id: anchor.clone() },
+    )
+    .and_then(decode_semantic_response);
+    let result = released.map(|released| TerminalAnchorReleaseView {
+        terminal_id: args.terminal_id,
+        anchor,
+        released,
+    });
     match result {
         Ok(result) => {
             let empty = !result.released;
@@ -370,12 +473,18 @@ fn run_input(args: TerminalInputArgs, output: OutputFormat) -> ExitCode {
         Ok(input) => input,
         Err(error) => return crate::emit_failure(output, operation, &error, false),
     };
-    match crate::instances::input_terminal(
+    let result = semantic_request(
         args.target.runtime.runtime_root.as_deref(),
         &args.target.instance,
         args.terminal_id,
-        input,
-    ) {
+        SemanticDriverRequest::Input { input },
+    )
+    .and_then(decode_semantic_response)
+    .map(|encoded_bytes| TerminalInputView {
+        terminal_id: args.terminal_id,
+        encoded_bytes,
+    });
+    match result {
         Ok(result) => crate::emit_success(
             output,
             operation,
@@ -412,6 +521,33 @@ fn semantic_input(args: &TerminalInputArgs) -> Result<TerminalInput, ControlErro
         ControlError::new(
             "terminal.input.invalid",
             format!("The semantic input is not one this host understands: {error}"),
+        )
+    })
+}
+
+fn semantic_request(
+    runtime_root: Option<&Path>,
+    instance: &str,
+    terminal_id: TerminalId,
+    request: SemanticDriverRequest,
+) -> Result<serde_json::Value, ControlError> {
+    let request = serde_json::to_value(request).map_err(|error| {
+        ControlError::new(
+            "terminal.driver.request_encode_failed",
+            format!("Could not encode the semantic terminal request: {error}"),
+        )
+    })?;
+    crate::instances::request_terminal_driver(runtime_root, instance, terminal_id, request)
+        .map(|result| result.response)
+}
+
+fn decode_semantic_response<T: DeserializeOwned>(
+    response: serde_json::Value,
+) -> Result<T, ControlError> {
+    serde_json::from_value(response).map_err(|error| {
+        ControlError::new(
+            "terminal.driver.response_decode_failed",
+            format!("The semantic terminal response had an invalid shape: {error}"),
         )
     })
 }
@@ -457,12 +593,10 @@ fn terminal_input(args: &TerminalWriteArgs) -> Result<Vec<u8>, ControlError> {
 }
 
 fn run_attach(args: TerminalAttachArgs) -> ExitCode {
-    let encoding = TerminalTransport::from(args.encoding);
     let mut attachment = match crate::instances::attach_terminal(
         args.target.runtime.runtime_root.as_deref(),
         &args.target.instance,
         args.terminal_id,
-        encoding,
     ) {
         Ok(attachment) => attachment,
         Err(error) => {
@@ -474,18 +608,10 @@ fn run_attach(args: TerminalAttachArgs) -> ExitCode {
         }
     };
 
-    if args.raw {
-        let baseline = raw_baseline(
-            encoding,
-            &attachment.state().replay.data_base64,
-            attachment.state().state.as_deref(),
-        );
-        if let Err(error) = baseline.and_then(|bytes| write_raw_bytes(&bytes)) {
-            render_raw_error(&error);
-            return ExitCode::FAILURE;
+    if !args.raw {
+        if let Err(error) = print_stream_record(&StreamRecord::Attachment(attachment.state())) {
+            return render_stream_error(&error);
         }
-    } else if let Err(error) = print_stream_record(&StreamRecord::Attachment(attachment.state())) {
-        return render_stream_error(&error);
     }
 
     loop {
@@ -501,7 +627,7 @@ fn run_attach(args: TerminalAttachArgs) -> ExitCode {
             }
         };
         let result = if args.raw {
-            write_raw_event(encoding, &event)
+            write_raw_event(&event)
         } else {
             print_stream_record(&StreamRecord::Event(&event))
         };
@@ -512,29 +638,6 @@ fn run_attach(args: TerminalAttachArgs) -> ExitCode {
             }
             return render_stream_error(&error);
         }
-    }
-}
-
-/// The bytes that put the caller's terminal into the state the attachment
-/// starts from.
-///
-/// The host answers in the encoding the attachment asked for, so a baseline
-/// missing the state a semantic attachment requested is a disagreement about
-/// the encoding, not a frame to skip.
-fn raw_baseline(
-    encoding: TerminalTransport,
-    replay_base64: &str,
-    state: Option<&shipctl_core::terminal::wire::TerminalScreenSnapshot>,
-) -> Result<Vec<u8>, ControlError> {
-    match encoding {
-        TerminalTransport::Legacy => decode_server_bytes(replay_base64),
-        TerminalTransport::Semantic => match state {
-            Some(snapshot) => Ok(painter::paint_snapshot(snapshot)),
-            None => Err(ControlError::new(
-                "terminal.attach.event_invalid",
-                "The semantic terminal attachment was given no state to start from",
-            )),
-        },
     }
 }
 
@@ -569,11 +672,8 @@ fn write_raw_bytes(bytes: &[u8]) -> Result<(), ControlError> {
         })
 }
 
-fn write_raw_event(
-    encoding: TerminalTransport,
-    event: &TerminalControlEvent,
-) -> Result<(), ControlError> {
-    match raw_event(encoding, event)? {
+fn write_raw_event(event: &TerminalControlEvent) -> Result<(), ControlError> {
+    match raw_event(event)? {
         Some(bytes) => write_raw_bytes(&bytes),
         None => Ok(()),
     }
@@ -582,35 +682,11 @@ fn write_raw_event(
 /// What one event puts on the caller's terminal, or nothing when the event
 /// changes no picture.
 ///
-/// Each encoding refuses the other's frames. A byte frame on a semantic
-/// attachment, or a screen frame on a byte one, means the host sent an encoding
-/// this attachment did not ask for, and rendering it anyway would make the
-/// caller's terminal a second authority over what the screen holds.
-fn raw_event(
-    encoding: TerminalTransport,
-    event: &TerminalControlEvent,
-) -> Result<Option<Vec<u8>>, ControlError> {
-    let semantic = encoding == TerminalTransport::Semantic;
+fn raw_event(event: &TerminalControlEvent) -> Result<Option<Vec<u8>>, ControlError> {
     match event {
-        TerminalControlEvent::Output { data_base64, .. } if !semantic => {
+        TerminalControlEvent::Output { data_base64, .. } => {
             decode_server_bytes(data_base64).map(Some)
         }
-        TerminalControlEvent::Replay { replay, .. } if !semantic => {
-            decode_server_bytes(&replay.data_base64).map(Some)
-        }
-        TerminalControlEvent::Screen { state, .. } if semantic => {
-            Ok(Some(painter::paint_snapshot(state)))
-        }
-        TerminalControlEvent::Effects { effects, .. } if semantic => {
-            Ok(Some(painter::paint_effects(effects)))
-        }
-        TerminalControlEvent::Output { .. }
-        | TerminalControlEvent::Replay { .. }
-        | TerminalControlEvent::Screen { .. }
-        | TerminalControlEvent::Effects { .. } => Err(ControlError::new(
-            "terminal.attach.event_invalid",
-            "The terminal attachment received the encoding it did not ask for",
-        )),
         TerminalControlEvent::Exited { descriptor, .. } => {
             if let Some(exit) = &descriptor.exit {
                 eprintln!(
@@ -654,8 +730,6 @@ fn render_raw_error(error: &ControlError) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::args::{RuntimeRootArgs, TerminalTargetArgs};
 
@@ -717,11 +791,11 @@ mod tests {
         ));
         assert_eq!(
             semantic_input(&key).unwrap(),
-            TerminalInput::Key(shipctl_core::terminal::input::TerminalKeyEvent {
-                action: shipctl_core::terminal::input::TerminalKeyAction::Press,
+            TerminalInput::Key(shipctl_module_semantic_terminal::input::TerminalKeyEvent {
+                action: shipctl_module_semantic_terminal::input::TerminalKeyAction::Press,
                 code: "ArrowUp".to_string(),
                 text: None,
-                mods: shipctl_core::terminal::input::TerminalModifiers {
+                mods: shipctl_module_semantic_terminal::input::TerminalModifiers {
                     ctrl: true,
                     ..Default::default()
                 },
@@ -750,102 +824,16 @@ mod tests {
         );
     }
 
-    fn screen_event(
-        state: Arc<shipctl_core::terminal::wire::TerminalScreenSnapshot>,
-    ) -> TerminalControlEvent {
-        TerminalControlEvent::Screen {
-            terminal_id: TerminalId::default(),
-            attachment_id: Default::default(),
-            sequence: 3,
-            revision: shipctl_core::terminal::TerminalRevision(4),
-            state,
-        }
-    }
-
-    fn effects_event() -> TerminalControlEvent {
-        TerminalControlEvent::Effects {
-            terminal_id: TerminalId::default(),
-            attachment_id: Default::default(),
-            sequence: 4,
-            effects: vec![shipctl_core::terminal::effects::TerminalEffect::Bell],
-        }
-    }
-
-    fn sample_state() -> Arc<shipctl_core::terminal::wire::TerminalScreenSnapshot> {
-        match shipctl_core::terminal::contract::sample_event(
-            shipctl_core::terminal::contract::TerminalEventKind::Screen,
-        ) {
-            shipctl_core::terminal::TerminalEvent::Screen { state, .. } => state,
-            other => panic!("the screen sample is a screen event, got {other:?}"),
-        }
-    }
-
-    /// The semantic path presents what the host holds, with no access to the
-    /// bytes that produced it and no base64 anywhere in the attachment.
     #[test]
-    fn a_semantic_attachment_paints_state_and_its_occurrences() {
-        let state = sample_state();
-        let expected_row = state.viewport[0].text().trim_end().to_string();
-        assert!(
-            !expected_row.is_empty(),
-            "the sample must put something on screen for this test to mean anything"
-        );
-
-        let baseline = raw_baseline(TerminalTransport::Semantic, "", Some(&state)).unwrap();
-        assert!(String::from_utf8_lossy(&baseline).contains(&expected_row));
-
-        let painted = raw_event(TerminalTransport::Semantic, &screen_event(state))
-            .unwrap()
-            .expect("a screen frame changes the picture");
-        assert!(String::from_utf8_lossy(&painted).contains(&expected_row));
-
-        let effects = raw_event(TerminalTransport::Semantic, &effects_event())
-            .unwrap()
-            .expect("a bell is an occurrence the raw client reports");
-        assert!(
-            effects.ends_with(&[0x07]),
-            "the bell is reliable without being coupled to replaceable screen state"
-        );
-    }
-
-    /// Each encoding refuses the other's frames rather than rendering what it
-    /// did not ask for.
-    #[test]
-    fn an_attachment_refuses_the_encoding_it_did_not_ask_for() {
+    fn a_raw_attachment_writes_exact_child_bytes() {
         let bytes_frame = TerminalControlEvent::Output {
             terminal_id: TerminalId::default(),
             attachment_id: Default::default(),
             sequence: 1,
-            revision: shipctl_core::terminal::TerminalRevision(2),
+            revision: shipctl_core::terminal_host::TerminalRevision(2),
             data_base64: BASE64_STANDARD.encode(b"ok"),
         };
-        assert_eq!(
-            raw_event(TerminalTransport::Semantic, &bytes_frame)
-                .unwrap_err()
-                .code
-                .as_str(),
-            "terminal.attach.event_invalid"
-        );
-        assert_eq!(
-            raw_event(TerminalTransport::Legacy, &screen_event(sample_state()))
-                .unwrap_err()
-                .code
-                .as_str(),
-            "terminal.attach.event_invalid"
-        );
-        assert_eq!(
-            raw_baseline(TerminalTransport::Semantic, "", None)
-                .unwrap_err()
-                .code
-                .as_str(),
-            "terminal.attach.event_invalid"
-        );
-
-        // The byte path is what it was.
-        assert_eq!(
-            raw_event(TerminalTransport::Legacy, &bytes_frame).unwrap(),
-            Some(b"ok".to_vec())
-        );
+        assert_eq!(raw_event(&bytes_frame).unwrap(), Some(b"ok".to_vec()));
     }
 
     #[test]
@@ -909,17 +897,17 @@ mod tests {
         let terminal_id: TerminalId = "00000000-0000-4000-8000-000000000004".parse().unwrap();
         let rendered = serde_json::to_value(shipctl_core::instance::TerminalAgentReportResult {
             terminal_id,
-            activity: shipctl_core::terminal::TerminalAgentActivity {
+            activity: shipctl_core::terminal_host::TerminalAgentActivity {
                 revision: 9,
-                state: shipctl_core::terminal::TerminalAgentState::Blocked,
+                state: shipctl_core::terminal_host::TerminalAgentState::Blocked,
                 message: Some("waiting".to_string()),
                 updated_at_ms: 42,
                 source: TerminalAgentReportSource {
                     identifier: "codex".to_string(),
                     version: "1".to_string(),
                 },
-                attention: Some(shipctl_core::terminal::TerminalAgentAttention {
-                    kind: shipctl_core::terminal::TerminalAgentAttentionKind::Blocked,
+                attention: Some(shipctl_core::terminal_host::TerminalAgentAttention {
+                    kind: shipctl_core::terminal_host::TerminalAgentAttentionKind::Blocked,
                     revision: 9,
                 }),
             },

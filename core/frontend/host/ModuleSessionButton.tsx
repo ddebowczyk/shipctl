@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import type { TerminalTabData, TabActivity } from "@shipctl/core/platform";
-import { useTerminalStore } from "@shipctl/core/terminal";
+import { useTerminalStore } from "@shipctl/core/terminal-host";
 import { handleActionKey } from "@shipctl/core/shared";
 import { FolderInput, X } from "lucide-react";
 import { ContextMenu } from "@shipctl/core/shared/views";

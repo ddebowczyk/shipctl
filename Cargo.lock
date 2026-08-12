@@ -4705,6 +4705,7 @@ dependencies = [
  "sha2",
  "shipctl-core",
  "tar",
+ "tauri-plugin-shipctl-semantic-terminal",
  "tokio",
  "toon-format",
  "uuid",
@@ -4724,7 +4725,6 @@ dependencies = [
  "interprocess",
  "jsonschema",
  "libc",
- "libghostty-vt",
  "log",
  "notify",
  "portable-pty",
@@ -4754,6 +4754,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "shipctl-module-assistants-host"
+version = "0.0.0"
+dependencies = [
+ "shipctl-core",
+ "shipctl-module-api",
+ "tauri",
+ "tauri-plugin-shipctl-assistants",
+]
+
+[[package]]
+name = "shipctl-module-git-host"
+version = "0.0.0"
+dependencies = [
+ "shipctl-core",
+ "tauri",
+ "tauri-plugin-shipctl-git",
+]
+
+[[package]]
+name = "shipctl-module-ports-host"
+version = "0.0.0"
+dependencies = [
+ "shipctl-core",
+ "tauri",
+ "tauri-plugin-shipctl-ports",
+]
+
+[[package]]
+name = "shipctl-module-semantic-terminal-host"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shipctl-core",
+ "shipctl-module-api",
+ "tauri",
+ "tauri-plugin-shipctl-semantic-terminal",
+]
+
+[[package]]
+name = "shipctl-module-skills-host"
+version = "0.0.0"
+dependencies = [
+ "shipctl-core",
+ "tauri",
+ "tauri-plugin-shipctl-skills",
+]
+
+[[package]]
+name = "shipctl-module-usage-host"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "shipctl-core",
+ "shipctl-module-api",
+ "tauri",
+ "tauri-plugin-shipctl-usage",
+]
+
+[[package]]
 name = "shipctl-rapid-terminal-probe"
 version = "0.0.0"
 dependencies = [
@@ -4775,6 +4835,12 @@ dependencies = [
  "serde_json",
  "shipctl-core",
  "shipctl-module-api",
+ "shipctl-module-assistants-host",
+ "shipctl-module-git-host",
+ "shipctl-module-ports-host",
+ "shipctl-module-semantic-terminal-host",
+ "shipctl-module-skills-host",
+ "shipctl-module-usage-host",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -4785,6 +4851,7 @@ dependencies = [
  "tauri-plugin-shipctl-fixture",
  "tauri-plugin-shipctl-git",
  "tauri-plugin-shipctl-ports",
+ "tauri-plugin-shipctl-semantic-terminal",
  "tauri-plugin-shipctl-skills",
  "tauri-plugin-shipctl-todos",
  "tauri-plugin-shipctl-usage",
@@ -5435,6 +5502,19 @@ name = "tauri-plugin-shipctl-ports"
 version = "0.0.0"
 dependencies = [
  "serde",
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
+name = "tauri-plugin-shipctl-semantic-terminal"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "shipctl-module-api",
  "tauri",
  "tauri-plugin",
 ]

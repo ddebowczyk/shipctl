@@ -1,0 +1,42 @@
+.semantic-terminal-context-menu {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  min-width: 180px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+}
+
+.semantic-terminal-context-menu__item {
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--text-body);
+  text-align: left;
+}
+
+.semantic-terminal-context-menu__item:hover,
+.semantic-terminal-context-menu__item:focus-visible {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.semantic-terminal-context-menu__item:focus-visible {
+  outline: 2px solid rgb(122 162 247 / 75%);
+  outline-offset: -2px;
+}
+
+.semantic-terminal-context-menu__item:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0.5;
+}

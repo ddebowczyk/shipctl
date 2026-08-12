@@ -1,13 +1,15 @@
 # Shipctl terminal single-VT end-state
 
+> Status: superseded by [the terminal extraction plan](../extract-terminal-code/README.md).
+> This document is retained as historical semantic-terminal evidence. The
+> current architecture has one selected authority per terminal session, not one
+> global Ghostty authority.
+
 ## Executive summary
 
-Shipctl must finish with one terminal authority. `libghostty-vt` in the backend
-will be the only component that parses child PTY output, decides terminal cell
-occupancy and modes, retains history, and encodes mode-aware PTY input. Every
-Shipctl client will consume versioned semantic state and submit semantic
-commands. The webview and CLI will present that state without receiving or
-parsing the child's VT stream.
+This former proposal required one global terminal authority. Its semantic
+implementation and evidence now belong to `modules/semantic-terminal`; it no
+longer defines the product target.
 
 The implemented enablers made this migration testable and reduced its risk, but
 they did not move the production authority boundary. Today Ghostty parses PTY

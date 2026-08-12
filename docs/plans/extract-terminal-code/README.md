@@ -1,6 +1,35 @@
 # Extract terminal implementations into modules
 
-Status: proposed implementation plan.
+Status: implementation complete; packaged-app comparison and product selection remain.
+
+## Implementation status — 2026-08-11
+
+The shared driver contracts, generic `TerminalSlot`, build-installed semantic
+module, and thin-terminal package are present. Core owns the PTY, lifecycle,
+raw ordered attachment, physical resize, terminal chrome, and driver
+selection. It no longer imports the semantic module, Ghostty, or xterm.
+
+`modules/semantic-terminal` owns the Ghostty parser, semantic state and input,
+semantic attachment protocol, Tauri command namespace, canvas presentation,
+fixtures, and tests. `modules/thin-terminal` owns xterm and its raw-byte
+presentation. `TerminalTransport`, typed semantic compatibility protocol,
+compatibility re-exports, and the old core terminal directories are deleted.
+
+`modules/semantic-terminal/host/` is the sole composition adapter. It registers
+the module's native driver and connects the module's host port to the generic
+core `TerminalService`; the Tauri shell calls its public functions but contains
+no semantic terminal behavior.
+The root registers `thin-terminal` as the browser-only driver. A terminal's
+selected `driverId` is fixed when its PTY starts.
+
+Verification on 2026-08-11: `just test fast`, `just check all`, and
+`cargo test --workspace` pass. The focused host, semantic, and thin frontend
+suites also pass. The driver registry test resolves both drivers at once, and
+the New Session menu creates either **Semantic terminal** or **TTY terminal**.
+
+Remaining work is intentional product work, not extraction work: perform the
+manual packaged-app exercises listed in 03-verification-and-cutover.md and
+make an explicit owner decision on the default implementation.
 
 ## Contract
 
@@ -33,15 +62,14 @@ available while the two implementations are compared.
 
 ## Why the boundary changes
 
-The current core terminal capability contains both terminal architectures.
-The browser selects a temporary legacy-or-semantic transport in
-core/frontend/terminal/terminalBrowserSession.ts. The backend runtime always
-feeds Ghostty before it publishes an attachment event. The shell directly
-mounts the core TerminalView.
+Before extraction, the core terminal capability contained most semantic work.
+The browser bound one semantic presentation, the backend fed Ghostty before it
+published attachment events, and selection could not name independent
+implementations.
 
-That is a migration switch inside one capability, not a modular architecture.
-It cannot select two independently owned implementations, and a module cannot
-replace it without importing core terminal internals.
+The extracted architecture replaces that migration switch with two module
+implementations and a generic host. Modules select a driver at launch without
+importing core implementation internals.
 
 The existing performance evidence remains useful. It shows that the original
 semantic cell-object protocol amplified the wire cost, and that compact runs
@@ -72,7 +100,7 @@ contradictory target architectures.
         v
     core/backend/terminal_host
         - PTY, process, raw bytes, identity, physical resize
-        - selected driver session
+        - selected native driver session, when one is needed
         |
         +-- raw attachment --> modules/thin-terminal/frontend --> xterm
         |
@@ -88,9 +116,9 @@ contradictory target architectures.
     modules/api
         - data-only host and driver contracts shared by core and modules
 
-The selected native driver is created inside the terminal host actor. It sees
-one ordered copy of PTY output. It cannot own the PTY handle or create another
-read loop.
+When the selected implementation needs native interpretation, its driver is
+created inside the terminal host actor. It sees one ordered copy of PTY output.
+It cannot own the PTY handle or create another read loop.
 
 The selected frontend presentation receives only the port for its driver. The
 shell knows how to place a terminal tab, but not whether the tab contains xterm
@@ -102,7 +130,6 @@ or a semantic canvas.
     core/frontend/terminal-host/
     modules/api/backend/src/terminal_host.rs
     modules/api/frontend/src/terminalHost.ts
-    modules/thin-terminal/backend/
     modules/thin-terminal/frontend/
     modules/semantic-terminal/backend/
     modules/semantic-terminal/frontend/
