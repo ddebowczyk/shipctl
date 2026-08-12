@@ -1,9 +1,0 @@
----
-schema_version: 1
-sequence: 1
-key: plan-contract
-phase_label: Plan contract
-title: Agent-operated capability module control plane
-role: governance
-document: README.md
-action_plan_dir: 01-plan-contract

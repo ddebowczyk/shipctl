@@ -1,9 +1,0 @@
----
-schema_version: 1
-sequence: 3
-key: step-0a
-phase_label: Step 0A
-title: Named instance specification
-role: phase
-document: 00a-named-instance-spec.md
-action_plan_dir: 03-step-0a

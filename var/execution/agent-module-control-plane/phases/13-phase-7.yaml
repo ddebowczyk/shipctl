@@ -1,9 +1,0 @@
----
-schema_version: 1
-sequence: 13
-key: phase-7
-phase_label: Phase 7
-title: Agent development loop
-role: phase
-document: 07-agent-development-loop.md
-action_plan_dir: 13-phase-7

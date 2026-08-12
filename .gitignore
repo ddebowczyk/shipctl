@@ -10,6 +10,9 @@ latest.json
 .claude/settings.local.json
 builds/
 notes/
+docs/
+research/
+var/
 
 # Beads / Dolt files (added by bd init)
 .dolt/

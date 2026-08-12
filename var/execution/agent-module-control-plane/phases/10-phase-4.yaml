@@ -1,9 +1,0 @@
----
-schema_version: 1
-sequence: 10
-key: phase-4
-phase_label: Phase 4
-title: Live runtime supervisor
-role: phase
-document: 04-live-runtime-supervisor.md
-action_plan_dir: 10-phase-4
