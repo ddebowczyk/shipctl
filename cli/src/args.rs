@@ -149,7 +149,7 @@ pub struct TerminalReportArgs {
     pub terminal_id: Option<TerminalId>,
 
     /// Instance name or UUID; defaults to SHIPCTL_INSTANCE_ID inside a hosted terminal.
-    #[arg(long)]
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
     pub instance: Option<String>,
 
     /// Stable identifier for the reporting integration.
@@ -171,7 +171,7 @@ pub struct TerminalReportArgs {
 #[derive(Debug, Args)]
 pub struct TerminalTargetArgs {
     /// Exact running instance name or UUID.
-    #[arg(long)]
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
     pub instance: String,
 
     #[command(flatten)]
@@ -365,7 +365,7 @@ pub struct LogsArgs {
     pub target: Vec<String>,
 
     /// Keep records produced by this instance.
-    #[arg(long, value_name = "NAME")]
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
     pub instance: Option<String>,
 
     /// Keep records at or after an RFC 3339 instant, or an offset back from
@@ -402,7 +402,12 @@ pub enum UiCommand {
 #[derive(Debug, Args)]
 pub struct UiStartArgs {
     /// Stable name used to address this instance later.
-    #[arg(long, default_value = DEFAULT_INSTANCE_NAME)]
+    #[arg(
+        long = "instance",
+        visible_alias = "name",
+        value_name = "NAME",
+        default_value = DEFAULT_INSTANCE_NAME
+    )]
     pub name: String,
 
     /// Writable state directory owned by this instance.
@@ -437,13 +442,35 @@ pub struct RuntimeRootArgs {
     pub runtime_root: Option<PathBuf>,
 }
 
+/// An instance addressed positionally or by flag.
+///
+/// Both spellings exist because `--instance` is how every other command in this
+/// CLI names an instance, and an instance addressed one way in one command and
+/// another way in the next is a surface a caller has to memorise. The positional
+/// form stays because it was here first and reads well.
 #[derive(Debug, Args)]
 pub struct InstanceSelectorArgs {
     /// Instance name or UUID; omitted only when exactly one instance is running.
     pub selector: Option<String>,
 
+    /// The same instance, written the way every other command writes it.
+    #[arg(
+        long,
+        visible_alias = "name",
+        value_name = "NAME",
+        conflicts_with = "selector"
+    )]
+    pub instance: Option<String>,
+
     #[command(flatten)]
     pub runtime: RuntimeRootArgs,
+}
+
+impl InstanceSelectorArgs {
+    /// The addressed instance, from whichever spelling the caller used.
+    pub fn target(&self) -> Option<&str> {
+        self.selector.as_deref().or(self.instance.as_deref())
+    }
 }
 
 #[derive(Debug, Args)]
@@ -451,12 +478,34 @@ pub struct InstanceStopArgs {
     /// Instance name or UUID; omitted only when exactly one instance is running.
     pub selector: Option<String>,
 
+    /// The same instance, written the way every other command writes it.
+    #[arg(
+        long,
+        visible_alias = "name",
+        value_name = "NAME",
+        conflicts_with = "selector"
+    )]
+    pub instance: Option<String>,
+
     /// Force shutdown when graceful control is unavailable.
     #[arg(long)]
     pub force: bool,
 
     #[command(flatten)]
     pub runtime: RuntimeRootArgs,
+}
+
+impl InstanceStopArgs {
+    /// The addressed instance, from whichever spelling the caller used.
+    pub fn target(self) -> (Option<String>, bool, Option<PathBuf>) {
+        let Self {
+            selector,
+            instance,
+            force,
+            runtime,
+        } = self;
+        (selector.or(instance), force, runtime.runtime_root)
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -502,7 +551,7 @@ pub enum CapabilitiesCommand {
 #[derive(Debug, Args)]
 pub struct CapabilityTargetArgs {
     /// Running instance name or UUID.
-    #[arg(long)]
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
     pub instance: String,
 
     #[command(flatten)]
@@ -549,7 +598,7 @@ pub enum ScheduleCommand {
 #[derive(Debug, Args)]
 pub struct ScheduleTargetArgs {
     /// Exact running instance name or UUID.
-    #[arg(long)]
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
     pub instance: String,
 
     #[command(flatten)]
@@ -570,6 +619,8 @@ pub struct ScheduleRefreshArgs {
     /// Exact running instance name or UUID.
     #[arg(
         long,
+        visible_alias = "name",
+        value_name = "NAME",
         required_unless_present = "all_instances",
         conflicts_with = "all_instances"
     )]
@@ -603,7 +654,7 @@ pub struct ScheduleTriggerArgs {
 #[derive(Debug, Args)]
 pub struct MessageTargetArgs {
     /// Exact running instance name or UUID.
-    #[arg(long)]
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
     pub instance: String,
 
     #[command(flatten)]
@@ -703,7 +754,12 @@ pub struct ModuleVerifyArgs {
 #[derive(Debug, Args)]
 pub struct OnlineTargetArgs {
     /// Running instance name or UUID.
-    #[arg(long, conflicts_with = "offline")]
+    #[arg(
+        long,
+        visible_alias = "name",
+        value_name = "NAME",
+        conflicts_with = "offline"
+    )]
     pub instance: Option<String>,
 
     /// Override the local instance discovery directory.
@@ -728,7 +784,12 @@ pub struct ModuleTransitionArgs {
     pub target_revision: Option<u64>,
 
     /// Running instance name or UUID.
-    #[arg(long, conflicts_with = "offline")]
+    #[arg(
+        long,
+        visible_alias = "name",
+        value_name = "NAME",
+        conflicts_with = "offline"
+    )]
     pub instance: Option<String>,
 
     /// Override the local instance discovery directory.
@@ -747,7 +808,7 @@ pub struct OperationInspectArgs {
     pub operation_id: Uuid,
 
     /// Running instance name or UUID.
-    #[arg(long)]
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
     pub instance: Option<String>,
 
     /// Override the local instance discovery directory.
@@ -768,7 +829,7 @@ pub enum StateCommand {
 #[derive(Debug, Args)]
 pub struct StateSaveArgs {
     /// Running instance name or UUID.
-    #[arg(long)]
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
     pub instance: String,
 
     /// Destination state archive.

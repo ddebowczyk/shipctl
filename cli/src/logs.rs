@@ -203,7 +203,7 @@ fn help(args: &LogsArgs, page: &shipctl_core::logs::LogPage) -> Vec<String> {
     }
     if page.unparsed > 0 {
         help.push(
-            "Lines from an older build are not readable; they clear on the next log rotation"
+            "Lines from an older build are not readable; run `shipctl ui` to retire them"
                 .to_string(),
         );
     }

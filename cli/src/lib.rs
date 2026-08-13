@@ -793,73 +793,65 @@ fn run_instances(command: InstancesCommand, output: OutputFormat) -> ExitCode {
         ),
         InstancesCommand::Inspect(args) => (
             "instances.inspect",
-            instances::inspect(
-                args.runtime.runtime_root.as_deref(),
-                args.selector.as_deref(),
-            )
-            .and_then(|data| {
-                emit_success(
-                    output,
-                    "instances.inspect",
-                    "control.instance.inspected",
-                    false,
-                    data,
-                )
-                .map_err(render_error)
-            }),
+            instances::inspect(args.runtime.runtime_root.as_deref(), args.target()).and_then(
+                |data| {
+                    emit_success(
+                        output,
+                        "instances.inspect",
+                        "control.instance.inspected",
+                        false,
+                        data,
+                    )
+                    .map_err(render_error)
+                },
+            ),
         ),
         InstancesCommand::Diagnose(args) => {
-            let rendered = instances::diagnose(
-                args.runtime.runtime_root.as_deref(),
-                args.selector.as_deref(),
-            )
-            .and_then(|data| {
-                let healthy = data.healthy;
-                emit_outcome(
-                    output,
-                    "instances.diagnose",
-                    if healthy {
-                        "control.instance.diagnostics_ok"
-                    } else {
-                        "control.instance.diagnostics_failed"
-                    },
-                    healthy,
-                    data,
-                )
-                .map_err(render_error)
-            });
+            let rendered = instances::diagnose(args.runtime.runtime_root.as_deref(), args.target())
+                .and_then(|data| {
+                    let healthy = data.healthy;
+                    emit_outcome(
+                        output,
+                        "instances.diagnose",
+                        if healthy {
+                            "control.instance.diagnostics_ok"
+                        } else {
+                            "control.instance.diagnostics_failed"
+                        },
+                        healthy,
+                        data,
+                    )
+                    .map_err(render_error)
+                });
             ("instances.diagnose", rendered)
         }
         InstancesCommand::Stop(args) => {
-            let selector = args.selector;
-            let rendered = match instances::stop(
-                args.runtime.runtime_root.as_deref(),
-                selector.as_deref(),
-                args.force,
-            ) {
-                Ok(data) => emit_success(
-                    output,
-                    "instances.stop",
-                    "control.instance.stopped",
-                    false,
-                    data,
-                )
-                .map_err(render_error),
-                Err(error) if error.code.as_str() == "control.instance.absent" => emit_success(
-                    output,
-                    "instances.stop",
-                    "control.instance.already_stopped",
-                    true,
-                    StoppedNoOp {
-                        selector: selector
-                            .or_else(|| std::env::var("SHIPCTL_INSTANCE_ID").ok())
-                            .unwrap_or_else(|| "<sole-live-instance>".to_string()),
-                        stopped: false,
-                    },
-                )
-                .map_err(render_error),
-                Err(error) => Err(error),
-            };
+            let (selector, force, runtime_root) = args.target();
+            let rendered =
+                match instances::stop(runtime_root.as_deref(), selector.as_deref(), force) {
+                    Ok(data) => emit_success(
+                        output,
+                        "instances.stop",
+                        "control.instance.stopped",
+                        false,
+                        data,
+                    )
+                    .map_err(render_error),
+                    Err(error) if error.code.as_str() == "control.instance.absent" => emit_success(
+                        output,
+                        "instances.stop",
+                        "control.instance.already_stopped",
+                        true,
+                        StoppedNoOp {
+                            selector: selector
+                                .or_else(|| std::env::var("SHIPCTL_INSTANCE_ID").ok())
+                                .unwrap_or_else(|| "<sole-live-instance>".to_string()),
+                            stopped: false,
+                        },
+                    )
+                    .map_err(render_error),
+                    Err(error) => Err(error),
+                };
             ("instances.stop", rendered)
         }
     };
@@ -1155,6 +1147,7 @@ fn print_version(format: OutputFormat) {
 
 #[cfg(test)]
 mod tests {
+    use crate::args::TerminalsCommand;
     use shipctl_core::instance::{DiscoveryProblem, DEFAULT_INSTANCE_NAME};
     use shipctl_module_semantic_terminal_core::projection::ProjectedSpace;
 
@@ -1250,6 +1243,115 @@ mod tests {
         };
         assert_eq!(stop.selector.as_deref(), Some("alpha"));
         assert!(stop.force);
+    }
+
+    fn stop_target(arguments: &[&str]) -> Option<String> {
+        let parsed = Cli::try_parse_from(arguments).unwrap();
+        let Some(CliCommand::Instances {
+            command: InstancesCommand::Stop(stop),
+        }) = parsed.command
+        else {
+            panic!("expected instances stop")
+        };
+        stop.target().0
+    }
+
+    /// One instance is addressed the same way everywhere. `ui start --name`
+    /// created it, so `--name` has to stop it too, and `--instance` is the
+    /// spelling every other command already uses.
+    #[test]
+    fn an_instance_is_addressed_by_position_or_by_either_flag() {
+        assert_eq!(
+            stop_target(&["shipctl", "instances", "stop", "alpha"]).as_deref(),
+            Some("alpha")
+        );
+        assert_eq!(
+            stop_target(&["shipctl", "instances", "stop", "--instance", "alpha"]).as_deref(),
+            Some("alpha")
+        );
+        assert_eq!(
+            stop_target(&["shipctl", "instances", "stop", "--name", "alpha"]).as_deref(),
+            Some("alpha")
+        );
+        assert_eq!(stop_target(&["shipctl", "instances", "stop"]), None);
+    }
+
+    /// The two spellings name the same thing, so giving both is a caller
+    /// mistake rather than a precedence question this CLI should answer.
+    #[test]
+    fn the_positional_and_the_flag_cannot_both_address_an_instance() {
+        assert!(Cli::try_parse_from([
+            "shipctl",
+            "instances",
+            "stop",
+            "alpha",
+            "--instance",
+            "beta"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn inspect_and_diagnose_accept_the_same_spellings_as_stop() {
+        for verb in ["inspect", "diagnose"] {
+            for spelling in [
+                vec!["alpha"],
+                vec!["--instance", "alpha"],
+                vec!["--name", "alpha"],
+            ] {
+                let mut arguments = vec!["shipctl", "instances", verb];
+                arguments.extend(spelling.iter());
+                let parsed = Cli::try_parse_from(&arguments).unwrap();
+                let target = match parsed.command {
+                    Some(CliCommand::Instances {
+                        command: InstancesCommand::Inspect(args),
+                    })
+                    | Some(CliCommand::Instances {
+                        command: InstancesCommand::Diagnose(args),
+                    }) => args.target().map(str::to_string),
+                    _ => panic!("expected an instances selector command"),
+                };
+                assert_eq!(target.as_deref(), Some("alpha"), "{arguments:?}");
+            }
+        }
+    }
+
+    /// `ui start` keeps `--name`, and gains the spelling the rest of the CLI
+    /// uses, so a caller never has to remember which command wants which.
+    #[test]
+    fn starting_the_ui_accepts_both_spellings_of_the_instance_name() {
+        for flag in ["--name", "--instance"] {
+            let parsed = Cli::try_parse_from(["shipctl", "ui", "start", flag, "alpha"]).unwrap();
+            let Some(CliCommand::Ui {
+                command: Some(UiCommand::Start(start)),
+                ..
+            }) = parsed.command
+            else {
+                panic!("expected ui start")
+            };
+            assert_eq!(start.name, "alpha", "{flag}");
+        }
+    }
+
+    /// Commands that reach a running instance already used `--instance`. They
+    /// must accept `--name` too, or the alias is only half a convention.
+    #[test]
+    fn a_running_instance_target_accepts_the_name_alias() {
+        let parsed =
+            Cli::try_parse_from(["shipctl", "terminals", "list", "--name", "alpha"]).unwrap();
+        let Some(CliCommand::Terminals {
+            command: TerminalsCommand::List(args),
+        }) = parsed.command
+        else {
+            panic!("expected terminals list")
+        };
+        assert_eq!(args.instance, "alpha");
+
+        let parsed = Cli::try_parse_from(["shipctl", "logs", "--name", "alpha"]).unwrap();
+        let Some(CliCommand::Logs(args)) = parsed.command else {
+            panic!("expected logs")
+        };
+        assert_eq!(args.instance.as_deref(), Some("alpha"));
     }
 
     #[test]
