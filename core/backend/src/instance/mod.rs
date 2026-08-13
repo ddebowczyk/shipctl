@@ -6,8 +6,9 @@ pub mod leases;
 pub mod protocol;
 
 pub use context::{
-    resolve_runtime_root, resolve_state_root, resolve_state_root_read_only, InstanceBuildIdentity,
-    InstanceContext, InstanceInspection, InstanceLaunchOptions, LaunchProvenance, RootSource,
+    default_state_root_name, resolve_runtime_root, resolve_state_root, resolve_state_root_for,
+    resolve_state_root_read_only, InstanceBuildIdentity, InstanceContext, InstanceInspection,
+    InstanceLaunchOptions, LaunchProvenance, RootSource, DEFAULT_INSTANCE_NAME,
 };
 pub use control::{ControlHandler, ControlServer, InstanceDirectory, TerminalAttachmentClient};
 pub use leases::InstanceLeases;

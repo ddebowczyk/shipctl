@@ -8,6 +8,20 @@ pub enum OutputFormat {
     #[default]
     Toon,
     Json,
+    /// One JSON object per line, with no response envelope.
+    ///
+    /// This is the only format a stream can use: a TOON array declares its
+    /// length in its header, which cannot be known before the last record
+    /// arrives.
+    Jsonl,
+}
+
+impl OutputFormat {
+    /// True when the format carries a response envelope. A bounded command can
+    /// report aggregates and a status code; a stream cannot.
+    pub fn is_enveloped(self) -> bool {
+        !matches!(self, Self::Jsonl)
+    }
 }
 
 #[derive(Serialize)]
@@ -103,6 +117,26 @@ fn render(format: OutputFormat, response: &ResponseEnvelope<'_>) -> Result<Strin
         OutputFormat::Toon => {
             toon_format::encode_default(response).map_err(|error| error.to_string())
         }
+        OutputFormat::Jsonl => render_lines(response),
+    }
+}
+
+/// Render without an envelope: an array becomes one line per element, and
+/// anything else becomes a single line. An error still reaches stdout as one
+/// line, so a reader never has to switch channels to find out what happened.
+fn render_lines(response: &ResponseEnvelope<'_>) -> Result<String, String> {
+    let encode = |value: &Value| serde_json::to_string(value).map_err(|error| error.to_string());
+    if let Some(error) = response.error {
+        return encode(&serde_json::to_value(error).map_err(|error| error.to_string())?);
+    }
+    match response.data.as_ref() {
+        Some(Value::Array(elements)) => Ok(elements
+            .iter()
+            .map(encode)
+            .collect::<Result<Vec<_>, _>>()?
+            .join("\n")),
+        Some(value) => encode(value),
+        None => Ok(String::new()),
     }
 }
 
@@ -111,6 +145,60 @@ mod tests {
     use super::*;
     use serde_json::json;
     use shipctl_core::module_control::codes::{OPERATION_ACCEPTED, VERIFICATION_MISMATCH};
+
+    /// A stream format drops the envelope, and an array becomes one line per
+    /// element so `jq` can read it a record at a time.
+    #[test]
+    fn jsonl_emits_one_line_per_element_without_an_envelope() {
+        let rendered = success(
+            OutputFormat::Jsonl,
+            "logs",
+            "logs.read",
+            false,
+            json!([{"level": "info"}, {"level": "warn"}]),
+        )
+        .unwrap();
+
+        let lines = rendered.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], r#"{"level":"info"}"#);
+        assert_eq!(lines[1], r#"{"level":"warn"}"#);
+        assert!(!rendered.contains("schemaVersion"));
+    }
+
+    #[test]
+    fn jsonl_renders_a_non_array_payload_as_a_single_line() {
+        let rendered = success(
+            OutputFormat::Jsonl,
+            "logs",
+            "logs.read",
+            false,
+            json!({"count": 2}),
+        )
+        .unwrap();
+
+        assert_eq!(rendered, r#"{"count":2}"#);
+    }
+
+    /// An error still has to reach stdout in the stream format, or a reader
+    /// would see an empty stream and no reason for it.
+    #[test]
+    fn jsonl_still_reports_an_error_on_stdout() {
+        let error = ControlError::new("logs.read_failed", "Could not read the log file");
+
+        let rendered = failure(OutputFormat::Jsonl, "logs", &error).unwrap();
+
+        assert_eq!(rendered.lines().count(), 1);
+        assert!(rendered.contains("logs.read_failed"));
+        assert!(!rendered.contains("schemaVersion"));
+    }
+
+    #[test]
+    fn only_the_stream_format_drops_the_envelope() {
+        assert!(OutputFormat::Toon.is_enveloped());
+        assert!(OutputFormat::Json.is_enveloped());
+        assert!(!OutputFormat::Jsonl.is_enveloped());
+    }
 
     #[test]
     fn toon_and_json_preserve_the_same_response_data() {

@@ -18,6 +18,9 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use shipctl_core::instance::{
     ControlServer, InstanceContext, InstanceLaunchOptions, InstanceLeases,
 };
+use shipctl_core::logs::{
+    app_log_dir, now_timestamp, LogRecord, LOG_FILE_STEM, NOTICE_LOG_FILE_STEM,
+};
 use shipctl_core::message_bus::RuntimeMessageBus;
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::module_control::registry::ModuleRegistrySnapshotProvider;
@@ -45,6 +48,9 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     let load_state = options.load_state.clone();
     let reconcile_external_sources = load_state.is_none();
     let context = InstanceContext::resolve(options, build_info::APP_VERSION)?;
+    // Every instance writes to one shared log, so each record has to name the
+    // instance that produced it or a second UI is unreadable.
+    let logging_instance = context.name.clone();
     let paths = context.paths();
     let module_artifact_root = paths.module_artifact_root.clone();
     let leases = Arc::new(InstanceLeases::acquire(&context).map_err(|error| error.to_string())?);
@@ -179,19 +185,34 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         // Release builds need the same file-backed diagnostics as development
         // builds. Logging is best-effort so an unavailable log directory can
         // never become another startup failure.
+        //
+        // There is deliberately no stdout target. This is a desktop
+        // application: its diagnostics belong in a file that `shipctl logs`
+        // can query, not on the terminal of whatever happened to start it.
+        //
+        // Records are JSON Lines so the file is directly usable with `jq`,
+        // with no parsing step and no CLI in the way.
+        let log_directory = app_log_dir(&app.config().identifier);
         if let Err(error) = app.handle().plugin(
             tauri_plugin_log::Builder::default()
                 .level(configured_log_level())
+                .format(move |callback, message, record| {
+                    let line = LogRecord::new(
+                        now_timestamp(),
+                        record.level().into(),
+                        record.target(),
+                        Some(logging_instance.as_str()),
+                        &message.to_string(),
+                    )
+                    .to_line()
+                    .unwrap_or_default();
+                    callback.finish(format_args!("{line}"))
+                })
                 .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some("shipctl".into()),
-                    })
-                    .filter(|metadata| !is_notice_log_target(metadata.target())),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some("shipctl-notices".into()),
-                    })
-                    .filter(|metadata| is_notice_log_target(metadata.target())),
+                    log_target(log_directory.as_deref(), LOG_FILE_STEM)
+                        .filter(|metadata| !is_notice_log_target(metadata.target())),
+                    log_target(log_directory.as_deref(), NOTICE_LOG_FILE_STEM)
+                        .filter(|metadata| is_notice_log_target(metadata.target())),
                 ])
                 .build(),
         ) {
@@ -347,6 +368,26 @@ fn configured_log_level() -> log::LevelFilter {
         .as_deref()
         .and_then(parse_log_level)
         .unwrap_or(log::LevelFilter::Info)
+}
+
+/// One log file target.
+///
+/// The folder comes from `shipctl_core::logs::app_log_dir` rather than the log
+/// plugin's own resolution, so the directory the UI writes to and the directory
+/// `shipctl logs` reads from are decided by one function. The plugin's own
+/// `LogDir` remains the fallback for a platform where that function cannot
+/// resolve a home directory.
+fn log_target(directory: Option<&std::path::Path>, file_name: &str) -> tauri_plugin_log::Target {
+    let kind = match directory {
+        Some(path) => tauri_plugin_log::TargetKind::Folder {
+            path: path.to_path_buf(),
+            file_name: Some(file_name.to_string()),
+        },
+        None => tauri_plugin_log::TargetKind::LogDir {
+            file_name: Some(file_name.to_string()),
+        },
+    };
+    tauri_plugin_log::Target::new(kind)
 }
 
 const NOTICE_LOG_TARGET: &str = "webview:shipctl.notice";

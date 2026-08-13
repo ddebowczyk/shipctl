@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use shipctl_core::instance::DEFAULT_INSTANCE_NAME;
 use shipctl_core::terminal_host::{TerminalAgentReportKind, TerminalId};
 use shipctl_module_semantic_terminal_core::projection::ProjectedSpace;
 use uuid::Uuid;
@@ -35,11 +36,16 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Start the UI or inspect its launcher options.
+    /// Start the UI as a detached instance and print its readiness record.
     Ui {
         #[command(subcommand)]
-        command: UiCommand,
+        command: Option<UiCommand>,
+
+        #[command(flatten)]
+        start: UiStartArgs,
     },
+    /// Read application log records written by running or past UI instances.
+    Logs(LogsArgs),
     /// List, inspect, or stop named running instances.
     Instances {
         #[command(subcommand)]
@@ -347,6 +353,46 @@ pub struct TerminalWriteArgs {
     pub target: TerminalTargetArgs,
 }
 
+#[derive(Debug, Args)]
+pub struct LogsArgs {
+    /// Keep records at this severity or above.
+    #[arg(long, value_name = "LEVEL")]
+    pub level: Option<String>,
+
+    /// Keep records whose emitting subsystem matches this glob. Repeatable;
+    /// a record matching any pattern is kept. For example `webview:*`.
+    #[arg(long, value_name = "GLOB")]
+    pub target: Vec<String>,
+
+    /// Keep records produced by this instance.
+    #[arg(long, value_name = "NAME")]
+    pub instance: Option<String>,
+
+    /// Keep records at or after an RFC 3339 instant, or an offset back from
+    /// now written as `15m`, `2h`, or `3d`.
+    #[arg(long, value_name = "WHEN")]
+    pub since: Option<String>,
+
+    /// Return at most this many of the most recent matches. The total number
+    /// of matches is reported either way, so a bounded read never hides how
+    /// much it left out.
+    #[arg(long, value_name = "COUNT", default_value_t = 100)]
+    pub limit: usize,
+
+    /// Read the user-facing notice log instead of the diagnostic log.
+    #[arg(long)]
+    pub notices: bool,
+
+    /// Print records as they arrive and do not exit. Implies `--output jsonl`,
+    /// because a TOON array must declare its length up front.
+    #[arg(long)]
+    pub follow: bool,
+
+    /// Read this log directory instead of the application's own.
+    #[arg(long, value_name = "PATH")]
+    pub log_dir: Option<PathBuf>,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum UiCommand {
     /// Start a named UI instance and wait until it publishes readiness.
@@ -356,7 +402,7 @@ pub enum UiCommand {
 #[derive(Debug, Args)]
 pub struct UiStartArgs {
     /// Stable name used to address this instance later.
-    #[arg(long)]
+    #[arg(long, default_value = DEFAULT_INSTANCE_NAME)]
     pub name: String,
 
     /// Writable state directory owned by this instance.

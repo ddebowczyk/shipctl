@@ -6,7 +6,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use shipctl_core::build_info::CONTROL_PROTOCOL_VERSION;
 use shipctl_core::instance::{
-    resolve_runtime_root, resolve_state_root, ControlError, DiscoveryProblem,
+    resolve_runtime_root, resolve_state_root_for, ControlError, DiscoveryProblem,
     InstanceBuildIdentity, InstanceDiagnosticReport, InstanceDirectory, InstanceRecord,
     StopOutcome,
 };
@@ -114,7 +114,9 @@ enum Wake {
 }
 
 pub fn start(ui_path: &Path, request: StartRequest) -> Result<StartDisposition, ControlError> {
-    let (state_root, _) = resolve_state_root(request.state_root.as_deref())
+    // The default root varies by instance name, so a second named instance
+    // lands beside the first rather than on top of it.
+    let (state_root, _) = resolve_state_root_for(request.state_root.as_deref(), &request.name)
         .map_err(|error| operational_error("control.instance.invalid_state_root", error))?;
     let (runtime_root, _) = resolve_runtime_root(request.runtime_root.as_deref())
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;

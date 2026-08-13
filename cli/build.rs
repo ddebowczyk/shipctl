@@ -20,4 +20,13 @@ fn main() {
         .and_then(serde_json::Value::as_str)
         .expect("src-tauri/tauri.conf.json must contain a string version");
     println!("cargo:rustc-env=SHIPCTL_APP_VERSION={version}");
+
+    // The CLI reads the log directory the UI writes to, and that directory is
+    // keyed to the bundle identifier. Both sides therefore have to read the
+    // same value out of the same file.
+    let identifier = config
+        .get("identifier")
+        .and_then(serde_json::Value::as_str)
+        .expect("src-tauri/tauri.conf.json must contain a string identifier");
+    println!("cargo:rustc-env=SHIPCTL_APP_IDENTIFIER={identifier}");
 }

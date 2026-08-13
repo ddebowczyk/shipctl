@@ -131,7 +131,8 @@ impl InstanceContext {
     pub fn resolve(options: InstanceLaunchOptions, app_version: &str) -> Result<Self, String> {
         let name =
             validate_instance_name(options.name.as_deref().unwrap_or(DEFAULT_INSTANCE_NAME))?;
-        let (state_root, state_root_source) = resolve_state_root(options.state_root.as_deref())?;
+        let (state_root, state_root_source) =
+            resolve_state_root_for(options.state_root.as_deref(), &name)?;
         let (runtime_root, runtime_root_source) =
             resolve_runtime_root(options.runtime_root.as_deref())?;
 
@@ -154,8 +155,11 @@ impl InstanceContext {
         ShipctlPaths::new(self.state_root.clone(), self.runtime_root.clone())
     }
 
+    /// True only for the canonical instance sitting on its platform default
+    /// root. This gates the one-way legacy state import, and a secondary named
+    /// instance must start clean rather than inherit a copy of that data.
     pub fn uses_default_profile(&self) -> bool {
-        self.state_root_source == RootSource::PlatformDefault
+        self.state_root_source == RootSource::PlatformDefault && self.name == DEFAULT_INSTANCE_NAME
     }
 }
 
@@ -175,10 +179,36 @@ pub fn validate_instance_name(value: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+/// Home-relative directory name of the platform default state root for one
+/// instance name.
+///
+/// A writable state root is owned exclusively by one live instance. The
+/// canonical instance keeps the established `~/.shipctl` location, and every
+/// other name resolves to a sibling directory, so a second named instance can
+/// start beside the first instead of contending for its root.
+pub fn default_state_root_name(instance_name: &str) -> String {
+    let base = crate::workspace::migration::HOME_DIR_NAME;
+    if instance_name == DEFAULT_INSTANCE_NAME {
+        base.to_string()
+    } else {
+        format!("{base}-{instance_name}")
+    }
+}
+
 pub fn resolve_state_root(explicit: Option<&Path>) -> Result<(PathBuf, RootSource), String> {
+    resolve_state_root_for(explicit, DEFAULT_INSTANCE_NAME)
+}
+
+/// Resolve the state root for one named instance. Explicit paths and
+/// `SHIPCTL_STATE_DIR` still win, in that order; only the platform default
+/// varies by name.
+pub fn resolve_state_root_for(
+    explicit: Option<&Path>,
+    instance_name: &str,
+) -> Result<(PathBuf, RootSource), String> {
     let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
     let environment = nonempty_path_env(STATE_DIR_ENV)?;
-    let platform_default = home.join(crate::workspace::migration::HOME_DIR_NAME);
+    let platform_default = home.join(default_state_root_name(instance_name));
     let (path, source) = select_state_root(explicit, environment.as_deref(), &platform_default);
     canonical_directory(path, source, "state root")
 }
@@ -348,6 +378,46 @@ mod tests {
             select_state_root(None, None, default),
             (default, RootSource::PlatformDefault)
         );
+    }
+
+    /// Two instances cannot share one writable state root, so the platform
+    /// default has to differ by name for a second instance to start at all.
+    #[test]
+    fn the_default_state_root_is_a_sibling_for_every_name_but_the_canonical_one() {
+        assert_eq!(default_state_root_name(DEFAULT_INSTANCE_NAME), ".shipctl");
+        assert_eq!(default_state_root_name("test"), ".shipctl-test");
+        assert_eq!(default_state_root_name("v0.7.4"), ".shipctl-v0.7.4");
+        assert_ne!(
+            default_state_root_name("test"),
+            default_state_root_name("other")
+        );
+    }
+
+    /// The legacy import seeds the canonical profile only. A secondary named
+    /// instance on its own default root must start empty.
+    #[test]
+    fn only_the_canonical_instance_reports_the_default_profile() {
+        let canonical = InstanceContext {
+            instance_id: Uuid::new_v4(),
+            name: DEFAULT_INSTANCE_NAME.to_string(),
+            state_root: PathBuf::from("/home/.shipctl"),
+            runtime_root: PathBuf::from("/runtime"),
+            state_root_source: RootSource::PlatformDefault,
+            runtime_root_source: RootSource::PlatformDefault,
+            build: InstanceBuildIdentity {
+                app_version: "0.0.0".to_string(),
+                control_protocol_version: CONTROL_PROTOCOL_VERSION,
+            },
+            launch_provenance: LaunchProvenance::DirectUi,
+        };
+        assert!(canonical.uses_default_profile());
+
+        let secondary = InstanceContext {
+            name: "test".to_string(),
+            state_root: PathBuf::from("/home/.shipctl-test"),
+            ..canonical.clone()
+        };
+        assert!(!secondary.uses_default_profile());
     }
 
     #[test]

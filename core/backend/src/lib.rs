@@ -11,6 +11,7 @@
 pub mod appearance;
 pub mod build_info;
 pub mod instance;
+pub mod logs;
 pub mod menu;
 pub mod message_bus;
 pub mod module_control;

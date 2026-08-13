@@ -1,12 +1,13 @@
 mod args;
 mod instances;
+mod logs;
 mod offline_modules;
 mod output;
 mod terminals;
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 use clap::error::ErrorKind as ClapErrorKind;
 use clap::Parser;
@@ -66,10 +67,6 @@ pub fn paired_ui_path(cli_executable: &Path) -> PathBuf {
 pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
     let raw = args.into_iter().collect::<Vec<_>>();
     let remaining = raw.get(1..).unwrap_or_default();
-    if should_forward_ui(remaining) {
-        return launch_ui_foreground(&remaining[1..]);
-    }
-
     let format_hint = detect_output(remaining);
     let cli = match Cli::try_parse_from(&raw) {
         Ok(cli) => cli,
@@ -105,9 +102,16 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
     }
 
     match cli.command {
-        Some(CliCommand::Ui { command }) => match command {
-            UiCommand::Start(args) => run_ui_start(args, cli.output),
+        // `shipctl ui` and `shipctl ui start` are the same operation. Both detach
+        // the UI process and return once it publishes readiness, so neither one
+        // holds the terminal or inherits its streams.
+        Some(CliCommand::Ui { command, start }) => match command {
+            Some(UiCommand::Start(args)) => run_ui_start(args, cli.output),
+            None => run_ui_start(start, cli.output),
         },
+        Some(CliCommand::Logs(args)) => {
+            logs::run(args, cli.output, requested_output(remaining).is_some())
+        }
         Some(CliCommand::Instances { command }) => run_instances(command, cli.output),
         Some(CliCommand::Modules { command }) => run_modules(command, cli.output),
         Some(CliCommand::Messages { command }) => run_messages(command, cli.output),
@@ -866,23 +870,6 @@ fn run_instances(command: InstancesCommand, output: OutputFormat) -> ExitCode {
     }
 }
 
-fn launch_ui_foreground(args: &[OsString]) -> ExitCode {
-    let ui_path = match resolve_ui_path() {
-        Ok(path) => path,
-        Err(error) => {
-            eprintln!("shipctl: {}", error.message);
-            return ExitCode::FAILURE;
-        }
-    };
-    match Command::new(&ui_path).args(args).status() {
-        Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
-        Err(error) => {
-            eprintln!("shipctl: could not launch {}: {error}", ui_path.display());
-            ExitCode::FAILURE
-        }
-    }
-}
-
 fn resolve_ui_path() -> Result<PathBuf, ControlError> {
     let current_exe = std::env::current_exe().map_err(|error| {
         ControlError::new(
@@ -925,14 +912,6 @@ fn absolute_path(path: &Path) -> Result<PathBuf, String> {
             .map(|directory| directory.join(path))
             .map_err(|error| format!("Could not resolve current directory: {error}"))
     }
-}
-
-fn should_forward_ui(args: &[OsString]) -> bool {
-    args.first().is_some_and(|argument| argument == "ui")
-        && !matches!(
-            args.get(1).and_then(|argument| argument.to_str()),
-            Some("start" | "--help" | "-h")
-        )
 }
 
 fn operation_hint(args: &[OsString]) -> &str {
@@ -980,18 +959,34 @@ fn operation_hint(args: &[OsString]) -> &str {
     }
 }
 
-fn detect_output(args: &[OsString]) -> OutputFormat {
+/// Read `--output` out of the raw arguments, before clap runs.
+///
+/// This serves two callers. A parse failure needs a format to report itself in,
+/// and a command that rejects a format combination needs to tell an explicit
+/// choice from the default — which is why this reports absence rather than
+/// substituting the default itself.
+fn requested_output(args: &[OsString]) -> Option<OutputFormat> {
     for (index, argument) in args.iter().enumerate() {
-        if argument == OsStr::new("--output")
-            && args.get(index + 1) == Some(&OsString::from("json"))
-        {
-            return OutputFormat::Json;
-        }
-        if argument == OsStr::new("--output=json") {
-            return OutputFormat::Json;
-        }
+        let value = if argument == OsStr::new("--output") {
+            args.get(index + 1).and_then(|value| value.to_str())
+        } else {
+            argument
+                .to_str()
+                .and_then(|argument| argument.strip_prefix("--output="))
+        };
+        let Some(value) = value else { continue };
+        return match value {
+            "toon" => Some(OutputFormat::Toon),
+            "json" => Some(OutputFormat::Json),
+            "jsonl" => Some(OutputFormat::Jsonl),
+            _ => None,
+        };
     }
-    OutputFormat::Toon
+    None
+}
+
+fn detect_output(args: &[OsString]) -> OutputFormat {
+    requested_output(args).unwrap_or_default()
 }
 
 fn emit_success(
@@ -1119,6 +1114,17 @@ fn emit_usage(format: OutputFormat, operation: &str, message: &str, args: &[OsSt
     emit_failure(format, operation, &error, true)
 }
 
+/// A usage failure whose cause is a rejected combination of arguments rather
+/// than a parse error, so there is no argument list to echo back.
+fn emit_usage_message(format: OutputFormat, operation: &str, message: &str) -> ExitCode {
+    emit_failure(
+        format,
+        operation,
+        &ControlError::new("cli.usage", message),
+        true,
+    )
+}
+
 fn emit_render_failure(format: OutputFormat, operation: &str, message: String) -> ExitCode {
     emit_failure(
         format,
@@ -1149,7 +1155,7 @@ fn print_version(format: OutputFormat) {
 
 #[cfg(test)]
 mod tests {
-    use shipctl_core::instance::DiscoveryProblem;
+    use shipctl_core::instance::{DiscoveryProblem, DEFAULT_INSTANCE_NAME};
     use shipctl_module_semantic_terminal_core::projection::ProjectedSpace;
 
     use super::*;
@@ -1219,7 +1225,8 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.output, OutputFormat::Json);
         let Some(CliCommand::Ui {
-            command: UiCommand::Start(start),
+            command: Some(UiCommand::Start(start)),
+            ..
         }) = parsed.command
         else {
             panic!("expected ui start")
@@ -1914,22 +1921,107 @@ mod tests {
         assert_ne!(APP_VERSION, "0.0.0");
     }
 
+    /// A command that rejects a format combination has to tell an explicit
+    /// `--output` from the default, so absence is reported rather than
+    /// replaced with the default value.
+    #[test]
+    fn the_requested_output_reports_absence_and_every_spelling() {
+        let of =
+            |args: &[&str]| requested_output(&args.iter().map(OsString::from).collect::<Vec<_>>());
+
+        assert_eq!(of(&["logs"]), None);
+        assert_eq!(of(&["logs", "--output", "toon"]), Some(OutputFormat::Toon));
+        assert_eq!(of(&["logs", "--output=json"]), Some(OutputFormat::Json));
+        assert_eq!(
+            of(&["logs", "--output", "jsonl"]),
+            Some(OutputFormat::Jsonl)
+        );
+        assert_eq!(of(&["logs", "--output=jsonl"]), Some(OutputFormat::Jsonl));
+        assert_eq!(of(&["logs", "--output", "nonsense"]), None);
+        assert_eq!(detect_output(&[OsString::from("logs")]), OutputFormat::Toon);
+    }
+
+    #[test]
+    fn clap_parses_the_log_read_surface() {
+        let cli = Cli::try_parse_from([
+            "shipctl",
+            "logs",
+            "--level",
+            "warn",
+            "--target",
+            "webview:*",
+            "--target",
+            "shipctl::*",
+            "--instance",
+            "lab",
+            "--since",
+            "15m",
+            "--limit",
+            "20",
+            "--follow",
+            "--output",
+            "jsonl",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.output, OutputFormat::Jsonl);
+        let Some(CliCommand::Logs(args)) = cli.command else {
+            panic!("expected the logs command")
+        };
+        assert_eq!(args.level.as_deref(), Some("warn"));
+        assert_eq!(args.target, vec!["webview:*", "shipctl::*"]);
+        assert_eq!(args.instance.as_deref(), Some("lab"));
+        assert_eq!(args.since.as_deref(), Some("15m"));
+        assert_eq!(args.limit, 20);
+        assert!(args.follow);
+        assert!(!args.notices);
+    }
+
     #[test]
     fn no_arguments_parse_to_the_home_view_instead_of_launching_the_ui() {
         let cli = Cli::try_parse_from(["shipctl"]).unwrap();
         assert!(cli.command.is_none());
         assert!(!cli.version);
-        assert!(!should_forward_ui(&[]));
+    }
+
+    /// Bare `shipctl ui` must reach the same detached start path as
+    /// `shipctl ui start`, so it never holds the terminal.
+    #[test]
+    fn bare_ui_carries_default_start_arguments() {
+        let cli = Cli::try_parse_from(["shipctl", "ui"]).unwrap();
+        let Some(CliCommand::Ui { command, start }) = cli.command else {
+            panic!("expected the ui command")
+        };
+        assert!(command.is_none());
+        assert_eq!(start.name, DEFAULT_INSTANCE_NAME);
+        assert!(start.state_root.is_none());
+        assert!(start.runtime_root.is_none());
+        assert!(start.load_state.is_none());
     }
 
     #[test]
-    fn bare_ui_still_forwards_to_the_paired_launcher() {
-        assert!(should_forward_ui(&[OsString::from("ui")]));
-        assert!(!should_forward_ui(&[
-            OsString::from("ui"),
-            OsString::from("start")
-        ]));
-        assert!(!should_forward_ui(&[OsString::from("instances")]));
+    fn bare_ui_accepts_the_start_arguments_directly() {
+        let cli = Cli::try_parse_from(["shipctl", "ui", "--name", "alpha"]).unwrap();
+        let Some(CliCommand::Ui { command, start }) = cli.command else {
+            panic!("expected the ui command")
+        };
+        assert!(command.is_none());
+        assert_eq!(start.name, "alpha");
+    }
+
+    /// `ui start` keeps working for the ops integration scripts, and its name
+    /// now falls back to the same default the UI itself applies.
+    #[test]
+    fn ui_start_defaults_its_name_to_the_shared_constant() {
+        let cli = Cli::try_parse_from(["shipctl", "ui", "start"]).unwrap();
+        let Some(CliCommand::Ui {
+            command: Some(UiCommand::Start(start)),
+            ..
+        }) = cli.command
+        else {
+            panic!("expected ui start")
+        };
+        assert_eq!(start.name, DEFAULT_INSTANCE_NAME);
     }
 
     #[test]
