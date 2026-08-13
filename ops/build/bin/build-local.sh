@@ -170,6 +170,7 @@ jq -n \
   --arg product_version "$version" \
   --arg version_sha256 "$version_sha256" \
   --arg target "$target" \
+  --arg adhoc_signing_config "$adhoc_signing_config" \
   --argjson source "$source_start" \
   --arg rustc "$rustc_version" \
   --arg pnpm "$pnpm_version" \
