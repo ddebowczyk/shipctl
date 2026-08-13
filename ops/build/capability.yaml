@@ -51,4 +51,4 @@ commands:
 skills:
   - name: releasing
     summary: >-
-      Cut an ad-hoc signed, unnotarized private-tap release and publish its Cask.
+      Cut an ad-hoc signed release and publish its Homebrew Cask.

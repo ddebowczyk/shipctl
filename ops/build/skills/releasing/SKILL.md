@@ -1,20 +1,24 @@
 ---
 name: releasing
-description: Cut an ad-hoc signed Shipctl release and publish its private Homebrew cask update.
+description: Cut an ad-hoc signed Shipctl release and publish its Homebrew cask update.
 ---
 
 # Releasing
 
-Shipctl currently distributes ad-hoc signed, unnotarized macOS DMGs through GitHub Releases on
+Shipctl distributes ad-hoc signed macOS DMGs through GitHub Releases on
 `ddebowczyk/shipctl`. The `ddebowczyk/homebrew-shipctl` tap contains
 `Casks/shipctl.rb`; Homebrew addresses that tap as `ddebowczyk/shipctl`.
 The cask installs the app and exposes its bundled `shipctl` command on the
 shell path. Homebrew owns installation and updates. Shipctl has no self-updater.
 
-This is a private, one-user distribution route. The app has no Apple developer
-identity and is not notarized. The ad-hoc signature makes the bundle valid on
-Apple Silicon; macOS Gatekeeper will still require a one-time user approval
-before the app can open. Do not present this cask as a signed public release.
+The ad-hoc signature makes the bundle valid on Apple Silicon.
+
+Gatekeeper only evaluates artifacts carrying `com.apple.quarantine`. Homebrew's
+cask installer propagates that attribute from the downloaded DMG onto the
+installed bundle, which is why an unnotarized cask is rejected on first launch
+while formula-installed tools are not — a formula's curl download never carries
+the attribute. The cask's `postflight` stanza removes it before first launch, so
+installation needs no user approval. Keep that stanza in every published cask.
 
 `just build release` remains the future signed and notarized path. It requires
 Apple credentials and is not part of this procedure.
@@ -59,8 +63,17 @@ immutable directory under `builds/`. Its `build.yaml` binds the artifacts to the
 Git commit and source fingerprint. Use the printed `dmg:` path for the GitHub
 release.
 
+This repository is a fork of `stumptowndoug/shep`, which `gh` selects as the
+base repository by default. Every `gh` command in this procedure passes
+`--repo ddebowczyk/shipctl` so a release can never be published to the upstream.
+Confirm the default before starting; correct it with
+`gh repo set-default ddebowczyk/shipctl` if it names any other repository.
+
 ```bash
-gh release create v<version> <printed-dmg-path> --title "Shipctl v<version>" --generate-notes
+gh repo view --json nameWithOwner -q .nameWithOwner   # must print ddebowczyk/shipctl
+gh release create v<version> <printed-dmg-path> \
+  --repo ddebowczyk/shipctl \
+  --title "Shipctl v<version>" --generate-notes
 ```
 
 After GitHub publishes the asset, calculate its SHA-256 from the downloaded
@@ -73,19 +86,25 @@ cask "shipctl" do
   sha256 "<sha256-from-downloaded-dmg>"
 
   url "https://github.com/ddebowczyk/shipctl/releases/download/v#{version}/shipctl_#{version}_aarch64.dmg"
-  name "shipctl"
+  name "Shipctl"
   desc "Desktop and command-line control for Shipctl"
   homepage "https://github.com/ddebowczyk/shipctl"
 
+  depends_on macos: :big_sur
   depends_on arch: :arm64
 
   app "shipctl.app"
   binary "#{appdir}/shipctl.app/Contents/MacOS/shipctl"
 
-  caveats <<~EOS
-    Shipctl is ad-hoc signed but not notarized. On first launch, approve it in
-    System Settings > Privacy & Security, then select Open Anyway.
-  EOS
+  # Shipctl is ad-hoc signed and unnotarized. Homebrew propagates
+  # com.apple.quarantine from the downloaded DMG onto the installed bundle,
+  # which makes Gatekeeper reject the app on first launch. Removing it here
+  # restores the condition formula-installed tools get for free.
+  # `xattr -dr` exits 0 when the attribute is absent.
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/shipctl.app"]
+  end
 end
 ```
 
@@ -117,8 +136,16 @@ shipctl version
 The cask must install `shipctl.app` and create a `shipctl` shell command that
 resolves to `shipctl.app/Contents/MacOS/shipctl`. The app owns its UI process;
 the lean command starts it through that bundled executable. Confirm the version
-matches the release tag. The first opening needs the Gatekeeper approval stated
-above.
+matches the release tag.
+
+The first opening must need no Gatekeeper approval. Prove the `postflight`
+stanza worked before publishing:
+
+```bash
+xattr -r -l "$PWD/Shipctl-test-applications/shipctl.app" | grep quarantine \
+  && echo "FAIL: quarantine attribute still present" \
+  || echo "OK: no quarantine attribute"
+```
 
 Verify an update only when a later real product release exists. Do not overwrite
 or re-upload an existing versioned GitHub asset to simulate an upgrade.

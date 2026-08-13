@@ -13,6 +13,7 @@ use clap::Parser;
 use serde::Serialize;
 use serde_json::Value;
 use shipctl_core::build_info::BuildIdentity;
+use shipctl_core::instance::protocol::{DiscoveryProblemCategory, InstanceLifecycle};
 use shipctl_core::instance::ControlError;
 use shipctl_core::message_bus::{
     RUNTIME_DIAGNOSTICS_FAILED, RUNTIME_HEALTHY, RUNTIME_INSPECTED as MESSAGE_RUNTIME_INSPECTED,
@@ -65,9 +66,6 @@ pub fn paired_ui_path(cli_executable: &Path) -> PathBuf {
 pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
     let raw = args.into_iter().collect::<Vec<_>>();
     let remaining = raw.get(1..).unwrap_or_default();
-    if remaining.is_empty() {
-        return launch_ui_foreground(&[]);
-    }
     if should_forward_ui(remaining) {
         return launch_ui_foreground(&remaining[1..]);
     }
@@ -122,12 +120,131 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
             print_version(cli.output);
             ExitCode::SUCCESS
         }
-        None => emit_usage(
-            cli.output,
-            "cli",
-            "A command is required unless launching the UI with no arguments",
-            remaining,
-        ),
+        None => run_home(cli.output),
+    }
+}
+
+/// Operation name for the top-level home view.
+const HOME_OPERATION: &str = "home";
+const HOME_RENDERED: &str = "control.home.rendered";
+const HOME_DESCRIPTION: &str = "Control room for your agent ops";
+
+/// One instance row, projected down to the fields an agent needs to choose a
+/// next command. The full record stays available through `instances inspect`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HomeInstance {
+    name: String,
+    instance_id: String,
+    lifecycle: InstanceLifecycle,
+}
+
+/// A descriptor that could not be reached and whose process is still alive, so
+/// the discovery sweep could not reclaim it. Reclaimed descriptors are omitted:
+/// discovery already deleted them, so reporting them would invite action on
+/// housekeeping that has already happened.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HomeProblem {
+    descriptor_path: PathBuf,
+    category: DiscoveryProblemCategory,
+    code: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HomeView {
+    bin: String,
+    description: &'static str,
+    version: &'static str,
+    instances: Vec<HomeInstance>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unreachable: Vec<HomeProblem>,
+    help: Vec<String>,
+}
+
+/// The top-level surface for bare `shipctl`. It shows live state rather than a
+/// usage manual so an agent can act on the first call, and it never starts the
+/// UI — `shipctl ui` does that explicitly.
+fn run_home(format: OutputFormat) -> ExitCode {
+    let view = match build_home_view(None) {
+        Ok(view) => view,
+        Err(error) => return emit_failure(format, HOME_OPERATION, &error, false),
+    };
+    match emit_success(format, HOME_OPERATION, HOME_RENDERED, false, view) {
+        Ok(code) => code,
+        Err(message) => emit_render_failure(format, HOME_OPERATION, message),
+    }
+}
+
+fn build_home_view(runtime_root: Option<&Path>) -> Result<HomeView, ControlError> {
+    let listed = instances::list(runtime_root)?;
+    let instances = listed
+        .instances
+        .into_iter()
+        .map(|record| HomeInstance {
+            name: record.name,
+            instance_id: record.instance_id.to_string(),
+            lifecycle: record.lifecycle,
+        })
+        .collect::<Vec<_>>();
+    let unreachable = listed
+        .problems
+        .into_iter()
+        .filter(|problem| !problem.reclaimed)
+        .map(|problem| HomeProblem {
+            descriptor_path: problem.descriptor_path,
+            category: problem.category,
+            code: problem.error.code.to_string(),
+        })
+        .collect::<Vec<_>>();
+    let help = home_help(instances.len(), unreachable.len());
+    Ok(HomeView {
+        bin: home_executable_path(),
+        description: HOME_DESCRIPTION,
+        version: APP_VERSION,
+        instances,
+        unreachable,
+        help,
+    })
+}
+
+/// Suggestions follow from what the view just showed: start the UI when nothing
+/// runs, inspect when something does, diagnose when something is stuck.
+fn home_help(running: usize, unreachable: usize) -> Vec<String> {
+    let mut help = Vec::new();
+    if running == 0 {
+        help.push("Run `shipctl ui` to start the UI".to_string());
+    } else {
+        help.push("Run `shipctl ui` to start another instance".to_string());
+        help.push("Run `shipctl instances inspect <selector>` for details".to_string());
+    }
+    if unreachable > 0 {
+        help.push(
+            "Run `shipctl instances diagnose <selector>` to diagnose an unreachable instance"
+                .to_string(),
+        );
+    }
+    help
+}
+
+/// The absolute path of this executable, with the home directory collapsed to
+/// `~` so the identity line stays short and portable across machines.
+fn home_executable_path() -> String {
+    let executable = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "shipctl".to_string());
+    collapse_home(&executable, std::env::var("HOME").ok().as_deref())
+}
+
+fn collapse_home(executable: &str, home: Option<&str>) -> String {
+    let Some(home) = home.filter(|home| !home.is_empty()) else {
+        return executable.to_string();
+    };
+    let home = home.strip_suffix('/').unwrap_or(home);
+    match executable.strip_prefix(home) {
+        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+        _ => executable.to_string(),
     }
 }
 
@@ -1032,6 +1149,7 @@ fn print_version(format: OutputFormat) {
 
 #[cfg(test)]
 mod tests {
+    use shipctl_core::instance::DiscoveryProblem;
     use shipctl_module_semantic_terminal_core::projection::ProjectedSpace;
 
     use super::*;
@@ -1794,5 +1912,116 @@ mod tests {
     #[test]
     fn app_version_is_compiled_from_the_tauri_source_of_truth() {
         assert_ne!(APP_VERSION, "0.0.0");
+    }
+
+    #[test]
+    fn no_arguments_parse_to_the_home_view_instead_of_launching_the_ui() {
+        let cli = Cli::try_parse_from(["shipctl"]).unwrap();
+        assert!(cli.command.is_none());
+        assert!(!cli.version);
+        assert!(!should_forward_ui(&[]));
+    }
+
+    #[test]
+    fn bare_ui_still_forwards_to_the_paired_launcher() {
+        assert!(should_forward_ui(&[OsString::from("ui")]));
+        assert!(!should_forward_ui(&[
+            OsString::from("ui"),
+            OsString::from("start")
+        ]));
+        assert!(!should_forward_ui(&[OsString::from("instances")]));
+    }
+
+    #[test]
+    fn home_help_follows_from_what_the_view_shows() {
+        assert_eq!(
+            home_help(0, 0),
+            vec!["Run `shipctl ui` to start the UI".to_string()]
+        );
+
+        let running = home_help(2, 0);
+        assert_eq!(running.len(), 2);
+        assert!(running[0].contains("start another instance"));
+        assert!(running[1].contains("instances inspect <selector>"));
+
+        let stuck = home_help(0, 1);
+        assert_eq!(stuck.len(), 2);
+        assert!(stuck[1].contains("instances diagnose <selector>"));
+    }
+
+    #[test]
+    fn home_collapses_only_a_real_home_prefix() {
+        assert_eq!(
+            collapse_home("/Users/me/bin/shipctl", Some("/Users/me")),
+            "~/bin/shipctl"
+        );
+        assert_eq!(
+            collapse_home("/Users/me/bin/shipctl", Some("/Users/me/")),
+            "~/bin/shipctl"
+        );
+        // A sibling directory that merely starts with the same characters is
+        // not inside the home directory.
+        assert_eq!(
+            collapse_home("/Users/median/bin/shipctl", Some("/Users/me")),
+            "/Users/median/bin/shipctl"
+        );
+        assert_eq!(
+            collapse_home("/opt/shipctl", Some("/Users/me")),
+            "/opt/shipctl"
+        );
+        assert_eq!(collapse_home("/opt/shipctl", None), "/opt/shipctl");
+        assert_eq!(collapse_home("/opt/shipctl", Some("")), "/opt/shipctl");
+    }
+
+    #[test]
+    fn home_view_reports_a_definitive_zero_for_an_empty_runtime_root() {
+        let runtime_root = tempfile::tempdir().unwrap();
+        let view = build_home_view(Some(runtime_root.path())).unwrap();
+
+        assert!(view.instances.is_empty());
+        assert!(view.unreachable.is_empty());
+        assert_eq!(view.version, APP_VERSION);
+        assert_eq!(view.description, HOME_DESCRIPTION);
+        assert_eq!(
+            view.help,
+            vec!["Run `shipctl ui` to start the UI".to_string()]
+        );
+
+        // The empty `unreachable` list is omitted so a quiet home view stays
+        // small, while `instances` always renders its definitive zero.
+        let rendered = output::success(
+            OutputFormat::Toon,
+            HOME_OPERATION,
+            HOME_RENDERED,
+            false,
+            &view,
+        )
+        .unwrap();
+        assert!(rendered.contains("instances[0]:"));
+        assert!(!rendered.contains("unreachable"));
+    }
+
+    #[test]
+    fn home_view_hides_reclaimed_descriptors_and_keeps_stuck_ones() {
+        let reclaimed = DiscoveryProblem {
+            descriptor_path: PathBuf::from("/tmp/gone.json"),
+            category: DiscoveryProblemCategory::HandshakeFailed,
+            error: ControlError::new("control.instance.handshake_failed", "dead"),
+            reclaimed: true,
+        };
+        let stuck = DiscoveryProblem {
+            descriptor_path: PathBuf::from("/tmp/stuck.json"),
+            category: DiscoveryProblemCategory::HandshakeFailed,
+            error: ControlError::new("control.instance.handshake_failed", "alive"),
+            reclaimed: false,
+        };
+
+        let kept = [reclaimed, stuck]
+            .into_iter()
+            .filter(|problem| !problem.reclaimed)
+            .map(|problem| problem.descriptor_path)
+            .collect::<Vec<_>>();
+
+        assert_eq!(kept, vec![PathBuf::from("/tmp/stuck.json")]);
     }
 }

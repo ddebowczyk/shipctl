@@ -4508,6 +4508,7 @@ dependencies = [
  "shipctl-core",
  "shipctl-module-semantic-terminal-core",
  "tar",
+ "tempfile",
  "tokio",
  "toon-format",
  "uuid",
