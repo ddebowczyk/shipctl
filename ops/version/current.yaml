@@ -1,7 +1,7 @@
 ---
 schema_version: 1
 product: shipctl
-product_version: 0.7.4
+product_version: 0.7.5
 description: >-
   First independently versioned Shipctl build line. This repository has
   diverged from its former upstream and does not inherit upstream versions.
