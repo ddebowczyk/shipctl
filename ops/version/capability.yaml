@@ -32,7 +32,15 @@ commands:
     lane: fast
     args: [part]
   - name: set
-    summary: Set the product version without staging, committing, or publishing.
+    summary: Forward-only product version change using the local release ledger.
     lane: fast
     args: [version]
-skills: []
+  - name: verify-release
+    summary: Verify that HEAD is clean and matches an annotated current-version release tag.
+    lane: fast
+  - name: sync
+    summary: Fetch release tags from origin before a local ledger check.
+    lane: slow
+skills:
+  - name: versioning
+    summary: Change and verify Shipctl product versions and release tags.

@@ -1,32 +1,22 @@
 ---
 name: releasing
-description: Cut a signed, notarized Shipctl release and publish its Homebrew cask update.
+description: Cut an unsigned Shipctl release and publish its private Homebrew cask update.
 ---
 
 # Releasing
 
-Shipctl distributes signed macOS DMGs through GitHub Releases on
+Shipctl currently distributes unsigned macOS DMGs through GitHub Releases on
 `ddebowczyk/shipctl`. The `ddebowczyk/homebrew-shipctl` tap contains
 `Casks/shipctl.rb`; Homebrew addresses that tap as `ddebowczyk/shipctl`.
 The cask installs the app and exposes its bundled `shipctl` command on the
 shell path. Homebrew owns installation and updates. Shipctl has no self-updater.
 
-## Prerequisites
+This is a private, one-user distribution route. The app is not signed or
+notarized. macOS Gatekeeper will require a one-time user approval before the
+app can open. Do not present this cask as a signed public release.
 
-A gitignored `.env` at the repository root must contain:
-
-```text
-APPLE_SIGNING_IDENTITY=Developer ID Application: <name> (<team id>)
-APPLE_ID=<apple developer account email>
-APPLE_PASSWORD=<app-specific password, not the account password>
-APPLE_TEAM_ID=<team id>
-```
-
-The Developer ID certificate must be in the login Keychain. Confirm it with:
-
-```bash
-security find-identity -v -p codesigning
-```
+`just build release` remains the future signed and notarized path. It requires
+Apple credentials and is not part of this procedure.
 
 ## Version
 
@@ -35,10 +25,13 @@ Tauri's JSON version is a required packaging projection. Internal npm and Cargo
 manifests use `0.0.0` placeholders. Use:
 
 ```bash
+just version sync
+just version next minor
 just version set <new-version>
 just version check
 ```
 
+See `ops/version/skills/versioning/SKILL.md` for the full version procedure.
 The version command changes local files only. It does not stage, commit, tag,
 push, or publish.
 
@@ -50,22 +43,22 @@ from its Git tag.
 ```bash
 just check all
 just test full
-just build release
+git add ops/version/current.yaml src-tauri/tauri.conf.json
+git commit -m "Release v<version>"
+git push origin main
+git tag -a v<version> -m "Shipctl v<version>"
+git push origin v<version>
+just version verify-release
+just build local
 ```
 
-`just build release` installs dependencies, builds, signs, notarizes, verifies
-the app bundle, checks it with Gatekeeper, and patches the DMG. Smoke test the
-built app before publishing: launch it, confirm its version, and confirm that
-the bundled `shipctl` command reports the same version.
+`just build local` builds an unsigned app and DMG, verifies that the app bundle
+contains the small `shipctl` command, and creates one immutable directory under
+`builds/`. Its `build.yaml` binds the artifacts to the Git commit and source
+fingerprint. Use the printed `dmg:` path for the GitHub release.
 
 ```bash
-git push origin main
-git tag v<version>
-git push origin v<version>
-target_dir="$(bash ops/build/bin/cargo-target-dir.sh)"
-target="$(rustc -vV | awk '/^host: / { print $2 }')"
-dmg="$target_dir/$target/release/bundle/dmg/shipctl_<version>_aarch64.dmg"
-gh release create v<version> "$dmg" --title "Shipctl v<version>" --generate-notes
+gh release create v<version> <printed-dmg-path> --title "Shipctl v<version>" --generate-notes
 ```
 
 After GitHub publishes the asset, calculate its SHA-256 from the downloaded
@@ -86,6 +79,11 @@ cask "shipctl" do
 
   app "shipctl.app"
   binary "#{appdir}/shipctl.app/Contents/MacOS/shipctl"
+
+  caveats <<~EOS
+    Shipctl is unsigned. On first launch, approve it in System Settings >
+    Privacy & Security, then select Open Anyway.
+  EOS
 end
 ```
 
@@ -106,16 +104,19 @@ published release asset. Then commit and push the cask change.
 
 ## Verify installation and update
 
-Use a disposable Homebrew prefix or a test machine:
+Use a disposable application directory or a test machine:
 
 ```bash
 brew tap ddebowczyk/shipctl
-brew install --cask shipctl
-shipctl version
-brew upgrade --cask shipctl
+brew install --cask --appdir "$PWD/Shipctl-test-applications" shipctl
 shipctl version
 ```
 
 The cask must install `shipctl.app` and create a `shipctl` shell command that
 resolves to `shipctl.app/Contents/MacOS/shipctl`. The app owns its UI process;
-the lean command starts it through that bundled executable.
+the lean command starts it through that bundled executable. Confirm the version
+matches the release tag. The first opening needs the Gatekeeper approval stated
+above.
+
+Verify an update only when a later real product release exists. Do not overwrite
+or re-upload an existing versioned GitHub asset to simulate an upgrade.

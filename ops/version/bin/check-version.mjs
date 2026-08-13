@@ -4,6 +4,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { compareStableVersions, latestLocalReleaseVersion, STABLE_SEMVER } from "./release-history.mjs";
+
 const defaultRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 // Operator intent lives here. Tauri needs its own JSON projection at packaging
@@ -17,7 +19,12 @@ const TAURI_PROJECTION = "src-tauri/tauri.conf.json";
 const PLACEHOLDER = "0.0.0";
 
 const SKIP_DIRS = new Set(["node_modules", "target", "dist", "builds", ".git"]);
-const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const STATE_FIELDS = new Set([
+  "schema_version",
+  "product",
+  "product_version",
+  "description",
+]);
 
 function readJson(file) {
   return JSON.parse(readFileSync(file, "utf8"));
@@ -46,7 +53,7 @@ function manifests(root) {
   return found.sort();
 }
 
-export function validateVersions(root) {
+export function validateVersions(root, { checkReleaseHistory = true } = {}) {
   const failures = [];
   const fail = (file, message) => failures.push(`${file}: ${message}`);
 
@@ -54,14 +61,21 @@ export function validateVersions(root) {
   if (!existsSync(sourcePath)) return [`${SOURCE}: does not exist`];
 
   const state = readYaml(sourcePath);
+  for (const field of Object.keys(state)) {
+    if (!STATE_FIELDS.has(field)) fail(SOURCE, `contains unsupported field ${JSON.stringify(field)}`);
+  }
+  if (state.schema_version !== 1) fail(SOURCE, "schema_version must be 1");
   const version = state.product_version;
   if (version === undefined) {
     fail(SOURCE, "must declare product_version");
-  } else if (!SEMVER.test(version)) {
-    fail(SOURCE, `product_version must be a literal semver string, got ${JSON.stringify(version)}`);
+  } else if (!STABLE_SEMVER.test(version)) {
+    fail(SOURCE, `product_version must be a literal stable semver string, got ${JSON.stringify(version)}`);
   }
   if (state.product !== "shipctl") {
     fail(SOURCE, `product must be "shipctl", got ${JSON.stringify(state.product)}`);
+  }
+  if (typeof state.description !== "string" || state.description.length === 0) {
+    fail(SOURCE, "description must be a non-empty string");
   }
 
   const tauriPath = path.join(root, TAURI_PROJECTION);
@@ -114,6 +128,16 @@ export function validateVersions(root) {
           `must not override the app version; ${SOURCE} is the single source`,
         );
       }
+    }
+  }
+
+  if (checkReleaseHistory && STABLE_SEMVER.test(version)) {
+    const latestRelease = latestLocalReleaseVersion(root);
+    if (latestRelease !== null && compareStableVersions(version, latestRelease) < 0) {
+      fail(
+        SOURCE,
+        `product_version ${JSON.stringify(version)} must not precede local release tag v${latestRelease}`,
+      );
     }
   }
 

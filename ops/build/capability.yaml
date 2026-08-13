@@ -51,4 +51,4 @@ commands:
 skills:
   - name: releasing
     summary: >-
-      Cut a signed, notarized release and publish the Homebrew cask update.
+      Cut an unsigned private-tap release and publish the Homebrew cask update.

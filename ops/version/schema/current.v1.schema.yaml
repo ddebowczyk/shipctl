@@ -5,8 +5,6 @@ required:
   - schema_version
   - product
   - product_version
-  - channel
-  - milestone
   - description
 properties:
   schema_version:
@@ -15,12 +13,7 @@ properties:
     const: shipctl
   product_version:
     type: string
-    pattern: ^[0-9]+\.[0-9]+\.[0-9]+$
-  channel:
-    enum: [development, preview, stable]
-  milestone:
-    type: string
-    pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+    pattern: ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$
   description:
     type: string
     minLength: 1

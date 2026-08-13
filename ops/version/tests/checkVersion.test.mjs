@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,7 +17,7 @@ async function scaffold(t, { appVersion = "1.2.3" } = {}) {
 
   await writeFile(
     path.join(root, "ops/version/current.yaml"),
-    `---\nschema_version: 1\nproduct: shipctl\nproduct_version: ${appVersion}\nchannel: development\nmilestone: test\ndescription: Test version.\n`,
+    `---\nschema_version: 1\nproduct: shipctl\nproduct_version: ${appVersion}\ndescription: Test version.\n`,
   );
 
   await writeFile(
@@ -85,7 +86,7 @@ test("the source must be a literal semver", async (t) => {
   const root = await scaffold(t, { appVersion: "../package.json" });
   assert.match(
     validateVersions(root).join("\n"),
-    /^ops\/version\/current\.yaml: product_version must be a literal semver string/m,
+    /^ops\/version\/current\.yaml: product_version must be a literal stable semver string/m,
   );
 });
 
@@ -93,7 +94,7 @@ test("a missing app version is reported rather than assumed", async (t) => {
   const root = await scaffold(t);
   await writeFile(
     path.join(root, "ops/version/current.yaml"),
-    "---\nschema_version: 1\nproduct: shipctl\nchannel: development\nmilestone: test\ndescription: Test.\n",
+    "---\nschema_version: 1\nproduct: shipctl\ndescription: Test.\n",
   );
   assert.match(
     validateVersions(root).join("\n"),
@@ -110,5 +111,20 @@ test("a stale Tauri packaging projection is reported", async (t) => {
   assert.match(
     validateVersions(root).join("\n"),
     /^src-tauri\/tauri\.conf\.json: packaging version "9\.9\.9" must match ops\/version\/current\.yaml "1\.2\.3"/m,
+  );
+});
+
+test("the source version cannot precede a local stable release tag", async (t) => {
+  const root = await scaffold(t, { appVersion: "0.1.0" });
+  execFileSync("git", ["init", "--quiet", root]);
+  execFileSync("git", ["-C", root, "config", "user.name", "Shipctl test"]);
+  execFileSync("git", ["-C", root, "config", "user.email", "test@example.invalid"]);
+  execFileSync("git", ["-C", root, "add", "."]);
+  execFileSync("git", ["-C", root, "commit", "--quiet", "-m", "fixture"]);
+  execFileSync("git", ["-C", root, "tag", "v0.6.0"]);
+
+  assert.match(
+    validateVersions(root).join("\n"),
+    /^ops\/version\/current\.yaml: product_version "0\.1\.0" must not precede local release tag v0\.6\.0/m,
   );
 });

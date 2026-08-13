@@ -10,3 +10,8 @@ next part:
 set version:
     node bin/version.mjs set {{version}}
 
+verify-release:
+    node bin/version.mjs verify-release
+
+sync:
+    node bin/version.mjs sync
