@@ -87,6 +87,32 @@ pub fn run(args: LogsArgs, format: OutputFormat, format_was_requested: bool) -> 
         Err(error) => return crate::emit_failure(format, OPERATION, &error, false),
     };
 
+    // A file in an older format answers every question with a count of noise.
+    // Say so and stop, rather than reporting an empty page as if the UI had
+    // logged nothing. Removing the file is the caller's decision to make.
+    match shipctl_core::logs::compat::inspect(&path) {
+        Ok(Some(found)) => {
+            return crate::emit_failure(
+                format,
+                OPERATION,
+                &ControlError::new(
+                    "logs.format_incompatible",
+                    shipctl_core::logs::cleanup_message(&[found]),
+                ),
+                false,
+            )
+        }
+        Ok(None) => {}
+        Err(message) => {
+            return crate::emit_failure(
+                format,
+                OPERATION,
+                &ControlError::new("logs.read_failed", message),
+                false,
+            )
+        }
+    }
+
     if args.follow {
         if format_was_requested && format.is_enveloped() {
             return usage_error(
@@ -202,10 +228,10 @@ fn help(args: &LogsArgs, page: &shipctl_core::logs::LogPage) -> Vec<String> {
         ));
     }
     if page.unparsed > 0 {
-        help.push(
-            "Lines from an older build are not readable; run `shipctl ui` to retire them"
-                .to_string(),
-        );
+        help.push(format!(
+            "{} line(s) could not be read and were skipped",
+            page.unparsed
+        ));
     }
     if !args.follow {
         help.push("Run `shipctl logs --follow` to stream new records".to_string());
@@ -413,15 +439,18 @@ mod tests {
             .iter()
             .any(|line| line.contains("--level trace")));
 
-        let legacy = LogPage {
+        // A wholesale-unreadable file is refused before the read, so the only
+        // lines that reach this counter are individually damaged ones. Say how
+        // many were skipped rather than implying an action that would not help.
+        let skipped = LogPage {
             records: Vec::new(),
             matched: 0,
             scanned: 10,
-            unparsed: 10,
+            unparsed: 2,
         };
-        assert!(help(&args(), &legacy)
+        assert!(help(&args(), &skipped)
             .iter()
-            .any(|line| line.contains("older build")));
+            .any(|line| line.contains("2 line(s) could not be read")));
     }
 
     #[test]

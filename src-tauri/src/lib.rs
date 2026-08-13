@@ -19,7 +19,8 @@ use shipctl_core::instance::{
     ControlServer, InstanceContext, InstanceLaunchOptions, InstanceLeases,
 };
 use shipctl_core::logs::{
-    app_log_dir, now_timestamp, retire_incompatible, LogRecord, LOG_FILE_STEM, NOTICE_LOG_FILE_STEM,
+    app_log_dir, cleanup_message, inspect_all, now_timestamp, LogRecord, LOG_FILE_STEM,
+    NOTICE_LOG_FILE_STEM,
 };
 use shipctl_core::message_bus::RuntimeMessageBus;
 use shipctl_core::module_control::live::ModuleControlService;
@@ -193,7 +194,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         // Records are JSON Lines so the file is directly usable with `jq`,
         // with no parsing step and no CLI in the way.
         let log_directory = app_log_dir(&app.config().identifier);
-        retire_incompatible_logs(log_directory.as_deref());
+        refuse_incompatible_logs(log_directory.as_deref())?;
         if let Err(error) = app.handle().plugin(
             tauri_plugin_log::Builder::default()
                 .level(configured_log_level())
@@ -391,26 +392,25 @@ fn log_target(directory: Option<&std::path::Path>, file_name: &str) -> tauri_plu
     tauri_plugin_log::Target::new(kind)
 }
 
-/// Move aside any log file an older build left in a format this build cannot
-/// append to coherently, before the plugin opens it.
+/// Refuse to start when a log file an older build left behind is in a format
+/// this build can neither read nor extend.
 ///
-/// A mixed file would make every read report unreadable lines forever, so the
-/// migration happens once, here, where the writer can still act on the whole
-/// file. Failure is reported and ignored: an un-retired log is worse output,
-/// never a reason to fail startup.
-fn retire_incompatible_logs(directory: Option<&std::path::Path>) {
-    let Some(directory) = directory else { return };
-    for stem in [LOG_FILE_STEM, NOTICE_LOG_FILE_STEM] {
-        let path = directory.join(format!("{stem}.log"));
-        match retire_incompatible(&path) {
-            Ok(Some(retired)) => eprintln!(
-                "Retired a log file written in an older format: {}",
-                retired.display()
-            ),
-            Ok(None) => {}
-            Err(error) => eprintln!("Logging warning: {error}"),
-        }
+/// Appending to such a file would produce a log that no reader can make sense
+/// of, and this process must not decide on its own to delete a file it did not
+/// write. So it stops and names what has to be removed. Clearing the file is
+/// one command, and it belongs to whoever owns the machine.
+fn refuse_incompatible_logs(directory: Option<&std::path::Path>) -> Result<(), String> {
+    let Some(directory) = directory else {
+        return Ok(());
+    };
+    let paths = [LOG_FILE_STEM, NOTICE_LOG_FILE_STEM]
+        .map(|stem| directory.join(format!("{stem}.log")))
+        .to_vec();
+    let found = inspect_all(&paths)?;
+    if found.is_empty() {
+        return Ok(());
     }
+    Err(cleanup_message(&found))
 }
 
 const NOTICE_LOG_TARGET: &str = "webview:shipctl.notice";
