@@ -15,6 +15,7 @@ import { TerminalList } from "@shipctl/core/terminal-host/views";
 import {
   useProjectFactsMap,
 } from "@shipctl/core/host";
+import type { CanvasProjectNavigationSurface } from "@shipctl/core/host";
 import {
   ModuleProjectNavigationSurfaces,
 } from "@shipctl/core/host/views";
@@ -39,6 +40,7 @@ interface ProjectListProps {
   onDeleteGroup: (groupId: string) => void;
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
   tabDropProjectPath: string | null;
+  projectNavigationContributions: readonly CanvasProjectNavigationSurface[];
 }
 
 export default function ProjectList({
@@ -60,6 +62,7 @@ export default function ProjectList({
   onDeleteGroup,
   onMoveToGroup,
   tabDropProjectPath,
+  projectNavigationContributions,
 }: ProjectListProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
     () => new Set(activeRepoPath ? [activeRepoPath] : []),
@@ -263,6 +266,7 @@ export default function ProjectList({
             </CollapsibleSection>
 
             <ModuleProjectNavigationSurfaces
+              contributions={projectNavigationContributions}
               project={{ id: repo.path, name: repo.name, path: repo.path }}
               activeTabId={activeTabId}
             />

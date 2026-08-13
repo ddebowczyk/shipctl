@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use shipctl_core::terminal_host::{TerminalAgentReportKind, TerminalId};
-use shipctl_module_semantic_terminal::projection::ProjectedSpace;
+use shipctl_module_semantic_terminal_core::projection::ProjectedSpace;
 use uuid::Uuid;
 
 use crate::output::OutputFormat;

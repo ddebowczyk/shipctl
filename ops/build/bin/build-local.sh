@@ -140,6 +140,11 @@ cp -p ops/version/current.yaml "${staging_dir}/version.yaml" \
 
 ui_path='shipctl.app/Contents/MacOS/shipctl-ui'
 cli_path='shipctl.app/Contents/MacOS/shipctl'
+bash "$script_dir/verify-app-bundle.sh" \
+  --app "${staging_dir}/shipctl.app" \
+  --target "$target" \
+  --version "$version" \
+  || fail 'final app bundle verification failed'
 app_sha256="$(node ops/build/bin/hash-tree.mjs "${staging_dir}/shipctl.app")"
 ui_sha256="$(shasum -a 256 "${staging_dir}/${ui_path}" | awk '{print $1}')"
 cli_sha256="$(shasum -a 256 "${staging_dir}/${cli_path}" | awk '{print $1}')"

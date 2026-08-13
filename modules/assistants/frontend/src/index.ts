@@ -18,7 +18,6 @@ export const assistantsModule = {
       singleton: "per-project",
       order: 30,
       shortcut: "⇧⌘T",
-      menuEvent: "new_session",
       newSession: { label: "Agent", order: 10 },
       unavailable: {
         title: "Agent launcher unavailable",

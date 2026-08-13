@@ -14,6 +14,7 @@ const MODULE_PLATFORM_EVENT_LISTENERS = new Map([
 // needs the same treatment as a relative reach into src/.
 const HOST_PACKAGE = "@shipctl/core";
 const HOST_ROOTS = ["src", "core/frontend"];
+const CANVAS_ROOT = "core/frontend/canvas";
 const COMPOSITION_FILES = new Set([
   "core/frontend/host/enabledModules.ts",
 ]);
@@ -236,6 +237,7 @@ export async function checkModuleBoundaries(root = process.cwd()) {
   for (const file of files) {
     const relativeFile = path.relative(absoluteRoot, file);
     const owner = packages.find(({ root: packageRoot }) => isWithin(packageRoot, file));
+    const isCanvas = isWithin(path.join(absoluteRoot, CANVAS_ROOT), file);
     const source = await readFile(file, "utf8");
     const sourceFile = ts.createSourceFile(
       file,
@@ -276,6 +278,28 @@ export async function checkModuleBoundaries(root = process.cwd()) {
       const matchedPackage = packageMatch(entry.specifier, packages);
       const isComposition = COMPOSITION_FILES.has(relativeFile);
       const isRelative = entry.specifier.startsWith(".");
+
+      if (isCanvas && entry.specifier.startsWith("@tauri-apps/")) {
+        diagnostics.push(diagnostic(
+          file,
+          entry,
+          "canvas-tauri-import",
+          "canvas adapters receive host facts and actions; native Tauri APIs stay in shell or platform",
+          absoluteRoot,
+        ));
+        continue;
+      }
+
+      if (isCanvas && matchedPackage && matchedPackage.name !== MODULE_API_PACKAGE) {
+        diagnostics.push(diagnostic(
+          file,
+          entry,
+          "canvas-feature-module-import",
+          "canvas adapters render feature contributions through host ports and may not import feature modules",
+          absoluteRoot,
+        ));
+        continue;
+      }
 
       if (scenarioRoot) {
         const target = isRelative ? path.resolve(path.dirname(file), entry.specifier) : null;

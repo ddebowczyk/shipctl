@@ -16,4 +16,9 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
   },
+  ssr: {
+    // Layman's public entrypoint imports its package CSS. Vite must transform
+    // that import for the node:test SSR harness instead of leaving it to Node.
+    noExternal: ["react-layman"],
+  },
 });

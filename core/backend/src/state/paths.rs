@@ -9,6 +9,7 @@ pub struct ShipctlPaths {
     pub global_config: PathBuf,
     pub old_projects: PathBuf,
     pub ui_state: PathBuf,
+    pub workspace_layouts: PathBuf,
     pub assistant_sessions: PathBuf,
     pub usage_database: PathBuf,
     /// User-authored schedule definitions owned by this instance.
@@ -34,6 +35,7 @@ impl ShipctlPaths {
             global_config: state_root.join("config.yml"),
             old_projects: state_root.join("projects"),
             ui_state: state_root.join("ui-state.json"),
+            workspace_layouts: state_root.join("workspace-layouts.json"),
             assistant_sessions: state_root.join("assistant-sessions.json"),
             usage_database: state_root.join("usage.sqlite3"),
             schedule_root: state_root.join("schedules"),
@@ -56,6 +58,11 @@ impl ShipctlPaths {
                 owner: "host.ui",
                 classification: "instance_owned",
                 path: self.ui_state.clone(),
+            },
+            DurableSource {
+                owner: "host.canvas_layout",
+                classification: "instance_owned",
+                path: self.workspace_layouts.clone(),
             },
             DurableSource {
                 owner: "assistants.continuity",
@@ -159,6 +166,33 @@ mod tests {
             source.owner == "scheduler.configuration"
                 && source.classification == "instance_owned"
                 && source.path == first.schedule_root
+        }));
+    }
+
+    #[test]
+    fn workspace_layout_store_is_instance_local_and_registered_as_durable_configuration() {
+        let first = ShipctlPaths::new(
+            PathBuf::from("/profiles/first"),
+            PathBuf::from("/run/first"),
+        );
+        let second = ShipctlPaths::new(
+            PathBuf::from("/profiles/second"),
+            PathBuf::from("/run/second"),
+        );
+
+        assert_eq!(
+            first.workspace_layouts,
+            first.state_root.join("workspace-layouts.json")
+        );
+        assert_eq!(
+            second.workspace_layouts,
+            second.state_root.join("workspace-layouts.json")
+        );
+        assert_ne!(first.workspace_layouts, second.workspace_layouts);
+        assert!(first.durable_sources().iter().any(|source| {
+            source.owner == "host.canvas_layout"
+                && source.classification == "instance_owned"
+                && source.path == first.workspace_layouts
         }));
     }
 

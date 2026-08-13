@@ -650,21 +650,6 @@ fn startup_observations(
     Ok(observations)
 }
 
-#[tauri::command]
-pub fn publish_module_runtime_snapshot(
-    service: tauri::State<'_, ModuleControlService>,
-    snapshot: FrontendRuntimeSnapshotInput,
-) -> Result<RuntimeSnapshotReceipt, ControlError> {
-    service.publish_frontend_snapshot(snapshot)
-}
-
-#[tauri::command]
-pub fn list_startup_modules(
-    service: tauri::State<'_, ModuleControlService>,
-) -> Result<StartupModuleCatalog, ControlError> {
-    service.startup_modules()
-}
-
 fn registry_error(error: RegistryError) -> ControlError {
     ControlError::new(error.code, error.message)
 }

@@ -9,6 +9,15 @@ export const COMMANDS_PANEL_ID = "core.commands" as const;
 export const commandsModule = {
   id: "shipctl.commands",
   version: "0.0.0",
+  commands: [
+    {
+      id: "commands.open-panel",
+      moduleId: "shipctl.commands",
+      label: "New Commands Panel",
+      isEnabled: ({ activeProjectId }) => activeProjectId !== null,
+      run: ({ openPanel }) => openPanel(COMMANDS_PANEL_ID),
+    },
+  ],
   panels: [
     {
       id: COMMANDS_PANEL_ID,
@@ -17,7 +26,6 @@ export const commandsModule = {
       label: "Commands",
       icon: { name: "list", label: "Commands" },
       shortcut: "⇧⌘C",
-      menuEvent: "new_commands",
       singleton: "per-project",
       order: 20,
       unavailable: {

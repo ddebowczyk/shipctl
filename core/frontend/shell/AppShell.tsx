@@ -1,13 +1,23 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import Sidebar from "./Sidebar.tsx";
-import TabBar from "./TabBar.tsx";
-import { TerminalErrorBoundary, TerminalSlot } from "../terminal-host/views.ts";
 import {
   terminalHostAdapter,
   terminalPresentationRegistry,
 } from "../terminal-host/index.ts";
-import { terminalDriverId, type TerminalDriverId, type TerminalHostDescriptor } from "@shipctl/module-api";
+import {
+  terminalDriverId,
+  type CommandContribution,
+  type ContributionId,
+  type PanelContribution,
+  type TerminalDriverId,
+  type TerminalHostDescriptor,
+} from "@shipctl/module-api";
+import {
+  createCanvasModel,
+  type CanvasActions,
+  type CanvasPorts,
+} from "@shipctl/core/canvas";
+import { CanvasHost, type CanvasAdapterView } from "@shipctl/core/canvas/views";
 import { NoticeCenter } from "../shared/views.ts";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useRepoStore } from "../projects/index.ts";
@@ -32,7 +42,6 @@ import {
 import { useThemeStore } from "../appearance/index.ts";
 import { useEditorStore } from "../settings/index.ts";
 import { useTerminalSettingsStore } from "../terminal-host/index.ts";
-import { useUpdateStore } from "./useUpdateStore.ts";
 import { initNotifications } from "../terminal-host/index.ts";
 import { getErrorMessage } from "../platform/index.ts";
 import { useNoticeStore } from "../shared/index.ts";
@@ -40,8 +49,7 @@ import {
   activateModules,
   activateModulesWithMessagesObserved,
   bindTerminalSessionDimensions,
-  createEnabledGlobalSurfaceRegistry,
-  createEnabledPanelRegistry,
+  createEnabledCanvasSurfaceCatalog,
   MODULE_HOST_SERVICES,
   ENABLED_MODULES,
   notifyModulesBeforeShutdown,
@@ -55,29 +63,38 @@ import {
   type StartupModuleRuntimeSnapshot,
 } from "../host/index.ts";
 import {
-  GlobalSurfaceHost,
-  ModuleProjectLayoutSurfaces,
-  PanelHost,
-} from "../host/views.ts";
-import {
   matchesPanelShortcut,
 } from "../host/index.ts";
+import { createCommandRegistry } from "./commandRegistry.ts";
+import { CanvasAdapterRuntimeProvider } from "./canvasAdapterRuntime.tsx";
 
-import type { TabCycleDirection, TerminalTabData, UiState, UnifiedTab } from "../platform/index.ts";
+import type {
+  CanvasAdapterId,
+  TabCycleDirection,
+  TerminalTabData,
+  UiState,
+  UnifiedTab,
+} from "../platform/index.ts";
 import type { TerminalId } from "@shipctl/core/terminal-host";
 
 // Stable empty arrays to avoid infinite re-render loops with zustand v5's
 // useSyncExternalStore — selectors must return the same reference for the same state.
 const EMPTY_TABS: UnifiedTab[] = [];
-const PANEL_REGISTRY = createEnabledPanelRegistry();
-const MODULE_PANEL_CONTRIBUTIONS = PANEL_REGISTRY.list()
-  .filter((panel) => panel.moduleId !== "core");
-const GLOBAL_SURFACE_REGISTRY = createEnabledGlobalSurfaceRegistry(
+const CANVAS_SURFACE_CATALOG = createEnabledCanvasSurfaceCatalog(
   BUILTIN_GLOBAL_SURFACE_LOADERS,
 );
+const MODULE_PANEL_CONTRIBUTIONS = CANVAS_SURFACE_CATALOG.panels()
+  .filter((panel) => panel.moduleId !== "core");
+const GLOBAL_NAVIGATION = CANVAS_SURFACE_CATALOG.globalNavigation();
 const TERMINAL_PRESENTATION_REGISTRY = terminalPresentationRegistry(ENABLED_MODULES);
 const SEMANTIC_TERMINAL_DRIVER_ID = terminalDriverId("semantic-terminal");
 const DEFAULT_TERMINAL_DIMENSIONS = { cols: 80, rows: 24 } as const;
+const CANVAS_PORTS: CanvasPorts = {
+  surfaceCatalog: CANVAS_SURFACE_CATALOG,
+  terminalHost: terminalHostAdapter,
+  terminalPresentationRegistry: TERMINAL_PRESENTATION_REGISTRY,
+  moduleHostServices: MODULE_HOST_SERVICES,
+};
 
 function terminalSlotDescriptor(terminalId: TerminalId): TerminalHostDescriptor {
   const descriptor = TERMINAL_CLIENT_RUNTIME.descriptor(terminalId);
@@ -96,7 +113,13 @@ function fallbackWorkspaceName(repoPath: string) {
   return repoPath.split("/").filter(Boolean).pop() ?? "Project";
 }
 
-export default function AppShell() {
+export interface AppShellProps {
+  /** Resolved once by bootstrap before terminal registry work can start. */
+  readonly canvasAdapter: CanvasAdapterView;
+  readonly canvasAdapterId: CanvasAdapterId;
+}
+
+export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellProps) {
   useThemeApplicator();
 
   const { repos, groups, activeRepoPath, fetchRepos, fetchGroups, openRepo, addRepo, removeRepo, renameGroup, deleteGroup, moveRepoToGroup } =
@@ -201,12 +224,9 @@ export default function AppShell() {
       }
     }
 
-    // Keep terminal DOM order stable even when the visible tab order changes.
-    // xterm renderers can fail to repaint cleanly when their mounted nodes are
-    // shuffled around in the document during tab drag/reorder operations.
-    return all.sort((a, b) =>
-      a.tab.terminalId.localeCompare(b.tab.terminalId) || a.tab.id.localeCompare(b.tab.id),
-    );
+    // Canvas owns the stable presentation order. The source list remains a
+    // complete inventory, independent from tab display order.
+    return all;
   }, [projectState]);
 
   const { setActiveTab } = useTerminalStore.getState();
@@ -354,22 +374,7 @@ export default function AppShell() {
     void initNotifications();
     getUsername().then((name) => useUIStore.getState().setUsername(name));
     getComputerName().then((name) => useUIStore.getState().setComputerName(name));
-
-    // Check for updates after startup settles
-    const updateTimer = window.setTimeout(async () => {
-      await useUpdateStore.getState().checkForUpdate();
-      const { status, availableVersion } = useUpdateStore.getState();
-      if (status === "available" && availableVersion) {
-        pushNotice(
-          { tone: "info", title: "Update available", message: `Version ${availableVersion} is ready to download` },
-          { durationMs: 8000 },
-        );
-      }
-    }, 3000);
-    return () => {
-      window.clearTimeout(updateTimer);
-    };
-  }, [fetchRepos, fetchGroups, loadEditorSettings, loadTerminalSettings, pushNotice]);
+  }, [fetchRepos, fetchGroups, loadEditorSettings, loadTerminalSettings]);
 
   const handleMoveTab = useCallback(
     async (tabId: string, destinationPath: string) => {
@@ -592,6 +597,20 @@ export default function AppShell() {
     useUIStore.getState().closeGlobalSurface();
   }, [activeRepoPath, pushNotice]);
 
+  const handleOpenPanel = useCallback((panel: PanelContribution) => {
+    if (!activeRepoPath) return;
+    useTerminalStore.getState().addContributedPanelTab(
+      activeRepoPath,
+      panel.id,
+      panel.label,
+    );
+  }, [activeRepoPath]);
+
+  const handleReorderTab = useCallback((tabId: string, destinationIndex: number) => {
+    if (!activeRepoPath) return;
+    useTerminalStore.getState().reorderTab(activeRepoPath, tabId, destinationIndex);
+  }, [activeRepoPath]);
+
   const handleNewShell = useCallback((driverId: TerminalDriverId = SEMANTIC_TERMINAL_DRIVER_ID) => {
     useUIStore.getState().closeGlobalSurface();
     const { cols, rows } = getTerminalDimensions();
@@ -618,6 +637,101 @@ export default function AppShell() {
       });
     }
   }, [pushNotice]);
+
+  const handleOpenPanelById = useCallback((panelId: ContributionId) => {
+    const panel = CANVAS_SURFACE_CATALOG.panel(panelId);
+    if (!panel) {
+      throw new Error(`Panel ${panelId} is unavailable in this build`);
+    }
+    handleOpenPanel(panel);
+  }, [handleOpenPanel]);
+
+  const coreCommands = useMemo<readonly CommandContribution[]>(() => [
+    {
+      id: "core.settings",
+      moduleId: "core",
+      label: "Settings…",
+      run: () => useUIStore.getState().toggleGlobalSurface(BUILTIN_GLOBAL_SURFACE_IDS.settings),
+    },
+    {
+      id: "terminal.new-semantic",
+      moduleId: "core",
+      label: "New Semantic Terminal",
+      run: () => handleNewShell(SEMANTIC_TERMINAL_DRIVER_ID),
+    },
+    {
+      id: "terminal.new-thin",
+      moduleId: "core",
+      label: "New Thin Terminal",
+      run: () => handleNewShell(terminalDriverId("thin-terminal")),
+    },
+    {
+      id: "core.new-session",
+      moduleId: "core",
+      label: "New Session",
+      isEnabled: ({ activeProjectId }) => activeProjectId !== null,
+      run: handleNewModuleSession,
+    },
+    {
+      id: "core.open-in-editor",
+      moduleId: "core",
+      label: "Open in Editor",
+      isEnabled: ({ activeProjectId }) => activeProjectId !== null,
+      run: ({ activeProjectId }) => {
+        if (activeProjectId) return handleOpenInEditor(activeProjectId);
+      },
+    },
+    {
+      id: "core.toggle-sidebar",
+      moduleId: "core",
+      label: "Toggle Sidebar",
+      run: () => useUIStore.getState().toggleSidebar(),
+    },
+    {
+      id: "core.next-tab",
+      moduleId: "core",
+      label: "Next Tab",
+      run: () => cycleTabs(1),
+    },
+    {
+      id: "core.previous-tab",
+      moduleId: "core",
+      label: "Previous Tab",
+      run: () => cycleTabs(-1),
+    },
+  ], [
+    cycleTabs,
+    handleNewModuleSession,
+    handleNewShell,
+    handleOpenInEditor,
+  ]);
+
+  const commandRegistry = useMemo(
+    () => createCommandRegistry({ coreCommands, modules: ENABLED_MODULES }),
+    [coreCommands],
+  );
+
+  const dispatchNativeCommand = useCallback((commandId: string) => {
+    void commandRegistry.dispatch(commandId, {
+      activeProjectId: activeRepoPath,
+      openPanel: handleOpenPanelById,
+    }).then((result) => {
+      if (result.status === "disabled") {
+        pushNotice({
+          tone: "info",
+          title: "Command unavailable",
+          message: `${result.command.label} requires an open project.`,
+        });
+      }
+      if (result.status === "failed") {
+        pushNotice({
+          tone: "error",
+          title: `Couldn’t run ${result.command.label}`,
+          message: getErrorMessage(result.error),
+        });
+      }
+    });
+  }, [activeRepoPath, commandRegistry, handleOpenPanelById, pushNotice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -691,65 +805,14 @@ export default function AppShell() {
     return () => { unlisten.then((f) => f()); };
   }, [pushNotice]);
 
-  // Handle native menu events (accelerators for Cmd+T, Cmd+Shift+T, Cmd+B, Cmd+E, Cmd+, etc.)
+  // The native menu emits stable command IDs. The registry owns their static
+  // dispatch, so this listener stays a transport edge instead of a command switch.
   useEffect(() => {
     const unlisten = listen<string>("menu-event", (event) => {
-      const contributedPanel = MODULE_PANEL_CONTRIBUTIONS.find(
-        (panel) => panel.menuEvent === event.payload,
-      );
-      if (contributedPanel) {
-        if (activeRepoPath) {
-          useTerminalStore.getState().addContributedPanelTab(
-            activeRepoPath,
-            contributedPanel.id,
-            contributedPanel.label,
-          );
-        }
-        return;
-      }
-      switch (event.payload) {
-        case "next_tab":
-          cycleTabs(1);
-          break;
-        case "previous_tab":
-          cycleTabs(-1);
-          break;
-        case "new_semantic_terminal":
-          handleNewShell(SEMANTIC_TERMINAL_DRIVER_ID);
-          break;
-        case "new_thin_terminal":
-          handleNewShell(terminalDriverId("thin-terminal"));
-          break;
-        case "new_session":
-          handleNewModuleSession();
-          break;
-        case "toggle_sidebar":
-          useUIStore.getState().toggleSidebar();
-          break;
-        case "open_in_editor": {
-          if (activeRepoPath) handleOpenInEditor(activeRepoPath);
-          break;
-        }
-        case "settings":
-          useUIStore.getState().toggleGlobalSurface(BUILTIN_GLOBAL_SURFACE_IDS.settings);
-          break;
-        case "check_updates":
-          void useUpdateStore.getState().checkForUpdate().then(() => {
-            const { status, availableVersion } = useUpdateStore.getState();
-            if (status === "available" && availableVersion) {
-              pushNotice(
-                { tone: "info", title: "Update available", message: `Version ${availableVersion} is ready to download` },
-                { durationMs: 8000 },
-              );
-            } else if (status === "idle") {
-              pushNotice({ tone: "success", title: "You're up to date", message: "No updates available" });
-            }
-          });
-          break;
-      }
+      dispatchNativeCommand(event.payload);
     });
     return () => { unlisten.then((f) => f()); };
-  }, [activeRepoPath, cycleTabs, handleNewShell, handleNewModuleSession, handleOpenInEditor, pushNotice]);
+  }, [dispatchNativeCommand]);
 
   // Renderer fallback for platforms/webviews that deliver the shortcut to the
   // page instead of the native application menu.
@@ -766,23 +829,98 @@ export default function AppShell() {
       if (!panel) return;
       event.preventDefault();
       event.stopPropagation();
-      if (activeRepoPath) {
-        useTerminalStore.getState().addContributedPanelTab(activeRepoPath, panel.id, panel.label);
-      }
+      handleOpenPanel(panel);
     };
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [activeRepoPath, cycleTabs]);
+  }, [cycleTabs, handleOpenPanel]);
 
-  const showGlobalSurface = activeGlobalSurfaceId !== null;
   const activePanelId = activeTab ? panelIdForTab(activeTab) : null;
   const activePanelProject = useMemo(() => activeRepoPath ? {
     id: activeRepoPath,
     name: fallbackWorkspaceName(activeRepoPath),
     path: activeRepoPath,
   } : null, [activeRepoPath]);
+  const canvasModel = useMemo(() => createCanvasModel({
+    repos,
+    groups,
+    sidebarVisible,
+    tabDropProjectPath,
+    activeProjectPath: activeRepoPath,
+    activeTabId,
+    tabs,
+    activeTab,
+    activeGlobalSurfaceId,
+    activePanelId,
+    activeProject: activePanelProject,
+    panels: MODULE_PANEL_CONTRIBUTIONS,
+    globalNavigation: GLOBAL_NAVIGATION,
+    terminalSlots: allTerminalTabs.map(({ tab, projectPath }) => ({
+      tab,
+      projectPath,
+      descriptor: terminalSlotDescriptor(tab.terminalId),
+    })),
+    trailingLayoutVisible: diffPanelVisible,
+  }), [
+    activeGlobalSurfaceId,
+    activePanelId,
+    activePanelProject,
+    activeRepoPath,
+    activeTab,
+    activeTabId,
+    allTerminalTabs,
+    diffPanelVisible,
+    groups,
+    repos,
+    sidebarVisible,
+    tabDropProjectPath,
+    tabs,
+  ]);
+  const canvasActions = useMemo<CanvasActions>(() => ({
+    selectRepo: handleSelectRepo,
+    addProject: handleAddProject,
+    removeProject: handleRemoveProject,
+    newModuleSession: handleNewModuleSession,
+    openInEditor: handleOpenInEditor,
+    selectTab: handleSelectSidebarTab,
+    selectProjectTab: handleSelectSidebarProjectTab,
+    closeTab: handleCloseTab,
+    moveTab: handleMoveTab,
+    newDefaultTerminal: () => handleNewShell(),
+    newTerminal: handleNewShell,
+    openPanel: handleOpenPanel,
+    renameTab: handleRenameTab,
+    reorderTab: handleReorderTab,
+    renameGroup: handleRenameGroup,
+    deleteGroup: handleDeleteGroup,
+    moveToGroup: handleMoveToGroup,
+    setTabDropProjectPath,
+    toggleGlobalSurface: (surfaceId) => useUIStore.getState().toggleGlobalSurface(surfaceId),
+    closeGlobalSurface: () => useUIStore.getState().closeGlobalSurface(),
+    setTabTitle: (tabId, title) => {
+      if (title) useTerminalStore.getState().updateTab(tabId, { label: title });
+    },
+  }), [
+    handleAddProject,
+    handleCloseTab,
+    handleDeleteGroup,
+    handleMoveTab,
+    handleMoveToGroup,
+    handleNewModuleSession,
+    handleNewShell,
+    handleOpenInEditor,
+    handleOpenPanel,
+    handleRemoveProject,
+    handleRenameGroup,
+    handleRenameTab,
+    handleReorderTab,
+    handleSelectRepo,
+    handleSelectSidebarProjectTab,
+    handleSelectSidebarTab,
+  ]);
   return (
+    <CanvasAdapterRuntimeProvider adapterId={canvasAdapterId}>
     <div className="app-shell">
       <NoticeCenter />
       <div
@@ -820,112 +958,13 @@ export default function AppShell() {
         </div>
       </div>
 
-      <div className="app-shell__frame">
-        {sidebarVisible && (
-          <Sidebar
-            repos={repos}
-            groups={groups}
-            activeRepoPath={activeRepoPath}
-            activeTabId={showGlobalSurface ? null : activeTabId}
-            onSelectRepo={handleSelectRepo}
-            onAddProject={handleAddProject}
-            onRemoveProject={handleRemoveProject}
-            onNewModuleSession={handleNewModuleSession}
-            onOpenInEditor={handleOpenInEditor}
-            onSelectTab={handleSelectSidebarTab}
-            onSelectProjectTab={handleSelectSidebarProjectTab}
-            onCloseTab={handleCloseTab}
-            onMoveTab={handleMoveTab}
-            onNewShell={() => handleNewShell()}
-            onRenameGroup={handleRenameGroup}
-            onDeleteGroup={handleDeleteGroup}
-            onMoveToGroup={handleMoveToGroup}
-            tabDropProjectPath={tabDropProjectPath}
-            globalNavigation={GLOBAL_SURFACE_REGISTRY.navigation()}
-          />
-        )}
-
-        <div className="workspace-panel">
-          <TabBar
-            onClose={handleCloseTab}
-            onNewTerminal={handleNewShell}
-            panels={MODULE_PANEL_CONTRIBUTIONS}
-            onOpenPanel={(panel) => {
-              if (activeRepoPath) {
-                useTerminalStore.getState().addContributedPanelTab(activeRepoPath, panel.id, panel.label);
-              }
-            }}
-            onOpenInEditor={() => { if (activeRepoPath) handleOpenInEditor(activeRepoPath); }}
-            onRenameTab={handleRenameTab}
-            onMoveTab={handleMoveTab}
-            onDragProjectChange={setTabDropProjectPath}
-          />
-
-          <div className="terminal-stage">
-            {activeGlobalSurfaceId && (
-              <GlobalSurfaceHost
-                registry={GLOBAL_SURFACE_REGISTRY}
-                surfaceId={activeGlobalSurfaceId}
-                close={() => useUIStore.getState().closeGlobalSurface()}
-                services={MODULE_HOST_SERVICES}
-              />
-            )}
-
-            {/* Project panel tabs resolve through the contribution registry. */}
-            {!showGlobalSurface && activeTab && activePanelId && (
-              <PanelHost
-                  registry={PANEL_REGISTRY}
-                  panelId={activePanelId}
-                  instanceId={activeTab.id}
-                  project={activePanelProject}
-                  visible
-                  close={() => handleCloseTab(activeTab.id)}
-                  setTitle={(title) => {
-                    if (title) useTerminalStore.getState().updateTab(activeTab.id, { label: title });
-                  }}
-                  services={MODULE_HOST_SERVICES}
-              />
-            )}
-
-            {!showGlobalSurface && !activeTab && tabs.length === 0 && (
-              <div className="terminal-empty">
-                {activeRepoPath
-                  ? "Open a session or terminal"
-                  : "Select or add a project to begin"}
-              </div>
-            )}
-            {allTerminalTabs.map(({ tab, projectPath }) => (
-              <div
-                key={tab.id}
-                className="absolute inset-0"
-                style={{
-                  display:
-                    !showGlobalSurface && projectPath === activeRepoPath && tab.id === activeTabId
-                      ? "block"
-                      : "none",
-                }}
-              >
-                <TerminalErrorBoundary>
-                  <TerminalSlot
-                    descriptor={terminalSlotDescriptor(tab.terminalId)}
-                    host={terminalHostAdapter}
-                    registry={TERMINAL_PRESENTATION_REGISTRY}
-                    services={MODULE_HOST_SERVICES}
-                    visible={!showGlobalSurface && projectPath === activeRepoPath && tab.id === activeTabId}
-                  />
-                </TerminalErrorBoundary>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {diffPanelVisible && activePanelProject && (
-          <ModuleProjectLayoutSurfaces
-            slot="workspace.trailing"
-            project={activePanelProject}
-          />
-        )}
-      </div>
+      <CanvasHost
+        adapter={canvasAdapter}
+        model={canvasModel}
+        actions={canvasActions}
+        ports={CANVAS_PORTS}
+      />
     </div>
+    </CanvasAdapterRuntimeProvider>
   );
 }

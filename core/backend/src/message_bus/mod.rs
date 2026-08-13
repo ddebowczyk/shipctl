@@ -3,18 +3,17 @@
 //! This capability is deliberately split from Tauri. Contract compilation is
 //! artifact-local and has no file, network, or persistence access.
 
-pub mod bridge;
-pub mod commands;
+pub mod bridge_contract;
 pub mod contracts;
 pub mod diagnostics;
 pub mod inspection;
 pub mod routes;
 pub mod runtime;
 
-pub use bridge::{
+pub use bridge_contract::{
     FrontendBridgeRegistration, HostMessageFrame, HostMessageFrameKind, MessageBridgeInspection,
     MessageBridgeOpenReceipt, MessageBridgeRegistrationObservation, MessageBridgeReply,
-    MessageBusBridgeService, MessageContractSummary,
+    MessageContractSummary,
 };
 pub use contracts::{
     parse_message_wire_json, AcceptedMessageDeclarations, BroadcastRoute,

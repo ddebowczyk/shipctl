@@ -18,15 +18,16 @@ see `../backend/README.md`.
 | `terminal-host/` | terminal session state, tab chrome, generic raw attachment, and the presentation port used by terminal modules | `platform`, `shared`, `appearance` |
 | `settings/` | user preferences not owned by another capability: editor choice and its logos (`logos/`) | `platform` |
 | `projects/` | repositories, grouping for the navigation, per-project settings, module-contributed project facts | `platform`, `shared` |
-| `host/` | module activation and composition, `ModuleHostServices`, panel and global-surface registries, module session chrome | every capability above |
-| `shell/` | **not a capability** — the app shell, tab bar, sidebar, settings panel, theme applicator and updater: the one place allowed to combine several capabilities into a single screen | everything |
+| `host/` | module activation and composition, `ModuleHostServices`, panel/global registries, the static `CanvasSurfaceCatalog`, module session chrome | every capability above |
+| `canvas/` | **not a capability** — host-owned main-canvas adapters, normalized rendering model, and placement of host and module surfaces | `host`, `terminal-host`, `projects`, `shared`, `platform` |
+| `shell/` | **not a capability** — app startup, native title bar, native menu dispatch, settings panel, theme applicator and Homebrew update guidance; it constructs the canvas model and actions | everything |
 
-`shell/` sits inside this package because it is frontend code and belongs next to
-what it composes, but it is the one directory here that is *not* reusable and not
-a capability. Nothing may import it except `src/main.tsx`, which is now the whole
-of `src/` alongside `vite-env.d.ts`. If you find yourself importing
-`@shipctl/core/shell` from a capability, the thing you want has to move down into a
-capability instead — see rule 4 below.
+`shell/` and `canvas/` sit inside this package because they are frontend
+composition surfaces, not reusable capabilities. Nothing may import `shell/`
+except `src/main.tsx`, which is now the whole of `src/` alongside
+`vite-env.d.ts`. `shell/` owns startup and native integration; `canvas/` owns
+the main-layout adapter. If a capability needs either surface, the needed
+contract belongs lower in a capability or in `@shipctl/module-api` instead.
 
 The host runtime imports concrete capability files rather than broad barrels.
 This keeps browser presentation dependencies out of capability logic and the
@@ -43,10 +44,12 @@ Answer in this order; the first match wins.
    speculation.
 3. **Does it talk to Rust?** It belongs in `platform/`, regardless of who calls it.
 4. **Does it combine several capabilities into one screen?** It is not a
-   capability member. It is a composition surface and belongs in `shell/`.
-   `SettingsPanel` is the worked example: it reads project settings, repo state,
-   terminal settings and themes at once, so no single capability can own it and
-   no ordering of the capabilities makes its imports point one way.
+   capability member. Main-canvas placement belongs in `canvas/`; startup,
+   native window integration, and composition of the canvas contract belong in
+   `shell/`. `SettingsPanel` is the worked example for shell composition: it
+   reads project settings, repo state, terminal settings and themes at once, so
+   no single capability can own it and no ordering of the capabilities makes
+   its imports point one way.
 5. **None of the above?** The capability boundaries are wrong for what you are
    building. Say so and fix the boundaries rather than parking the file in the
    nearest directory.

@@ -1,6 +1,6 @@
 use super::config::{
-    EditorSettings, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo, RepoInfo,
-    SidebarSettings, TerminalSettings, WorkspaceConfig,
+    CanvasAdapter, EditorSettings, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo,
+    RepoInfo, SidebarSettings, TerminalSettings, WorkspaceConfig,
 };
 use super::loader;
 use crate::state::paths::ShipctlPaths;
@@ -29,6 +29,10 @@ impl WorkspaceManager {
 
     pub fn backfill_global_config_defaults(&self) -> Result<(), String> {
         loader::backfill_global_config_defaults(&self.store)
+    }
+
+    pub fn load_canvas_adapter(&self) -> Result<CanvasAdapter, String> {
+        Ok(loader::load_global_config(&self.store)?.ui.canvas)
     }
 
     pub fn list_repos(&self) -> Result<Vec<RepoInfo>, String> {

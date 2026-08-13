@@ -193,13 +193,14 @@ test("native cache, unavailable states, and capability-owned config remain bound
 test("native ownership seam includes ingestion, query DB, and provider subprocess access", () => {
   const host = source("../../../../src-tauri/src/lib.rs");
   const installer = source("../../../../src-tauri/src/modules/mod.rs");
+  const adapter = source("../../host/src/lib.rs");
   const commands = [
     "platform",
     "projects",
     "settings",
     "terminal_host",
     "appearance",
-  ].map((capability) => source(`../../../../core/backend/src/${capability}/commands.rs`)).join("\n");
+  ].map((capability) => source(`../../../../core/tauri/src/${capability}.rs`)).join("\n");
   const client = source("../src/client.ts");
   const plugin = source("../../backend/src/lib.rs");
   const usage = source("../../backend/src/usage/mod.rs");
@@ -209,8 +210,9 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
   assert.doesNotMatch(host, /usage::run_background_ingest\(&db\)/);
   assert.match(
     installer,
-    /shipctl_module_usage::init\([\s\S]*modules::usage::host_services\(workspace\.clone\(\), message_bridges\.clone\(\)\)[\s\S]*paths\.usage_database\.clone\(\)/,
+    /shipctl_module_usage_host::install\([\s\S]*workspace\.clone\(\)[\s\S]*message_bridges\.clone\(\)[\s\S]*paths\.usage_database\.clone\(\)/,
   );
+  assert.match(adapter, /builder\.plugin\(shipctl_module_usage::init\([\s\S]*host_services\(workspace, messages\)[\s\S]*database_path/);
   assert.match(plugin, /plugin::Builder::new\(PLUGIN_NAME\)/);
   assert.match(plugin, /app\.manage\(UsagePluginState/);
   assert.match(plugin, /spawn_ingest\(state\.db\.clone\(\), state\.services\.clone\(\)\)/);

@@ -42,19 +42,13 @@ commands:
   - name: release
     summary: Build a signed and notarized release.
     lane: slow
-  - name: verify-key
-    summary: Verify the updater key matches the app's compiled public key.
-    lane: fast
   - name: dmg
     summary: Patch and re-sign the release DMG.
     lane: slow
   - name: icon
     summary: Generate the application icon asset.
     lane: slow
-  - name: update-json
-    summary: Generate Tauri updater metadata.
-    lane: slow
 skills:
   - name: releasing
     summary: >-
-      Cut a signed, notarized release and publish an update clients accept.
+      Cut a signed, notarized release and publish the Homebrew cask update.

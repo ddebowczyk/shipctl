@@ -18,19 +18,21 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use shipctl_core::instance::{
     ControlServer, InstanceContext, InstanceLaunchOptions, InstanceLeases,
 };
-use shipctl_core::message_bus::{MessageBusBridgeService, RuntimeMessageBus};
+use shipctl_core::message_bus::RuntimeMessageBus;
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::module_control::registry::ModuleRegistrySnapshotProvider;
-use shipctl_core::projects::watcher::GitWatcher;
 use shipctl_core::scheduler::{SchedulerService, SchedulerSnapshotProvider};
 use shipctl_core::state::archive::StateArchiveService;
 use shipctl_core::state::providers::{
-    LegacyStateSnapshotProvider, UiSnapshotProvider, WorkspaceSnapshotProvider,
+    LegacyStateSnapshotProvider, UiSnapshotProvider, WorkspaceLayoutSnapshotProvider,
+    WorkspaceSnapshotProvider,
 };
 use shipctl_core::state::ui::UiStateStore;
+use shipctl_core::state::workspace_layout::WorkspaceLayoutStore;
 use shipctl_core::terminal_host::TerminalService;
 use shipctl_core::workspace::manager::WorkspaceManager;
 use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
+use shipctl_tauri_adapter::{GitWatcher, MessageBusBridgeService};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -82,9 +84,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_notification::init());
     let workspace = WorkspaceManager::new_with_barrier(paths.clone(), durable_writes.clone());
     // Seed retention from normalized settings before any terminal can spawn, so
     // no runtime is ever constructed with a policy the user did not choose.
@@ -110,6 +110,10 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         )
     };
     let ui_state = UiStateStore::new_with_barrier(paths.ui_state.clone(), durable_writes.clone());
+    let workspace_layouts = WorkspaceLayoutStore::new_with_barrier(
+        paths.workspace_layouts.clone(),
+        durable_writes.clone(),
+    );
     let message_bus = RuntimeMessageBus::new(context.clone());
     let message_bridges = MessageBusBridgeService::new(message_bus.clone());
     let agent_capabilities = shipctl_core::module_control::agent::AgentCapabilityService::new(
@@ -136,6 +140,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     .manage(terminals)
     .manage(workspace)
     .manage(ui_state)
+    .manage(workspace_layouts)
     .manage(state_archive)
     .manage(module_control)
     .manage(agent_capabilities)
@@ -226,66 +231,69 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         }
     })
     .invoke_handler(tauri::generate_handler![
-        shipctl_core::projects::commands::list_repos,
-        shipctl_core::projects::commands::register_repo,
-        shipctl_core::projects::commands::unregister_repo,
-        shipctl_core::projects::commands::load_workspace,
-        shipctl_core::projects::commands::save_workspace,
-        shipctl_core::projects::commands::list_groups,
-        shipctl_core::projects::commands::create_group,
-        shipctl_core::projects::commands::rename_group,
-        shipctl_core::projects::commands::delete_group,
-        shipctl_core::projects::commands::move_repo_to_group,
-        shipctl_core::projects::commands::watch_repo,
-        shipctl_core::projects::commands::unwatch_repo,
-        shipctl_core::settings::commands::get_editor_settings,
-        shipctl_core::settings::commands::save_editor_settings,
-        shipctl_core::settings::commands::get_project_settings,
-        shipctl_core::settings::commands::save_project_settings,
-        shipctl_core::settings::commands::get_keybinding_settings,
-        shipctl_core::settings::commands::save_keybinding_settings,
-        shipctl_core::settings::commands::get_sidebar_settings,
-        shipctl_core::settings::commands::open_in_editor,
-        shipctl_core::terminal_host::commands::get_terminal_settings,
-        shipctl_core::terminal_host::commands::save_terminal_settings,
-        shipctl_core::terminal_host::commands::get_memory_stats,
-        shipctl_core::terminal_host::commands::spawn_terminal,
-        shipctl_core::terminal_host::commands::list_terminals,
-        shipctl_core::terminal_host::commands::get_terminal,
-        shipctl_core::terminal_host::commands::get_terminal_publication_stats,
-        shipctl_core::terminal_host::commands::attach_raw_terminal,
-        shipctl_core::terminal_host::commands::detach_terminal,
-        shipctl_core::terminal_host::commands::subscribe_terminal_registry,
-        shipctl_core::terminal_host::commands::unsubscribe_terminal_registry,
-        shipctl_core::terminal_host::commands::write_terminal,
-        shipctl_core::terminal_host::commands::resize_terminal,
-        shipctl_core::terminal_host::commands::close_terminal,
-        shipctl_core::terminal_host::commands::update_terminal_color_theme,
-        shipctl_core::terminal_host::commands::update_terminal_metadata,
-        shipctl_core::appearance::commands::list_monospace_families,
-        shipctl_core::appearance::commands::load_font_family,
-        shipctl_core::platform::commands::get_username,
-        shipctl_core::platform::commands::get_home_directory,
-        shipctl_core::platform::commands::get_default_shell,
-        shipctl_core::platform::commands::get_computer_name,
-        shipctl_core::platform::commands::check_command_exists,
-        shipctl_core::platform::commands::reveal_in_finder,
-        shipctl_core::platform::commands::open_url,
-        shipctl_core::instance::context::inspect_instance,
-        shipctl_core::state::ui::get_ui_state,
-        shipctl_core::state::ui::set_last_repo_path,
-        shipctl_core::state::ui::save_appearance_state,
-        shipctl_core::module_control::live::publish_module_runtime_snapshot,
-        shipctl_core::module_control::live::list_startup_modules,
-        shipctl_core::message_bus::commands::open_runtime_message_bridge,
-        shipctl_core::message_bus::commands::reconcile_runtime_message_bridge,
-        shipctl_core::message_bus::commands::close_runtime_message_bridge,
-        shipctl_core::message_bus::commands::send_runtime_message,
-        shipctl_core::message_bus::commands::publish_runtime_message,
-        shipctl_core::message_bus::commands::request_runtime_message,
-        shipctl_core::message_bus::commands::reply_runtime_message,
-        shipctl_core::message_bus::commands::report_runtime_message_failure,
-        shipctl_core::message_bus::commands::inspect_runtime_messages,
+        shipctl_tauri_adapter::workspace::get_canvas_adapter,
+        shipctl_tauri_adapter::state::load_workspace_layout,
+        shipctl_tauri_adapter::state::save_workspace_layout,
+        shipctl_tauri_adapter::projects::list_repos,
+        shipctl_tauri_adapter::projects::register_repo,
+        shipctl_tauri_adapter::projects::unregister_repo,
+        shipctl_tauri_adapter::projects::load_workspace,
+        shipctl_tauri_adapter::projects::save_workspace,
+        shipctl_tauri_adapter::projects::list_groups,
+        shipctl_tauri_adapter::projects::create_group,
+        shipctl_tauri_adapter::projects::rename_group,
+        shipctl_tauri_adapter::projects::delete_group,
+        shipctl_tauri_adapter::projects::move_repo_to_group,
+        shipctl_tauri_adapter::projects::watch_repo,
+        shipctl_tauri_adapter::projects::unwatch_repo,
+        shipctl_tauri_adapter::settings::get_editor_settings,
+        shipctl_tauri_adapter::settings::save_editor_settings,
+        shipctl_tauri_adapter::settings::get_project_settings,
+        shipctl_tauri_adapter::settings::save_project_settings,
+        shipctl_tauri_adapter::settings::get_keybinding_settings,
+        shipctl_tauri_adapter::settings::save_keybinding_settings,
+        shipctl_tauri_adapter::settings::get_sidebar_settings,
+        shipctl_tauri_adapter::settings::open_in_editor,
+        shipctl_tauri_adapter::terminal_host::get_terminal_settings,
+        shipctl_tauri_adapter::terminal_host::save_terminal_settings,
+        shipctl_tauri_adapter::terminal_host::get_memory_stats,
+        shipctl_tauri_adapter::terminal_host::spawn_terminal,
+        shipctl_tauri_adapter::terminal_host::list_terminals,
+        shipctl_tauri_adapter::terminal_host::get_terminal,
+        shipctl_tauri_adapter::terminal_host::get_terminal_publication_stats,
+        shipctl_tauri_adapter::terminal_host::attach_raw_terminal,
+        shipctl_tauri_adapter::terminal_host::detach_terminal,
+        shipctl_tauri_adapter::terminal_host::subscribe_terminal_registry,
+        shipctl_tauri_adapter::terminal_host::unsubscribe_terminal_registry,
+        shipctl_tauri_adapter::terminal_host::write_terminal,
+        shipctl_tauri_adapter::terminal_host::resize_terminal,
+        shipctl_tauri_adapter::terminal_host::close_terminal,
+        shipctl_tauri_adapter::terminal_host::update_terminal_color_theme,
+        shipctl_tauri_adapter::terminal_host::update_terminal_metadata,
+        shipctl_tauri_adapter::appearance::list_monospace_families,
+        shipctl_tauri_adapter::appearance::load_font_family,
+        shipctl_tauri_adapter::platform::get_username,
+        shipctl_tauri_adapter::platform::get_home_directory,
+        shipctl_tauri_adapter::platform::get_default_shell,
+        shipctl_tauri_adapter::platform::get_computer_name,
+        shipctl_tauri_adapter::platform::check_command_exists,
+        shipctl_tauri_adapter::platform::reveal_in_finder,
+        shipctl_tauri_adapter::platform::open_url,
+        shipctl_tauri_adapter::instance::inspect_instance,
+        shipctl_tauri_adapter::state::get_ui_state,
+        shipctl_tauri_adapter::state::set_last_repo_path,
+        shipctl_tauri_adapter::state::save_appearance_state,
+        shipctl_tauri_adapter::module_control::publish_module_runtime_snapshot,
+        shipctl_tauri_adapter::module_control::list_startup_modules,
+        shipctl_tauri_adapter::message_bus::open_runtime_message_bridge,
+        shipctl_tauri_adapter::message_bus::reconcile_runtime_message_bridge,
+        shipctl_tauri_adapter::message_bus::close_runtime_message_bridge,
+        shipctl_tauri_adapter::message_bus::send_runtime_message,
+        shipctl_tauri_adapter::message_bus::publish_runtime_message,
+        shipctl_tauri_adapter::message_bus::request_runtime_message,
+        shipctl_tauri_adapter::message_bus::reply_runtime_message,
+        shipctl_tauri_adapter::message_bus::report_runtime_message_failure,
+        shipctl_tauri_adapter::message_bus::inspect_runtime_messages,
         modules::capability_data::get_global_capability_data,
         modules::capability_data::replace_global_capability_data,
         lifecycle::shutdown_and_quit,
@@ -316,6 +324,9 @@ fn snapshot_providers(
         Arc::new(WorkspaceSnapshotProvider::new(paths.global_config.clone())),
         Arc::new(LegacyStateSnapshotProvider),
         Arc::new(UiSnapshotProvider::new(paths.ui_state.clone())),
+        Arc::new(WorkspaceLayoutSnapshotProvider::new(
+            paths.workspace_layouts.clone(),
+        )),
         Arc::new(ModuleRegistrySnapshotProvider::new(
             paths.module_registry_database.clone(),
         )),

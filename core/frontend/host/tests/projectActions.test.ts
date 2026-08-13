@@ -204,10 +204,12 @@ test("inline interactive actions remain data until the host opens their surface"
 test("project hosts depend on generic rails instead of Git UI implementations", () => {
   const root = fileURLToPath(new URL("../../../..", import.meta.url));
   const appShell = readFileSync(`${root}/core/frontend/shell/AppShell.tsx`, "utf8");
+  const legacyCanvas = readFileSync(`${root}/core/frontend/canvas/legacy/LegacyCanvas.tsx`, "utf8");
   const projectItem = readFileSync(`${root}/core/frontend/projects/ProjectItem.tsx`, "utf8");
 
-  assert.match(appShell, /ModuleProjectLayoutSurfaces/);
-  assert.doesNotMatch(appShell, /DiffSummaryPanel/);
+  assert.match(legacyCanvas, /ports\.surfaceCatalog\.projectLayout/);
+  assert.doesNotMatch(legacyCanvas, /DiffSummaryPanel/);
+  assert.doesNotMatch(appShell, /ModuleProjectLayoutSurfaces/);
   assert.match(projectItem, /ModuleProjectActionSurface/);
   assert.doesNotMatch(projectItem, /gitCreateWorktree/);
 });

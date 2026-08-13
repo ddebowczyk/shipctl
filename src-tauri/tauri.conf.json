@@ -182,7 +182,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": true,
     "externalBin": ["binaries/shipctl"],
     "icon": [
       "icons/32x32.png",
@@ -193,14 +192,6 @@
     ],
     "macOS": {
       "entitlements": "./Entitlements.plist"
-    }
-  },
-  "plugins": {
-    "updater": {
-      "endpoints": [
-        "https://github.com/ddebowczyk/shipctl/releases/latest/download/latest.json"
-      ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBOTg0QzQ5RkI2RjY4QgpSV1NMOXJhZnhJU3BETFBjOHNrZUdJWTNydWNMdW5raEFLSGJkUkk3cUVtVTVyZEVsNUkxdlcwVAo="
     }
   }
 }

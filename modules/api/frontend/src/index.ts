@@ -9,6 +9,10 @@ export type {
   ProjectRef,
 } from "./panels";
 export type {
+  CommandContribution,
+  CommandInvocationContext,
+} from "./commands";
+export type {
   ModuleAppearancePort,
   ModuleAppearanceSnapshot,
   ModuleHostServices,

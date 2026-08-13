@@ -11,6 +11,22 @@ export {
   GlobalSurfaceRegistry,
 } from "./globalSurfaceRegistry.ts";
 export {
+  CanvasSurfaceCatalog,
+  CanvasSurfaceCatalogError,
+  CanvasSurfaceLoadError,
+  createEnabledCanvasSurfaceCatalog,
+} from "./canvasSurfaceCatalog.ts";
+export type {
+  CanvasGlobalNavigationSurface,
+  CanvasGlobalSurface,
+  CanvasPanelSurface,
+  CanvasProjectLayoutSurface,
+  CanvasProjectNavigationSurface,
+  CanvasSidebarSurface,
+  CanvasSurfaceCatalogInput,
+  CanvasSurfaceLoadKind,
+} from "./canvasSurfaceCatalog.ts";
+export {
   BUILTIN_GLOBAL_NAVIGATION,
   createBuiltinGlobalSurfaceContributions,
 } from "./builtinGlobalSurfaceAdapters.ts";

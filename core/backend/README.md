@@ -1,26 +1,31 @@
 # `shipctl-core` — the host's own capabilities (Rust)
 
 The native half of the same split the frontend uses in `core/frontend/`: one
-directory per capability, each owning its state, its logic and the Tauri
-commands that expose it. There is no `commands.rs` at the crate root, because
-"is a command" is a file kind, not a concern.
+directory per capability, each owning its state and logic. This crate has no
+Tauri dependency. `core/tauri/` owns the command, event, and watcher adapters
+that expose these capabilities to the desktop app.
 
 ## Layout
 
-| Directory | Owns | Commands |
+| Directory | Owns | Tauri adapter commands |
 | --- | --- | --- |
-| `workspace/` | the on-disk config schema, its loader and the `WorkspaceManager` that guards it | none — it is the persistence layer the others read |
+| `workspace/` | the on-disk config schema, its loader and the `WorkspaceManager` that guards it | `get_canvas_adapter` — the read-only host-composition selection used before frontend startup |
 | `platform/` | host-environment queries and OS handoffs | `get_username`, `get_home_directory`, `get_default_shell`, `get_computer_name`, `check_command_exists`, `reveal_in_finder`, `open_url` |
 | `appearance/` | font enumeration and loading (`fonts.rs`) | `list_monospace_families`, `load_font_family` |
 | `terminal/` | host-owned terminal registry, ordered runtimes, VT replay, attachments, lifecycle, exit and agent activity | `list_terminals`, `get_terminal`, `spawn_terminal`, `update_terminal_metadata`, `attach_terminal`, `detach_terminal`, `write_terminal`, `resize_terminal`, `close_terminal`, registry subscription, terminal settings |
-| `projects/` | the repository list, groups, and the git `watcher.rs` | `list_repos`, `register_repo`, `unregister_repo`, `load_workspace`, `save_workspace`, `list_groups`, `create_group`, `rename_group`, `delete_group`, `move_repo_to_group`, `watch_repo`, `unwatch_repo` |
+| `projects/` | the repository list and groups | `list_repos`, `register_repo`, `unregister_repo`, `load_workspace`, `save_workspace`, `list_groups`, `create_group`, `rename_group`, `delete_group`, `move_repo_to_group`, `watch_repo`, `unwatch_repo` |
 | `settings/` | preferences no other capability owns: editor choice, project defaults, keybindings, sidebar state | `get_editor_settings`, `save_editor_settings`, `get_project_settings`, `save_project_settings`, `get_keybinding_settings`, `save_keybinding_settings`, `get_sidebar_settings`, `open_in_editor` |
 
-Every capability follows the same shape: `mod.rs` declares the submodules, the
-logic lives in named files, and `commands.rs` holds only `#[tauri::command]`
-wrappers over that logic.
+Every capability follows the same shape: `mod.rs` declares submodules and the
+logic lives in named files. The matching adapter in `core/tauri/` holds only
+`#[tauri::command]` wrappers over that logic. This keeps `shipctl-core`
+available to the standalone CLI without Tauri, WebKit, or Wry.
 
 ## What is *not* here
+
+`core/tauri/` is the framework adapter. It owns all direct Tauri imports:
+commands, IPC channels, app events, and the filesystem watcher. It must not
+own domain state or business rules.
 
 `src-tauri/` is the Tauri shell and holds no capability logic. It has four files
 plus a small module-composition directory:
@@ -51,6 +56,6 @@ If a change to `src-tauri/src/*.rs` is about *what the app does* rather than
 
 Same rule as the frontend, in the same order: one capability uses it → that
 capability; two or more already use it → the capability that owns the data, not
-a `common` bucket; it reads or writes config → `workspace/`; it composes several
-capabilities → `src-tauri/`; none of the above → the boundaries are wrong, say so
-rather than parking the file.
+a `common` bucket; it reads or writes config → `workspace/`; it uses a Tauri
+type → `core/tauri/`; it composes several capabilities → `src-tauri/`; none of
+the above → the boundaries are wrong, say so rather than parking the file.

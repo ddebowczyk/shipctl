@@ -1,0 +1,23 @@
+[package]
+name = "shipctl-tauri-adapter"
+version = "0.0.0"
+description = "Tauri command, event, and watcher adapters for Shipctl core"
+edition = "2021"
+rust-version.workspace = true
+
+[lib]
+name = "shipctl_tauri_adapter"
+
+[dependencies]
+dirs = "6.0"
+log = "0.4"
+notify = { version = "8", features = ["macos_fsevent"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+shipctl-core = { path = "../backend" }
+shipctl-module-api = { path = "../../modules/api/backend" }
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
+tauri = { version = "2.11.5", features = ["macos-private-api"] }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }

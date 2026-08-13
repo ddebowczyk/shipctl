@@ -2,9 +2,12 @@
 
 `modules/` contains features that can be removed from a build. A normal module
 owns a public frontend package under `frontend/` and, when native behavior is
-needed, a feature-gated Tauri plugin under `backend/`. If the plugin needs a
-host-owned service, its typed adapter belongs in `host/`; it exports the module
-installation function and is the only code that sees both module and host.
+needed, a feature-gated Tauri plugin under `backend/`. When native model or
+driver logic must also serve the CLI, it belongs in a Tauri-free `core/` crate;
+the backend plugin depends on that crate, never the reverse. If the plugin
+needs a host-owned service, its typed adapter belongs in `host/`; it exports
+the module installation function and is the only code that sees both module and
+host.
 
 Two directories are intentionally different:
 

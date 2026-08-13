@@ -14,6 +14,7 @@ import type {
   FontFaceData,
   PreferredEditor,
   UiState,
+  CanvasAdapterId,
 } from "./types";
 import type {
   TerminalAttachmentId,
@@ -30,6 +31,11 @@ import type {
 
 
 // ── Workspace commands ──────────────────────────────────────────────
+
+/** Reads the immutable canvas selection before AppShell can start terminals. */
+export function getCanvasAdapter(): Promise<CanvasAdapterId> {
+  return invoke("get_canvas_adapter");
+}
 
 export function listRepos(): Promise<RepoInfo[]> {
   return invoke("list_repos");

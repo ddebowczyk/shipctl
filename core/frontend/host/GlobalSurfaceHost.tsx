@@ -1,11 +1,13 @@
 import { Component, lazy, Suspense, useMemo, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
-import type { ContributionId, ModuleHostServices } from "@shipctl/module-api";
-
-import type { GlobalSurfaceRegistry } from "./globalSurfaceRegistry.ts";
+import type {
+  ContributionId,
+  GlobalSurfaceContribution,
+  ModuleHostServices,
+} from "@shipctl/module-api";
 
 interface GlobalSurfaceHostProps {
-  readonly registry: GlobalSurfaceRegistry;
+  readonly contribution: GlobalSurfaceContribution | undefined;
   readonly surfaceId: ContributionId;
   readonly close: () => void;
   readonly services: ModuleHostServices;
@@ -58,13 +60,12 @@ function GlobalSurfaceUnavailable({
 }
 
 export default function GlobalSurfaceHost({
-  registry,
+  contribution,
   surfaceId,
   close,
   services,
 }: GlobalSurfaceHostProps) {
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const contribution = registry.surface(surfaceId);
   const Surface = useMemo(
     () => contribution ? lazy(contribution.load) : null,
     [contribution, loadAttempt],

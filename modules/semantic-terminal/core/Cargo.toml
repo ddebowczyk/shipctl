@@ -1,0 +1,19 @@
+[package]
+name = "shipctl-module-semantic-terminal-core"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "shipctl_module_semantic_terminal_core"
+path = "src/lib.rs"
+
+[dependencies]
+libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "72ac98f292879bf9f788fcbb11238c562a1eebe6", default-features = false }
+shipctl-module-api = { path = "../../api/backend" }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+portable-pty = "0.9"

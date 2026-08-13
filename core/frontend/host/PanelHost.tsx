@@ -1,11 +1,14 @@
 import { Component, lazy, Suspense, useMemo, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
-import type { ContributionId, ModuleHostServices, ProjectRef } from "@shipctl/module-api";
-
-import type { PanelRegistry } from "./panelRegistry.ts";
+import type {
+  ContributionId,
+  ModuleHostServices,
+  PanelContribution,
+  ProjectRef,
+} from "@shipctl/module-api";
 
 interface PanelHostProps {
-  readonly registry: PanelRegistry;
+  readonly contribution: PanelContribution | undefined;
   readonly panelId: ContributionId;
   readonly instanceId: string;
   readonly project: ProjectRef | null;
@@ -68,7 +71,7 @@ function PanelUnavailable({
 }
 
 export default function PanelHost({
-  registry,
+  contribution,
   panelId,
   instanceId,
   project,
@@ -78,7 +81,6 @@ export default function PanelHost({
   services,
 }: PanelHostProps) {
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const contribution = registry.panel(panelId);
   const Panel = useMemo(
     () => contribution ? lazy(contribution.load) : null,
     [contribution, loadAttempt],

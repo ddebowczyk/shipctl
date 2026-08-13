@@ -773,7 +773,20 @@ fn resolve_ui_path() -> Result<PathBuf, ControlError> {
             format!("Could not resolve the Shipctl executable path: {error}"),
         )
     })?;
-    let ui_path = paired_ui_path(&current_exe);
+    resolve_ui_path_from(&current_exe)
+}
+
+fn resolve_ui_path_from(cli_executable: &Path) -> Result<PathBuf, ControlError> {
+    let cli_executable = cli_executable.canonicalize().map_err(|error| {
+        ControlError::new(
+            "control.instance.launcher_unavailable",
+            format!(
+                "Could not resolve the Shipctl executable path {}: {error}",
+                cli_executable.display()
+            ),
+        )
+    })?;
+    let ui_path = paired_ui_path(&cli_executable);
     if ui_path.is_file() {
         Ok(ui_path)
     } else {
@@ -1019,7 +1032,7 @@ fn print_version(format: OutputFormat) {
 
 #[cfg(test)]
 mod tests {
-    use shipctl_module_semantic_terminal::projection::ProjectedSpace;
+    use shipctl_module_semantic_terminal_core::projection::ProjectedSpace;
 
     use super::*;
 
@@ -1042,6 +1055,33 @@ mod tests {
                 "shipctl-ui"
             }))
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolves_the_ui_from_a_homebrew_style_cli_symlink() {
+        use std::fs;
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("shipctl-cli-test-{}", Uuid::new_v4()));
+        let application = root.join("Cellar/shipctl/0.0.0/shipctl.app/Contents/MacOS");
+        let cli = application.join("shipctl");
+        let ui = application.join("shipctl-ui");
+        let shell_cli = root.join("bin/shipctl");
+
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            fs::create_dir_all(&application)?;
+            fs::create_dir_all(shell_cli.parent().expect("shell CLI has a parent"))?;
+            fs::write(&cli, [])?;
+            fs::write(&ui, [])?;
+            symlink(&cli, &shell_cli)?;
+
+            assert_eq!(resolve_ui_path_from(&shell_cli)?, ui.canonicalize()?);
+            Ok(())
+        })();
+
+        let _ = fs::remove_dir_all(&root);
+        result.expect("a Homebrew CLI symlink must resolve its bundled UI sibling");
     }
 
     #[test]

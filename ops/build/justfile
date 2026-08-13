@@ -14,14 +14,8 @@ module-fixture:
 release:
     bash bin/release-build.sh
 
-verify-key:
-    bash bin/verify-updater-key.sh
-
 dmg:
     bash bin/post-build-dmg.sh
 
 icon:
     node bin/generate-icon.mjs
-
-update-json:
-    bash bin/generate-update-json.sh

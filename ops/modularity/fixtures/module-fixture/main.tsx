@@ -86,7 +86,7 @@ createRoot(document.getElementById("root")!).render(
       Command: <code data-testid="fixture-command">not invoked</code>
     </aside>
     <PanelHost
-      registry={registry}
+      contribution={registry.panel("fixture.panel")}
       panelId="fixture.panel"
       instanceId="fixture-smoke"
       project={null}

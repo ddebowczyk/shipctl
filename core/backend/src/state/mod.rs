@@ -4,3 +4,4 @@ pub mod archive;
 pub mod paths;
 pub mod providers;
 pub mod ui;
+pub mod workspace_layout;

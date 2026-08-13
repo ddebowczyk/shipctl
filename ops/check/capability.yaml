@@ -59,6 +59,10 @@ commands:
     summary: Reject instance-owned state outside the injected path boundary.
     lane: fast
     aggregate: check
+  - name: cli-boundary
+    summary: Reject Tauri and Wry dependencies in the shared core and standalone CLI.
+    lane: fast
+    aggregate: check
   - name: release-bundle
     summary: Reject a release bundle that carries the dev-only scenario harness.
     lane: fast

@@ -81,7 +81,7 @@ fn membership(
     }
 }
 
-fn frontend_enabled(value: Option<&str>) -> bool {
+pub(crate) fn frontend_enabled(value: Option<&str>) -> bool {
     !matches!(value, Some("disabled"))
 }
 

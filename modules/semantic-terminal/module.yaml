@@ -19,8 +19,26 @@ backend:
     crate: shipctl-module-semantic-terminal-host
     path: modules/semantic-terminal/host
     dependency_alias: shipctl-module-semantic-terminal-host
-tauri: null
-profile: null
+tauri:
+  capability_identifier: semantic-terminal
+  permissions:
+    - shipctl-semantic-terminal:allow-get-semantic-terminal-snapshot
+    - shipctl-semantic-terminal:allow-attach-semantic-terminal
+    - shipctl-semantic-terminal:allow-credit-semantic-terminal-screen
+    - shipctl-semantic-terminal:allow-detach-semantic-terminal
+    - shipctl-semantic-terminal:allow-resize-semantic-terminal
+    - shipctl-semantic-terminal:allow-input-semantic-terminal
+    - shipctl-semantic-terminal:allow-history-semantic-terminal
+    - shipctl-semantic-terminal:allow-anchor-semantic-terminal
+    - shipctl-semantic-terminal:allow-resolve-semantic-terminal-anchor
+    - shipctl-semantic-terminal:allow-release-semantic-terminal-anchor
+    - shipctl-semantic-terminal:allow-select-semantic-terminal
+    - shipctl-semantic-terminal:allow-is-semantic-terminal-paste-safe
+    - shipctl-semantic-terminal:allow-get-semantic-terminal-publication-stats
+    - shipctl-semantic-terminal:allow-get-semantic-terminal-app-memory
+profile: profiles/semantic-terminal-disabled/tauri.conf.json
 tests:
   frontend: modules/semantic-terminal/frontend/tests
-  backend: cargo test --manifest-path modules/semantic-terminal/backend/Cargo.toml
+  backend: >-
+    cargo test --manifest-path modules/semantic-terminal/core/Cargo.toml &&
+    cargo test --manifest-path modules/semantic-terminal/backend/Cargo.toml

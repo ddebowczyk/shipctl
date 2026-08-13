@@ -15,8 +15,6 @@
     "core:window:allow-set-effects",
     "dialog:default",
     "log:default",
-    "notification:default",
-    "updater:default",
-    "process:allow-restart"
+    "notification:default"
   ]
 }

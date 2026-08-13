@@ -4,6 +4,7 @@ import type {
   PanelContribution,
   PanelHostPort,
 } from "./panels";
+import type { CommandContribution } from "./commands";
 import type { ModuleHostServices, ModuleSkillsPort } from "./services";
 import type { ModuleMessageContributions, ModuleMessages } from "./messages";
 import type { TerminalPresentationProvider } from "./terminalHost.ts";
@@ -52,6 +53,8 @@ export interface ModuleScheduledTask {
 export interface ShipctlModule {
   readonly id: ModuleId;
   readonly version: string;
+  /** Static frontend commands. Native menu placement stays host-owned. */
+  readonly commands?: readonly CommandContribution[];
   readonly panels?: readonly PanelContribution[];
   readonly globalSurfaces?: readonly GlobalSurfaceContribution[];
   readonly globalNavigation?: readonly GlobalNavigationContribution[];

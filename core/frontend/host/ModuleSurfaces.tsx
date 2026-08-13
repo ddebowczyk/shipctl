@@ -4,12 +4,8 @@ import { createPortal } from "react-dom";
 import type {
   ProjectActionSurfaceHost,
   ProjectActionSurfacePosition,
-  ProjectLayoutContribution,
-  ProjectLayoutSlot,
-  ProjectNavigationContribution,
   ProjectRef,
   ProjectSurfaceAction,
-  SidebarContribution,
   SettingsContribution,
   SettingsSlot,
 } from "@shipctl/module-api";
@@ -18,13 +14,12 @@ import { contributedPanelTabId } from "@shipctl/core/platform";
 import { useTerminalStore } from "@shipctl/core/terminal-host";
 import { useUIStore } from "@shipctl/core/shared";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";
-import {
-  enabledProjectLayoutContributions,
-  modulePanelContributions,
-  moduleProjectNavigationContributions,
-  moduleSidebarContributions,
-  moduleSettingsContributions,
-} from "./moduleComposition.ts";
+import type {
+  CanvasProjectLayoutSurface,
+  CanvasProjectNavigationSurface,
+  CanvasSidebarSurface,
+} from "./canvasSurfaceCatalog.ts";
+import { moduleSettingsContributions } from "./moduleComposition.ts";
 
 class ModuleSurfaceBoundary extends Component<
   { readonly children: ReactNode },
@@ -51,7 +46,7 @@ function ProjectLayoutSurface({
   contribution,
   project,
 }: {
-  readonly contribution: ProjectLayoutContribution;
+  readonly contribution: CanvasProjectLayoutSurface;
   readonly project: ProjectRef;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
@@ -65,21 +60,19 @@ function ProjectLayoutSurface({
 }
 
 export function ModuleProjectLayoutSurfaces({
-  slot,
+  contributions,
   project,
 }: {
-  readonly slot: ProjectLayoutSlot;
+  readonly contributions: readonly CanvasProjectLayoutSurface[];
   readonly project: ProjectRef;
 }) {
-  return enabledProjectLayoutContributions()
-    .filter((contribution) => contribution.slot === slot)
-    .map((contribution) => (
-      <ProjectLayoutSurface
-        key={contribution.id}
-        contribution={contribution}
-        project={project}
-      />
-    ));
+  return contributions.map((contribution) => (
+    <ProjectLayoutSurface
+      key={contribution.id}
+      contribution={contribution}
+      project={project}
+    />
+  ));
 }
 
 export function ModuleProjectActionSurface({
@@ -117,13 +110,12 @@ function ProjectNavigationSurface({
   project,
   activeTabId,
 }: {
-  readonly contribution: ProjectNavigationContribution;
+  readonly contribution: CanvasProjectNavigationSurface;
   readonly project: ProjectRef;
   readonly activeTabId: string | null;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
-  const panel = modulePanelContributions().find(({ id }) => id === contribution.panelId);
-  if (!panel) return null;
+  const panel = contribution.panel;
   const instanceId = contributedPanelTabId(contribution.panelId);
   const active = activeTabId === instanceId;
 
@@ -148,13 +140,15 @@ function ProjectNavigationSurface({
 }
 
 export function ModuleProjectNavigationSurfaces({
+  contributions,
   project,
   activeTabId,
 }: {
+  readonly contributions: readonly CanvasProjectNavigationSurface[];
   readonly project: ProjectRef;
   readonly activeTabId: string | null;
 }) {
-  return moduleProjectNavigationContributions().map((contribution) => (
+  return contributions.map((contribution) => (
     <ProjectNavigationSurface
       key={contribution.id}
       contribution={contribution}
@@ -167,7 +161,7 @@ export function ModuleProjectNavigationSurfaces({
 function SidebarSurface({
   contribution,
 }: {
-  readonly contribution: SidebarContribution;
+  readonly contribution: CanvasSidebarSurface;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
   return (
@@ -182,8 +176,12 @@ function SidebarSurface({
   );
 }
 
-export function ModuleSidebarSurfaces() {
-  return moduleSidebarContributions().map((contribution) => (
+export function ModuleSidebarSurfaces({
+  contributions,
+}: {
+  readonly contributions: readonly CanvasSidebarSurface[];
+}) {
+  return contributions.map((contribution) => (
     <SidebarSurface key={contribution.id} contribution={contribution} />
   ));
 }

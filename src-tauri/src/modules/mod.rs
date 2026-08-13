@@ -10,11 +10,12 @@ pub mod inventory;
 
 use tauri::{AppHandle, Builder, Runtime};
 
-use shipctl_core::message_bus::MessageBusBridgeService;
+use shipctl_core::menu::{NativeMenuContribution, NativeMenuSlot};
 use shipctl_core::state::paths::ShipctlPaths;
 use shipctl_core::terminal_host::TerminalService;
 use shipctl_core::workspace::manager::WorkspaceManager;
 use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
+use shipctl_tauri_adapter::MessageBusBridgeService;
 
 pub fn install<R: Runtime>(
     builder: Builder<R>,
@@ -92,4 +93,53 @@ pub fn start_background_tasks<R: Runtime>(app: &AppHandle<R>, reconcile_external
         reconcile_external_sources.then(|| shipctl_module_usage_host::start_background_ingest(app));
 
     let _ = (app, reconcile_external_sources);
+}
+
+/// Compile native-menu declarations from the same static profile that the
+/// frontend registers at startup. Runtime artifacts are deliberately absent:
+/// their lifecycle currently permits headless capabilities only.
+pub fn native_menu_contributions() -> Vec<NativeMenuContribution> {
+    native_menu_contributions_for(inventory::frontend_enabled(option_env!(
+        "VITE_SHIPCTL_COMMANDS_MODULE"
+    )))
+}
+
+pub const fn semantic_terminal_available() -> bool {
+    cfg!(feature = "semantic-terminal-module")
+}
+
+fn native_menu_contributions_for(commands_enabled: bool) -> Vec<NativeMenuContribution> {
+    if !commands_enabled {
+        return Vec::new();
+    }
+
+    vec![NativeMenuContribution::new(
+        "shipctl.commands",
+        "commands.open-panel",
+        "New Commands Panel",
+        Some("CmdOrCtrl+Shift+C"),
+        NativeMenuSlot::FileNew,
+        20,
+    )]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commands_menu_contribution_matches_the_static_frontend_command() {
+        let frontend = include_str!("../../../modules/commands/frontend/src/index.ts");
+        let contributions = native_menu_contributions_for(true);
+
+        assert_eq!(contributions.len(), 1);
+        assert_eq!(contributions[0].module_id, "shipctl.commands");
+        assert_eq!(contributions[0].command_id, "commands.open-panel");
+        assert!(frontend.contains("id: \"commands.open-panel\""));
+    }
+
+    #[test]
+    fn disabled_static_profile_has_no_module_native_menu_items() {
+        assert!(native_menu_contributions_for(false).is_empty());
+    }
 }

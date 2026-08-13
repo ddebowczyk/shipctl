@@ -39,8 +39,6 @@ export interface PanelContribution {
   readonly label: string;
   readonly icon: PanelIconDescriptor;
   readonly shortcut?: string;
-  /** Native host event that should open this panel when emitted. */
-  readonly menuEvent?: string;
   readonly singleton: "per-project" | "global" | false;
   readonly order?: number;
   /** Places this project panel in the generic new-session menu. */

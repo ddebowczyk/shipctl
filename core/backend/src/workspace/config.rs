@@ -5,6 +5,37 @@ use std::collections::{HashMap, HashSet};
 
 // ── Global config (~/.shipctl/config.yml) ───────────────────────────
 
+/// The main canvas implementation selected when Shipctl starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CanvasAdapter {
+    Legacy,
+    Layman,
+}
+
+impl Default for CanvasAdapter {
+    fn default() -> Self {
+        Self::Legacy
+    }
+}
+
+impl CanvasAdapter {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Legacy => "legacy",
+            Self::Layman => "layman",
+        }
+    }
+}
+
+/// Host-owned composition settings. These never enter capability data or
+/// per-session UI state because they select the application shell itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSettings {
+    #[serde(default)]
+    pub canvas: CanvasAdapter,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     #[serde(default = "default_version")]
@@ -23,6 +54,8 @@ pub struct GlobalConfig {
     pub terminal: TerminalSettings,
     #[serde(default)]
     pub sidebar: SidebarSettings,
+    #[serde(default)]
+    pub ui: UiSettings,
     /// Capability-owned top-level values remain human-editable without expanding the host schema.
     #[serde(default, flatten)]
     pub capability_data: HashMap<String, serde_json::Value>,
@@ -43,6 +76,7 @@ impl Default for GlobalConfig {
             keybindings: KeybindingSettings::default(),
             terminal: TerminalSettings::default(),
             sidebar: SidebarSettings::default(),
+            ui: UiSettings::default(),
             capability_data: HashMap::new(),
         }
     }
@@ -340,9 +374,45 @@ pub struct WorkspaceConfig {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_terminal_settings, GlobalConfig, ProjectSettings, TerminalSettings,
-        WorkspaceConfig, RETENTION_DEFAULT_BYTES,
+        normalize_terminal_settings, CanvasAdapter, GlobalConfig, ProjectSettings,
+        TerminalSettings, WorkspaceConfig, RETENTION_DEFAULT_BYTES,
     };
+
+    #[test]
+    fn global_config_defaults_canvas_to_legacy_when_ui_is_absent() {
+        let config: GlobalConfig = serde_yaml::from_str("version: 1\n").unwrap();
+
+        assert_eq!(config.ui.canvas, CanvasAdapter::Legacy);
+    }
+
+    #[test]
+    fn global_config_accepts_layman_canvas_selection() {
+        let config: GlobalConfig = serde_yaml::from_str("ui:\n  canvas: layman\n").unwrap();
+
+        assert_eq!(config.ui.canvas, CanvasAdapter::Layman);
+    }
+
+    #[test]
+    fn global_config_rejects_an_unknown_canvas_selection() {
+        let error = serde_yaml::from_str::<GlobalConfig>("ui:\n  canvas: mosaic\n")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("mosaic"));
+        assert!(error.contains("legacy"));
+        assert!(error.contains("layman"));
+    }
+
+    #[test]
+    fn global_config_round_trips_the_canvas_selection() {
+        let config: GlobalConfig = serde_yaml::from_str("ui:\n  canvas: layman\n").unwrap();
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        let restored: GlobalConfig = serde_yaml::from_str(&yaml).unwrap();
+
+        assert!(yaml.contains("ui:"));
+        assert!(yaml.contains("canvas: layman"));
+        assert_eq!(restored.ui.canvas, CanvasAdapter::Layman);
+    }
 
     #[test]
     fn global_config_preserves_capability_owned_top_level_values() {
@@ -374,6 +444,10 @@ mod tests {
             .contains("must not be empty"));
         assert!(config
             .replace_capability_value("terminal", serde_json::json!({}))
+            .unwrap_err()
+            .contains("host-owned"));
+        assert!(config
+            .replace_capability_value("ui", serde_json::json!({}))
             .unwrap_err()
             .contains("host-owned"));
     }

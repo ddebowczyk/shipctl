@@ -69,28 +69,6 @@ impl UiStateStore {
     }
 }
 
-#[tauri::command]
-pub fn get_ui_state(store: tauri::State<'_, UiStateStore>) -> Result<UiState, String> {
-    store.load()
-}
-
-#[tauri::command]
-pub fn set_last_repo_path(
-    path: Option<String>,
-    store: tauri::State<'_, UiStateStore>,
-) -> Result<UiState, String> {
-    store.set_last_repo_path(path)
-}
-
-#[tauri::command]
-pub fn save_appearance_state(
-    theme_id: String,
-    custom_theme: Option<serde_json::Value>,
-    store: tauri::State<'_, UiStateStore>,
-) -> Result<UiState, String> {
-    store.save_appearance(theme_id, custom_theme)
-}
-
 fn read_at(path: &Path) -> Result<UiState, String> {
     if !path.exists() {
         return Ok(UiState::default());

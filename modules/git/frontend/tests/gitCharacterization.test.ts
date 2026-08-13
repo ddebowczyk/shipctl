@@ -318,12 +318,12 @@ test("module lifecycle owns project refresh, filesystem refresh, and removal", a
 test("generic host project chrome has no direct Git state dependency", () => {
   const files = [
     "../../../../core/frontend/shell/AppShell.tsx",
-    "../../../../core/frontend/shell/TabBar.tsx",
+    "../../../../core/frontend/canvas/legacy/LegacyTabBar.tsx",
     "../../../../core/frontend/projects/projectMoveMenu.tsx",
     "../../../../core/frontend/terminal-host/AgentSessionList.tsx",
     "../../../../core/frontend/host/ModuleSessionButton.tsx",
     "../../../../core/frontend/projects/ProjectList.tsx",
-    "../../../../core/frontend/shell/Sidebar.tsx",
+    "../../../../core/frontend/canvas/legacy/LegacySidebar.tsx",
     "../../../../core/frontend/terminal-host/TerminalItem.tsx",
     "../../../../core/frontend/projects/useProjectWatcher.ts",
     "../../../../core/frontend/projects/projectGrouping.ts",

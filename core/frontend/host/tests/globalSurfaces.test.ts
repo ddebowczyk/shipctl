@@ -190,7 +190,7 @@ test("global surface activation survives project switches", () => {
 
 test("an unknown or disabled surface renders a recoverable host state", () => {
   const markup = renderToStaticMarkup(createElement(GlobalSurfaceHost, {
-    registry: GlobalSurfaceRegistry.create(),
+    contribution: undefined,
     surfaceId: "fixture.disabled",
     close: () => undefined,
     services,

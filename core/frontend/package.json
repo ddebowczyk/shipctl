@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "sideEffects": [
-    "./appearance/globals.css"
+    "./appearance/globals.css",
+    "./canvas/legacy/legacyCanvas.css"
   ],
   "exports": {
     "./platform": "./platform/index.ts",
@@ -19,11 +20,15 @@
     "./projects/views": "./projects/views.ts",
     "./host": "./host/index.ts",
     "./host/views": "./host/views.ts",
+    "./host/layman": "./host/layman.ts",
+    "./canvas": "./canvas/index.ts",
+    "./canvas/views": "./canvas/views.ts",
     "./shell": "./shell/index.ts"
   },
   "dependencies": {
     "@shipctl/module-api": "workspace:*",
-    "@tauri-apps/api": "^2.11.1"
+    "@tauri-apps/api": "^2.11.1",
+    "react-layman": "github:ddebowczyk/react-layman#8d0c41a0a52830f3072771af674d63d80215384e"
   },
   "peerDependencies": {
     "react": "^19.2.4"

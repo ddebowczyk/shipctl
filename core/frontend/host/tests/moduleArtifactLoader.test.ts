@@ -50,3 +50,29 @@ test("restart-bound loader accepts only the admitted headless module identity", 
       && error.code === "module.loader.invalid_artifact",
   );
 });
+
+test("restart-bound loader rejects command and canvas contributions", async () => {
+  const module = {
+    id: "test.headless-module",
+    version: "1.0.0",
+  };
+  for (const [field, value] of [
+    ["commands", []],
+    ["globalSurfaces", []],
+  ] as const) {
+    await assert.rejects(
+      () => loadShipctlModuleArtifact({
+        digest: DIGEST_A,
+        entryUrl: `asset://localhost/modules/${DIGEST_A}/module.mjs`,
+        expectedModuleId: module.id,
+        expectedVersion: module.version,
+        importModule: async () => ({
+          createShipctlModule: () => ({ ...module, [field]: value }),
+        }),
+      }),
+      (error: unknown) => error instanceof ModuleArtifactLoadError
+        && error.code === "module.loader.invalid_artifact"
+        && error.message.includes(field),
+    );
+  }
+});

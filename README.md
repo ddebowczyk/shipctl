@@ -33,6 +33,30 @@ pnpm tauri build    # production bundle
 Run `just` for repository commands and `just ops skills` for procedures; see
 `docs/ops/overview.md`.
 
+## Install and update
+
+Shipctl will use one macOS Homebrew cask. It installs `shipctl.app` and exposes
+the CLI inside that app as `shipctl` on your shell path. The first cask will be
+published with the first signed release.
+
+```bash
+brew install --cask ddebowczyk/shipctl/shipctl
+shipctl --help
+open -a shipctl
+```
+
+Homebrew owns updates and removal:
+
+```bash
+brew update
+brew outdated --cask shipctl
+brew upgrade --cask shipctl
+brew uninstall --cask shipctl
+```
+
+There is no separate CLI installer. The app bundle contains both `shipctl-ui`
+and the lean `shipctl` command.
+
 ## Configuration
 
 - Per project: `<repo>/.shipctl/workspace.yml`

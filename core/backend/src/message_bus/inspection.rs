@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::module_control::ModuleInspection;
 
-use super::bridge::{MessageBridgeInspection, MessageBridgeRegistrationObservation};
+use super::bridge_contract::{MessageBridgeInspection, MessageBridgeRegistrationObservation};
 use super::contracts::{MessageObservation, RedactedMessageContext};
 use super::diagnostics::{DRAIN_BLOCKED, MODULE_JOIN_UNAVAILABLE};
 use super::MESSAGE_CONTRACT_SCHEMA_VERSION;

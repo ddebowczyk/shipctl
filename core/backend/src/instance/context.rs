@@ -159,17 +159,6 @@ impl InstanceContext {
     }
 }
 
-#[tauri::command]
-pub fn inspect_instance(
-    context: tauri::State<'_, InstanceContext>,
-    paths: tauri::State<'_, ShipctlPaths>,
-) -> InstanceInspection {
-    InstanceInspection {
-        context: context.inner().clone(),
-        durable_sources: paths.durable_sources(),
-    }
-}
-
 pub fn validate_instance_name(value: &str) -> Result<String, String> {
     let value = value.trim();
     if value.is_empty() {

@@ -9,7 +9,8 @@ cd "$repo_root"
 # so it doesn't appear in Finder, and lays out the app + Applications nicely.
 
 cargo_target_dir="$(bash "$script_dir/cargo-target-dir.sh")"
-DMG_DIR="${cargo_target_dir}/release/bundle/dmg"
+target="$(rustc -vV | awk '/^host: / { print $2 }')"
+DMG_DIR="${cargo_target_dir}/${target}/release/bundle/dmg"
 DMG=$(ls "$DMG_DIR"/*.dmg 2>/dev/null | grep -v rw_temp | head -1)
 
 if [[ -z "$DMG" ]]; then

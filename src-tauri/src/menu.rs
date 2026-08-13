@@ -1,154 +1,119 @@
+//! Tauri rendering for the host-owned static native-menu model.
+
+use std::collections::HashSet;
+
+use shipctl_core::menu::{
+    compile_native_menu, NativeMenuCompileInput, NativeMenuEntry, NativeMenuModel, NativeMenuRole,
+    NativeMenuSection, NativeMenuSectionId,
+};
 use tauri::menu::{
-    AboutMetadata, AboutMetadataBuilder, MenuBuilder, MenuItem, SubmenuBuilder, HELP_SUBMENU_ID,
+    AboutMetadata, AboutMetadataBuilder, MenuBuilder, MenuItem, Submenu, SubmenuBuilder,
+    HELP_SUBMENU_ID,
 };
 use tauri::{AppHandle, Emitter, Wry};
 
 use crate::build_info::BUILD_ID;
 
 pub fn setup(app: &AppHandle<Wry>) -> tauri::Result<()> {
-    let version = app.config().version.clone();
-
-    // -- App (Shipctl) submenu --
-    let about_meta = about_metadata(version);
-    let check_updates = MenuItem::with_id(
-        app,
-        "check_updates",
-        "Check for Updates…",
-        true,
-        None::<&str>,
-    )?;
-    let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
-
-    let app_menu = SubmenuBuilder::new(app, "Shipctl")
-        .about(Some(about_meta))
-        .separator()
-        .item(&check_updates)
-        .separator()
-        .item(&settings)
-        .separator()
-        .services()
-        .separator()
-        .hide()
-        .hide_others()
-        .show_all()
-        .separator()
-        .quit()
-        .build()?;
-
-    // -- File --
-    let new_semantic_terminal = MenuItem::with_id(
-        app,
-        "new_semantic_terminal",
-        "New Semantic Terminal",
-        true,
-        Some("CmdOrCtrl+T"),
-    )?;
-    let new_thin_terminal = MenuItem::with_id(
-        app,
-        "new_thin_terminal",
-        "New Thin Terminal",
-        true,
-        Some("CmdOrCtrl+Alt+T"),
-    )?;
-    let new_session = MenuItem::with_id(
-        app,
-        "new_session",
-        "New Session",
-        true,
-        Some("CmdOrCtrl+Shift+T"),
-    )?;
-    let new_commands = MenuItem::with_id(
-        app,
-        "new_commands",
-        "New Commands Panel",
-        true,
-        Some("CmdOrCtrl+Shift+C"),
-    )?;
-    let open_in_editor = MenuItem::with_id(
-        app,
-        "open_in_editor",
-        "Open in Editor",
-        true,
-        Some("CmdOrCtrl+E"),
-    )?;
-
-    let file_menu = SubmenuBuilder::new(app, "File")
-        .item(&new_semantic_terminal)
-        .item(&new_thin_terminal)
-        .item(&new_session)
-        .item(&new_commands)
-        .separator()
-        .item(&open_in_editor)
-        .separator()
-        .close_window()
-        .build()?;
-
-    // -- Edit --
-    let edit_menu = SubmenuBuilder::new(app, "Edit")
-        .undo()
-        .redo()
-        .separator()
-        .cut()
-        .copy()
-        .paste()
-        .separator()
-        .select_all()
-        .build()?;
-
-    // -- View --
-    let toggle_sidebar = MenuItem::with_id(
-        app,
-        "toggle_sidebar",
-        "Toggle Sidebar",
-        true,
-        Some("CmdOrCtrl+B"),
-    )?;
-    let next_tab = MenuItem::with_id(app, "next_tab", "Next Tab", true, Some("CmdOrCtrl+Tab"))?;
-    let previous_tab = MenuItem::with_id(
-        app,
-        "previous_tab",
-        "Previous Tab",
-        true,
-        Some("CmdOrCtrl+Shift+Tab"),
-    )?;
-
-    let view_menu = SubmenuBuilder::new(app, "View")
-        .item(&next_tab)
-        .item(&previous_tab)
-        .separator()
-        .item(&toggle_sidebar)
-        .separator()
-        .fullscreen()
-        .build()?;
-
-    // -- Window --
-    let window_menu = SubmenuBuilder::new(app, "Window")
-        .minimize()
-        .maximize()
-        .separator()
-        .close_window()
-        .build()?;
-
-    // -- Help --
-    let help_menu = SubmenuBuilder::with_id(app, HELP_SUBMENU_ID, "Help").build()?;
-
-    let menu = MenuBuilder::new(app)
-        .item(&app_menu)
-        .item(&file_menu)
-        .item(&edit_menu)
-        .item(&view_menu)
-        .item(&window_menu)
-        .item(&help_menu)
-        .build()?;
+    let model = compile_native_menu(NativeMenuCompileInput {
+        semantic_terminal_available: crate::modules::semantic_terminal_available(),
+        contributions: crate::modules::native_menu_contributions(),
+    })
+    .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let menu = build_menu(app, &model, app.config().version.clone())?;
+    let command_ids = model
+        .command_ids()
+        .map(str::to_owned)
+        .collect::<HashSet<_>>();
 
     app.set_menu(menu)?;
-
-    app.on_menu_event(|handle, event| {
+    app.on_menu_event(move |handle, event| {
         let id = event.id().as_ref();
-        let _ = handle.emit("menu-event", id);
+        if command_ids.contains(id) {
+            let _ = handle.emit("menu-event", id);
+        }
     });
 
     Ok(())
+}
+
+fn build_menu(
+    app: &AppHandle<Wry>,
+    model: &NativeMenuModel,
+    version: Option<String>,
+) -> tauri::Result<tauri::menu::Menu<Wry>> {
+    let mut builder = MenuBuilder::new(app);
+    for section in &model.sections {
+        let submenu = build_submenu(app, section, &version)?;
+        builder = builder.item(&submenu);
+    }
+    builder.build()
+}
+
+fn build_submenu(
+    app: &AppHandle<Wry>,
+    section: &NativeMenuSection,
+    version: &Option<String>,
+) -> tauri::Result<Submenu<Wry>> {
+    let mut builder = SubmenuBuilder::with_id(app, section_identifier(section.id), section.label);
+    for entry in &section.entries {
+        builder = append_entry(builder, app, entry, version)?;
+    }
+    builder.build()
+}
+
+fn section_identifier(id: NativeMenuSectionId) -> &'static str {
+    match id {
+        NativeMenuSectionId::Help => HELP_SUBMENU_ID,
+        _ => id.identifier(),
+    }
+}
+
+fn append_entry<'a>(
+    builder: SubmenuBuilder<'a, Wry, AppHandle<Wry>>,
+    app: &'a AppHandle<Wry>,
+    entry: &NativeMenuEntry,
+    version: &Option<String>,
+) -> tauri::Result<SubmenuBuilder<'a, Wry, AppHandle<Wry>>> {
+    match entry {
+        NativeMenuEntry::Separator => Ok(builder.separator()),
+        NativeMenuEntry::Command(command) => {
+            let item = MenuItem::with_id(
+                app,
+                command.id.as_str(),
+                command.label.as_str(),
+                true,
+                command.accelerator.as_deref(),
+            )?;
+            Ok(builder.item(&item))
+        }
+        NativeMenuEntry::Role(role) => append_role(builder, *role, version),
+    }
+}
+
+fn append_role<'a>(
+    builder: SubmenuBuilder<'a, Wry, AppHandle<Wry>>,
+    role: NativeMenuRole,
+    version: &Option<String>,
+) -> tauri::Result<SubmenuBuilder<'a, Wry, AppHandle<Wry>>> {
+    Ok(match role {
+        NativeMenuRole::About => builder.about(Some(about_metadata(version.clone()))),
+        NativeMenuRole::Services => builder.services(),
+        NativeMenuRole::Hide => builder.hide(),
+        NativeMenuRole::HideOthers => builder.hide_others(),
+        NativeMenuRole::ShowAll => builder.show_all(),
+        NativeMenuRole::Quit => builder.quit(),
+        NativeMenuRole::CloseWindow => builder.close_window(),
+        NativeMenuRole::Undo => builder.undo(),
+        NativeMenuRole::Redo => builder.redo(),
+        NativeMenuRole::Cut => builder.cut(),
+        NativeMenuRole::Copy => builder.copy(),
+        NativeMenuRole::Paste => builder.paste(),
+        NativeMenuRole::SelectAll => builder.select_all(),
+        NativeMenuRole::Fullscreen => builder.fullscreen(),
+        NativeMenuRole::Minimize => builder.minimize(),
+        NativeMenuRole::Maximize => builder.maximize(),
+    })
 }
 
 fn about_metadata(version: Option<String>) -> AboutMetadata<'static> {
@@ -170,6 +135,14 @@ mod tests {
         assert_eq!(
             metadata.short_version,
             Some(format!("Build ID: {BUILD_ID}"))
+        );
+    }
+
+    #[test]
+    fn help_keeps_tauris_reserved_menu_identifier() {
+        assert_eq!(
+            section_identifier(NativeMenuSectionId::Help),
+            HELP_SUBMENU_ID
         );
     }
 }

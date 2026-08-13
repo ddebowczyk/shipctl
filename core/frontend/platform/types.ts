@@ -8,6 +8,9 @@ import type {
 
 // ── Config types (match Rust structs) ────────────────────────────────
 
+/** The host-owned main canvas selected before the application shell mounts. */
+export type CanvasAdapterId = "legacy" | "layman";
+
 export interface RepoInfo {
   path: string;
   name: string;

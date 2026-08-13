@@ -4,10 +4,8 @@
 #
 # - Verifies .env is present and every required signing/notarization var is set
 # - Verifies the Developer ID certificate is actually installed in Keychain
-# - Verifies the updater signing key file exists and exports its contents
-# - Verifies that key matches the public key compiled into the app
 # - Verifies the authoritative YAML product version and Tauri projection agree
-# - Runs pnpm install, pnpm tauri build, post-build-dmg.sh, generate-update-json.sh
+# - Runs pnpm install, pnpm tauri build, and post-build-dmg.sh
 # - Prints a summary of the resulting artifacts
 #
 # Usage: just build release
@@ -56,7 +54,6 @@ require_var APPLE_SIGNING_IDENTITY
 require_var APPLE_ID
 require_var APPLE_PASSWORD
 require_var APPLE_TEAM_ID
-require_var TAURI_SIGNING_PRIVATE_KEY_PATH
 
 # ── Step 3: verify the Developer ID cert is actually in Keychain ────
 #
@@ -78,30 +75,7 @@ fi
 
 ok "$APPLE_SIGNING_IDENTITY"
 
-# ── Step 4: verify updater signing key file + export contents ───────
-
-step "Loading updater signing key"
-
-if [ ! -f "$TAURI_SIGNING_PRIVATE_KEY_PATH" ]; then
-  fail "Updater key file not found at: $TAURI_SIGNING_PRIVATE_KEY_PATH"
-fi
-
-export TAURI_SIGNING_PRIVATE_KEY
-TAURI_SIGNING_PRIVATE_KEY="$(cat "$TAURI_SIGNING_PRIVATE_KEY_PATH")"
-
-if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-  fail "Updater key file at $TAURI_SIGNING_PRIVATE_KEY_PATH is empty"
-fi
-
-ok "updater key loaded from $TAURI_SIGNING_PRIVATE_KEY_PATH"
-
-if [ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]; then
-  ok "updater key password is set"
-else
-  ok "updater key password is not set (this is fine if the key has no password)"
-fi
-
-# ── Step 5: verify required tools are on PATH ───────────────────────
+# ── Step 4: verify required tools are on PATH ───────────────────────
 
 step "Verifying build tools"
 
@@ -112,15 +86,7 @@ for tool in pnpm jq yq hdiutil codesign; do
   ok "$tool"
 done
 
-# ── Step 6: verify the updater key matches the compiled pubkey ──────
-#
-# The build itself never checks these agree, so a stale key path would
-# produce a release that signs and notarizes cleanly and that every
-# installed client then rejects.
-
-bash ops/build/bin/verify-updater-key.sh
-
-# ── Step 7: verify the app version is single-sourced ────────────────
+# ── Step 5: verify the app version is single-sourced ────────────────
 
 step "Verifying app version"
 
@@ -129,21 +95,43 @@ just version check || fail "product version is invalid or its packaging projecti
 VERSION=$(yq -r '.product_version' ops/version/current.yaml)
 cargo_target_dir="$(bash "$script_dir/cargo-target-dir.sh")" \
   || fail "could not determine Cargo target directory"
+target="$(rustc -vV | awk '/^host: / { print $2 }')"
+case "$target" in
+  aarch64-apple-darwin)
+    dmg_arch='aarch64'
+    ;;
+  *)
+    fail "release build supports only aarch64-apple-darwin; current host is $target"
+    ;;
+esac
+bundle_root="${cargo_target_dir}/${target}/release/bundle"
 ok "building v$VERSION"
 
-# ── Step 8: warn on dirty working tree (don't block) ────────────────
+# ── Step 6: require a reproducible source tree ──────────────────────
 
 step "Checking working tree"
 
 if [ -n "$(git status --porcelain)" ]; then
-  printf "   WARNING: working tree is dirty. Continuing anyway, but release artifacts\n"
-  printf "            will include uncommitted changes.\n"
   git status --short | sed 's/^/            /'
+  fail "release build requires a clean working tree"
 else
   ok "working tree is clean"
 fi
 
-# ── Step 9: install deps + build + post-build + updater metadata ────
+# ── Step 7: remove obsolete generated updater payloads ─────────────
+
+step "Removing obsolete updater artifacts"
+
+for artifact in \
+  "${bundle_root}/macos/shipctl.app.tar.gz" \
+  "${bundle_root}/macos/shipctl.app.tar.gz.sig"; do
+  if [ -e "$artifact" ]; then
+    rm -f -- "$artifact"
+    ok "removed $(basename "$artifact")"
+  fi
+done
+
+# ── Step 8: install deps + build + post-build ───────────────────────
 
 step "pnpm install"
 pnpm install
@@ -151,28 +139,30 @@ pnpm install
 step "pnpm tauri build (signs + notarizes — can take several minutes)"
 pnpm tauri build
 
+step "Verifying signed app bundle"
+app_path="${bundle_root}/macos/shipctl.app"
+bash "$script_dir/verify-app-bundle.sh" \
+  --app "$app_path" \
+  --target "$target" \
+  --version "$VERSION"
+codesign --verify --deep --strict --verbose=2 "$app_path"
+spctl --assess --type execute --verbose "$app_path"
+ok 'signed app bundle passed executable and Gatekeeper verification'
+
 step "Patching DMG (post-build-dmg.sh)"
 bash ops/build/bin/post-build-dmg.sh
 
-step "Generating latest.json (generate-update-json.sh)"
-bash ops/build/bin/generate-update-json.sh
+# ── Step 8: summary ─────────────────────────────────────────────────
 
-# ── Step 10: summary ─────────────────────────────────────────────────
-
-DMG_PATH="${cargo_target_dir}/release/bundle/dmg/shipctl_${VERSION}_aarch64.dmg"
-UPDATER_TARBALL="${cargo_target_dir}/release/bundle/macos/shipctl.app.tar.gz"
-UPDATER_SIG="${cargo_target_dir}/release/bundle/macos/shipctl.app.tar.gz.sig"
+DMG_PATH="${bundle_root}/dmg/shipctl_${VERSION}_${dmg_arch}.dmg"
 
 printf "\n"
 printf "── Release build complete: v%s\n" "$VERSION"
 printf "\n"
 printf "   DMG:          %s\n" "$DMG_PATH"
-printf "   Updater:      %s\n" "$UPDATER_TARBALL"
-printf "   Signature:    %s\n" "$UPDATER_SIG"
-printf "   Metadata:     latest.json\n"
 printf "\n"
 printf "Next steps:\n"
 printf "   1. Smoke test the built .app (or install from the .dmg)\n"
 printf "   2. git tag v%s && git push origin main && git push origin v%s\n" "$VERSION" "$VERSION"
-printf "   3. gh release create v%s <dmg> <updater-tarball> <updater-sig> latest.json\n" "$VERSION"
+printf "   3. gh release create v%s %s\n" "$VERSION" "$DMG_PATH"
 printf "\n"

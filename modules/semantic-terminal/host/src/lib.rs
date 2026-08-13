@@ -12,7 +12,7 @@ use shipctl_core::terminal_host::{
     TerminalAttachmentId, TerminalDriverEventSink, TerminalId, TerminalService,
 };
 use shipctl_module_api::TerminalDriverRegistry;
-use shipctl_module_semantic_terminal::{
+use shipctl_module_semantic_terminal_core::{
     HostServices, SemanticTerminalEventSink, SemanticTerminalHost,
 };
 use tauri::{Builder, Runtime};
@@ -123,7 +123,7 @@ fn host_services(terminals: TerminalService) -> HostServices {
 /// Register the module's native terminal driver.
 pub fn register_native_driver(drivers: &mut TerminalDriverRegistry) {
     drivers
-        .register(shipctl_module_semantic_terminal::native_factory())
+        .register(shipctl_module_semantic_terminal_core::native_factory())
         .expect("the semantic terminal driver registers once");
 }
 

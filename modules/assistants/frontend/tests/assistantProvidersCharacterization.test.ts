@@ -148,7 +148,7 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   const terminalActions = source("../../../../core/frontend/terminal-host/useTerminalActions.ts");
   const nativeHost = source("../../../../src-tauri/src/lib.rs");
   const nativeComposition = source("../../../../src-tauri/src/modules/mod.rs");
-  const terminalAdapter = source("../../../../src-tauri/src/modules/assistants.rs");
+  const terminalAdapter = source("../../host/src/lib.rs");
   const piConfig = source("../../backend/src/pi_config.rs");
   const backend = source("../../backend/src/lib.rs");
   const client = source("../src/client.ts");
@@ -160,7 +160,8 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   assert.doesNotMatch(shell, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|listRestorableAssistantSessions/);
   assert.doesNotMatch(terminalActions, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|CODEX_CAPTURE_RETRY_MS|RESTORE_PROBATION_MS/);
   assert.doesNotMatch(nativeHost, /AssistantSessionRegistry|commands::spawn_assistant_session|commands::begin_assistant_session_preserving_shutdown/);
-  assert.match(nativeComposition, /shipctl_module_assistants::init\(/);
+  assert.match(nativeComposition, /shipctl_module_assistants_host::install\(/);
+  assert.match(terminalAdapter, /builder\.plugin\(shipctl_module_assistants::init\(/);
   assert.match(terminalAdapter, /impl TerminalAuthority for HostTerminalAuthority/);
   // Terminal execution is the only thing this module cannot own. pi's own config —
   // ~/.pi/agent and its Keychain entries — is module business and stays in the

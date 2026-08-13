@@ -9,19 +9,18 @@ use shipctl_core::instance::{
     OperationCommand, ScheduleCommand,
 };
 use shipctl_core::message_bus::{
-    diagnose_message_runtime, MessageBusBridgeService, MessageModuleInspection,
-    MessageRuntimeInspection,
+    diagnose_message_runtime, MessageModuleInspection, MessageRuntimeInspection,
 };
 use shipctl_core::module_control::agent::AgentCapabilityService;
 use shipctl_core::module_control::codes::MUTATION_UNAVAILABLE;
 use shipctl_core::module_control::live::ModuleControlService;
-use shipctl_core::projects::watcher::GitWatcher;
 use shipctl_core::scheduler::{SchedulerControlError, SchedulerService};
 use shipctl_core::state::archive::{StateArchiveInspection, StateArchiveService};
 use shipctl_core::terminal_host::{
     TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachmentId, TerminalCloseResult,
     TerminalDescriptor, TerminalEventSink, TerminalId, TerminalRawAttachment, TerminalService,
 };
+use shipctl_tauri_adapter::{GitWatcher, MessageBusBridgeService};
 use std::path::Path;
 use std::sync::Arc;
 use tauri::Manager;

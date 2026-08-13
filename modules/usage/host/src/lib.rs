@@ -3,12 +3,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use shipctl_core::message_bus::{
-    MessageBusBridgeService, MessageEnvelope, MessageTypeId, MESSAGE_CONTRACT_SCHEMA_VERSION,
-};
+use shipctl_core::message_bus::{MessageEnvelope, MessageTypeId, MESSAGE_CONTRACT_SCHEMA_VERSION};
 use shipctl_core::workspace::manager::WorkspaceManager;
 use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
 use shipctl_module_usage::{GlobalCapabilityDataAuthority, HostServices, UsageIngestNotifier};
+use shipctl_tauri_adapter::MessageBusBridgeService;
 use tauri::{AppHandle, Builder, Runtime};
 
 const USAGE_MODULE_ID: &str = "shipctl.usage";
