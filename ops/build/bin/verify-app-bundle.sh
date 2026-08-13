@@ -65,6 +65,12 @@ cli="$macos_dir/shipctl"
 [ -x "$ui" ] || fail "app bundle has no executable UI: $ui"
 [ -x "$cli" ] || fail "app bundle has no executable CLI: $cli"
 
+# A raw Mach-O linker signature does not make a valid macOS application bundle.
+# Require a complete bundle signature so that a release cannot pass verification
+# and later show macOS's "app is damaged" alert.
+codesign --verify --deep --strict --verbose=2 "$app" \
+  || fail 'app bundle code signature is invalid'
+
 bundle_executable="$(plutil -extract CFBundleExecutable raw "$plist")" \
   || fail 'could not read CFBundleExecutable from Info.plist'
 [ "$bundle_executable" = 'shipctl-ui' ] \

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Build and archive a machine-local, unsigned macOS release bundle.
+# Build and archive a machine-local, ad-hoc signed macOS release bundle.
 set -euo pipefail
 
 usage() {
   printf '%s\n' \
     'usage: just build local [--target <triple>]' \
     '' \
-    'Builds an unsigned macOS app and DMG. Every successful invocation creates' \
+    'Builds an ad-hoc signed, unnotarized macOS app and DMG. Every successful invocation creates' \
     'a unique builds/<build-id>/ directory with build.yaml and version.yaml.' \
     '' \
     'options:' \
@@ -58,7 +58,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../../.." && pwd)"
 cd "$repo_root"
 
-for tool in ditto git jq node pnpm rustc shasum yamllint yq ys; do
+for tool in codesign ditto git jq node pnpm rustc shasum yamllint yq ys; do
   require_command "$tool"
 done
 
@@ -103,7 +103,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-build_command=(pnpm tauri build --target "$target" --bundles app,dmg --no-sign)
+# Apple Silicon requires a structurally valid code signature for downloaded
+# applications. The pseudo-identity requests Tauri's documented ad-hoc signing
+# without selecting an Apple Developer identity or changing the signed-release
+# command path.
+adhoc_signing_config='{"bundle":{"macOS":{"signingIdentity":"-"}}}'
+build_command=(pnpm tauri build --target "$target" --bundles app,dmg --config "$adhoc_signing_config")
 printf 'build_id: %s\n' "$build_id" >&2
 printf 'build: %s\n' "${build_command[*]}" >&2
 SHIPCTL_BUILD_ID="$build_id" "${build_command[@]}"
@@ -188,7 +193,7 @@ jq -n \
     target: $target,
     mode: "build",
     source: $source,
-    command: ["pnpm", "tauri", "build", "--target", $target, "--bundles", "app,dmg", "--no-sign"],
+    command: ["pnpm", "tauri", "build", "--target", $target, "--bundles", "app,dmg", "--config", $adhoc_signing_config],
     toolchain: { rustc: $rustc, pnpm: $pnpm, tauri_cli: $tauri_cli },
     artifacts: [
       { kind: "app-bundle", path: "shipctl.app", digest: { algorithm: "sha256", scope: "tree", value: $app_sha256 } },

@@ -1,19 +1,20 @@
 ---
 name: releasing
-description: Cut an unsigned Shipctl release and publish its private Homebrew cask update.
+description: Cut an ad-hoc signed Shipctl release and publish its private Homebrew cask update.
 ---
 
 # Releasing
 
-Shipctl currently distributes unsigned macOS DMGs through GitHub Releases on
+Shipctl currently distributes ad-hoc signed, unnotarized macOS DMGs through GitHub Releases on
 `ddebowczyk/shipctl`. The `ddebowczyk/homebrew-shipctl` tap contains
 `Casks/shipctl.rb`; Homebrew addresses that tap as `ddebowczyk/shipctl`.
 The cask installs the app and exposes its bundled `shipctl` command on the
 shell path. Homebrew owns installation and updates. Shipctl has no self-updater.
 
-This is a private, one-user distribution route. The app is not signed or
-notarized. macOS Gatekeeper will require a one-time user approval before the
-app can open. Do not present this cask as a signed public release.
+This is a private, one-user distribution route. The app has no Apple developer
+identity and is not notarized. The ad-hoc signature makes the bundle valid on
+Apple Silicon; macOS Gatekeeper will still require a one-time user approval
+before the app can open. Do not present this cask as a signed public release.
 
 `just build release` remains the future signed and notarized path. It requires
 Apple credentials and is not part of this procedure.
@@ -52,10 +53,11 @@ just version verify-release
 just build local
 ```
 
-`just build local` builds an unsigned app and DMG, verifies that the app bundle
-contains the small `shipctl` command, and creates one immutable directory under
-`builds/`. Its `build.yaml` binds the artifacts to the Git commit and source
-fingerprint. Use the printed `dmg:` path for the GitHub release.
+`just build local` builds an ad-hoc signed, unnotarized app and DMG, verifies
+the full app-bundle signature and the small `shipctl` command, and creates one
+immutable directory under `builds/`. Its `build.yaml` binds the artifacts to the
+Git commit and source fingerprint. Use the printed `dmg:` path for the GitHub
+release.
 
 ```bash
 gh release create v<version> <printed-dmg-path> --title "Shipctl v<version>" --generate-notes
@@ -81,8 +83,8 @@ cask "shipctl" do
   binary "#{appdir}/shipctl.app/Contents/MacOS/shipctl"
 
   caveats <<~EOS
-    Shipctl is unsigned. On first launch, approve it in System Settings >
-    Privacy & Security, then select Open Anyway.
+    Shipctl is ad-hoc signed but not notarized. On first launch, approve it in
+    System Settings > Privacy & Security, then select Open Anyway.
   EOS
 end
 ```
