@@ -20,7 +20,7 @@ const executableExtension = process.platform === "win32" ? ".exe" : "";
 const runId = `${new Date().toISOString().replaceAll(":", "-")}-${process.pid}`;
 const evidenceDirectory = path.join(repositoryRoot, "target", "message-bus", "evidence");
 const workRoot = path.join(repositoryRoot, "target", "message-bus", "work", runId);
-const sharedGoldens = path.join(repositoryRoot, "modules", "api", "fixtures", "message-contracts.json");
+const sharedGoldens = path.join(repositoryRoot, "module-api", "fixtures", "message-contracts.json");
 const fixtureManifest = path.join(repositoryRoot, "modules", "fixture", "module.yaml");
 const fixtureSchema = path.join(repositoryRoot, "modules", "fixture", "messages", "agent-wakeup.schema.json");
 const shipctl = path.join(repositoryRoot, "target", "debug", `shipctl${executableExtension}`);
@@ -372,7 +372,7 @@ function contractProof() {
     evidence,
     "contract.typescript_shared_goldens",
     "pnpm",
-    ["exec", "node", "--test", "modules/api/frontend/tests/messageContracts.test.ts"],
+    ["exec", "node", "--test", "module-api/frontend/tests/messageContracts.test.ts"],
   );
   assertion(
     evidence,

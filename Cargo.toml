@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "core/backend",
     "core/tauri",
+    "module-api/backend",
     "modules/*/backend",
     "modules/*/core",
     "modules/*/host",

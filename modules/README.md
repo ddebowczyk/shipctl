@@ -9,10 +9,14 @@ needs a host-owned service, its typed adapter belongs in `host/`; it exports
 the module installation function and is the only code that sees both module and
 host.
 
-Two directories are intentionally different:
+Two repository locations are intentionally different from removable features:
 
-- `api/` is the narrow host-to-module contract for both TypeScript and Rust. It
-  is a leaf dependency, not a feature module.
+- Top-level `module-api/` is the narrow shared contract for TypeScript and
+  Rust. It is a leaf dependency, not a feature module or plug-out candidate.
+  Its `host/`, `module/`, and `protocol/` source directories mean,
+  respectively, host-provided ports, module-provided contributions, and shared
+  immutable/wire values. Consumers use the root `@shipctl/module-api` or
+  `shipctl-module-api` export, never an implementation subpath.
 - `commands/` is frontend-only because it contributes saved-command UI and
   launches through host terminal services; it owns no native capability.
 

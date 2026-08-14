@@ -143,20 +143,33 @@ function moduleTauriEventUsage(sourceFile) {
   return { listeners, escapes };
 }
 
-async function modulePackages(root) {
+async function frontendPackage(root, relativeRoot) {
+  const frontendRoot = path.join(root, relativeRoot);
+  try {
+    const manifest = JSON.parse(await readFile(path.join(frontendRoot, "package.json"), "utf8"));
+    return { name: manifest.name, root: frontendRoot };
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function frontendPackages(root) {
   const modulesRoot = path.join(root, "modules");
-  const entries = await readdir(modulesRoot, { withFileTypes: true });
+  let entries = [];
+  try {
+    entries = await readdir(modulesRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
   const packages = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const frontendRoot = path.join(modulesRoot, entry.name, "frontend");
-    try {
-      const manifest = JSON.parse(await readFile(path.join(frontendRoot, "package.json"), "utf8"));
-      packages.push({ name: manifest.name, root: frontendRoot });
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
+    const packageRecord = await frontendPackage(root, path.join("modules", entry.name, "frontend"));
+    if (packageRecord) packages.push(packageRecord);
   }
+  const moduleApi = await frontendPackage(root, path.join("module-api", "frontend"));
+  if (moduleApi) packages.push(moduleApi);
   return packages;
 }
 
@@ -194,7 +207,7 @@ function diagnostic(file, entry, rule, message, root) {
 
 export async function checkModuleBoundaries(root = process.cwd()) {
   const absoluteRoot = path.resolve(root);
-  const packages = await modulePackages(absoluteRoot);
+  const packages = await frontendPackages(absoluteRoot);
   const coreRoot = path.join(absoluteRoot, "core/frontend");
   const opsRoot = path.join(absoluteRoot, "ops");
   const coreEntries = await coreEntrypoints(absoluteRoot);

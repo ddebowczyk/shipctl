@@ -292,11 +292,11 @@ mod tests {
     use super::*;
 
     const VALID: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/valid-channel.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/valid-channel.yaml");
     const INVALID: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/invalid-unknown-field.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/invalid-unknown-field.yaml");
     const DUPLICATE: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/duplicate-b.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/duplicate-b.yaml");
 
     #[test]
     fn candidate_parses_direct_sources_in_normalized_order() {
@@ -353,7 +353,7 @@ mod tests {
         fs::write(root.path().join("invalid.yml"), INVALID).unwrap();
         fs::write(
             root.path().join("duplicate-a.yaml"),
-            include_str!("../../../../modules/api/fixtures/schedules/duplicate-a.yaml"),
+            include_str!("../../../../module-api/fixtures/schedules/duplicate-a.yaml"),
         )
         .unwrap();
         fs::write(root.path().join("duplicate-b.yaml"), DUPLICATE).unwrap();

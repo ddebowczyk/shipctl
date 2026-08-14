@@ -580,42 +580,42 @@ mod tests {
     use super::*;
 
     const VALID_CHANNEL: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/valid-channel.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/valid-channel.yaml");
     const VALID_TOPIC: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/valid-topic.yaml");
-    const DISABLED: &str = include_str!("../../../../modules/api/fixtures/schedules/disabled.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/valid-topic.yaml");
+    const DISABLED: &str = include_str!("../../../../module-api/fixtures/schedules/disabled.yaml");
     const DST_AUSTRALIA: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/dst-australia.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/dst-australia.yaml");
     const UNKNOWN_FIELD: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/invalid-unknown-field.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/invalid-unknown-field.yaml");
     const UNSUPPORTED_VERSION: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/invalid-version.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/invalid-version.yaml");
     const INVALID_CRON: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/invalid-cron.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/invalid-cron.yaml");
     const MISSING_TIMEZONE: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/invalid-no-timezone.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/invalid-no-timezone.yaml");
     const DUPLICATE_A: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/duplicate-a.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/duplicate-a.yaml");
     const DUPLICATE_B: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/duplicate-b.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/duplicate-b.yaml");
     const INVALID_PAYLOAD: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/invalid-payload.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/invalid-payload.yaml");
     const OVERSIZED_PAYLOAD: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/oversized-payload.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/oversized-payload.yaml");
     const SECRET_PAYLOAD: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/secret-payload.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/secret-payload.yaml");
     const UNAVAILABLE_TARGET: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/unavailable-target.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/unavailable-target.yaml");
     const INCOMPATIBLE_TARGET: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/incompatible-target.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/incompatible-target.yaml");
     const UNAUTHORIZED_TARGET: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/unauthorized-target.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/unauthorized-target.yaml");
     const CANONICAL_ORDER_A: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/canonical-order-a.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/canonical-order-a.yaml");
     const CANONICAL_ORDER_B: &str =
-        include_str!("../../../../modules/api/fixtures/schedules/canonical-order-b.yaml");
+        include_str!("../../../../module-api/fixtures/schedules/canonical-order-b.yaml");
     const INSPECTION_GOLDEN: &str =
-        include_str!("../../../../modules/api/fixtures/schedule-inspection.json");
+        include_str!("../../../../module-api/fixtures/schedule-inspection.json");
 
     fn fixture_contract(
         max_encoded_bytes: u64,

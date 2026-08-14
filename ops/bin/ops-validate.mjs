@@ -10,7 +10,7 @@ const exec = promisify(execFile);
 const EXECUTABLE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".sh", ".py"]);
 const GENERATED_DIRECTORIES = new Set([".git", "dist", "node_modules", "target"]);
 const SUBJECT_ROOTS = new Set([
-  ".beads", ".git", "assets", "builds", "core", "dist", "docs", "modules",
+  ".beads", ".git", "assets", "builds", "core", "dist", "docs", "module-api", "modules",
   "node_modules", "notes", "ops", "profiles", "research", "src", "src-tauri", "target",
 ]);
 

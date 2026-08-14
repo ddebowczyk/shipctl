@@ -45,7 +45,7 @@ fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
 tauri-plugin-notification = "2"
 shipctl-core = { path = "../core/backend" }
 shipctl-tauri-adapter = { path = "../core/tauri" }
-shipctl-module-api = { path = "../modules/api/backend" }
+shipctl-module-api = { path = "../module-api/backend" }
 shipctl-module-fixture = { package = "tauri-plugin-shipctl-fixture", path = "../examples/module-fixture/backend", optional = true }
 shipctl-module-todos = { package = "tauri-plugin-shipctl-todos", path = "../modules/todos/backend", optional = true }
 # Direct optional module dependencies make their generated Tauri ACL manifests

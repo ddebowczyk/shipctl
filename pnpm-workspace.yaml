@@ -1,5 +1,6 @@
 packages:
   - "core/frontend"
+  - "module-api/frontend"
   - "modules/*/frontend"
   - "examples/module-fixture/frontend"
 

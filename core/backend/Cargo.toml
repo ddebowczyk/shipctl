@@ -31,7 +31,7 @@ interprocess = "2.4.3"
 fs4 = "1.1.0"
 sha2 = "0.10"
 sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
-shipctl-module-api = { path = "../../modules/api/backend" }
+shipctl-module-api = { path = "../../module-api/backend" }
 tar = "0.4"
 rusqlite = { version = "0.40", features = ["backup", "bundled"] }
 tempfile = "3"

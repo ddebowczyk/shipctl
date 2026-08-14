@@ -20,12 +20,12 @@ async function fixture(files) {
       },
     }),
   );
-  for (const [moduleName, packageName] of [
-    ["api", "@shipctl/module-api"],
-    ["git", "@shipctl/module-git"],
-    ["alpha", "@shipctl/module-alpha"],
+  for (const [relativeRoot, packageName] of [
+    ["module-api/frontend", "@shipctl/module-api"],
+    ["modules/git/frontend", "@shipctl/module-git"],
+    ["modules/alpha/frontend", "@shipctl/module-alpha"],
   ]) {
-    const frontend = path.join(root, "modules", moduleName, "frontend");
+    const frontend = path.join(root, relativeRoot);
     await mkdir(path.join(frontend, "src"), { recursive: true });
     await writeFile(path.join(frontend, "package.json"), JSON.stringify({ name: packageName }));
   }

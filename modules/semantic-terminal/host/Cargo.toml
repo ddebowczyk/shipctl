@@ -13,7 +13,7 @@ path = "src/lib.rs"
 serde = "1.0"
 serde_json = "1.0"
 shipctl-core = { path = "../../../core/backend" }
-shipctl-module-api = { path = "../../api/backend" }
+shipctl-module-api = { path = "../../../module-api/backend" }
 shipctl-module-semantic-terminal = { package = "tauri-plugin-shipctl-semantic-terminal", path = "../backend" }
 shipctl-module-semantic-terminal-core = { path = "../core" }
 tauri = { version = "2.11.5", default-features = false }

@@ -15,9 +15,11 @@ Shipctl is a Tauri v2 desktop app (Rust backend + React/TypeScript frontend) for
   `@shipctl/core/<capability>` entrypoints. Read `core/frontend/README.md` first.
 - `core/backend/src/<capability>/` owns native host logic and Tauri command
   implementations. Read `core/backend/README.md` first.
-- `modules/<name>/` owns removable features. `modules/api/` is the shared
-  host/module contract, not a feature; `modules/commands/` is frontend-only by
-  design. Read `modules/README.md` first.
+- `modules/<name>/` owns removable features. `module-api/` is the top-level
+  shared host/module contract, not a feature: its frontend and native sources
+  separate host-provided ports, module-provided contributions, and shared
+  protocol values while retaining root compatibility exports. `modules/commands/`
+  is frontend-only by design. Read `modules/README.md` first.
 - `src/` contains only the Vite entry files.
 - `src-tauri/` is the Tauri app-bundle shell because the crate using
   `tauri::generate_context!()` must sit beside `tauri.conf.json`; capability

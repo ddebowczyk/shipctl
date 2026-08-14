@@ -41,11 +41,11 @@ async function fixture({ mutate, files = {} } = {}) {
   mutate?.({ manifests, ops });
 
   await put(root, "package.json", JSON.stringify({ scripts: {} }));
-  await put(root, "Cargo.toml", '[workspace]\nmembers = ["modules/*/backend"]\n');
+  await put(root, "Cargo.toml", '[workspace]\nmembers = ["module-api/backend", "modules/*/backend"]\n');
   await put(root, "core/frontend/package.json", JSON.stringify({ name: "@shipctl/core", exports: {} }));
   await put(root, "core/frontend/host/index.ts", "export const host = true;");
-  await put(root, "modules/api/frontend/package.json", JSON.stringify({ name: "@shipctl/module-api" }));
-  await put(root, "modules/api/frontend/src/index.ts", "export const api = true;");
+  await put(root, "module-api/frontend/package.json", JSON.stringify({ name: "@shipctl/module-api" }));
+  await put(root, "module-api/frontend/src/index.ts", "export const api = true;");
   await put(root, "src/main.tsx", "export {};");
   await put(root, "src/vite-env.d.ts", "/// <reference types='vite/client' />");
   await put(root, "ops/ops.yaml", JSON.stringify(ops));

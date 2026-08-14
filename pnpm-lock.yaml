@@ -13,7 +13,7 @@ importers:
         version: link:core/frontend
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:modules/api/frontend
+        version: link:module-api/frontend
       '@shipctl/module-assistants':
         specifier: workspace:*
         version: link:modules/assistants/frontend
@@ -101,7 +101,7 @@ importers:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../modules/api/frontend
+        version: link:../../module-api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -110,13 +110,13 @@ importers:
         version: 19.2.8
       react-layman:
         specifier: github:ddebowczyk/react-layman#8d0c41a0a52830f3072771af674d63d80215384e
-        version: git+https://github.com/ddebowczyk/react-layman.git#8d0c41a0a52830f3072771af674d63d80215384e(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: https://codeload.github.com/ddebowczyk/react-layman/tar.gz/8d0c41a0a52830f3072771af674d63d80215384e(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
 
   examples/module-fixture/frontend:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../../modules/api/frontend
+        version: link:../../../module-api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -124,7 +124,7 @@ importers:
         specifier: ^19.2.4
         version: 19.2.8
 
-  modules/api/frontend:
+  module-api/frontend:
     dependencies:
       react:
         specifier: ^19.2.4
@@ -134,7 +134,7 @@ importers:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../module-api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -152,7 +152,7 @@ importers:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../module-api/frontend
       lucide-react:
         specifier: ^1.30.0
         version: 1.30.0(react@19.2.8)
@@ -176,7 +176,7 @@ importers:
         version: 4.4.2
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../module-api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -200,7 +200,7 @@ importers:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../module-api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -215,7 +215,7 @@ importers:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../module-api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -227,7 +227,7 @@ importers:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../module-api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -239,7 +239,7 @@ importers:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../module-api/frontend
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -254,7 +254,7 @@ importers:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../module-api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -272,7 +272,7 @@ importers:
     dependencies:
       '@shipctl/module-api':
         specifier: workspace:*
-        version: link:../../api/frontend
+        version: link:../../../module-api/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -1469,8 +1469,8 @@ packages:
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
 
-  react-layman@git+https://github.com/ddebowczyk/react-layman.git#8d0c41a0a52830f3072771af674d63d80215384e:
-    resolution: {commit: 8d0c41a0a52830f3072771af674d63d80215384e, repo: https://github.com/ddebowczyk/react-layman.git, type: git}
+  react-layman@https://codeload.github.com/ddebowczyk/react-layman/tar.gz/8d0c41a0a52830f3072771af674d63d80215384e:
+    resolution: {tarball: https://codeload.github.com/ddebowczyk/react-layman/tar.gz/8d0c41a0a52830f3072771af674d63d80215384e}
     version: 0.5.0
     engines: {node: '>=20.19.0 <27'}
     peerDependencies:
@@ -2537,7 +2537,7 @@ snapshots:
 
   react-is@16.13.1: {}
 
-  react-layman@git+https://github.com/ddebowczyk/react-layman.git#8d0c41a0a52830f3072771af674d63d80215384e(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  react-layman@https://codeload.github.com/ddebowczyk/react-layman/tar.gz/8d0c41a0a52830f3072771af674d63d80215384e(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       dnd-core: 16.0.1
       react: 19.2.8

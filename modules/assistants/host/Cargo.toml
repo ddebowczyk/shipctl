@@ -11,6 +11,6 @@ path = "src/lib.rs"
 
 [dependencies]
 shipctl-core = { path = "../../../core/backend" }
-shipctl-module-api = { path = "../../api/backend" }
+shipctl-module-api = { path = "../../../module-api/backend" }
 shipctl-module-assistants = { package = "tauri-plugin-shipctl-assistants", path = "../backend" }
 tauri = { version = "2.11.5", default-features = false }

@@ -20,12 +20,14 @@ async function fixture(files) {
       },
     }),
   );
-  for (const moduleName of ["api", "alpha", "beta", "git"]) {
-    const frontend = path.join(root, "modules", moduleName, "frontend");
+  for (const [relativeRoot, packageName] of [
+    ["module-api/frontend", "@shipctl/module-api"],
+    ["modules/alpha/frontend", "@shipctl/alpha"],
+    ["modules/beta/frontend", "@shipctl/beta"],
+    ["modules/git/frontend", "@shipctl/module-git"],
+  ]) {
+    const frontend = path.join(root, relativeRoot);
     await mkdir(path.join(frontend, "src"), { recursive: true });
-    const packageName = moduleName === "api"
-      ? "@shipctl/module-api"
-      : moduleName === "git" ? "@shipctl/module-git" : `@shipctl/${moduleName}`;
     await writeFile(path.join(frontend, "package.json"), JSON.stringify({ name: packageName }));
   }
   for (const [relative, contents] of Object.entries(files)) {
@@ -44,6 +46,30 @@ test("accepts public composition and inward API imports", async (t) => {
   });
   t.after(() => rm(root, { recursive: true, force: true }));
   assert.deepEqual(await checkModuleBoundaries(root), []);
+});
+
+test("discovers the top-level shared contract package", async (t) => {
+  const root = await fixture({
+    "module-api/frontend/src/index.ts": "import host from '../../../src/main'; export default host;",
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.deepEqual(
+    (await checkModuleBoundaries(root)).map(({ rule }) => rule),
+    ["module-host-import"],
+  );
+});
+
+test("requires modules to use the shared contract public root", async (t) => {
+  const root = await fixture({
+    "modules/alpha/frontend/src/index.ts": "import type { ModuleId } from '@shipctl/module-api/protocol'; export type T = ModuleId;",
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.deepEqual(
+    (await checkModuleBoundaries(root)).map(({ rule }) => rule),
+    ["module-api-deep-import"],
+  );
 });
 
 test("reports deterministic host and sibling violations", async (t) => {
