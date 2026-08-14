@@ -17,7 +17,7 @@ reads:
   - examples/**/package.json
   - modules/**/Cargo.toml
   - modules/**/package.json
-  - profiles/**/tauri.conf.json
+  - ops/modularity/profiles/**/tauri.conf.json
   - src-tauri/Cargo.toml
 generates: [src-tauri/tauri.conf.json]
 commands:

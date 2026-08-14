@@ -11,7 +11,7 @@ const EXECUTABLE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".mts", ".c
 const GENERATED_DIRECTORIES = new Set([".git", "dist", "node_modules", "target"]);
 const SUBJECT_ROOTS = new Set([
   ".beads", ".git", "assets", "builds", "core", "dist", "docs", "module-api", "modules",
-  "node_modules", "notes", "ops", "profiles", "research", "src", "src-tauri", "target",
+  "node_modules", "notes", "ops", "research", "src", "src-tauri", "target",
 ]);
 
 function diagnostic(rule, message, file = null) {

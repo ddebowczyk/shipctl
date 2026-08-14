@@ -1,0 +1,21 @@
+---
+schema_version: 1
+id: repository
+provides: repository
+description: Maintain and validate the logical inventory of repository-root items.
+status: supported
+requires:
+  tools: [node, yq, ys]
+  capabilities: []
+owns: [ops/repository/**]
+reads: ["*"]
+generates: []
+commands:
+  - name: map
+    summary: Show the canonical logical map of the repository root.
+    lane: fast
+  - name: validate
+    summary: Reject root entries that are unclassified, stale, or unresolved.
+    lane: fast
+    aggregate: check
+skills: []

@@ -18,7 +18,7 @@ tauri:
     - shipctl-todos:allow-toggle-todo
     - shipctl-todos:allow-add-todo
     - shipctl-todos:allow-move-todo
-profile: profiles/todos-disabled/tauri.conf.json
+profile: ops/modularity/profiles/todos-disabled/tauri.conf.json
 tests:
   frontend: modules/todos/frontend/tests
   backend: cargo test --manifest-path modules/todos/backend/Cargo.toml

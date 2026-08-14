@@ -6,9 +6,9 @@ description: Run the repository test lanes.
 status: supported
 requires:
   tools: [just, node, pnpm, cargo]
-  capabilities: [modularity]
+  capabilities: [modularity, repository]
 owns: [ops/test/**]
-reads: [core/**, modules/**, ops/check/tests/**, ops/modularity/tests/**, ops/upstream/tests/**, ops/version/tests/**, src-tauri/**]
+reads: [core/**, modules/**, ops/check/tests/**, ops/modularity/tests/**, ops/repository/tests/**, ops/upstream/tests/**, ops/version/tests/**, src-tauri/**]
 generates: [target/**]
 commands:
   - name: fast

@@ -1,0 +1,150 @@
+---
+schema_version: 1
+groups:
+  - id: application
+    description: Product source, assets, and build/package entry points.
+  - id: module-system
+    description: Removable product modules and non-shipping module fixtures.
+  - id: repository-operations
+    description: Repository maintenance commands, checks, and automation.
+  - id: repository-guidance
+    description: Shared documentation and agent or developer entry points.
+  - id: repository-control
+    description: Version control, CI, and shared repository coordination metadata.
+  - id: local-artifacts
+    description: Ignored local build output, tool caches, state, and working evidence.
+  - id: unknown
+    description: Explicit temporary classification awaiting a human or agent decision.
+entries:
+  - path: .beads
+    kind: directory
+    group: repository-control
+    description: Shared Beads task-tracking state and its configured local metadata.
+  - path: .codegraph
+    kind: directory
+    group: local-artifacts
+    description: Ignored local code-graph cache.
+  - path: .git
+    kind: directory
+    group: repository-control
+    description: Git working-tree metadata managed by Git.
+  - path: .github
+    kind: directory
+    group: repository-control
+    description: GitHub workflow and repository automation configuration.
+  - path: assets
+    kind: directory
+    group: application
+    description: Product-level brand and application icon assets.
+  - path: builds
+    kind: directory
+    group: local-artifacts
+    description: Ignored local release-build output and records.
+  - path: cli
+    kind: directory
+    group: application
+    description: The standalone shipctl command-line executable.
+  - path: core
+    kind: directory
+    group: application
+    description: Host frontend, native backend, and Tauri adapter capabilities.
+  - path: dist
+    kind: directory
+    group: local-artifacts
+    description: Ignored Vite frontend distribution consumed by Tauri packaging.
+  - path: docs
+    kind: directory
+    group: repository-guidance
+    description: Durable shared reference, with local plan and legacy review areas.
+  - path: examples
+    kind: directory
+    group: module-system
+    description: Non-shipping fixture and reference packages used by checks and development.
+  - path: module-api
+    kind: directory
+    group: application
+    description: Shared host-to-module and module-to-host contract package.
+  - path: modules
+    kind: directory
+    group: module-system
+    description: Removable shipping product feature packages.
+  - path: node_modules
+    kind: directory
+    group: local-artifacts
+    description: Ignored pnpm-installed dependency tree.
+  - path: ops
+    kind: directory
+    group: repository-operations
+    description: Capability-owned build, check, test, release, and maintenance tooling.
+  - path: research
+    kind: directory
+    group: local-artifacts
+    description: Ignored dated evidence and working notes; settled results move to docs.
+  - path: src
+    kind: directory
+    group: application
+    description: Minimal Vite renderer bootstrap entry files.
+  - path: src-tauri
+    kind: directory
+    group: application
+    description: Tauri bundle shell and configuration adjacent to tauri.conf.json.
+  - path: target
+    kind: directory
+    group: local-artifacts
+    description: Ignored workspace-root Cargo build output.
+  - path: var
+    kind: directory
+    group: local-artifacts
+    description: Ignored local operational state and disposable evidence.
+  - path: .gitignore
+    kind: file
+    group: repository-control
+    description: Repository tracking policy for generated and local-only material.
+  - path: AGENTS.md
+    kind: file
+    group: repository-guidance
+    description: Canonical instructions for coding agents and repository contributors.
+  - path: CLAUDE.md
+    kind: file
+    group: repository-guidance
+    description: Compatibility pointer to the canonical AGENTS.md instructions.
+  - path: Cargo.lock
+    kind: file
+    group: application
+    description: Resolved Rust dependency lockfile for reproducible product builds.
+  - path: Cargo.toml
+    kind: file
+    group: application
+    description: Rust workspace manifest and member topology.
+  - path: README.md
+    kind: file
+    group: repository-guidance
+    description: Human project entry point and concise architecture overview.
+  - path: index.html
+    kind: file
+    group: application
+    description: Vite HTML entry point for the renderer.
+  - path: justfile
+    kind: file
+    group: repository-operations
+    description: Top-level dispatcher for capability-owned repository commands.
+  - path: package.json
+    kind: file
+    group: application
+    description: Frontend package manifest and product build script entry points.
+  - path: pnpm-lock.yaml
+    kind: file
+    group: application
+    description: Resolved JavaScript dependency lockfile.
+  - path: pnpm-workspace.yaml
+    kind: file
+    group: application
+    description: pnpm workspace package membership.
+  - path: tsconfig.json
+    kind: file
+    group: application
+    description: Root TypeScript compiler configuration.
+  - path: vite.config.ts
+    kind: file
+    group: application
+    description: Vite development and production build configuration.

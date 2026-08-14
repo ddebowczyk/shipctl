@@ -31,7 +31,7 @@ pnpm tauri build    # production bundle
 ```
 
 Run `just` for repository commands and `just ops skills` for procedures; see
-`docs/ops/overview.md`.
+[`ops/README.md`](ops/README.md).
 
 ## Install and update
 
@@ -70,15 +70,22 @@ state, and assets in one directory, never by file kind.
 ```text
 core/frontend/   host capabilities (package @shipctl/core) — read its README first
 core/backend/    host capabilities in Rust (crate shipctl-core)
-modules/         pluggable features, each removable from a build
+module-api/      shared host/module contract (ports, contributions, protocol)
+modules/         pluggable shipping features, each removable from a build
+examples/        non-shipping fixture and reference packages
 src-tauri/       the Tauri shell — no capability logic lives here
 ops/             build, check, test, modularity, and upstream tooling
+docs/            curated shared reference; local plans remain under docs/plans/
 ```
 
 Two rules are enforced in CI: a module may never import the host, and the host
 reaches modules only through `@shipctl/module-api` and
 `core/frontend/host/enabledModules.ts`. Verify with
 `just modularity plugout <name>`.
+
+For a complete, validated map of every root-level item, run
+`just repository map` or read
+[`ops/repository/README.md`](ops/repository/README.md).
 
 ## License
 

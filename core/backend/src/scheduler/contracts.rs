@@ -579,25 +579,19 @@ mod tests {
 
     use super::*;
 
-    const VALID_CHANNEL: &str =
-        include_str!("../../fixtures/scheduler/sources/valid-channel.yaml");
-    const VALID_TOPIC: &str =
-        include_str!("../../fixtures/scheduler/sources/valid-topic.yaml");
+    const VALID_CHANNEL: &str = include_str!("../../fixtures/scheduler/sources/valid-channel.yaml");
+    const VALID_TOPIC: &str = include_str!("../../fixtures/scheduler/sources/valid-topic.yaml");
     const DISABLED: &str = include_str!("../../fixtures/scheduler/sources/disabled.yaml");
-    const DST_AUSTRALIA: &str =
-        include_str!("../../fixtures/scheduler/sources/dst-australia.yaml");
+    const DST_AUSTRALIA: &str = include_str!("../../fixtures/scheduler/sources/dst-australia.yaml");
     const UNKNOWN_FIELD: &str =
         include_str!("../../fixtures/scheduler/sources/invalid-unknown-field.yaml");
     const UNSUPPORTED_VERSION: &str =
         include_str!("../../fixtures/scheduler/sources/invalid-version.yaml");
-    const INVALID_CRON: &str =
-        include_str!("../../fixtures/scheduler/sources/invalid-cron.yaml");
+    const INVALID_CRON: &str = include_str!("../../fixtures/scheduler/sources/invalid-cron.yaml");
     const MISSING_TIMEZONE: &str =
         include_str!("../../fixtures/scheduler/sources/invalid-no-timezone.yaml");
-    const DUPLICATE_A: &str =
-        include_str!("../../fixtures/scheduler/sources/duplicate-a.yaml");
-    const DUPLICATE_B: &str =
-        include_str!("../../fixtures/scheduler/sources/duplicate-b.yaml");
+    const DUPLICATE_A: &str = include_str!("../../fixtures/scheduler/sources/duplicate-a.yaml");
+    const DUPLICATE_B: &str = include_str!("../../fixtures/scheduler/sources/duplicate-b.yaml");
     const INVALID_PAYLOAD: &str =
         include_str!("../../fixtures/scheduler/sources/invalid-payload.yaml");
     const OVERSIZED_PAYLOAD: &str =
@@ -614,8 +608,7 @@ mod tests {
         include_str!("../../fixtures/scheduler/sources/canonical-order-a.yaml");
     const CANONICAL_ORDER_B: &str =
         include_str!("../../fixtures/scheduler/sources/canonical-order-b.yaml");
-    const INSPECTION_GOLDEN: &str =
-        include_str!("../../fixtures/scheduler/inspection.json");
+    const INSPECTION_GOLDEN: &str = include_str!("../../fixtures/scheduler/inspection.json");
 
     fn fixture_contract(
         max_encoded_bytes: u64,

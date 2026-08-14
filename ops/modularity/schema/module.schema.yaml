@@ -186,7 +186,7 @@ properties:
               type: boolean
   profile:
     type: [string, "null"]
-    pattern: ^profiles/[a-z0-9-]+/tauri\.conf\.json$
+    pattern: ^ops/modularity/profiles/[a-z0-9-]+/tauri\.conf\.json$
   tests:
     type: object
     additionalProperties: false

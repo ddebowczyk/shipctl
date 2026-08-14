@@ -20,7 +20,7 @@ tauri:
   permissions:
     - shipctl-ports:allow-list-listening-ports
     - shipctl-ports:allow-kill-port
-profile: profiles/ports-disabled/tauri.conf.json
+profile: ops/modularity/profiles/ports-disabled/tauri.conf.json
 tests:
   frontend: modules/ports/frontend/tests
   backend: cargo test --manifest-path modules/ports/backend/Cargo.toml

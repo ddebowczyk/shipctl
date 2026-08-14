@@ -18,12 +18,11 @@ owns:
 reads:
   - core/**
   - modules/**
-  - profiles/fixture/**
   - src/**
   - src-tauri/**
   - package.json
   - pnpm-workspace.yaml
-generates: [profiles/*-disabled/tauri.conf.json]
+generates: [ops/modularity/profiles/*-disabled/tauri.conf.json]
 commands:
   - name: validate
     summary: Validate operation schemas and ownership invariants.

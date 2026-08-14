@@ -27,18 +27,23 @@ Shipctl is a Tauri v2 desktop app (Rust backend + React/TypeScript frontend) for
 - Cargo uses the workspace-root `target/` directory, never
   `src-tauri/target/`.
 - `ops/` owns repository operations; application code must not import it.
+- `ops/repository/` owns the canonical map of root-level repository items.
+  Run `just repository map` to navigate it and `just repository validate` to
+  catch an unclassified root entry.
 
 ## Documentation placement
 
-Use `docs/` for durable reference (including new ops capability documentation),
-`research/` for dated working notes and evidence, and keep procedure prose only
-in `ops/<capability>/skills/` once that capability exists rather than
-duplicating it.
+Use versioned `docs/` for durable reference. `docs/plans/` and `docs/ops/` are
+ignored local working areas unless a file has been intentionally promoted;
+`research/` is ignored dated evidence and working notes. Promote settled
+findings into `docs/`, and keep procedure prose only in
+`ops/<capability>/skills/` once that capability exists rather than duplicating
+it.
 
 ## Repository operations
 
 Repo operations live in `ops/`. Run `just` for commands and `just ops skills`
-for procedures; see `docs/ops/overview.md`.
+for procedures; see `ops/README.md`.
 
 ## React Patterns
 
@@ -69,47 +74,9 @@ Avoid `useEffect` for synchronizing state or computing derived values. This is a
 - Use `getErrorMessage()` helper to extract error messages
 - Only log to console in dev mode: `if (import.meta.env.DEV) console.error(...)`
 
-# MSW — the kernel
 
-## program — complete
+# POLICIES AND INSTRUCTIONS FOR AI AGENTS
 
-```
-contract ← the requested outcome + the smallest criteria that prove it
+Below is obligatory reading for AI agents:
 
-while ∃ claim c : deleting c leaves contract unmet ∨ unproven
-      do c ; prove c
-
-halt ; report
-```
-
-## definitions — no behavior lives here, only meaning
-
-**contract** — the requested outcome and the smallest set of acceptance criteria that would prove it, stated before any work. The sole source of necessity; a ceiling as much as a floor. If the request is ambiguous: attended → ask; unattended → bind the smallest reading consistent with stated intent and record the assumption.
-
-**claim** — anything petitioning to become work: a plan step, a change, a test, a reviewer's P1, a discovered edge case, your own instinct that one more pass would help. Everything enters as this type. Nothing enters as a verdict.
-
-**deleting c leaves contract unmet ∨ unproven** — the only test. A claim passes solely by breaking the contract — reproducibly, within the task's actual inputs and environment. Severity is derived from the contract, never inherited from whoever raised the claim. *Useful*, *thorough*, and *possible* are not aliases for *necessary*. A claim that fails receives one line in the report — never a fix, an investigation, or a deferred follow-up.
-
-**do ; prove** — the smallest reliable act that closes the gap, and evidence sized to the claim it settles. An unproven act keeps its claim alive; a proven one closes it — and re-proving a closed claim is itself an inadmissible claim.
-
-**halt** — the fixed point: contract proven, no remaining claim passes. Not reviewer silence; not exhausted imagination. Halting before the fixed point and looping past it are the same bug, mirrored.
-
-**report** — the outcome against the contract; the proof; rejected claims worth the user's attention, one line each. Nothing else.
-
-## fuses — outside the program, for when its evaluator fails
-
-```
-rounds = 3            → halt anyway ; report open items, do not chase them
-claim born in round n+1, visible in round n   → rejected
-```
-
-## No unauthoritative limits
-
-Never invent a limit. A cap, threshold, quota, budget, timeout, retry or round count, file or line count, acceptance-criterion count, agent count, or similar constraint is admissible only when its exact value is:
-
-- explicitly required by the requester;
-- imposed by an applicable technical or platform contract;
-- defined by authoritative project policy; or
-- derived from measured evidence necessary to meet or prove the task contract.
-
-State the authority or derivation whenever proposing or applying a limit. If no authority exists, omit the limit and use the MSW necessity test. Metrics may be reported as evidence, but they must not become gates, defaults, targets, or recommendations through agent intuition. Examples and representative proportions never become defaults. If a necessary limit is an unresolved owner choice, ask; do not manufacture a value.
+- `./ops/MSW.md` Guidance for AI agents so they operate in minimal sufficient work (MWS) mode

@@ -117,7 +117,7 @@ export function validateVersions(root, { checkReleaseHistory = true } = {}) {
 
   // Profile overlays are merged over the base config at build time, so a
   // version here would silently ship a different number than a normal build.
-  const profilesDir = path.join(root, "profiles");
+  const profilesDir = path.join(root, "ops/modularity/profiles");
   if (existsSync(profilesDir)) {
     for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;

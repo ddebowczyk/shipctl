@@ -42,7 +42,7 @@ tauri:
     - shipctl-assistants:allow-save-pi-settings
     - shipctl-assistants:allow-save-pi-api-key
     - shipctl-assistants:allow-delete-pi-api-key
-profile: profiles/assistants-disabled/tauri.conf.json
+profile: ops/modularity/profiles/assistants-disabled/tauri.conf.json
 tests:
   frontend: modules/assistants/frontend/tests
   backend: cargo test -p tauri-plugin-shipctl-assistants -- --test-threads=1

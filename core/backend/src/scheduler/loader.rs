@@ -291,12 +291,10 @@ mod tests {
 
     use super::*;
 
-    const VALID: &str =
-        include_str!("../../fixtures/scheduler/sources/valid-channel.yaml");
+    const VALID: &str = include_str!("../../fixtures/scheduler/sources/valid-channel.yaml");
     const INVALID: &str =
         include_str!("../../fixtures/scheduler/sources/invalid-unknown-field.yaml");
-    const DUPLICATE: &str =
-        include_str!("../../fixtures/scheduler/sources/duplicate-b.yaml");
+    const DUPLICATE: &str = include_str!("../../fixtures/scheduler/sources/duplicate-b.yaml");
 
     #[test]
     fn candidate_parses_direct_sources_in_normalized_order() {

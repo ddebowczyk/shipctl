@@ -36,7 +36,7 @@ messages:
   publishes: []
   subscribes: []
   ports: []
-profile: profiles/fixture/tauri.conf.json
+profile: ops/modularity/profiles/fixture/tauri.conf.json
 tests:
   frontend: examples/module-fixture/tests
   backend: null

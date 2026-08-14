@@ -36,7 +36,7 @@ tauri:
     - shipctl-semantic-terminal:allow-is-semantic-terminal-paste-safe
     - shipctl-semantic-terminal:allow-get-semantic-terminal-publication-stats
     - shipctl-semantic-terminal:allow-get-semantic-terminal-app-memory
-profile: profiles/semantic-terminal-disabled/tauri.conf.json
+profile: ops/modularity/profiles/semantic-terminal-disabled/tauri.conf.json
 tests:
   frontend: modules/semantic-terminal/frontend/tests
   backend: >-

@@ -52,6 +52,10 @@ async function schemaTargets(root) {
   ]);
   targets.push([path.join(root, "ops/upstream/state.yaml"), path.join(root, "ops/upstream/schema/state.schema.yaml")]);
   targets.push([path.join(root, "ops/upstream/path-map.yaml"), path.join(root, "ops/upstream/schema/path-map.schema.yaml")]);
+  targets.push([
+    path.join(root, "ops/repository/root-map.yaml"),
+    path.join(root, "ops/repository/schema/root-map.schema.yaml"),
+  ]);
 
   const moduleFiles = await filesUnder(path.join(root, "modules"), (file) => path.basename(file) === "module.yaml");
   const fixtureManifest = path.join(root, "examples/module-fixture/module.yaml");

@@ -13,7 +13,7 @@ async function scaffold(t, { appVersion = "1.2.3" } = {}) {
   await mkdir(path.join(root, "src-tauri"), { recursive: true });
   await mkdir(path.join(root, "core/backend"), { recursive: true });
   await mkdir(path.join(root, "ops/version"), { recursive: true });
-  await mkdir(path.join(root, "profiles/probe-disabled"), { recursive: true });
+  await mkdir(path.join(root, "ops/modularity/profiles/probe-disabled"), { recursive: true });
 
   await writeFile(
     path.join(root, "ops/version/current.yaml"),
@@ -32,7 +32,7 @@ async function scaffold(t, { appVersion = "1.2.3" } = {}) {
     '[package]\nname = "shipctl-core"\nversion = "0.0.0"\n',
   );
   await writeFile(
-    path.join(root, "profiles/probe-disabled/tauri.conf.json"),
+    path.join(root, "ops/modularity/profiles/probe-disabled/tauri.conf.json"),
     JSON.stringify({ productName: "shipctl" }),
   );
   return root;
@@ -73,12 +73,12 @@ test("a workspace-inherited crate version is drift", async (t) => {
 test("a profile overlay may not override the app version", async (t) => {
   const root = await scaffold(t);
   await writeFile(
-    path.join(root, "profiles/probe-disabled/tauri.conf.json"),
+    path.join(root, "ops/modularity/profiles/probe-disabled/tauri.conf.json"),
     JSON.stringify({ productName: "shipctl", version: "9.9.9" }),
   );
   assert.match(
     validateVersions(root).join("\n"),
-    /^profiles\/probe-disabled\/tauri\.conf\.json: must not override the app version/m,
+    /^ops\/modularity\/profiles\/probe-disabled\/tauri\.conf\.json: must not override the app version/m,
   );
 });
 

@@ -138,11 +138,11 @@ function removeCapability(root, relativePath, identifier) {
 
 function tauriConfigs(root) {
   const configs = ["src-tauri/tauri.conf.json"];
-  const profiles = path.join(root, "profiles");
+  const profiles = path.join(root, "ops/modularity/profiles");
   if (!existsSync(profiles)) return configs;
   for (const entry of readdirSync(profiles, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const relativePath = `profiles/${entry.name}/tauri.conf.json`;
+    const relativePath = `ops/modularity/profiles/${entry.name}/tauri.conf.json`;
     if (existsSync(path.join(root, relativePath))) configs.push(relativePath);
   }
   return configs;

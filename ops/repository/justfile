@@ -1,0 +1,5 @@
+map:
+    node bin/root-map.mjs show
+
+validate:
+    node bin/root-map.mjs check

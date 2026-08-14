@@ -21,7 +21,7 @@ tauri:
     - shipctl-skills:allow-list-skills
     - shipctl-skills:allow-setup-skill
     - shipctl-skills:allow-remove-skill
-profile: profiles/skills-disabled/tauri.conf.json
+profile: ops/modularity/profiles/skills-disabled/tauri.conf.json
 tests:
   frontend: modules/skills/frontend/tests
   backend: cargo test --manifest-path modules/skills/backend/Cargo.toml

@@ -38,7 +38,7 @@ tauri:
     - shipctl-git:allow-git-switch-branch
     - shipctl-git:allow-git-create-branch
     - shipctl-git:allow-git-diff-stats
-profile: profiles/git-disabled/tauri.conf.json
+profile: ops/modularity/profiles/git-disabled/tauri.conf.json
 tests:
   frontend: modules/git/frontend/tests
   backend: cargo test --manifest-path modules/git/backend/Cargo.toml -- --test-threads=1

@@ -16,9 +16,10 @@ reads:
   - src/**
   - src-tauri/**
   - package.json
-  - profiles/**
   - ops/modularity/bin/plugout.mjs
   - ops/modularity/fixtures/module-fixture/enabledModules.ts
+  - ops/modularity/profiles/**
+  - ops/repository/**
   - ops/ops.yaml
   - ops/schema/**
   - ops/*/capability.yaml

@@ -10,7 +10,10 @@ latest.json
 .claude/settings.local.json
 builds/
 notes/
-docs/
+# Shared durable documentation is tracked deliberately. Existing working plans
+# and legacy operations reviews remain local until promoted.
+docs/ops/
+docs/plans/
 research/
 var/
 
