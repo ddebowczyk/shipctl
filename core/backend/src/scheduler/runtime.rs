@@ -2219,31 +2219,31 @@ mod tests {
         clear_schedule_root(root);
         let contents = match fixture {
             "valid-channel.yaml" => {
-                include_str!("../../../../module-api/fixtures/schedules/valid-channel.yaml")
+                include_str!("../../fixtures/scheduler/sources/valid-channel.yaml")
             }
             "invalid-unknown-field.yaml" => {
-                include_str!("../../../../module-api/fixtures/schedules/invalid-unknown-field.yaml")
+                include_str!("../../fixtures/scheduler/sources/invalid-unknown-field.yaml")
             }
             "secret-payload.yaml" => {
-                include_str!("../../../../module-api/fixtures/schedules/secret-payload.yaml")
+                include_str!("../../fixtures/scheduler/sources/secret-payload.yaml")
             }
             "unavailable-target.yaml" => {
-                include_str!("../../../../module-api/fixtures/schedules/unavailable-target.yaml")
+                include_str!("../../fixtures/scheduler/sources/unavailable-target.yaml")
             }
             "unauthorized-target.yaml" => {
-                include_str!("../../../../module-api/fixtures/schedules/unauthorized-target.yaml")
+                include_str!("../../fixtures/scheduler/sources/unauthorized-target.yaml")
             }
             "disabled.yaml" => {
-                include_str!("../../../../module-api/fixtures/schedules/disabled.yaml")
+                include_str!("../../fixtures/scheduler/sources/disabled.yaml")
             }
             "incompatible-target.yaml" => {
-                include_str!("../../../../module-api/fixtures/schedules/incompatible-target.yaml")
+                include_str!("../../fixtures/scheduler/sources/incompatible-target.yaml")
             }
             "invalid-payload.yaml" => {
-                include_str!("../../../../module-api/fixtures/schedules/invalid-payload.yaml")
+                include_str!("../../fixtures/scheduler/sources/invalid-payload.yaml")
             }
             "oversized-payload.yaml" => {
-                include_str!("../../../../module-api/fixtures/schedules/oversized-payload.yaml")
+                include_str!("../../fixtures/scheduler/sources/oversized-payload.yaml")
             }
             other => panic!("unknown scheduler fixture {other}"),
         };
@@ -2252,7 +2252,7 @@ mod tests {
 
     #[test]
     fn next_occurrence_is_future_and_disabled_schedules_have_no_deadline() {
-        let source = include_str!("../../../../module-api/fixtures/schedules/valid-channel.yaml");
+        let source = include_str!("../../fixtures/scheduler/sources/valid-channel.yaml");
         let definition =
             super::super::parse_schedule_source(Path::new("wake.yaml"), source).unwrap();
         let now = "2026-08-09T07:00:00Z".parse::<Timestamp>().unwrap();
@@ -2267,7 +2267,7 @@ mod tests {
 
     #[test]
     fn dst_schedule_produces_a_strictly_future_utc_occurrence() {
-        let source = include_str!("../../../../module-api/fixtures/schedules/dst-australia.yaml");
+        let source = include_str!("../../fixtures/scheduler/sources/dst-australia.yaml");
         let definition =
             super::super::parse_schedule_source(Path::new("dst.yaml"), source).unwrap();
         let now = "2026-10-03T15:59:00Z".parse::<Timestamp>().unwrap();
@@ -3709,12 +3709,12 @@ mod tests {
         fs::remove_file(schedule_root.join("schedule.yaml")).unwrap();
         fs::write(
             schedule_root.join("duplicate-a.yaml"),
-            include_str!("../../../../module-api/fixtures/schedules/duplicate-a.yaml"),
+            include_str!("../../fixtures/scheduler/sources/duplicate-a.yaml"),
         )
         .unwrap();
         fs::write(
             schedule_root.join("duplicate-b.yaml"),
-            include_str!("../../../../module-api/fixtures/schedules/duplicate-b.yaml"),
+            include_str!("../../fixtures/scheduler/sources/duplicate-b.yaml"),
         )
         .unwrap();
         let duplicate = service.refresh().await;

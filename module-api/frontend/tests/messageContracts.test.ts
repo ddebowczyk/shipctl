@@ -33,7 +33,7 @@ interface GoldenFixture {
 }
 
 const fixturePath = fileURLToPath(
-  new URL("../../fixtures/message-contracts.json", import.meta.url),
+  new URL("../../fixtures/protocol/messages.json", import.meta.url),
 );
 const fixtures = JSON.parse(readFileSync(fixturePath, "utf8")) as GoldenFixture;
 

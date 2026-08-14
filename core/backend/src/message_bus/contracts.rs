@@ -923,7 +923,7 @@ mod tests {
 
     use super::*;
 
-    const GOLDENS: &str = include_str!("../../../../module-api/fixtures/message-contracts.json");
+    const GOLDENS: &str = include_str!("../../../../module-api/fixtures/protocol/messages.json");
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -15,7 +15,7 @@ interface GoldenFixture {
 }
 
 const fixturePath = fileURLToPath(
-  new URL("../../fixtures/schedule-inspection.json", import.meta.url),
+  new URL("../../../core/backend/fixtures/scheduler/inspection.json", import.meta.url),
 );
 const fixtures = JSON.parse(readFileSync(fixturePath, "utf8")) as GoldenFixture;
 
