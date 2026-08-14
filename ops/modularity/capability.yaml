@@ -13,6 +13,7 @@ owns:
   - ops/schema/**
   - ops/bin/**
   - ops/ops.yaml
+  - ops/MSW.md
   - ops/README.md
   - ops/justfile
 reads:
