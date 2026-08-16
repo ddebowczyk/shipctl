@@ -1,0 +1,1193 @@
+{
+  "schema_version": "source-architecture/v1",
+  "composition_source": "core/frontend/host/enabledModules.ts",
+  "modules": [
+    {
+      "id": "assistants",
+      "manifest_path": "modules/assistants/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "assistants",
+        "frontend": {
+          "package": "@shipctl/module-assistants",
+          "path": "modules/assistants/frontend",
+          "composition_symbol": "assistantsModule"
+        },
+        "backend": {
+          "crate": "tauri-plugin-shipctl-assistants",
+          "path": "modules/assistants/backend",
+          "cargo_feature": "assistants-module",
+          "dependency_alias": "shipctl-module-assistants",
+          "install": "shipctl_module_assistants_host::install(\n  builder,\n  terminals.clone(),\n  paths.assistant_sessions.clone(),\n  durable_writes.clone()\n)",
+          "host": {
+            "crate": "shipctl-module-assistants-host",
+            "path": "modules/assistants/host",
+            "dependency_alias": "shipctl-module-assistants-host"
+          }
+        },
+        "tauri": {
+          "capability_identifier": "assistants",
+          "permissions": [
+            "shipctl-assistants:allow-spawn-assistant-session",
+            "shipctl-assistants:allow-resume-assistant-session",
+            "shipctl-assistants:allow-prepare-assistant-session",
+            "shipctl-assistants:allow-confirm-assistant-session-capture",
+            "shipctl-assistants:allow-try-capture-codex-assistant-session",
+            "shipctl-assistants:allow-fail-assistant-session-capture",
+            "shipctl-assistants:allow-update-assistant-session-placement",
+            "shipctl-assistants:allow-update-assistant-session-label",
+            "shipctl-assistants:allow-discard-assistant-session",
+            "shipctl-assistants:allow-rearm-assistant-session",
+            "shipctl-assistants:allow-list-restorable-assistant-sessions",
+            "shipctl-assistants:allow-take-assistant-session-startup-warning",
+            "shipctl-assistants:allow-begin-assistant-session-preserving-shutdown",
+            "shipctl-assistants:allow-get-models-for-provider",
+            "shipctl-assistants:allow-get-pi-config",
+            "shipctl-assistants:allow-save-pi-settings",
+            "shipctl-assistants:allow-has-pi-api-key",
+            "shipctl-assistants:allow-save-pi-api-key",
+            "shipctl-assistants:allow-delete-pi-api-key"
+          ]
+        },
+        "messages": null,
+        "profile": "ops/modularity/profiles/assistants-disabled/tauri.conf.json",
+        "tests": {
+          "frontend": "modules/assistants/frontend/tests",
+          "backend": "cargo test -p tauri-plugin-shipctl-assistants -- --test-threads=1"
+        }
+      },
+      "composition": {
+        "order": 1,
+        "symbol": "assistantsModule",
+        "environment": "VITE_SHIPCTL_ASSISTANTS_MODULE"
+      },
+      "frontend_source": {
+        "entrypoint": "modules/assistants/frontend/src/index.ts",
+        "import_closure": [
+          "modules/assistants/frontend/src/branding.ts",
+          "modules/assistants/frontend/src/catalog.ts",
+          "modules/assistants/frontend/src/client.ts",
+          "modules/assistants/frontend/src/index.ts",
+          "modules/assistants/frontend/src/runtime.ts",
+          "modules/assistants/frontend/src/types.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 9,
+        "direct_tauri_imports": [
+          {
+            "file": "modules/assistants/frontend/src/client.ts",
+            "line": 1,
+            "specifier": "@tauri-apps/api/core"
+          }
+        ]
+      },
+      "native_crates": [
+        {
+          "name": "tauri-plugin-shipctl-assistants",
+          "path": "modules/assistants/backend/Cargo.toml",
+          "role": "backend"
+        },
+        {
+          "name": "shipctl-module-assistants-host",
+          "path": "modules/assistants/host/Cargo.toml",
+          "role": "host"
+        }
+      ]
+    },
+    {
+      "id": "commands",
+      "manifest_path": "modules/commands/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "commands",
+        "frontend": {
+          "package": "@shipctl/module-commands",
+          "path": "modules/commands/frontend",
+          "composition_symbol": "commandsModule"
+        },
+        "backend": null,
+        "tauri": null,
+        "messages": null,
+        "profile": null,
+        "tests": {
+          "frontend": "modules/commands/frontend/tests",
+          "backend": null
+        }
+      },
+      "composition": {
+        "order": 3,
+        "symbol": "commandsModule",
+        "environment": "VITE_SHIPCTL_COMMANDS_MODULE"
+      },
+      "frontend_source": {
+        "entrypoint": "modules/commands/frontend/src/index.ts",
+        "import_closure": [
+          "modules/commands/frontend/src/CommandsPanel.tsx",
+          "modules/commands/frontend/src/commandsDataClient.ts",
+          "modules/commands/frontend/src/index.ts",
+          "modules/commands/frontend/src/runtime.ts",
+          "modules/commands/frontend/src/store.ts",
+          "modules/commands/frontend/src/types.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 7,
+        "direct_tauri_imports": []
+      },
+      "native_crates": []
+    },
+    {
+      "id": "git",
+      "manifest_path": "modules/git/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "git",
+        "frontend": {
+          "package": "@shipctl/module-git",
+          "path": "modules/git/frontend",
+          "composition_symbol": "gitModule"
+        },
+        "backend": {
+          "crate": "tauri-plugin-shipctl-git",
+          "path": "modules/git/backend",
+          "cargo_feature": "git-module",
+          "dependency_alias": "shipctl-module-git",
+          "install": "shipctl_module_git_host::install(builder, workspace.clone())",
+          "host": {
+            "crate": "shipctl-module-git-host",
+            "path": "modules/git/host",
+            "dependency_alias": "shipctl-module-git-host"
+          }
+        },
+        "tauri": {
+          "capability_identifier": "git",
+          "permissions": [
+            "shipctl-git:allow-is-git-repo",
+            "shipctl-git:allow-git-init",
+            "shipctl-git:allow-git-current-branch",
+            "shipctl-git:allow-git-list-branches",
+            "shipctl-git:allow-git-push-branch",
+            "shipctl-git:allow-git-list-worktrees",
+            "shipctl-git:allow-git-create-worktree",
+            "shipctl-git:allow-git-status",
+            "shipctl-git:allow-git-changed-files",
+            "shipctl-git:allow-git-file-diff",
+            "shipctl-git:allow-git-file-contents",
+            "shipctl-git:allow-git-list-files",
+            "shipctl-git:allow-git-stage-file",
+            "shipctl-git:allow-git-stage-all",
+            "shipctl-git:allow-git-commit",
+            "shipctl-git:allow-git-unstage-file",
+            "shipctl-git:allow-git-unstage-all",
+            "shipctl-git:allow-git-switch-branch",
+            "shipctl-git:allow-git-create-branch",
+            "shipctl-git:allow-git-diff-stats"
+          ]
+        },
+        "messages": null,
+        "profile": "ops/modularity/profiles/git-disabled/tauri.conf.json",
+        "tests": {
+          "frontend": "modules/git/frontend/tests",
+          "backend": "cargo test --manifest-path modules/git/backend/Cargo.toml -- --test-threads=1"
+        }
+      },
+      "composition": {
+        "order": 8,
+        "symbol": "gitModule",
+        "environment": "VITE_SHIPCTL_GIT_MODULE"
+      },
+      "frontend_source": {
+        "entrypoint": "modules/git/frontend/src/index.ts",
+        "import_closure": [
+          "modules/git/frontend/src/gitClient.ts",
+          "modules/git/frontend/src/index.ts",
+          "modules/git/frontend/src/store.ts",
+          "modules/git/frontend/src/types.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 22,
+        "direct_tauri_imports": []
+      },
+      "native_crates": [
+        {
+          "name": "tauri-plugin-shipctl-git",
+          "path": "modules/git/backend/Cargo.toml",
+          "role": "backend"
+        },
+        {
+          "name": "shipctl-module-git-host",
+          "path": "modules/git/host/Cargo.toml",
+          "role": "host"
+        }
+      ]
+    },
+    {
+      "id": "ports",
+      "manifest_path": "modules/ports/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "ports",
+        "frontend": {
+          "package": "@shipctl/module-ports",
+          "path": "modules/ports/frontend",
+          "composition_symbol": "portsModule"
+        },
+        "backend": {
+          "crate": "tauri-plugin-shipctl-ports",
+          "path": "modules/ports/backend",
+          "cargo_feature": "ports-module",
+          "dependency_alias": "shipctl-module-ports",
+          "install": "shipctl_module_ports_host::install(builder, workspace.clone())",
+          "host": {
+            "crate": "shipctl-module-ports-host",
+            "path": "modules/ports/host",
+            "dependency_alias": "shipctl-module-ports-host"
+          }
+        },
+        "tauri": {
+          "capability_identifier": "ports",
+          "permissions": [
+            "shipctl-ports:allow-list-listening-ports",
+            "shipctl-ports:allow-kill-port"
+          ]
+        },
+        "messages": null,
+        "profile": "ops/modularity/profiles/ports-disabled/tauri.conf.json",
+        "tests": {
+          "frontend": "modules/ports/frontend/tests",
+          "backend": "cargo test --manifest-path modules/ports/backend/Cargo.toml"
+        }
+      },
+      "composition": {
+        "order": 2,
+        "symbol": "portsModule",
+        "environment": null
+      },
+      "frontend_source": {
+        "entrypoint": "modules/ports/frontend/src/index.ts",
+        "import_closure": [
+          "modules/ports/frontend/src/index.ts",
+          "modules/ports/frontend/src/types.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 3,
+        "direct_tauri_imports": []
+      },
+      "native_crates": [
+        {
+          "name": "tauri-plugin-shipctl-ports",
+          "path": "modules/ports/backend/Cargo.toml",
+          "role": "backend"
+        },
+        {
+          "name": "shipctl-module-ports-host",
+          "path": "modules/ports/host/Cargo.toml",
+          "role": "host"
+        }
+      ]
+    },
+    {
+      "id": "semantic-terminal",
+      "manifest_path": "modules/semantic-terminal/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "semantic-terminal",
+        "frontend": {
+          "package": "@shipctl/module-semantic-terminal",
+          "path": "modules/semantic-terminal/frontend",
+          "composition_symbol": "semanticTerminalModule"
+        },
+        "backend": {
+          "crate": "tauri-plugin-shipctl-semantic-terminal",
+          "path": "modules/semantic-terminal/backend",
+          "cargo_feature": "semantic-terminal-module",
+          "dependency_alias": "shipctl-module-semantic-terminal",
+          "install": "shipctl_module_semantic_terminal_host::install(\n  builder,\n  terminals.clone()\n)",
+          "host": {
+            "crate": "shipctl-module-semantic-terminal-host",
+            "path": "modules/semantic-terminal/host",
+            "dependency_alias": "shipctl-module-semantic-terminal-host"
+          }
+        },
+        "tauri": {
+          "capability_identifier": "semantic-terminal",
+          "permissions": [
+            "shipctl-semantic-terminal:allow-get-semantic-terminal-snapshot",
+            "shipctl-semantic-terminal:allow-attach-semantic-terminal",
+            "shipctl-semantic-terminal:allow-credit-semantic-terminal-screen",
+            "shipctl-semantic-terminal:allow-detach-semantic-terminal",
+            "shipctl-semantic-terminal:allow-resize-semantic-terminal",
+            "shipctl-semantic-terminal:allow-input-semantic-terminal",
+            "shipctl-semantic-terminal:allow-history-semantic-terminal",
+            "shipctl-semantic-terminal:allow-anchor-semantic-terminal",
+            "shipctl-semantic-terminal:allow-resolve-semantic-terminal-anchor",
+            "shipctl-semantic-terminal:allow-release-semantic-terminal-anchor",
+            "shipctl-semantic-terminal:allow-select-semantic-terminal",
+            "shipctl-semantic-terminal:allow-is-semantic-terminal-paste-safe",
+            "shipctl-semantic-terminal:allow-get-semantic-terminal-publication-stats",
+            "shipctl-semantic-terminal:allow-get-semantic-terminal-app-memory"
+          ]
+        },
+        "messages": null,
+        "profile": "ops/modularity/profiles/semantic-terminal-disabled/tauri.conf.json",
+        "tests": {
+          "frontend": "modules/semantic-terminal/frontend/tests",
+          "backend": "cargo test --manifest-path modules/semantic-terminal/core/Cargo.toml && cargo test --manifest-path modules/semantic-terminal/backend/Cargo.toml"
+        }
+      },
+      "composition": {
+        "order": 6,
+        "symbol": "semanticTerminalModule",
+        "environment": null
+      },
+      "frontend_source": {
+        "entrypoint": "modules/semantic-terminal/frontend/src/index.ts",
+        "import_closure": [
+          "modules/semantic-terminal/frontend/src/browserInteraction.ts",
+          "modules/semantic-terminal/frontend/src/index.ts",
+          "modules/semantic-terminal/frontend/src/presentation/keybindingPresets.ts",
+          "modules/semantic-terminal/frontend/src/presentation/semanticTerminalAttachmentController.ts",
+          "modules/semantic-terminal/frontend/src/presentation/semanticTerminalBrowserSession.ts",
+          "modules/semantic-terminal/frontend/src/presentation/semanticTerminalCanvasBinding.ts",
+          "modules/semantic-terminal/frontend/src/presentation/semanticTerminalViewSession.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalCache.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalCanvasTarget.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalCellPaint.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalCellPresenter.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalCellSurface.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalClientModel.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalClipboard.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalContainerBinding.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalFitPlan.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalFitScheduler.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalFontMetrics.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalLinkTargets.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalMeasure.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalPointerRouter.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalReadingAnchor.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalScrollPin.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalSelectionGestures.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalSemanticInput.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalSemanticSurface.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalSurface.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalTheme.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalViewportComposition.ts",
+          "modules/semantic-terminal/frontend/src/presentation/terminalViewportPin.ts",
+          "modules/semantic-terminal/frontend/src/scenarios/capabilityRegister.ts",
+          "modules/semantic-terminal/frontend/src/scenarios/scenarioCatalog.ts",
+          "modules/semantic-terminal/frontend/src/scenarios/scenarioContract.ts",
+          "modules/semantic-terminal/frontend/src/scenarios/scenarioRunner.ts",
+          "modules/semantic-terminal/frontend/src/scenarios/semanticTerminalScenarioEntry.ts",
+          "modules/semantic-terminal/frontend/src/semanticTypes.ts",
+          "modules/semantic-terminal/frontend/src/terminalPerformanceMetrics.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 39,
+        "direct_tauri_imports": []
+      },
+      "native_crates": [
+        {
+          "name": "tauri-plugin-shipctl-semantic-terminal",
+          "path": "modules/semantic-terminal/backend/Cargo.toml",
+          "role": "backend"
+        },
+        {
+          "name": "shipctl-module-semantic-terminal-core",
+          "path": "modules/semantic-terminal/core/Cargo.toml",
+          "role": "core"
+        },
+        {
+          "name": "shipctl-module-semantic-terminal-host",
+          "path": "modules/semantic-terminal/host/Cargo.toml",
+          "role": "host"
+        }
+      ]
+    },
+    {
+      "id": "skills",
+      "manifest_path": "modules/skills/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "skills",
+        "frontend": {
+          "package": "@shipctl/module-skills",
+          "path": "modules/skills/frontend",
+          "composition_symbol": "skillsModule"
+        },
+        "backend": {
+          "crate": "tauri-plugin-shipctl-skills",
+          "path": "modules/skills/backend",
+          "cargo_feature": "skills-module",
+          "dependency_alias": "shipctl-module-skills",
+          "install": "shipctl_module_skills_host::install(builder, workspace.clone())",
+          "host": {
+            "crate": "shipctl-module-skills-host",
+            "path": "modules/skills/host",
+            "dependency_alias": "shipctl-module-skills-host"
+          }
+        },
+        "tauri": {
+          "capability_identifier": "skills",
+          "permissions": [
+            "shipctl-skills:allow-list-skills",
+            "shipctl-skills:allow-setup-skill",
+            "shipctl-skills:allow-remove-skill"
+          ]
+        },
+        "messages": null,
+        "profile": "ops/modularity/profiles/skills-disabled/tauri.conf.json",
+        "tests": {
+          "frontend": "modules/skills/frontend/tests",
+          "backend": "cargo test --manifest-path modules/skills/backend/Cargo.toml"
+        }
+      },
+      "composition": {
+        "order": 5,
+        "symbol": "skillsModule",
+        "environment": null
+      },
+      "frontend_source": {
+        "entrypoint": "modules/skills/frontend/src/index.ts",
+        "import_closure": [
+          "modules/skills/frontend/src/index.ts",
+          "modules/skills/frontend/src/skillInstallationClient.ts",
+          "modules/skills/frontend/src/store.ts",
+          "modules/skills/frontend/src/types.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 4,
+        "direct_tauri_imports": []
+      },
+      "native_crates": [
+        {
+          "name": "tauri-plugin-shipctl-skills",
+          "path": "modules/skills/backend/Cargo.toml",
+          "role": "backend"
+        },
+        {
+          "name": "shipctl-module-skills-host",
+          "path": "modules/skills/host/Cargo.toml",
+          "role": "host"
+        }
+      ]
+    },
+    {
+      "id": "thin-terminal",
+      "manifest_path": "modules/thin-terminal/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "thin-terminal",
+        "frontend": {
+          "package": "@shipctl/module-thin-terminal",
+          "path": "modules/thin-terminal/frontend",
+          "composition_symbol": "thinTerminalModule"
+        },
+        "backend": null,
+        "tauri": null,
+        "messages": null,
+        "profile": null,
+        "tests": {
+          "frontend": "modules/thin-terminal/frontend/tests",
+          "backend": null
+        }
+      },
+      "composition": {
+        "order": 7,
+        "symbol": "thinTerminalModule",
+        "environment": null
+      },
+      "frontend_source": {
+        "entrypoint": "modules/thin-terminal/frontend/src/index.ts",
+        "import_closure": [
+          "modules/thin-terminal/frontend/src/index.ts",
+          "modules/thin-terminal/frontend/src/oscNotification.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 5,
+        "direct_tauri_imports": []
+      },
+      "native_crates": []
+    },
+    {
+      "id": "todos",
+      "manifest_path": "modules/todos/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "todos",
+        "frontend": {
+          "package": "@shipctl/module-todos",
+          "path": "modules/todos/frontend",
+          "composition_symbol": "todosModule"
+        },
+        "backend": {
+          "crate": "tauri-plugin-shipctl-todos",
+          "path": "modules/todos/backend",
+          "cargo_feature": "todos-module",
+          "dependency_alias": "shipctl-module-todos",
+          "install": "shipctl_module_todos_host::install(builder, workspace.clone())",
+          "host": {
+            "crate": "shipctl-module-todos-host",
+            "path": "modules/todos/host",
+            "dependency_alias": "shipctl-module-todos-host"
+          }
+        },
+        "tauri": {
+          "capability_identifier": "todos",
+          "permissions": [
+            "shipctl-todos:allow-read-todos",
+            "shipctl-todos:allow-toggle-todo",
+            "shipctl-todos:allow-add-todo",
+            "shipctl-todos:allow-move-todo",
+            "shipctl-todos:allow-discover-project-documents",
+            "shipctl-todos:allow-read-project-document",
+            "shipctl-todos:allow-write-project-document"
+          ]
+        },
+        "messages": null,
+        "profile": "ops/modularity/profiles/todos-disabled/tauri.conf.json",
+        "tests": {
+          "frontend": "modules/todos/frontend/tests",
+          "backend": "cargo test --manifest-path modules/todos/backend/Cargo.toml"
+        }
+      },
+      "composition": {
+        "order": 4,
+        "symbol": "todosModule",
+        "environment": null
+      },
+      "frontend_source": {
+        "entrypoint": "modules/todos/frontend/src/index.ts",
+        "import_closure": [
+          "modules/todos/frontend/src/index.ts",
+          "modules/todos/frontend/src/store.ts",
+          "modules/todos/frontend/src/todoDocuments.ts",
+          "modules/todos/frontend/src/types.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 8,
+        "direct_tauri_imports": []
+      },
+      "native_crates": [
+        {
+          "name": "tauri-plugin-shipctl-todos",
+          "path": "modules/todos/backend/Cargo.toml",
+          "role": "backend"
+        },
+        {
+          "name": "shipctl-module-todos-host",
+          "path": "modules/todos/host/Cargo.toml",
+          "role": "host"
+        }
+      ]
+    },
+    {
+      "id": "usage",
+      "manifest_path": "modules/usage/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "usage",
+        "frontend": {
+          "package": "@shipctl/module-usage",
+          "path": "modules/usage/frontend",
+          "composition_symbol": "usageModule"
+        },
+        "backend": {
+          "crate": "tauri-plugin-shipctl-usage",
+          "path": "modules/usage/backend",
+          "cargo_feature": "usage-module",
+          "dependency_alias": "shipctl-module-usage",
+          "install": "shipctl_module_usage_host::install(\n  builder,\n  workspace.clone(),\n  message_bridges.clone(),\n  paths.usage_database.clone(),\n  durable_writes.clone()\n)",
+          "host": {
+            "crate": "shipctl-module-usage-host",
+            "path": "modules/usage/host",
+            "dependency_alias": "shipctl-module-usage-host"
+          }
+        },
+        "tauri": {
+          "capability_identifier": "usage",
+          "permissions": [
+            "shipctl-usage:allow-get-all-usage-snapshots",
+            "shipctl-usage:allow-get-usage-snapshot",
+            "shipctl-usage:allow-get-usage-details",
+            "shipctl-usage:allow-get-usage-overview",
+            "shipctl-usage:allow-get-project-alias-review-queue",
+            "shipctl-usage:allow-refresh-usage-data"
+          ]
+        },
+        "messages": {
+          "provides": [
+            {
+              "id": "usage.ingest-completed",
+              "version": 1,
+              "schema": "modules/usage/messages/ingest-completed.schema.json",
+              "max_encoded_bytes": 2,
+              "redacted_fields": [],
+              "compatible_versions": [
+                1
+              ]
+            },
+            {
+              "id": "usage.refresh-request",
+              "version": 1,
+              "schema": "modules/usage/messages/refresh-request.schema.json",
+              "max_encoded_bytes": 2,
+              "redacted_fields": [],
+              "compatible_versions": [
+                1
+              ]
+            }
+          ],
+          "handles": [
+            {
+              "id": "usage.refresh-request",
+              "message": {
+                "id": "usage.refresh-request",
+                "version": 1
+              },
+              "capacity": 1,
+              "required_grant": "message.send.usage.refresh-request",
+              "scheduler_allowed": true
+            }
+          ],
+          "publishes": [
+            {
+              "id": "usage.ingest-completed",
+              "message": {
+                "id": "usage.ingest-completed",
+                "version": 1
+              },
+              "capacity": 1,
+              "required_grant": "message.publish.usage.ingest-completed",
+              "scheduler_allowed": false
+            }
+          ],
+          "subscribes": [
+            {
+              "id": "usage.ingest-completed",
+              "message": {
+                "id": "usage.ingest-completed",
+                "version": 1
+              },
+              "required_grant": "message.subscribe.usage.ingest-completed"
+            }
+          ],
+          "ports": []
+        },
+        "profile": "ops/modularity/profiles/usage-disabled/tauri.conf.json",
+        "tests": {
+          "frontend": "modules/usage/frontend/tests",
+          "backend": "CARGO_TARGET_DIR=\"$PWD/target/usage-characterization\" cargo test -p tauri-plugin-shipctl-usage -- --test-threads=1"
+        }
+      },
+      "composition": {
+        "order": 0,
+        "symbol": "usageModule",
+        "environment": "VITE_SHIPCTL_USAGE_MODULE"
+      },
+      "frontend_source": {
+        "entrypoint": "modules/usage/frontend/src/index.ts",
+        "import_closure": [
+          "modules/usage/frontend/src/index.ts",
+          "modules/usage/frontend/src/ingestCompleted.ts",
+          "modules/usage/frontend/src/types.ts",
+          "modules/usage/frontend/src/usageSettingsDataClient.ts",
+          "modules/usage/frontend/src/usageSettingsStore.ts",
+          "modules/usage/frontend/src/usageSourcesClient.ts",
+          "modules/usage/frontend/src/usageStore.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 12,
+        "direct_tauri_imports": []
+      },
+      "native_crates": [
+        {
+          "name": "tauri-plugin-shipctl-usage",
+          "path": "modules/usage/backend/Cargo.toml",
+          "role": "backend"
+        },
+        {
+          "name": "shipctl-module-usage-host",
+          "path": "modules/usage/host/Cargo.toml",
+          "role": "host"
+        }
+      ]
+    }
+  ],
+  "legacy_composition": [
+    {
+      "id": "shipctl.usage",
+      "version": "0.0.0",
+      "commands": [],
+      "panels": [],
+      "global_surfaces": [
+        {
+          "id": "core.usage",
+          "module_id": "shipctl.usage"
+        }
+      ],
+      "global_navigation": [
+        {
+          "id": "usage.global-navigation",
+          "module_id": "shipctl.usage",
+          "surface_id": "core.usage",
+          "label": "Usage",
+          "order": 20
+        }
+      ],
+      "sidebar": [
+        {
+          "id": "usage.sidebar",
+          "module_id": "shipctl.usage",
+          "surface_id": "core.usage",
+          "order": 100
+        }
+      ],
+      "project_navigation": [],
+      "project_layout": [],
+      "project_actions": [],
+      "project_facts_provider": null,
+      "project_import": null,
+      "settings": [
+        {
+          "id": "usage.settings",
+          "module_id": "shipctl.usage",
+          "slot": "terminal.after",
+          "order": 10
+        }
+      ],
+      "skills_provider": null,
+      "scheduled_tasks": [
+        {
+          "id": "usage.periodic-refresh",
+          "module_id": "shipctl.usage",
+          "schedule": {
+            "cron": "* * * * * Etc/UTC",
+            "target": {
+              "kind": "channel",
+              "endpoint": {
+                "id": "usage.refresh-request",
+                "message": {
+                  "id": "usage.refresh-request",
+                  "version": 1
+                }
+              }
+            },
+            "payload": {}
+          }
+        }
+      ],
+      "messages": {
+        "provides": [
+          {
+            "message": {
+              "id": "usage.ingest-completed",
+              "version": 1
+            }
+          },
+          {
+            "message": {
+              "id": "usage.refresh-request",
+              "version": 1
+            }
+          }
+        ],
+        "handles": [
+          {
+            "id": "usage.refresh-request",
+            "message": {
+              "id": "usage.refresh-request",
+              "version": 1
+            },
+            "capacity": 1,
+            "required_grant": "message.send.usage.refresh-request",
+            "scheduler_allowed": true
+          }
+        ],
+        "publishes": [
+          {
+            "id": "usage.ingest-completed",
+            "message": {
+              "id": "usage.ingest-completed",
+              "version": 1
+            },
+            "capacity": 1,
+            "required_grant": "message.publish.usage.ingest-completed",
+            "scheduler_allowed": false
+          }
+        ],
+        "subscribes": [
+          {
+            "id": "usage.ingest-completed",
+            "message": {
+              "id": "usage.ingest-completed",
+              "version": 1
+            }
+          }
+        ]
+      },
+      "terminal_presentations": [],
+      "lifecycle": [],
+      "activates": true,
+      "prepares_shutdown": false
+    },
+    {
+      "id": "shipctl.assistants",
+      "version": "0.0.0",
+      "commands": [],
+      "panels": [
+        {
+          "id": "assistants.launcher",
+          "module_id": "shipctl.assistants",
+          "scope": "project",
+          "label": "New Agent",
+          "singleton": "per-project",
+          "order": 30,
+          "shortcut": "⇧⌘T"
+        }
+      ],
+      "global_surfaces": [],
+      "global_navigation": [],
+      "sidebar": [],
+      "project_navigation": [],
+      "project_layout": [],
+      "project_actions": [],
+      "project_facts_provider": null,
+      "project_import": null,
+      "settings": [],
+      "skills_provider": null,
+      "scheduled_tasks": [],
+      "messages": {
+        "provides": [],
+        "handles": [],
+        "publishes": [],
+        "subscribes": []
+      },
+      "terminal_presentations": [],
+      "lifecycle": [
+        "onProjectsChanged"
+      ],
+      "activates": true,
+      "prepares_shutdown": true
+    },
+    {
+      "id": "shipctl.ports",
+      "version": "0.0.0",
+      "commands": [],
+      "panels": [],
+      "global_surfaces": [
+        {
+          "id": "ports.overview",
+          "module_id": "shipctl.ports"
+        }
+      ],
+      "global_navigation": [
+        {
+          "id": "ports.global-navigation",
+          "module_id": "shipctl.ports",
+          "surface_id": "ports.overview",
+          "label": "Ports",
+          "order": 30
+        }
+      ],
+      "sidebar": [],
+      "project_navigation": [],
+      "project_layout": [],
+      "project_actions": [],
+      "project_facts_provider": null,
+      "project_import": null,
+      "settings": [],
+      "skills_provider": null,
+      "scheduled_tasks": [],
+      "messages": {
+        "provides": [],
+        "handles": [],
+        "publishes": [],
+        "subscribes": []
+      },
+      "terminal_presentations": [],
+      "lifecycle": [],
+      "activates": false,
+      "prepares_shutdown": false
+    },
+    {
+      "id": "shipctl.commands",
+      "version": "0.0.0",
+      "commands": [
+        {
+          "id": "commands.open-panel",
+          "module_id": "shipctl.commands",
+          "label": "New Commands Panel"
+        }
+      ],
+      "panels": [
+        {
+          "id": "core.commands",
+          "module_id": "shipctl.commands",
+          "scope": "project",
+          "label": "Commands",
+          "singleton": "per-project",
+          "order": 20,
+          "shortcut": "⇧⌘C"
+        }
+      ],
+      "global_surfaces": [],
+      "global_navigation": [],
+      "sidebar": [],
+      "project_navigation": [
+        {
+          "id": "commands.project-navigation",
+          "module_id": "shipctl.commands",
+          "panel_id": "core.commands",
+          "order": 20
+        }
+      ],
+      "project_layout": [],
+      "project_actions": [],
+      "project_facts_provider": null,
+      "project_import": null,
+      "settings": [],
+      "skills_provider": null,
+      "scheduled_tasks": [],
+      "messages": {
+        "provides": [],
+        "handles": [],
+        "publishes": [],
+        "subscribes": []
+      },
+      "terminal_presentations": [],
+      "lifecycle": [
+        "onProjectOpened",
+        "onProjectRemoved"
+      ],
+      "activates": true,
+      "prepares_shutdown": false
+    },
+    {
+      "id": "shipctl.todos",
+      "version": "0.0.0",
+      "commands": [],
+      "panels": [
+        {
+          "id": "todos.board",
+          "module_id": "shipctl.todos",
+          "scope": "project",
+          "label": "To-dos",
+          "singleton": "per-project",
+          "order": 40
+        }
+      ],
+      "global_surfaces": [],
+      "global_navigation": [],
+      "sidebar": [],
+      "project_navigation": [
+        {
+          "id": "todos.project-navigation",
+          "module_id": "shipctl.todos",
+          "panel_id": "todos.board",
+          "order": 40
+        }
+      ],
+      "project_layout": [],
+      "project_actions": [],
+      "project_facts_provider": null,
+      "project_import": null,
+      "settings": [
+        {
+          "id": "todos.settings",
+          "module_id": "shipctl.todos",
+          "order": 40
+        }
+      ],
+      "skills_provider": null,
+      "scheduled_tasks": [],
+      "messages": {
+        "provides": [],
+        "handles": [],
+        "publishes": [],
+        "subscribes": []
+      },
+      "terminal_presentations": [],
+      "lifecycle": [
+        "onFilesystemChanged",
+        "onProjectRemoved",
+        "onProjectsChanged"
+      ],
+      "activates": false,
+      "prepares_shutdown": false
+    },
+    {
+      "id": "shipctl.skills",
+      "version": "0.0.0",
+      "commands": [],
+      "panels": [],
+      "global_surfaces": [],
+      "global_navigation": [],
+      "sidebar": [],
+      "project_navigation": [],
+      "project_layout": [],
+      "project_actions": [
+        {
+          "id": "skills.project-actions",
+          "module_id": "shipctl.skills",
+          "order": 20
+        }
+      ],
+      "project_facts_provider": null,
+      "project_import": null,
+      "settings": [],
+      "skills_provider": {
+        "id": "skills.provider",
+        "module_id": "shipctl.skills"
+      },
+      "scheduled_tasks": [],
+      "messages": {
+        "provides": [],
+        "handles": [],
+        "publishes": [],
+        "subscribes": []
+      },
+      "terminal_presentations": [],
+      "lifecycle": [
+        "onFilesystemChanged",
+        "onProjectRemoved",
+        "onProjectsChanged"
+      ],
+      "activates": true,
+      "prepares_shutdown": false
+    },
+    {
+      "id": "shipctl.semantic-terminal",
+      "version": "0.0.0",
+      "commands": [],
+      "panels": [],
+      "global_surfaces": [],
+      "global_navigation": [],
+      "sidebar": [],
+      "project_navigation": [],
+      "project_layout": [],
+      "project_actions": [],
+      "project_facts_provider": null,
+      "project_import": null,
+      "settings": [],
+      "skills_provider": null,
+      "scheduled_tasks": [],
+      "messages": {
+        "provides": [],
+        "handles": [],
+        "publishes": [],
+        "subscribes": []
+      },
+      "terminal_presentations": [
+        {
+          "driver_id": "semantic-terminal"
+        }
+      ],
+      "lifecycle": [],
+      "activates": false,
+      "prepares_shutdown": false
+    },
+    {
+      "id": "shipctl.thin-terminal",
+      "version": "0.0.0",
+      "commands": [],
+      "panels": [],
+      "global_surfaces": [],
+      "global_navigation": [],
+      "sidebar": [],
+      "project_navigation": [],
+      "project_layout": [],
+      "project_actions": [],
+      "project_facts_provider": null,
+      "project_import": null,
+      "settings": [],
+      "skills_provider": null,
+      "scheduled_tasks": [],
+      "messages": {
+        "provides": [],
+        "handles": [],
+        "publishes": [],
+        "subscribes": []
+      },
+      "terminal_presentations": [
+        {
+          "driver_id": "thin-terminal"
+        }
+      ],
+      "lifecycle": [],
+      "activates": false,
+      "prepares_shutdown": false
+    },
+    {
+      "id": "shipctl.git",
+      "version": "0.0.0",
+      "commands": [],
+      "panels": [
+        {
+          "id": "core.git",
+          "module_id": "shipctl.git",
+          "scope": "project",
+          "label": "Files",
+          "singleton": "per-project",
+          "order": 10,
+          "shortcut": "⌘G"
+        }
+      ],
+      "global_surfaces": [],
+      "global_navigation": [],
+      "sidebar": [],
+      "project_navigation": [
+        {
+          "id": "git.project-navigation",
+          "module_id": "shipctl.git",
+          "panel_id": "core.git",
+          "order": 10
+        }
+      ],
+      "project_layout": [
+        {
+          "id": "git.diff-summary",
+          "module_id": "shipctl.git",
+          "slot": "workspace.trailing",
+          "order": 10
+        }
+      ],
+      "project_actions": [
+        {
+          "id": "git.project-actions",
+          "module_id": "shipctl.git",
+          "order": 30
+        }
+      ],
+      "project_facts_provider": {
+        "id": "git.project-facts",
+        "module_id": "shipctl.git"
+      },
+      "project_import": {
+        "id": "git.related-projects",
+        "module_id": "shipctl.git"
+      },
+      "settings": [
+        {
+          "id": "git.settings",
+          "module_id": "shipctl.git",
+          "order": 10
+        }
+      ],
+      "skills_provider": null,
+      "scheduled_tasks": [],
+      "messages": {
+        "provides": [],
+        "handles": [],
+        "publishes": [],
+        "subscribes": []
+      },
+      "terminal_presentations": [],
+      "lifecycle": [
+        "onFilesystemChanged",
+        "onProjectRemoved",
+        "onProjectsChanged"
+      ],
+      "activates": false,
+      "prepares_shutdown": false
+    }
+  ]
+}

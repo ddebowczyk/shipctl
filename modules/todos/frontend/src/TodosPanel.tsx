@@ -1,5 +1,5 @@
 import { Fragment, useState, useSyncExternalStore } from "react";
-import type { ModulePanelProps } from "@shipctl/module-api";
+import { projectDocumentsService, type ModulePanelProps } from "@shipctl/module-api";
 import {
   LayoutList,
   ListTodo,
@@ -238,8 +238,9 @@ function TodoBoardView({ file, showFileLabel, columns, inbox, onToggle, onMove }
 
 // ── Panel ────────────────────────────────────────────────────────────
 
-export default function TodosPanel({ project, services }: ModulePanelProps) {
+export default function TodosPanel({ project, services, activation }: ModulePanelProps) {
   const activeProjectPath = project?.path ?? null;
+  const documents = activation.services.require(projectDocumentsService);
   const files = useTodoStore((s) =>
     activeProjectPath ? s.projectTodos[activeProjectPath] : undefined,
   );
@@ -291,7 +292,7 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
   const handleToggle = (file: TodoFile, item: TodoItem) => {
     useTodoStore
       .getState()
-      .toggleItem(activeProjectPath, file.path, item.line, item.text, !item.checked)
+      .toggleItem(documents, file, item.line, item.text, !item.checked)
       .catch((error) => {
         pushNotice({
           tone: "error",
@@ -305,8 +306,8 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
     useTodoStore
       .getState()
       .moveItem(
-        activeProjectPath,
-        file.path,
+        documents,
+        file,
         item.line,
         item.text,
         target.line,
@@ -326,13 +327,14 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
     if (!text || saving) return;
     setSaving(true);
     try {
-      // New items go to the primary (first-discovered) file; with no file
-      // yet, the backend creates TODO.md at the project root.
+      // New items go to the first discovered file. The document service
+      // creates TODO.md at the project root when the list is still absent.
       await useTodoStore
         .getState()
         .addItem(
+          documents,
           activeProjectPath,
-          todoFiles[0]?.path ?? null,
+          todoFiles[0] ?? null,
           text,
           addTarget?.section.line ?? null,
           todoFileStyle === "kanban",
@@ -433,7 +435,7 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
         {boards.map(({ file, columns, inbox }) =>
           view === "board" && columns.length >= 2 ? (
             <TodoBoardView
-              key={file.path}
+              key={file.relativePath}
               file={file}
               showFileLabel={todoFiles.length > 1}
               columns={columns}
@@ -443,7 +445,7 @@ export default function TodosPanel({ project, services }: ModulePanelProps) {
             />
           ) : (
             <TodoListView
-              key={file.path}
+              key={file.relativePath}
               file={file}
               showFileLabel={todoFiles.length > 1}
               onToggle={handleToggle}

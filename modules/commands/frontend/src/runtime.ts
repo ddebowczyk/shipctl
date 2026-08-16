@@ -4,10 +4,9 @@ import type {
 } from "@shipctl/module-api";
 
 import { useCommandsStore } from "./store";
+import { activeCommandsDataClient } from "./commandsDataClient";
 import { readCommandConfigs, toCommandConfig } from "./types";
 import type { CommandConfig, CommandState } from "./types";
-
-export const COMMANDS_CAPABILITY_ID = "commands";
 
 interface CommandOwner {
   readonly projectPath: string;
@@ -67,9 +66,15 @@ function commandsFor(projectPath: string): readonly CommandState[] {
 async function persist(
   projectPath: string,
   commands: readonly CommandConfig[],
-  services: ModuleHostServices,
 ) {
-  await services.projectData.replace(projectPath, COMMANDS_CAPABILITY_ID, commands);
+  const value = commands.map((command) => ({
+    name: command.name,
+    command: command.command,
+    autostart: command.autostart,
+    env: { ...command.env },
+    cwd: command.cwd,
+  }));
+  await activeCommandsDataClient().replace(projectPath, value);
 }
 
 export async function stopCommand(
@@ -135,7 +140,7 @@ export async function createCommand(
 ) {
   const next = [...commandsFor(projectPath).map(toCommandConfig), command];
   try {
-    await persist(projectPath, next, services);
+    await persist(projectPath, next);
     useCommandsStore.getState().add(projectPath, command);
     return true;
   } catch (error) {
@@ -158,7 +163,7 @@ export async function updateCommand(
     existing.name === previousName ? command : toCommandConfig(existing)
   ));
   try {
-    await persist(projectPath, next, services);
+    await persist(projectPath, next);
     await stopCommand(projectPath, previousName, services);
     useCommandsStore.getState().update(projectPath, previousName, command);
     return true;
@@ -181,7 +186,7 @@ export async function deleteCommand(
     .filter((command) => command.name !== name)
     .map(toCommandConfig);
   try {
-    await persist(projectPath, next, services);
+    await persist(projectPath, next);
     await stopCommand(projectPath, name, services);
     useCommandsStore.getState().remove(projectPath, name);
     return true;
@@ -223,7 +228,7 @@ export function loadProjectCommands(
 
   const load = (async () => {
     try {
-      const value = await services.projectData.read(projectPath, COMMANDS_CAPABILITY_ID);
+      const value = await activeCommandsDataClient().read(projectPath);
       const commands = readCommandConfigs(value);
       useCommandsStore.getState().load(projectPath, commands);
       ensureRuntime(services);

@@ -83,6 +83,8 @@ test("the module message API is pure and carries no caller identity authority", 
     "utf8",
   );
   assert.doesNotMatch(source, /@tauri-apps|moduleId/);
-  assert.match(source, /send<Payload>\(\s*channel:/);
-  assert.match(source, /publish<Payload>\(\s*topic:/);
+  assert.match(source, /execute<Payload>\(\s*input: SendMessageInput<Payload>/);
+  assert.match(source, /execute<Payload>\(\s*input: PublishMessageInput<Payload>/);
+  assert.match(source, /execute<Request, Response>\(\s*input: RequestMessageInput<Request, Response>/);
+  assert.match(source, /defineSemanticService<ModuleMessages>\(\s*"shipctl\.messages",\s*1/);
 });

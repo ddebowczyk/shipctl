@@ -6,11 +6,7 @@ import type {
 import type { ProjectSettings } from "@shipctl/core/platform";
 import { contributedPanelTabId } from "@shipctl/core/platform";
 import {
-  getGlobalCapabilityData,
-  loadWorkspace,
   openUrl,
-  replaceGlobalCapabilityData,
-  saveWorkspace,
 } from "@shipctl/core/platform";
 import { useNoticeStore } from "../shared/useNoticeStore.ts";
 import { useProjectSettingsStore } from "../projects/useProjectSettingsStore.ts";
@@ -18,8 +14,6 @@ import { useRepoStore } from "../projects/useRepoStore.ts";
 import { useThemeStore } from "../appearance/useThemeStore.ts";
 import { useTerminalStore } from "../terminal-host/useTerminalStore.ts";
 import { modulePanelContributions, moduleSkillsProvider } from "./moduleComposition.ts";
-import { createProjectCapabilityDataPort } from "./projectCapabilityData.ts";
-import { createGlobalCapabilityDataPort } from "./globalCapabilityData.ts";
 import { MODULE_TERMINAL_SESSIONS } from "../terminal-host/terminalSessions.ts";
 import { terminalPresentationPort } from "@shipctl/core/terminal-host";
 
@@ -63,22 +57,6 @@ const skillsProvider = moduleSkillsProvider() ?? {
   },
 };
 
-const projectData = createProjectCapabilityDataPort({
-  load: loadWorkspace,
-  save: saveWorkspace,
-  onSaved: (projectPath, document) => {
-    const repoState = useRepoStore.getState();
-    if (repoState.activeRepoPath === projectPath) {
-      repoState.setActiveConfig(document);
-    }
-  },
-});
-
-const globalData = createGlobalCapabilityDataPort({
-  read: getGlobalCapabilityData,
-  replace: replaceGlobalCapabilityData,
-});
-
 export const MODULE_HOST_SERVICES: ModuleHostServices = {
   panels: {
     open: (panelId) => {
@@ -103,8 +81,6 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
     getSnapshot: getAppearanceSnapshot,
     subscribe: (listener) => useThemeStore.subscribe(listener),
   },
-  globalData,
-  projectData,
   terminalSessions: MODULE_TERMINAL_SESSIONS,
   terminalPresentation: terminalPresentationPort,
   settings: {

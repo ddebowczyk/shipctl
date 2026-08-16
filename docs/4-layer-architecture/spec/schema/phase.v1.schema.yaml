@@ -1,0 +1,206 @@
+---
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: shipctl://architecture/schema/phase.v1
+title: Shipctl architecture phase record
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - id
+  - title
+  - status
+  - source
+  - depends_on
+  - semantics
+  - properties
+  - deliverables
+  - deletion_gates
+properties:
+  $schema:
+    type: string
+  schema_version:
+    const: phase/v1
+  id:
+    type: string
+    pattern: ^phase-[a-h]$
+  title:
+    type: string
+  status:
+    enum: [proposed, specified, implementing, complete]
+  source:
+    type: string
+  depends_on:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+      pattern: ^phase-[a-h]$
+  semantics:
+    type: array
+    items:
+      $ref: "#/$defs/semantic"
+  properties:
+    type: array
+    items:
+      $ref: "#/$defs/property"
+  deliverables:
+    type: array
+    items:
+      type: string
+  deletion_gates:
+    type: array
+    items:
+      $ref: "#/$defs/deletionGate"
+  decisions:
+    type: array
+    items:
+      type: string
+$defs:
+  semantic:
+    type: object
+    additionalProperties: false
+    required: [id, kind, rule]
+    properties:
+      id:
+        type: string
+        pattern: ^SEM-[A-H]-[0-9]{3}$
+      kind:
+        enum: [MUST, MUST-NOT, SHOULD, SHOULD-NOT, MAY]
+      rule:
+        type: string
+      rationale:
+        type: string
+  property:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - claim
+      - shapes
+      - evidence
+      - domain
+      - preconditions
+      - oracle
+      - failure_value
+      - runner
+      - tiers
+      - status
+      - deletion_gates
+    properties:
+      id:
+        type: string
+        pattern: ^PROP-[A-H]-[A-Z0-9-]+-[0-9]{3}$
+      claim:
+        type: string
+      shapes:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          enum:
+            - roundtrip
+            - differential
+            - idempotency
+            - safety
+            - conservation
+            - monotonicity
+            - state-machine
+            - metamorphic
+      evidence:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+          pattern: ^SEM-[A-H]-[0-9]{3}$
+      domain:
+        type: object
+        additionalProperties: false
+        required: [generates, excludes, strategy]
+        properties:
+          generates:
+            type: string
+          excludes:
+            type: array
+            items:
+              type: string
+          strategy:
+            type: string
+          classifications:
+            type: array
+            items:
+              type: string
+      preconditions:
+        type: array
+        items:
+          type: string
+      oracle:
+        type: object
+        additionalProperties: false
+        required: [primary, alternative]
+        properties:
+          primary:
+            $ref: "#/$defs/oracle"
+          alternative:
+            $ref: "#/$defs/oracle"
+      failure_value:
+        type: string
+      runner:
+        type: object
+        additionalProperties: false
+        required: [language, library, test_id, shrink, replay]
+        properties:
+          language:
+            enum: [typescript, rust]
+          library:
+            enum: [fast-check, proptest]
+          test_id:
+            type: string
+          shrink:
+            const: required
+          replay:
+            const: required
+      tiers:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          enum: [local, pr, nightly, release]
+      status:
+        enum:
+          - proposed
+          - generator-ready
+          - implemented
+          - passing
+          - quarantined
+      deletion_gates:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: ^DELETE-[A-H]-[A-Z0-9-]+$
+  oracle:
+    type: object
+    additionalProperties: false
+    required: [kind, description, independence]
+    properties:
+      kind:
+        enum: [invariant, model, reference, metamorphic, roundtrip]
+      description:
+        type: string
+      independence:
+        type: string
+  deletionGate:
+    type: object
+    additionalProperties: false
+    required: [id, condition, removes]
+    properties:
+      id:
+        type: string
+        pattern: ^DELETE-[A-H]-[A-Z0-9-]+$
+      condition:
+        type: string
+      removes:
+        type: array
+        items:
+          type: string

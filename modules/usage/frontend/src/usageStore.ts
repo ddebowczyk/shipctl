@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { getAllUsageSnapshots } from "./client";
+import { activeUsageSourcesClient } from "./usageSourcesClient";
 import type { ProviderUsageSnapshot, UsageProvider } from "./types";
 
 export type TimeWindow = "5h" | "7d" | "30d" | "365d";
@@ -27,7 +27,7 @@ export const useUsageStore = create<UsageStore>((set, get) => ({
   fetchSnapshots: async () => {
     set({ loading: true, error: null });
     try {
-      const snapshots = await getAllUsageSnapshots();
+      const snapshots = await activeUsageSourcesClient().getAllUsageSnapshots();
       set({
         loading: false,
         snapshots: Object.fromEntries(snapshots.map((snapshot) => [snapshot.provider, snapshot])),

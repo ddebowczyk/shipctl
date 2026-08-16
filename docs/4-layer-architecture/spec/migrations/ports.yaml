@@ -1,0 +1,38 @@
+---
+$schema: ../schema/module-disposition.v1.schema.yaml
+schema_version: module-disposition/v1
+id: ports
+status: migrating
+source_manifest: modules/ports/module.yaml
+current:
+  frontend: modules/ports/frontend
+  backend_crates:
+    - modules/ports/backend
+  host_crates:
+    - modules/ports/host
+  direct_tauri: false
+  static_activation: true
+target:
+  roles: [compound]
+  responsibilities:
+    - Implement port inspection and termination policy in TypeScript.
+    - Publish port views and actions through typed contributions.
+  capabilities:
+    - processes
+    - workspace
+phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
+prerequisites:
+  - Characterize port discovery, process identity, and termination behavior.
+compatibility_paths:
+  - Use the current ports module as the first native-module extraction pilot.
+  - Keep old UI behavior while calls move to the process capability client.
+deletion_gates:
+  - id: DELETE-D-NATIVE-MODULE
+    proof_ids: [PROP-D-PARITY-001, PROP-D-CLOSURE-001]
+    targets:
+      - modules/ports/backend
+      - modules/ports/host
+  - id: DELETE-E-STATIC-IMPORT
+    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    targets:
+      - modules/ports/frontend/src/index.ts

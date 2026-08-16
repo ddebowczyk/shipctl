@@ -99,10 +99,10 @@ export function useTerminalActions(
     });
   }, []);
 
-  const launchTerminalSession = useCallback(async (
+  const launchTerminalSessionForModule = useCallback(async (
+    moduleId: string,
     request: ModuleTerminalSessionLaunchRequest,
   ) => {
-    const moduleId = request.ownerKey.split(":", 1)[0] || "unknown";
     const descriptor = await spawnSession(
       request.command,
       request.arguments ? [...request.arguments] : null,
@@ -126,6 +126,13 @@ export function useTerminalActions(
     );
     return requireModuleSession(descriptor);
   }, [spawnSession]);
+
+  const launchTerminalSession = useCallback((
+    request: ModuleTerminalSessionLaunchRequest,
+  ) => launchTerminalSessionForModule(
+    request.ownerKey.split(":", 1)[0] || "unknown",
+    request,
+  ), [launchTerminalSessionForModule]);
 
   const launchManagedTerminalSession = useCallback(async (
     request: ModuleManagedTerminalSessionLaunchRequest,
@@ -251,6 +258,7 @@ export function useTerminalActions(
 
   useEffect(() => bindTerminalSessionsRuntime({
     launch: launchTerminalSession,
+    launchForModule: launchTerminalSessionForModule,
     launchManaged: launchManagedTerminalSession,
     update: updateTerminalSession,
     observe: observeTerminalSession,
@@ -261,6 +269,7 @@ export function useTerminalActions(
     focusTerminalSession,
     launchManagedTerminalSession,
     launchTerminalSession,
+    launchTerminalSessionForModule,
     listTerminalSessions,
     observeTerminalSession,
     stopTerminalSession,

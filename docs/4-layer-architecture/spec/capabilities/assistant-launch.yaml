@@ -1,0 +1,45 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: assistant-launch
+version: 1.0.0
+title: Assistant process and session launch
+status: proposed
+layer: native-kernel
+consumers: [assistants]
+current_implementations:
+  - modules/assistants/backend
+  - modules/assistants/host
+target_owners:
+  provider: core/backend/src/assistant_launch
+  tauri_adapter: core/tauri/src/assistant_launch.rs
+  typescript_client: core/frontend/platform/assistantLaunch
+operations:
+  - id: startAssistant
+    kind: request
+    contract: >-
+      Start or resume an approved provider through a host terminal session.
+  - id: recordPlacement
+    kind: request
+    contract: Persist host-owned recovery placement by stable session identity.
+  - id: observeAssistant
+    kind: event
+    contract: Observe host session lifecycle through an activation lease.
+required_grants:
+  - assistant.launch
+  - assistant.session-record
+ownership:
+  authority: >-
+    The host owns process launch, session identity, and recovery records.
+  resources: Assistant sessions survive presentation replacement by policy.
+  activation_scope: Provider and project scope are explicit on every launch.
+depends_on: [processes, terminal-sessions, credential-store, plugin-data]
+property_ids:
+  - PROP-B-ADAPTER-001
+  - PROP-B-EVENT-001
+  - PROP-D-PARITY-001
+  - PROP-D-AUTHORITY-001
+  - PROP-D-OWNERSHIP-001
+open_questions:
+  - >-
+    Separate provider-specific capture policy from host recovery identity.

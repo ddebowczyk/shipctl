@@ -6,6 +6,10 @@ import "@shipctl/core/appearance/globals.css";
 import PanelHost from "../../../../core/frontend/host/PanelHost";
 import { modulePanelContributions } from "../../../../core/frontend/host/moduleComposition";
 import { PanelRegistry } from "../../../../core/frontend/host/panelRegistry";
+import {
+  createModuleActivationIdentity,
+  SemanticServiceRegistry,
+} from "../../../../core/frontend/runtime/semanticServiceRuntime";
 import { FIXTURE_PING_COMMAND } from "@shipctl/module-fixture";
 import type { ModuleHostServices, ModuleTerminalId } from "@shipctl/module-api";
 import { ENABLED_MODULES } from "./enabledModules";
@@ -21,14 +25,6 @@ const services = {
   appearance: {
     getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
     subscribe: () => () => undefined,
-  },
-  globalData: {
-    read: async () => undefined,
-    replace: async () => undefined,
-  },
-  projectData: {
-    read: async () => undefined,
-    replace: async () => undefined,
   },
   terminalSessions: {
     list: () => [],
@@ -79,6 +75,11 @@ mockIPC((command) => {
 });
 
 const registry = PanelRegistry.create(modulePanelContributions(ENABLED_MODULES));
+const fixtureModule = ENABLED_MODULES[0];
+if (!fixtureModule) throw new Error("Fixture module is unavailable");
+const fixtureActivation = new SemanticServiceRegistry().activate(
+  createModuleActivationIdentity(fixtureModule.id, fixtureModule.version),
+);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -94,6 +95,7 @@ createRoot(document.getElementById("root")!).render(
       close={() => undefined}
       setTitle={() => undefined}
       services={services}
+      moduleActivations={new Map([[fixtureModule.id, fixtureActivation.context]])}
     />
   </StrictMode>,
 );

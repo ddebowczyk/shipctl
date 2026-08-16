@@ -14,7 +14,7 @@ export type ChangeKind = "added" | "modified" | null;
 
 export interface FileTreeProps {
   /** Flat list of repo-relative paths to render. */
-  files: string[];
+  files: readonly string[];
   /** Map of repo-relative paths to their change kind. Files not in the
    *  map render without any change indicator. Folders derive their kind
    *  from descendants at tree-build time. */

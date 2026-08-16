@@ -10,7 +10,6 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
-  decodeSemanticTerminalEvent,
   reportTerminalEffectOutcome,
   semanticInputDiagnosticFacts,
   startSemanticTerminalViewSession,
@@ -59,8 +58,10 @@ const historyRow = (
  * there is anything behind the screen to scroll back to.
  */
 function screenEvent(sequence: number, scrollbackRows?: number): SemanticTerminalWireEvent {
-  const event = decodeSemanticTerminalEvent(structuredClone(fixture));
-  if (event.event !== "screen") throw new Error("the fixture is a screen frame");
+  const event = structuredClone(fixture) as unknown as Extract<
+    SemanticTerminalWireEvent,
+    { readonly event: "screen" }
+  >;
   if (scrollbackRows === undefined) return { ...event, sequence } as SemanticTerminalWireEvent;
   const state = structuredClone(event.state) as Record<string, unknown>;
   state.scrollbackRows = scrollbackRows;
@@ -68,15 +69,11 @@ function screenEvent(sequence: number, scrollbackRows?: number): SemanticTermina
 }
 
 function baselineState(): unknown {
-  const event = decodeSemanticTerminalEvent(structuredClone(fixture));
-  if (event.event !== "screen") throw new Error("the fixture is a screen frame");
-  return event.state;
+  return structuredClone(fixture.state);
 }
 
 function baselineRevision(): number {
-  const event = decodeSemanticTerminalEvent(structuredClone(fixture));
-  if (event.event !== "screen") throw new Error("the fixture is a screen frame");
-  return event.revision;
+  return fixture.revision as number;
 }
 
 class Harness {

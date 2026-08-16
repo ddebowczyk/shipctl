@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { ProjectLayoutContributionProps } from "@shipctl/module-api";
+import type {
+  ProjectLayoutContributionProps,
+  SemanticEventLease,
+} from "@shipctl/module-api";
 import { Diff } from "lucide-react";
-import { listen } from "@tauri-apps/api/event";
 import {
   createFileTreeIconResolver,
   getBuiltInFileIconColor,
@@ -10,7 +12,7 @@ import {
 } from "@pierre/trees";
 import { useGitStore } from "./store";
 import { useGitPanelStore } from "./panelStore";
-import { gitChangedFiles, gitDiffStats } from "./client";
+import { gitClientFor } from "./gitClient";
 import type { ChangedFile, DiffFileStat } from "./types";
 
 // Clicking a row opens GitPanel in diff mode. Both chunks are lazy in AppShell,
@@ -61,7 +63,7 @@ function DiffTooltip({ tip }: { tip: TooltipState }) {
   const { file, stat } = tip;
   const top = tip.rect.top + tip.rect.height / 2;
   const right = window.innerWidth - tip.rect.left + 10;
-  const filename = file.path.split("/").pop() ?? file.path;
+  const filename = file.relativePath.split("/").pop() ?? file.relativePath;
 
   return (
     <div
@@ -86,13 +88,18 @@ function DiffTooltip({ tip }: { tip: TooltipState }) {
           </div>
         </div>
       )}
-      <div className="diff-strip__tooltip-path">{file.path}</div>
+      <div className="diff-strip__tooltip-path">{file.relativePath}</div>
     </div>
   );
 }
 
-export default function DiffSummaryPanel({ project, services }: ProjectLayoutContributionProps) {
+export default function DiffSummaryPanel({
+  project,
+  activation,
+  services,
+}: ProjectLayoutContributionProps) {
   const activeProjectPath = project.path;
+  const client = useMemo(() => gitClientFor(activation), [activation]);
   const gitStatus = useGitStore(
     (s) => (activeProjectPath ? s.projectGitStatus[activeProjectPath] ?? null : null),
   );
@@ -103,11 +110,11 @@ export default function DiffSummaryPanel({ project, services }: ProjectLayoutCon
   const viewerMode = panelState?.viewerMode ?? "file";
   const repoPreferredDiffArea = panelState?.repoPreferredDiffArea ?? {};
 
-  const [files, setFiles] = useState<ChangedFile[]>([]);
+  const [files, setFiles] = useState<readonly ChangedFile[]>([]);
   const [statsMap, setStatsMap] = useState<Map<string, DiffFileStat>>(new Map());
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
-  const canLoad = !!activeProjectPath && !!gitStatus?.is_git_repo;
+  const canLoad = !!activeProjectPath && !!gitStatus?.isRepository;
 
   const fetchData = useCallback(async () => {
     if (!canLoad || !activeProjectPath) {
@@ -116,14 +123,14 @@ export default function DiffSummaryPanel({ project, services }: ProjectLayoutCon
       return;
     }
     const [changedFiles, diffStats] = await Promise.all([
-      gitChangedFiles(activeProjectPath).catch(() => [] as ChangedFile[]),
-      gitDiffStats(activeProjectPath).catch(() => [] as DiffFileStat[]),
+      client.changedFiles(activeProjectPath).catch(() => [] as ChangedFile[]),
+      client.diffStats(activeProjectPath).catch(() => [] as DiffFileStat[]),
     ]);
     setFiles(changedFiles);
     const m = new Map<string, DiffFileStat>();
-    for (const s of diffStats) m.set(s.path, s);
+    for (const s of diffStats) m.set(s.relativePath, s);
     setStatsMap(m);
-  }, [canLoad, activeProjectPath]);
+  }, [canLoad, activeProjectPath, client]);
 
   useEffect(() => {
     fetchData();
@@ -133,16 +140,23 @@ export default function DiffSummaryPanel({ project, services }: ProjectLayoutCon
   useEffect(() => {
     if (!canLoad || !activeProjectPath) return;
     const repo = activeProjectPath;
-    const unlistenP = listen<{ paths: string[] }>("git-fs-changed", (event) => {
-      if (!event.payload.paths.includes(repo)) return;
+    let disposed = false;
+    let lease: SemanticEventLease | null = null;
+    void client.subscribeChanges(repo, () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => fetchData(), 300);
+    }).then((value) => {
+      if (disposed) void value.dispose();
+      else lease = value;
+    }).catch(() => {
+      // Initial data is still usable if the optional live subscription fails.
     });
     return () => {
+      disposed = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      unlistenP.then((f) => f());
+      if (lease) void lease.dispose();
     };
-  }, [canLoad, activeProjectPath, fetchData]);
+  }, [canLoad, activeProjectPath, client, fetchData]);
 
   const dedupedFiles = useMemo(() => {
     const priority = (area: string) => {
@@ -152,15 +166,15 @@ export default function DiffSummaryPanel({ project, services }: ProjectLayoutCon
     };
     const byPath = new Map<string, ChangedFile>();
     for (const f of files) {
-      const current = byPath.get(f.path);
+      const current = byPath.get(f.relativePath);
       if (!current || priority(f.area) > priority(current.area)) {
-        byPath.set(f.path, f);
+        byPath.set(f.relativePath, f);
       }
     }
     const vals = Array.from(byPath.values());
     return vals.sort((a, b) => {
-      const sa = statsMap.get(a.path);
-      const sb = statsMap.get(b.path);
+      const sa = statsMap.get(a.relativePath);
+      const sb = statsMap.get(b.relativePath);
       const ta = sa ? sa.additions + sa.deletions : 0;
       const tb = sb ? sb.additions + sb.deletions : 0;
       return tb - ta;
@@ -170,7 +184,7 @@ export default function DiffSummaryPanel({ project, services }: ProjectLayoutCon
   const maxChangedLines = useMemo(() => {
     let max = 1;
     for (const file of dedupedFiles) {
-      max = Math.max(max, changedLineCount(statsMap.get(file.path)));
+      max = Math.max(max, changedLineCount(statsMap.get(file.relativePath)));
     }
     return max;
   }, [dedupedFiles, statsMap]);
@@ -179,14 +193,18 @@ export default function DiffSummaryPanel({ project, services }: ProjectLayoutCon
     if (!activeProjectPath) return;
     if (file.area !== "staged" && file.area !== "unstaged" && file.area !== "untracked") return;
     services.panels.open("core.git");
-    useGitPanelStore.getState().setRepoSelection(activeProjectPath, file.path);
-    useGitPanelStore.getState().setRepoPreferredDiffArea(activeProjectPath, file.path, file.area);
+    useGitPanelStore.getState().setRepoSelection(activeProjectPath, file.relativePath);
+    useGitPanelStore.getState().setRepoPreferredDiffArea(
+      activeProjectPath,
+      file.relativePath,
+      file.area,
+    );
     useGitPanelStore.getState().setViewerMode(activeProjectPath, "diff");
   }, [activeProjectPath, services.panels]);
 
   const handleMouseLeave = useCallback(() => setTooltip(null), []);
 
-  if (!activeProjectPath || !gitStatus?.is_git_repo) return null;
+  if (!activeProjectPath || !gitStatus?.isRepository) return null;
 
   return (
     <div className="diff-strip" onMouseLeave={handleMouseLeave}>
@@ -203,13 +221,16 @@ export default function DiffSummaryPanel({ project, services }: ProjectLayoutCon
           <div className="diff-strip__clean" title="Working tree clean">·</div>
         ) : (
           dedupedFiles.map((file) => {
-            const stat = statsMap.get(file.path);
+            const stat = statsMap.get(file.relativePath);
             const isActive =
               viewerMode === "diff" &&
-              repoSelectedPath === file.path &&
-              (repoPreferredDiffArea[file.path] ?? file.area) === file.area;
-            const filename = file.path.split("/").pop() ?? file.path;
-            const icon = diffStripIconResolver.resolveIcon("file-tree-icon-file", file.path);
+              repoSelectedPath === file.relativePath &&
+              (repoPreferredDiffArea[file.relativePath] ?? file.area) === file.area;
+            const filename = file.relativePath.split("/").pop() ?? file.relativePath;
+            const icon = diffStripIconResolver.resolveIcon(
+              "file-tree-icon-file",
+              file.relativePath,
+            );
             const iconColor = icon.token ? getBuiltInFileIconColor(icon.token) : undefined;
             const additions = stat?.additions ?? 0;
             const deletions = stat?.deletions ?? 0;
@@ -221,7 +242,7 @@ export default function DiffSummaryPanel({ project, services }: ProjectLayoutCon
 
             return (
               <button
-                key={`${file.area}:${file.path}`}
+                key={`${file.area}:${file.relativePath}`}
                 className={`diff-strip__row${isActive ? " diff-strip__row--active" : ""}`}
                 data-status={file.status}
                 onClick={() => handleFileClick(file)}

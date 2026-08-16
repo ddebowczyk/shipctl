@@ -1,14 +1,14 @@
 import {
   MESSAGE_CONTRACT_SCHEMA_VERSION,
   type BroadcastMessageSubscription,
-  type CapabilityPort,
   type CapabilityPortHandler,
   type DirectedMessageHandler,
   type MessageDeclarations,
-  type MessageEnvelope,
-  type ModuleMessages,
   type ShipctlModule,
 } from "@shipctl/module-api";
+import type {
+  ActivationMessageClient,
+} from "../platform/messages.ts";
 import type {
   FrontendBridgeRegistration,
   RuntimeMessageTransport,
@@ -29,6 +29,7 @@ export interface ModuleMessageHandlers {
 export interface PreparedModuleMessageActivation {
   readonly moduleId: string;
   readonly activationId: string;
+  readonly grants: ReadonlySet<string>;
   readonly registration: FrontendBridgeRegistration;
   readonly handlers: ModuleMessageHandlers;
 }
@@ -96,6 +97,7 @@ export function prepareModuleMessageActivation(
   return {
     moduleId: activation.module.id,
     activationId: activation.activationId,
+    grants: new Set(activation.grants),
     registration: {
       moduleId: activation.module.id,
       activationId: activation.activationId,
@@ -110,45 +112,14 @@ export function prepareModuleMessageActivation(
   };
 }
 
-function envelope(
-  endpoint: string,
-  message: MessageEnvelope["message"],
-  payload: unknown,
-): MessageEnvelope {
-  return {
-    schemaVersion: MESSAGE_CONTRACT_SCHEMA_VERSION,
-    endpoint,
-    message,
-    payload,
-  };
-}
-
-export function createModuleMessages(
+export function createActivationMessageClient(
   bridgeId: string,
   activationId: string,
   transport: RuntimeMessageTransport,
-): ModuleMessages {
+): ActivationMessageClient {
   return {
-    send: (channel, payload) => transport.send(
-      bridgeId,
-      activationId,
-      envelope(channel.id, channel.message, payload),
-    ),
-    publish: (topic, payload) => transport.publish(
-      bridgeId,
-      activationId,
-      envelope(topic.id, topic.message, payload),
-    ),
-    async request<Request, Response>(
-      port: CapabilityPort<Request, Response>,
-      payload: Request,
-    ): Promise<Response> {
-      const response = await transport.request(
-        bridgeId,
-        activationId,
-        envelope(port.id, port.request, payload),
-      );
-      return response.payload as Response;
-    },
+    send: (envelope) => transport.send(bridgeId, activationId, envelope),
+    publish: (envelope) => transport.publish(bridgeId, activationId, envelope),
+    request: (envelope) => transport.request(bridgeId, activationId, envelope),
   };
 }

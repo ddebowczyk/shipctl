@@ -183,6 +183,30 @@ function removeSmokeDependencies(root, manifest) {
       removals.push([node.getFullStart(), node.end]);
       return;
     }
+    if (
+      ts.isVariableStatement(node) &&
+      ts.isSourceFile(node.parent) &&
+      node.declarationList.declarations.some(
+        (declaration) => declaration.initializer
+          ?.getText(parsed)
+          .includes(manifest.frontend.composition_symbol),
+      )
+    ) {
+      removals.push([node.getFullStart(), node.end]);
+      return;
+    }
+    if (
+      node.parent &&
+      ts.isArrayLiteralExpression(node.parent) &&
+      node.getText(parsed).includes(manifest.frontend.composition_symbol)
+    ) {
+      const siblings = node.parent.elements;
+      const index = siblings.indexOf(node);
+      const start = index === 0 ? node.getStart(parsed) : siblings[index - 1].end;
+      const end = index === 0 && siblings.length > 1 ? siblings[1].getStart(parsed) : node.end;
+      removals.push([start, end]);
+      return;
+    }
     ts.forEachChild(node, walk);
   };
   walk(parsed);

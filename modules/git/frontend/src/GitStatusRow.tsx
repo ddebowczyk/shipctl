@@ -5,10 +5,12 @@ import { useGitStore } from "./store";
 export default function GitStatusRow({ project, active, open }: ProjectNavigationContributionProps) {
   const status = useGitStore((s) => s.projectGitStatus[project.path]);
 
-  if (!status?.is_git_repo) return null;
+  if (!status?.isRepository) return null;
 
-  const changeCount = status.staged + status.unstaged + status.untracked;
-  const label = status.branch && status.branch !== "(detached)" ? status.branch : "Files";
+  const changeCount = status.stagedCount + status.unstagedCount + status.untrackedCount;
+  const label = status.branchName && status.branchName !== "(detached)"
+    ? status.branchName
+    : "Files";
 
   return (
     <button
@@ -20,11 +22,11 @@ export default function GitStatusRow({ project, active, open }: ProjectNavigatio
       {changeCount > 0 && (
         <span className="badge">{changeCount}</span>
       )}
-      {(status.ahead > 0 || status.behind > 0) && (
+      {(status.aheadCount > 0 || status.behindCount > 0) && (
         <span className="badge">
-          {status.ahead > 0 && `↑${status.ahead}`}
-          {status.ahead > 0 && status.behind > 0 && " "}
-          {status.behind > 0 && `↓${status.behind}`}
+          {status.aheadCount > 0 && `↑${status.aheadCount}`}
+          {status.aheadCount > 0 && status.behindCount > 0 && " "}
+          {status.behindCount > 0 && `↓${status.behindCount}`}
         </span>
       )}
       {status.dirty && <span className="sidebar-status-dot sidebar-status-dot--attention" />}

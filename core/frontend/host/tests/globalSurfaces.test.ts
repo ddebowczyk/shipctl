@@ -45,14 +45,6 @@ const services = {
     getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
     subscribe: () => () => undefined,
   },
-  globalData: {
-    read: async () => undefined,
-    replace: async () => undefined,
-  },
-  projectData: {
-    read: async () => undefined,
-    replace: async () => undefined,
-  },
   terminalSessions: {
     list: () => [],
     getDimensions: () => ({ columns: 80, rows: 24 }),
@@ -194,6 +186,7 @@ test("an unknown or disabled surface renders a recoverable host state", () => {
     surfaceId: "fixture.disabled",
     close: () => undefined,
     services,
+    moduleActivations: new Map(),
   }));
   assert.match(markup, /Surface unavailable/);
   assert.match(markup, /fixture.disabled is not registered in this build/);

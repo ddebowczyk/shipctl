@@ -1,0 +1,292 @@
+---
+$schema: ../schema/phase.v1.schema.yaml
+schema_version: phase/v1
+id: phase-c
+title: Cordis static application composition
+status: complete
+source: docs/4-layer-architecture/08-phase-c-cordis-static-composition.md
+depends_on: [phase-a, phase-b]
+semantics:
+  - id: SEM-C-001
+    kind: MUST
+    rule: >-
+      The application host creates one Shipctl Cordis root and one child context
+      for each plugin activation.
+  - id: SEM-C-002
+    kind: MUST
+    rule: >-
+      Every service, controller, contribution, subscription, timer, worker,
+      connection, style, lease, and task is owned by its activation.
+  - id: SEM-C-003
+    kind: MUST-NOT
+    rule: A failed activation must not publish a contribution or service.
+  - id: SEM-C-004
+    kind: MUST
+    rule: >-
+      Disposal is idempotent and removes exactly the disposed activation
+      effects.
+  - id: SEM-C-005
+    kind: MUST-NOT
+    rule: >-
+      Cordis implementation details must not escape the Shipctl runtime adapter.
+  - id: SEM-C-006
+    kind: MUST
+    rule: >-
+      Static Cordis composition preserves accepted service, contribution, and
+      user behavior from legacy composition.
+  - id: SEM-C-007
+    kind: MUST
+    rule: >-
+      Package import stays passive and only the supervisor starts activation.
+  - id: SEM-C-008
+    kind: MUST
+    rule: >-
+      A valid plugin may provide and consume services and own background effects
+      without React or a presentation contribution.
+properties:
+  - id: PROP-C-LIFECYCLE-001
+    claim: >-
+      After each generated lifecycle command, live activation states equal an
+      independent state model.
+    shapes: [state-machine]
+    evidence: [SEM-C-001, SEM-C-003, SEM-C-004]
+    domain:
+      generates: >-
+        Distinct instances, readiness, failure before and after effects,
+        replacement, repeated disposal, and invalid commands.
+      excludes: [artifact import, native process failure]
+      strategy: Generate commands from modeled activation state.
+      classifications: [preparing, active, failed, replaced, disposed, denied]
+    preconditions:
+      - Valid-branch commands obey activation identity rules.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A pure map models absent, preparing, active, failed, and disposed.
+        independence: The model does not import Cordis or runtime code.
+      alternative:
+        kind: reference
+        description: Compare normalized events with a reviewed transition table.
+        independence: >-
+          The transition table is specification data, not runtime code.
+    failure_value: >-
+      A failed candidate remains active or replaces the old activation.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.cordis-lifecycle.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-C-LEGACY-LIFECYCLE]
+  - id: PROP-C-EFFECTS-001
+    claim: >-
+      Live effects equal modeled effects for active instances and include no
+      effect owned by a failed or disposed activation.
+    shapes: [conservation]
+    evidence: [SEM-C-002, SEM-C-003, SEM-C-004]
+    domain:
+      generates: >-
+        Contributions, subscriptions, timers, styles, leases, and background
+        tasks with synchronous and asynchronous cleanup.
+      excludes: [external cleanup that the fixture cannot observe]
+      strategy: >-
+        Generate uniquely identified acquisitions and lifecycle commands.
+      classifications:
+        - active-owner
+        - failed-owner
+        - disposed-owner
+        - async-cleanup
+    preconditions:
+      - Every effect exposes independent acquisition and release probes.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A command model predicts the multiset of owner-effect pairs.
+        independence: >-
+          Probes and expected pairs do not use Cordis effect storage.
+      alternative:
+        kind: invariant
+        description: >-
+          Unique effect-family canaries must all be absent after quiescence.
+        independence: Canaries are observed through external effect boundaries.
+    failure_value: >-
+      Replacement leaves an old repository watcher or stylesheet active.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.cordis-effect-conservation.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-C-LEGACY-LIFECYCLE]
+  - id: PROP-C-STATIC-PARITY-001
+    claim: >-
+      Legacy and Cordis composition publish equal normalized catalogs in
+      declared order for every supported generated module set.
+    shapes: [differential]
+    evidence: [SEM-C-006]
+    domain:
+      generates: >-
+        Unique and conflicting contribution IDs from every current family.
+      excludes: [runtime artifacts, live replacement]
+      strategy: Build both roots from the same generated declarations.
+      classifications: [unique, accepted-conflict, rejected-conflict]
+    preconditions:
+      - Both paths receive the same module and host declarations.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare separately built normalized legacy and Cordis snapshots.
+        independence: Normalization removes only generated activation identity.
+      alternative:
+        kind: reference
+        description: >-
+          Compare the candidate with a reviewed packaged-app inventory.
+        independence: The golden inventory is captured outside both builders.
+    failure_value: >-
+      Moving assistants drops a project action while its panel tests pass.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.static-cordis-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-C-LEGACY-LIFECYCLE]
+  - id: PROP-C-DISPOSE-001
+    claim: >-
+      Disposing an activation one or more times has the same final effect and
+      catalog state as disposing it once.
+    shapes: [idempotency]
+    evidence: [SEM-C-004]
+    domain:
+      generates: >-
+        Active, failed, partially prepared, and already disposed activations.
+      excludes: [process termination policy]
+      strategy: Generate a lifecycle prefix followed by repeated disposal.
+      classifications: [active, failed, partial, already-disposed]
+    preconditions: []
+    oracle:
+      primary:
+        kind: metamorphic
+        description: Compare normalized state after one and repeated disposal.
+        independence: >-
+          The comparison uses only public effect and catalog records.
+      alternative:
+        kind: invariant
+        description: >-
+          Assert one release count for each acquired owner-effect pair.
+        independence: Release counters live outside disposal implementation.
+    failure_value: >-
+      A second cleanup removes a newer activation contribution after ID reuse.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.cordis-dispose.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-C-LEGACY-LIFECYCLE]
+  - id: PROP-C-ROLE-001
+    claim: >-
+      Headless, presentation, and compound plugins preserve exactly their
+      services, effects, and optional contributions across activation and
+      disposal.
+    shapes: [conservation]
+    evidence: [SEM-C-002, SEM-C-003, SEM-C-004, SEM-C-008]
+    domain:
+      generates: >-
+        Providers, consumers, timers, subscriptions, commands, and optional
+        React contribution fixtures.
+      excludes: [artifact loading]
+      strategy: >-
+        Generate role-independent definitions, then vary optional presentation.
+      classifications: [headless, presentation, compound, readiness-failure]
+    preconditions:
+      - Services exist unless the case explicitly tests readiness failure.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          Derive expected owned entities directly from the generated definition.
+        independence: >-
+          The definition model does not inspect React or runtime code.
+      alternative:
+        kind: reference
+        description: >-
+          Compare DOM-free and browser harness service and effect ledgers.
+        independence: The two harnesses use separate environment boundaries.
+    failure_value: >-
+      A headless plugin is rejected or compound disposal leaves its controller.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.cordis-plugin-role.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-C-LEGACY-LIFECYCLE]
+  - id: PROP-C-BOUNDARY-001
+    claim: >-
+      Plugin imports are passive and plugin code uses only the Shipctl runtime
+      contract, with no observable Cordis implementation value or direct
+      lifecycle authority.
+    shapes: [safety]
+    evidence: [SEM-C-005, SEM-C-007]
+    domain:
+      generates: >-
+        Plugin entrypoints with valid public runtime use or one injected Cordis
+        import, top-level effect, or direct lifecycle operation.
+      excludes: [explicit supervisor activation]
+      strategy: Mutate one boundary edge in an otherwise valid fixture plugin.
+      classifications:
+        - valid
+        - cordis-import
+        - cordis-value
+        - top-level-effect
+        - lifecycle-bypass
+    preconditions:
+      - The fixture is a syntactically valid ECMAScript module.
+    oracle:
+      primary:
+        kind: invariant
+        description: >-
+          Import tripwires and the source graph expose forbidden effects and
+          dependency edges.
+        independence: >-
+          The probes and graph rules do not execute the runtime adapter.
+      alternative:
+        kind: reference
+        description: >-
+          Import the plugin in a fresh process with only public context fakes.
+        independence: The process harness has no Cordis package binding.
+    failure_value: >-
+      A plugin imports Cordis directly or activates itself during package load.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.cordis-boundary.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-C-LEGACY-LIFECYCLE]
+deliverables:
+  - A Shipctl-owned adapter over the pinned Cordis public API.
+  - Static activation identities and complete effect ownership.
+  - A headless conformance fixture and commands compound pilot.
+deletion_gates:
+  - id: DELETE-C-LEGACY-LIFECYCLE
+    condition: >-
+      Every built-in uses the Cordis coordinator and parity properties pass.
+    removes:
+      - Legacy activateModules helpers and direct lifecycle calls.

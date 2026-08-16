@@ -12,9 +12,11 @@ import { createServer, type ViteDevServer } from "vite";
 import type { CommandConfig, CommandState } from "../src/types.ts";
 
 type CommandsModule = typeof import("../src/index.ts");
+type CommandsDataModule = typeof import("../src/commandsDataClient.ts");
 
 let vite: ViteDevServer;
 let commands: CommandsModule;
+let commandsData: CommandsDataModule;
 
 before(async () => {
   vite = await createServer({
@@ -26,6 +28,9 @@ before(async () => {
   commands = await vite.ssrLoadModule(
     "/modules/commands/frontend/src/index.ts",
   ) as CommandsModule;
+  commandsData = await vite.ssrLoadModule(
+    "/modules/commands/frontend/src/commandsDataClient.ts",
+  ) as CommandsDataModule;
 });
 
 after(async () => {
@@ -34,6 +39,7 @@ after(async () => {
 
 beforeEach(() => {
   commands.useCommandsStore.setState({ projectCommands: {} });
+  commandsData.configureCommandsDataClient(null);
 });
 
 const command = (overrides: Partial<CommandConfig> = {}): CommandConfig => ({
@@ -61,19 +67,6 @@ function fixtureServices(options: {
     appearance: {
       getSnapshot: () => ({ themeId: "fixture", background: "#000" }),
       subscribe: () => () => undefined,
-    },
-    globalData: {
-      read: async () => undefined,
-      replace: async () => undefined,
-    },
-    projectData: {
-      read: async (projectPath, capabilityId) => {
-        calls.push(["read", projectPath, capabilityId]);
-        return options.data;
-      },
-      replace: async (projectPath, capabilityId, value) => {
-        calls.push(["replace", projectPath, capabilityId, value]);
-      },
     },
     terminalSessions: {
       list: () => options.sessions ?? [],
@@ -129,6 +122,16 @@ function fixtureServices(options: {
     },
     externalLinks: { open: async () => undefined },
   } satisfies ModuleHostServices;
+  commandsData.configureCommandsDataClient({
+    read: async (projectPath) => {
+      calls.push(["read", projectPath]);
+      return (options.data ?? null) as never;
+    },
+    replace: async (projectPath, value) => {
+      calls.push(["replace", projectPath, value]);
+    },
+    forget: () => undefined,
+  });
   return {
     calls,
     services,

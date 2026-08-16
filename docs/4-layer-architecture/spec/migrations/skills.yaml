@@ -1,0 +1,39 @@
+---
+$schema: ../schema/module-disposition.v1.schema.yaml
+schema_version: module-disposition/v1
+id: skills
+status: migrating
+source_manifest: modules/skills/module.yaml
+current:
+  frontend: modules/skills/frontend
+  backend_crates:
+    - modules/skills/backend
+  host_crates:
+    - modules/skills/host
+  direct_tauri: false
+  static_activation: true
+target:
+  roles: [compound]
+  responsibilities:
+    - Implement skill discovery and installation workflow policy in TypeScript.
+    - Publish skill management views and commands as typed contributions.
+  capabilities:
+    - skill-installation
+    - plugin-data
+    - workspace
+phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
+prerequisites:
+  - Characterize skill discovery, installation, removal, and error behavior.
+compatibility_paths:
+  - Route existing feature calls through the skill installation client.
+  - Keep the built-in module active through the common artifact loader.
+deletion_gates:
+  - id: DELETE-D-NATIVE-MODULE
+    proof_ids: [PROP-D-PARITY-001, PROP-D-AUTHORITY-001]
+    targets:
+      - modules/skills/backend
+      - modules/skills/host
+  - id: DELETE-E-STATIC-IMPORT
+    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    targets:
+      - modules/skills/frontend/src/index.ts

@@ -1,0 +1,40 @@
+---
+$schema: ../schema/module-disposition.v1.schema.yaml
+schema_version: module-disposition/v1
+id: git
+status: migrating
+source_manifest: modules/git/module.yaml
+current:
+  frontend: modules/git/frontend
+  backend_crates:
+    - modules/git/backend
+  host_crates:
+    - modules/git/host
+  direct_tauri: false
+  static_activation: true
+target:
+  roles: [compound]
+  responsibilities:
+    - Implement Git workflow policy in TypeScript plugin application logic.
+    - Publish Git views and actions through typed contributions.
+  capabilities:
+    - git
+    - workspace
+phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
+prerequisites:
+  - Characterize repository, worktree, branch, diff, stage, and commit behavior.
+compatibility_paths:
+  - >-
+    Current frontend calls use the typed Git capability client over the
+    transitional trusted Tauri adapter.
+  - Keep the built-in module on the common activation path until externalized.
+deletion_gates:
+  - id: DELETE-D-NATIVE-MODULE
+    proof_ids: [PROP-D-PARITY-001, PROP-D-AUTHORITY-001]
+    targets:
+      - modules/git/backend
+      - modules/git/host
+  - id: DELETE-E-STATIC-IMPORT
+    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    targets:
+      - modules/git/frontend/src/index.ts

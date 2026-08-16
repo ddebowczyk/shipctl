@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { deletePiApiKey, getPiConfig, savePiApiKey, savePiSettings } from "./client";
+import { getPiConfig, savePiSettings } from "./client";
+import type { PiCredentialClient } from "./credentialStoreClient";
 import type { PiConfig, PiSettings } from "./types";
 
 const DEFAULT_CONFIG: PiConfig = {
@@ -14,8 +15,8 @@ interface PiConfigStore {
   error: string | null;
   loadConfig: () => Promise<void>;
   updateSettings: (patch: Partial<PiSettings>) => Promise<void>;
-  setApiKey: (provider: string, apiKey: string) => Promise<void>;
-  removeApiKey: (provider: string) => Promise<void>;
+  setApiKey: (provider: string, apiKey: string, client: PiCredentialClient) => Promise<void>;
+  removeApiKey: (provider: string, client: PiCredentialClient) => Promise<void>;
 }
 
 export const usePiConfigStore = create<PiConfigStore>((set, get) => ({
@@ -57,10 +58,10 @@ export const usePiConfigStore = create<PiConfigStore>((set, get) => ({
     }
   },
 
-  setApiKey: async (provider, apiKey) => {
+  setApiKey: async (provider, apiKey, client) => {
     set({ isSaving: true });
     try {
-      await savePiApiKey(provider, apiKey);
+      await client.saveApiKey(provider, apiKey);
       const prev = get().config;
       const configured = prev.configuredProviders.includes(provider)
         ? prev.configuredProviders
@@ -76,10 +77,10 @@ export const usePiConfigStore = create<PiConfigStore>((set, get) => ({
     }
   },
 
-  removeApiKey: async (provider) => {
+  removeApiKey: async (provider, client) => {
     set({ isSaving: true });
     try {
-      await deletePiApiKey(provider);
+      await client.deleteApiKey(provider);
       const prev = get().config;
       set({
         config: {

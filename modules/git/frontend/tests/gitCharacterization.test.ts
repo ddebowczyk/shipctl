@@ -1,110 +1,65 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { after, before, beforeEach, test } from "node:test";
+import { readFileSync, readdirSync } from "node:fs";
+import { after, afterEach, before, beforeEach, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createServer, type Plugin, type ViteDevServer } from "vite";
+import { createServer, type ViteDevServer } from "vite";
 
-import type { ModuleHostServices } from "@shipctl/module-api";
 import type {
-  GitStatus,
-  WorktreeEntry,
-} from "../src/types.ts";
+  GitRepositoryStatus,
+  GitWorktree,
+  ModuleActivationContext,
+  ModuleHostServices,
+} from "@shipctl/module-api";
 
 type GitStoreModule = typeof import("../src/store.ts");
 type GitPanelStoreModule = typeof import("../src/panelStore.ts");
 type GitFrontendModule = typeof import("../src/index.ts");
-
-interface NativeMock {
-  gitStatus(repoPath: string): Promise<GitStatus>;
-  gitListWorktrees(repoPath: string): Promise<WorktreeEntry[]>;
-}
-
-const virtualNativeId = "\0git-native-characterization";
-const nativeGlobal = globalThis as typeof globalThis & {
-  __shipctlGitNativeMock: NativeMock;
-};
-
-const nativePlugin: Plugin = {
-  name: "git-native-characterization",
-  enforce: "pre",
-  resolveId(source, importer) {
-    if (source === "./client" && (
-      importer?.endsWith("/modules/git/frontend/src/store.ts")
-      || importer?.endsWith("/modules/git/frontend/src/index.ts")
-    )) {
-      return virtualNativeId;
-    }
-    return null;
-  },
-  load(id) {
-    if (id !== virtualNativeId) return null;
-    return `
-      const native = () => globalThis.__shipctlGitNativeMock;
-      export const gitStatus = (...args) => native().gitStatus(...args);
-      export const gitListWorktrees = (...args) => native().gitListWorktrees(...args);
-    `;
-  },
-};
-
-test("frontend Git calls use the namespaced plugin command surface", () => {
-  const gitClient = readFileSync(
-    fileURLToPath(new URL("../src/client.ts", import.meta.url)),
-    "utf8",
-  );
-  const commands = [
-    "is_git_repo",
-    "git_init",
-    "git_current_branch",
-    "git_list_branches",
-    "git_list_worktrees",
-    "git_create_worktree",
-    "git_status",
-    "git_changed_files",
-    "git_file_diff",
-    "git_file_contents",
-    "git_list_files",
-    "git_switch_branch",
-    "git_create_branch",
-    "git_diff_stats",
-  ];
-
-  for (const command of commands) {
-    assert.match(gitClient, new RegExp(`plugin:shipctl-git\\|${command}`));
-    assert.doesNotMatch(
-      gitClient,
-      new RegExp(`invoke(?:<[^>]+>)?\\(\\s*[\"']${command}[\"']`),
-    );
-  }
-});
+type GitClientModule = typeof import("../src/gitClient.ts");
+type ModuleApi = typeof import("@shipctl/module-api");
+type ModuleApiTesting = typeof import("@shipctl/module-api/testing");
 
 let vite: ViteDevServer;
 let useGitStore: GitStoreModule["useGitStore"];
 let useGitPanelStore: GitPanelStoreModule["useGitPanelStore"];
 let gitModule: GitFrontendModule["gitModule"];
-let implementations: Map<string, () => Promise<GitStatus>>;
-let worktrees: Map<string, WorktreeEntry[]>;
+let gitClientFor: GitClientModule["gitClientFor"];
+let gitService: ModuleApi["gitService"];
+let createFakeGitServiceProvider: ModuleApiTesting["createFakeGitServiceProvider"];
+let createTestActivationIdentity: ModuleApiTesting["createTestActivationIdentity"];
+let SemanticServiceTestHost: ModuleApiTesting["SemanticServiceTestHost"];
+let activations: Array<{ dispose(): Promise<void> }> = [];
 
-function status(overrides: Partial<GitStatus> = {}): GitStatus {
+function status(overrides: Partial<GitRepositoryStatus> = {}): GitRepositoryStatus {
   return {
-    is_git_repo: true,
-    branch: "main",
+    isRepository: true,
+    branchName: "main",
     dirty: false,
-    staged: 0,
-    unstaged: 0,
-    untracked: 0,
-    ahead: 0,
-    behind: 0,
-    worktree_parent: null,
+    stagedCount: 0,
+    unstagedCount: 0,
+    untrackedCount: 0,
+    aheadCount: 0,
+    behindCount: 0,
+    worktreeParentProjectId: null,
     ...overrides,
   };
+}
+
+function activateGit(
+  repositories: Parameters<typeof createFakeGitServiceProvider>[0]["repositories"] = [],
+): ModuleActivationContext {
+  const host = new SemanticServiceTestHost([
+    createFakeGitServiceProvider({ repositories }),
+  ]);
+  const activation = host.activate(createTestActivationIdentity("shipctl.git"));
+  activations.push(activation);
+  return activation.context;
 }
 
 before(async () => {
   vite = await createServer({
     configFile: false,
     optimizeDeps: { noDiscovery: true },
-    plugins: [nativePlugin],
     root: fileURLToPath(new URL("../../../..", import.meta.url)),
     server: { hmr: false, middlewareMode: true },
   });
@@ -117,26 +72,33 @@ before(async () => {
   ({ gitModule } = await vite.ssrLoadModule(
     "/modules/git/frontend/src/index.ts",
   ) as GitFrontendModule);
+  ({ gitClientFor } = await vite.ssrLoadModule(
+    "/modules/git/frontend/src/gitClient.ts",
+  ) as GitClientModule);
+  ({ gitService } = await vite.ssrLoadModule(
+    "/module-api/frontend/src/index.ts",
+  ) as ModuleApi);
+  ({
+    createFakeGitServiceProvider,
+    createTestActivationIdentity,
+    SemanticServiceTestHost,
+  } = await vite.ssrLoadModule(
+    "/module-api/frontend/src/testing.ts",
+  ) as ModuleApiTesting);
 });
 
 after(async () => {
   await vite.close();
-  delete (globalThis as Partial<typeof nativeGlobal>).__shipctlGitNativeMock;
 });
 
 beforeEach(() => {
-  implementations = new Map();
-  worktrees = new Map();
-  nativeGlobal.__shipctlGitNativeMock = {
-    gitStatus(repoPath) {
-      return (implementations.get(repoPath) ?? (async () => status()))();
-    },
-    async gitListWorktrees(repoPath) {
-      return worktrees.get(repoPath) ?? [];
-    },
-  };
+  activations = [];
   useGitStore.setState({ projectGitStatus: {} });
   useGitPanelStore.setState({ perRepo: {} });
+});
+
+afterEach(async () => {
+  for (const activation of activations.reverse()) await activation.dispose();
 });
 
 function services(autoImportWorktrees = true): ModuleHostServices {
@@ -149,14 +111,6 @@ function services(autoImportWorktrees = true): ModuleHostServices {
     appearance: {
       getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
       subscribe: () => () => undefined,
-    },
-    globalData: {
-      read: async () => undefined,
-      replace: async () => undefined,
-    },
-    projectData: {
-      read: async () => undefined,
-      replace: async () => undefined,
     },
     terminalSessions: {
       list: () => [],
@@ -197,6 +151,17 @@ function services(autoImportWorktrees = true): ModuleHostServices {
   };
 }
 
+test("Git module source depends on its semantic contract and not on Tauri", () => {
+  const sourceDirectory = fileURLToPath(new URL("../src", import.meta.url));
+  const source = readdirSync(sourceDirectory, { recursive: true })
+    .filter((entry) => typeof entry === "string" && /\.(?:ts|tsx)$/u.test(entry))
+    .map((entry) => readFileSync(`${sourceDirectory}/${entry}`, "utf8"))
+    .join("\n");
+
+  assert.match(source, /gitService/);
+  assert.doesNotMatch(source, /@tauri-apps\/api|plugin:shipctl-git\||git-fs-changed/);
+});
+
 test("module entry owns every Git contribution and its stable panel shortcut", () => {
   assert.equal(gitModule.id, "shipctl.git");
   assert.deepEqual(gitModule.panels.map(({ id, shortcut }) => ({ id, shortcut })), [
@@ -213,18 +178,21 @@ test("module entry owns every Git contribution and its stable panel shortcut", (
 });
 
 test("module-owned project import preserves main and linked worktree behavior", async () => {
-  const entries: WorktreeEntry[] = [
-    { path: "/repo", branch: "main", is_main: true },
-    { path: "/repo-feature", branch: "feature", is_main: false },
+  const entries: readonly GitWorktree[] = [
+    { projectId: "/repo", branchName: "main", isMain: true },
+    { projectId: "/repo-feature", branchName: "feature", isMain: false },
   ];
-  worktrees.set("/repo", entries);
-  worktrees.set("/repo-feature", entries);
+  const activation = activateGit([
+    { projectId: "/repo", worktrees: entries },
+    { projectId: "/repo-feature", worktrees: entries },
+  ]);
 
   assert.deepEqual(
     await gitModule.projectImport.relatedPaths(
       "/repo",
       { expandRelated: true },
       services(true),
+      activation,
     ),
     ["/repo-feature"],
   );
@@ -233,6 +201,7 @@ test("module-owned project import preserves main and linked worktree behavior", 
       "/repo",
       { expandRelated: true },
       services(false),
+      activation,
     ),
     [],
   );
@@ -241,6 +210,7 @@ test("module-owned project import preserves main and linked worktree behavior", 
       "/repo",
       { expandRelated: false },
       services(true),
+      activation,
     ),
     [],
   );
@@ -249,51 +219,58 @@ test("module-owned project import preserves main and linked worktree behavior", 
       "/repo-feature",
       { expandRelated: false },
       services(false),
+      activation,
     ),
     ["/repo"],
   );
 });
 
 test("batch refresh updates fulfilled projects and preserves failed project snapshots", async () => {
-  const oldBeta = status({ branch: "beta-old", dirty: true });
+  const oldBeta = status({ branchName: "beta-old", dirty: true });
   useGitStore.setState({
     projectGitStatus: {
-      "/alpha": status({ branch: "alpha-old" }),
+      "/alpha": status({ branchName: "alpha-old" }),
       "/beta": oldBeta,
     },
   });
-  implementations.set("/alpha", async () => status({ branch: "alpha-new", ahead: 2 }));
-  implementations.set("/beta", async () => {
-    throw new Error("git unavailable");
-  });
+  const activation = activateGit([
+    { projectId: "/alpha", status: { branchName: "alpha-new", aheadCount: 2 } },
+  ]);
 
-  await useGitStore.getState().refreshAll(["/alpha", "/beta"]);
+  await useGitStore.getState().refreshAll(
+    ["/alpha", "/beta"],
+    gitClientFor(activation),
+  );
 
   assert.deepEqual(useGitStore.getState().projectGitStatus, {
-    "/alpha": status({ branch: "alpha-new", ahead: 2 }),
+    "/alpha": status({ branchName: "alpha-new", aheadCount: 2 }),
     "/beta": oldBeta,
   });
 });
 
 test("single refresh failures are silent and equal snapshots retain store identity", async () => {
-  const original = status({ branch: "main", untracked: 1 });
+  const original = status({ branchName: "main", untrackedCount: 1 });
   useGitStore.setState({ projectGitStatus: { "/repo": original } });
-  implementations.set("/repo", async () => {
-    throw new Error("temporary failure");
-  });
+  const missingActivation = activateGit([]);
 
-  await useGitStore.getState().refreshStatus("/repo");
+  await useGitStore.getState().refreshStatus(
+    "/repo",
+    gitClientFor(missingActivation),
+  );
   assert.equal(useGitStore.getState().projectGitStatus["/repo"], original);
 
-  implementations.set("/repo", async () => ({ ...original }));
+  const equalActivation = activateGit([{ projectId: "/repo", status: original }]);
   const beforeState = useGitStore.getState();
-  await useGitStore.getState().refreshAll(["/repo"]);
+  await useGitStore.getState().refreshAll(
+    ["/repo"],
+    gitClientFor(equalActivation),
+  );
   assert.equal(useGitStore.getState(), beforeState);
 });
 
 test("project removal evicts only the requested Git status snapshot", () => {
-  const alpha = status({ branch: "alpha" });
-  const beta = status({ branch: "beta" });
+  const alpha = status({ branchName: "alpha" });
+  const beta = status({ branchName: "beta" });
   useGitStore.setState({ projectGitStatus: { "/alpha": alpha, "/beta": beta } });
 
   useGitStore.getState().removeProject("/alpha");
@@ -301,18 +278,29 @@ test("project removal evicts only the requested Git status snapshot", () => {
   assert.deepEqual(useGitStore.getState().projectGitStatus, { "/beta": beta });
 });
 
-test("module lifecycle owns project refresh, filesystem refresh, and removal", async () => {
-  implementations.set("/alpha", async () => status({ branch: "alpha" }));
-  implementations.set("/beta", async () => status({ branch: "beta", dirty: true }));
+test("module lifecycle uses the exact activation for refresh and owns removal", async () => {
+  const activation = activateGit([
+    { projectId: "/alpha", status: { branchName: "alpha" } },
+    { projectId: "/beta", status: { branchName: "beta", dirty: true } },
+  ]);
 
-  await gitModule.projectLifecycle.onProjectsChanged(["/alpha"]);
-  await gitModule.projectLifecycle.onFilesystemChanged(["/beta"]);
-  assert.equal(useGitStore.getState().projectGitStatus["/alpha"].branch, "alpha");
+  await gitModule.projectLifecycle.onProjectsChanged(
+    ["/alpha"],
+    services(),
+    activation,
+  );
+  await gitModule.projectLifecycle.onFilesystemChanged(
+    ["/beta"],
+    services(),
+    activation,
+  );
+  assert.equal(useGitStore.getState().projectGitStatus["/alpha"].branchName, "alpha");
   assert.equal(useGitStore.getState().projectGitStatus["/beta"].dirty, true);
 
-  gitModule.projectLifecycle.onProjectRemoved("/alpha");
+  gitModule.projectLifecycle.onProjectRemoved("/alpha", services(), activation);
   assert.equal(useGitStore.getState().projectGitStatus["/alpha"], undefined);
-  assert.equal(useGitStore.getState().projectGitStatus["/beta"].branch, "beta");
+  assert.equal(useGitStore.getState().projectGitStatus["/beta"].branchName, "beta");
+  assert.equal(activation.services.require(gitService).inspectStatus.policy.retry.kind, "never");
 });
 
 test("generic host project chrome has no direct Git state dependency", () => {

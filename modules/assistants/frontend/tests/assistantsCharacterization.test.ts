@@ -45,14 +45,6 @@ function fixtureServices() {
       getSnapshot: () => ({ themeId: "fixture", background: "#000" }),
       subscribe: () => () => undefined,
     },
-    globalData: {
-      read: async () => undefined,
-      replace: async () => undefined,
-    },
-    projectData: {
-      read: async () => undefined,
-      replace: async () => undefined,
-    },
     terminalSessions: {
       list: () => [],
       getDimensions: () => ({ columns: 132, rows: 42 }),
@@ -130,7 +122,7 @@ test("module identity and launcher migration metadata remain stable", () => {
   assert.equal(assistants.assistantsModule.panels[0].newSession.label, "Agent");
 });
 
-test("provider discovery and Pi settings are namespaced to the Assistants native module", () => {
+test("provider discovery and Pi settings remain on the transitional Assistants commands", () => {
   const client = readFileSync(
     fileURLToPath(new URL("../src/client.ts", import.meta.url)),
     "utf8",
@@ -138,10 +130,16 @@ test("provider discovery and Pi settings are namespaced to the Assistants native
   assert.match(client, /assistantCommand\("get_models_for_provider"\)/);
   assert.match(client, /assistantCommand\("get_pi_config"\)/);
   assert.match(client, /assistantCommand\("save_pi_settings"\)/);
-  assert.match(client, /assistantCommand\("save_pi_api_key"\)/);
-  assert.match(client, /assistantCommand\("delete_pi_api_key"\)/);
+  assert.doesNotMatch(client, /save_pi_api_key|delete_pi_api_key/);
   assert.doesNotMatch(client, /invoke\("get_models_for_provider"/);
   assert.doesNotMatch(client, /invoke\("(?:get|save|delete)_pi_/);
+
+  const credentials = readFileSync(
+    fileURLToPath(new URL("../src/credentialStoreClient.ts", import.meta.url)),
+    "utf8",
+  );
+  assert.match(credentials, /activation\.services\.require\(credentialStoreService\)/);
+  assert.doesNotMatch(credentials, /@tauri-apps|invoke|Keychain|security/);
 });
 
 test("the provider catalogue preserves commands and exact launch flags", () => {

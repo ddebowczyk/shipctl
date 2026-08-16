@@ -1,6 +1,7 @@
 ---
 schema_version: 1
 active:
+  architecture: architecture
   test: test
   check: check
   build: build

@@ -1,7 +1,22 @@
-import type { MessageTypeId } from "./messages";
+import { defineSemanticService } from "./semanticServices.ts";
+import type {
+  BroadcastTopic,
+  DirectedChannel,
+  MessageTypeId,
+} from "./messages.ts";
+import type {
+  SemanticEventSource,
+  SemanticOwnedLease,
+  SemanticRequestOperation,
+  SemanticRequestOptions,
+  SemanticRequestOutcome,
+  SemanticRequestPolicy,
+} from "./semanticServices.ts";
 
 export const SCHEDULE_SCHEMA_VERSION = 1 as const;
 export const SCHEDULE_INSPECTION_SCHEMA_VERSION = 1 as const;
+export const SCHEDULER_SERVICE_SCHEMA_VERSION = 1 as const;
+export const SCHEDULER_REGISTER_GRANT = "schedule.register" as const;
 
 export const SCHEDULE_DIAGNOSTIC_CODES = {
   sourcePathUnsafe: "scheduler.source.path_unsafe",
@@ -29,6 +44,21 @@ export const SCHEDULE_DIAGNOSTIC_CODES = {
 export type ScheduleDiagnosticCode =
   (typeof SCHEDULE_DIAGNOSTIC_CODES)[keyof typeof SCHEDULE_DIAGNOSTIC_CODES];
 
+export const SCHEDULER_SERVICE_ERROR_CODES = {
+  invalidRequest: "scheduler.request.invalid",
+  cancelled: "scheduler.request.cancelled",
+  activationDisposed: "scheduler.activation.disposed",
+  denied: "scheduler.activation.denied",
+  conflict: "scheduler.registration.conflict",
+  unavailable: "scheduler.service.unavailable",
+  transportFailed: "scheduler.transport.failed",
+  invalidResponse: "scheduler.response.invalid",
+} as const;
+
+export type SchedulerServiceErrorCode =
+  | ScheduleDiagnosticCode
+  | (typeof SCHEDULER_SERVICE_ERROR_CODES)[keyof typeof SCHEDULER_SERVICE_ERROR_CODES];
+
 export type ScheduleTargetKind = "channel" | "topic";
 export type ScheduleTargetAvailability = "unknown" | "available" | "unavailable";
 export type ScheduleDeliveryOutcome = "delivered" | "failed";
@@ -38,6 +68,79 @@ export interface ScheduleTarget {
   readonly kind: ScheduleTargetKind;
   readonly id: string;
 }
+
+/** A schedule can target only one declared typed message endpoint. */
+export type ScheduleRegistrationTarget<Payload> =
+  | {
+      readonly kind: "channel";
+      readonly endpoint: DirectedChannel<Payload>;
+    }
+  | {
+      readonly kind: "topic";
+      readonly endpoint: BroadcastTopic<Payload>;
+    };
+
+export interface RegisterScheduleInput<Payload> {
+  readonly scheduleId: string;
+  /** Five-field cron expression followed by one explicit IANA timezone. */
+  readonly cron: string;
+  readonly target: ScheduleRegistrationTarget<Payload>;
+  readonly payload: Payload;
+}
+
+export interface ScheduleLeaseInspection {
+  readonly schemaVersion: typeof SCHEDULER_SERVICE_SCHEMA_VERSION;
+  readonly leaseId: string;
+  readonly ownerModuleId: string;
+  readonly ownerActivationId: string;
+  readonly scheduleId: string;
+  readonly definitionDigestSha256: string;
+  readonly registeredAtUnixMs: number;
+}
+
+export interface ScheduleLease extends SemanticOwnedLease {
+  readonly scheduleId: string;
+  readonly inspection: ScheduleLeaseInspection;
+}
+
+export interface RegisterScheduleOperation {
+  readonly policy: SemanticRequestPolicy;
+  execute<Payload>(
+    input: RegisterScheduleInput<Payload>,
+    options?: SemanticRequestOptions,
+  ): Promise<SemanticRequestOutcome<ScheduleLease, SchedulerServiceErrorCode>>;
+}
+
+export interface InspectSchedulesInput {
+  readonly owner: "activation";
+}
+
+export interface ScheduledDeliveryEvent {
+  readonly scheduleId: string;
+  readonly occurrenceUtc: string;
+  readonly outcome: ScheduleDeliveryOutcome;
+  readonly routeGeneration: number;
+  readonly diagnostic?: ScheduleDiagnostic;
+}
+
+export interface SchedulerService {
+  readonly registerSchedule: RegisterScheduleOperation;
+  readonly inspectSchedules: SemanticRequestOperation<
+    InspectSchedulesInput,
+    readonly ScheduleLeaseInspection[],
+    SchedulerServiceErrorCode
+  >;
+  readonly observeDelivery: SemanticEventSource<
+    InspectSchedulesInput,
+    ScheduledDeliveryEvent
+  >;
+}
+
+/** Activation-owned access to host clocks, schedule persistence, and delivery. */
+export const schedulerService = defineSemanticService<SchedulerService>(
+  "shipctl.scheduler",
+  1,
+);
 
 export interface ScheduleDiagnostic {
   readonly schemaVersion: typeof SCHEDULE_INSPECTION_SCHEMA_VERSION;

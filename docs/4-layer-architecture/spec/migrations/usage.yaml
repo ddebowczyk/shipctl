@@ -1,0 +1,53 @@
+---
+$schema: ../schema/module-disposition.v1.schema.yaml
+schema_version: module-disposition/v1
+id: usage
+status: migrating
+source_manifest: modules/usage/module.yaml
+current:
+  frontend: modules/usage/frontend
+  backend_crates:
+    - modules/usage/backend
+  host_crates:
+    - modules/usage/host
+  direct_tauri: false
+  static_activation: true
+target:
+  roles: [compound]
+  responsibilities:
+    - Implement usage ingestion and presentation policy in TypeScript.
+    - Publish usage views, schedules, commands, and message handlers.
+  capabilities:
+    - usage-sources
+    - credential-store
+    - plugin-data
+    - scheduler
+    - messages
+    - workspace
+phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
+prerequisites:
+  - Characterize ingestion, alias review, refresh, and message behavior.
+  - Separate usage source access from aggregation and presentation policy.
+compatibility_paths:
+  - >-
+    Preserve usage.ingest-completed while source-change observation moves to
+    the semantic Usage Sources event.
+  - >-
+    Keep the current native overview query behind an explicit
+    legacy-overview-projection until Phase D moves aggregation policy to
+    TypeScript.
+  - Route persistence and secrets through typed capability clients.
+deletion_gates:
+  - id: DELETE-D-NATIVE-MODULE
+    proof_ids: [PROP-D-PARITY-001, PROP-D-AUTHORITY-001]
+    targets:
+      - modules/usage/backend
+      - modules/usage/host
+  - id: DELETE-E-STATIC-IMPORT
+    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    targets:
+      - modules/usage/frontend/src/index.ts
+  - id: DELETE-F-RESTART-LIFECYCLE
+    proof_ids: [PROP-F-SERVICE-001, PROP-F-RESTART-001]
+    targets:
+      - modules/usage/frontend/src/activation.ts

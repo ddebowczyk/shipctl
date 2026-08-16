@@ -1,13 +1,21 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  ACTIVATION_TERMINAL_SESSIONS,
   terminalHostAdapter,
   terminalPresentationRegistry,
 } from "../terminal-host/index.ts";
 import {
+  activateStaticPluginsObserved,
+  createModuleActivationIdentity,
+  SemanticServiceRegistry,
+} from "../runtime/index.ts";
+import {
   terminalDriverId,
   type CommandContribution,
   type ContributionId,
+  type ModuleActivationContext,
+  type ModuleId,
   type PanelContribution,
   type TerminalDriverId,
   type TerminalHostDescriptor,
@@ -38,6 +46,18 @@ import {
   openInEditor,
   setLastRepoPath,
   shutdownAndQuit,
+  createGitServiceProvider,
+  createProcessesServiceProvider,
+  createProjectDocumentsServiceProvider,
+  createSkillInstallationServiceProvider,
+  createCredentialStoreServiceProvider,
+  createUsageSourcesServiceProvider,
+  createPluginDataServiceProvider,
+  createMessagesServiceProvider,
+  createSchedulerServiceProvider,
+  createSemanticTerminalsServiceProvider,
+  createTerminalSessionsServiceProvider,
+  observeUsageSourceMessageFrame,
 } from "../platform/index.ts";
 import { useThemeStore } from "../appearance/index.ts";
 import { useEditorStore } from "../settings/index.ts";
@@ -46,8 +66,6 @@ import { initNotifications } from "../terminal-host/index.ts";
 import { getErrorMessage } from "../platform/index.ts";
 import { useNoticeStore } from "../shared/index.ts";
 import {
-  activateModules,
-  activateModulesWithMessagesObserved,
   bindTerminalSessionDimensions,
   createEnabledCanvasSurfaceCatalog,
   MODULE_HOST_SERVICES,
@@ -60,6 +78,7 @@ import {
   openModuleMessageBridge,
   loadRestartBoundModules,
   publishFrontendRuntimeSnapshot,
+  type ShipctlModule,
   type StartupModuleRuntimeSnapshot,
 } from "../host/index.ts";
 import {
@@ -87,14 +106,30 @@ const MODULE_PANEL_CONTRIBUTIONS = CANVAS_SURFACE_CATALOG.panels()
   .filter((panel) => panel.moduleId !== "core");
 const GLOBAL_NAVIGATION = CANVAS_SURFACE_CATALOG.globalNavigation();
 const TERMINAL_PRESENTATION_REGISTRY = terminalPresentationRegistry(ENABLED_MODULES);
+const SEMANTIC_SERVICE_PROVIDERS = [
+  createGitServiceProvider(),
+  createProcessesServiceProvider(),
+  createProjectDocumentsServiceProvider(),
+  createSkillInstallationServiceProvider(),
+  createCredentialStoreServiceProvider(),
+  createUsageSourcesServiceProvider(),
+  createPluginDataServiceProvider(),
+];
+const SEMANTIC_SERVICES = new SemanticServiceRegistry(SEMANTIC_SERVICE_PROVIDERS);
+const CORE_ACTIVATION = SEMANTIC_SERVICES.activate(
+  createModuleActivationIdentity("core", "host"),
+).context;
+const CORE_MODULE_ACTIVATIONS: ReadonlyMap<ModuleId, ModuleActivationContext> = new Map([
+  ["core", CORE_ACTIVATION],
+]);
 const SEMANTIC_TERMINAL_DRIVER_ID = terminalDriverId("semantic-terminal");
 const DEFAULT_TERMINAL_DIMENSIONS = { cols: 80, rows: 24 } as const;
-const CANVAS_PORTS: CanvasPorts = {
-  surfaceCatalog: CANVAS_SURFACE_CATALOG,
-  terminalHost: terminalHostAdapter,
-  terminalPresentationRegistry: TERMINAL_PRESENTATION_REGISTRY,
-  moduleHostServices: MODULE_HOST_SERVICES,
-};
+
+function withCoreActivation(
+  activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
+): ReadonlyMap<ModuleId, ModuleActivationContext> {
+  return new Map([["core", CORE_ACTIVATION], ...activations]);
+}
 
 function terminalSlotDescriptor(terminalId: TerminalId): TerminalHostDescriptor {
   const descriptor = TERMINAL_CLIENT_RUNTIME.descriptor(terminalId);
@@ -130,6 +165,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   const durableUiStateRef = useRef<UiState | null>(null);
   const [durableUiStateLoaded, setDurableUiStateLoaded] = useState(false);
   const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
+  const [moduleActivations, setModuleActivations] = useState(CORE_MODULE_ACTIVATIONS);
   const lastTabCycleAtRef = useRef(0);
 
   const handleSelectRepo = useCallback(
@@ -141,7 +177,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         await openRepo(repoPath);
         initialProjectAttemptedRef.current = true;
         durableUiStateRef.current = await setLastRepoPath(repoPath);
-        await notifyModulesProjectOpened(repoPath, MODULE_HOST_SERVICES);
+        await notifyModulesProjectOpened(repoPath, MODULE_HOST_SERVICES, moduleActivations);
         return true;
       } catch (error) {
         pushNotice({
@@ -152,7 +188,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         return false;
       }
     },
-    [activeRepoPath, openRepo, pushNotice],
+    [activeRepoPath, moduleActivations, openRepo, pushNotice],
   );
 
   const {
@@ -212,7 +248,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     () => repos.map((r) => r.path),
     [repos],
   );
-  useProjectWatcher(projectPaths);
+  useProjectWatcher(projectPaths, moduleActivations);
   // Collect only PTY-backed tabs for terminal presentation (panel tabs have no terminal)
   const allTerminalTabs = useMemo(() => {
     const all: Array<{ tab: TerminalTabData; projectPath: string }> = [];
@@ -262,21 +298,33 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
           message: `${failure.code}: ${failure.message}`,
         });
       }
-      const modules = [...ENABLED_MODULES, ...restartBound.modules];
+      const modules: readonly ShipctlModule[] = [
+        ...ENABLED_MODULES,
+        ...restartBound.modules,
+      ];
       let opened: Awaited<ReturnType<typeof openModuleMessageBridge>>;
       try {
-        opened = await openModuleMessageBridge(modules);
+        opened = await openModuleMessageBridge(
+          modules,
+          undefined,
+          undefined,
+          observeUsageSourceMessageFrame,
+        );
       } catch (error) {
         if (disposed) return;
         const modulesWithoutMessages = modules.filter(
-          (module) => !("messages" in module),
+          (module) => !("messages" in module)
+            && (module.scheduledTasks?.length ?? 0) === 0
+            && (module.requiredGrants?.length ?? 0) === 0,
         );
-        const activation = activateModulesWithMessagesObserved(
+        const activation = await activateStaticPluginsObserved(
           MODULE_HOST_SERVICES,
-          new Map(),
           modulesWithoutMessages,
+          new Map(),
+          SEMANTIC_SERVICES,
         );
         deactivate = activation.deactivate;
+        setModuleActivations(withCoreActivation(activation.activationContextsByModule));
         const activeModules = modulesWithoutMessages.filter(
           (module) => activation.activeModuleIds.has(module.id),
         );
@@ -308,12 +356,35 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         return;
       }
       closeBridge = () => opened.bridge.close();
-      const activation = activateModulesWithMessagesObserved(
+      const runtimeSemanticServices = new SemanticServiceRegistry([
+        ...SEMANTIC_SERVICE_PROVIDERS,
+        createMessagesServiceProvider({
+          clientsByActivation: opened.clientsByActivation,
+          deactivateActivation: (activationId) => {
+            opened.bridge.deactivateActivation(activationId);
+          },
+        }),
+        createSchedulerServiceProvider({
+          bindingsByActivation: opened.schedulerBindingsByActivation,
+        }),
+        createTerminalSessionsServiceProvider({
+          bindingsByActivation: opened.terminalBindingsByActivation,
+          runtime: ACTIVATION_TERMINAL_SESSIONS,
+          terminalHost: terminalHostAdapter,
+        }),
+        createSemanticTerminalsServiceProvider({
+          bindingsByActivation: opened.terminalBindingsByActivation,
+          runtime: ACTIVATION_TERMINAL_SESSIONS,
+        }),
+      ]);
+      const activation = await activateStaticPluginsObserved(
         MODULE_HOST_SERVICES,
-        opened.messagesByModule,
         modules,
+        opened.activationIdsByModule,
+        runtimeSemanticServices,
       );
       deactivate = activation.deactivate;
+      setModuleActivations(withCoreActivation(activation.activationContextsByModule));
       const activeModules = modules.filter(
         (module) => activation.activeModuleIds.has(module.id),
       );
@@ -339,10 +410,23 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
             phase: "activation",
           }),
       );
-    })().catch((error) => {
+    })().catch(async (error) => {
       if (disposed) return;
-      deactivate = activateModules(MODULE_HOST_SERVICES, ENABLED_MODULES);
-      void publishFrontendRuntimeSnapshot(ENABLED_MODULES);
+      await deactivate?.();
+      const modulesWithoutMessages = (ENABLED_MODULES as readonly ShipctlModule[]).filter(
+        (module) => !("messages" in module)
+          && (module.scheduledTasks?.length ?? 0) === 0
+          && (module.requiredGrants?.length ?? 0) === 0,
+      );
+      const fallback = await activateStaticPluginsObserved(
+        MODULE_HOST_SERVICES,
+        modulesWithoutMessages,
+        new Map(),
+        SEMANTIC_SERVICES,
+      );
+      deactivate = fallback.deactivate;
+      setModuleActivations(withCoreActivation(fallback.activationContextsByModule));
+      void publishFrontendRuntimeSnapshot(modulesWithoutMessages);
       pushNotice({
         tone: "error",
         title: "Runtime modules could not be inspected",
@@ -363,8 +447,9 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     void notifyModulesProjectsChanged(
       repos.map((repo) => repo.path),
       MODULE_HOST_SERVICES,
+      moduleActivations,
     );
-  }, [repos]);
+  }, [repos, moduleActivations]);
 
   useEffect(() => {
     fetchRepos();
@@ -448,13 +533,17 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     async (repoPath: string) => {
       try {
         useUIStore.getState().closeGlobalSurface();
-        await addRepo(repoPath, MODULE_HOST_SERVICES);
+        await addRepo(repoPath, MODULE_HOST_SERVICES, moduleActivations);
         // addRepo sets activeRepoPath in the repo store, get the canonical path
         const canonicalPath = useRepoStore.getState().activeRepoPath;
         if (!canonicalPath) return;
         initialProjectAttemptedRef.current = true;
         durableUiStateRef.current = await setLastRepoPath(canonicalPath);
-        await notifyModulesProjectOpened(canonicalPath, MODULE_HOST_SERVICES);
+        await notifyModulesProjectOpened(
+          canonicalPath,
+          MODULE_HOST_SERVICES,
+          moduleActivations,
+        );
       } catch (error) {
         pushNotice({
           tone: "error",
@@ -463,7 +552,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         });
       }
     },
-    [addRepo, pushNotice],
+    [addRepo, moduleActivations, pushNotice],
   );
 
   const handleRemoveProject = useCallback(
@@ -478,7 +567,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         await closeProjectTerminals(repoPath);
         await removeRepo(repoPath);
         useTerminalStore.getState().removeProject(repoPath);
-        await notifyModulesProjectRemoved(repoPath, MODULE_HOST_SERVICES);
+        await notifyModulesProjectRemoved(repoPath, MODULE_HOST_SERVICES, moduleActivations);
       } catch (error) {
         pushNotice({
           tone: "error",
@@ -487,7 +576,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         });
       }
     },
-    [closeProjectTerminals, pushNotice, removeRepo],
+    [closeProjectTerminals, moduleActivations, pushNotice, removeRepo],
   );
 
   const handleRenameGroup = useCallback(
@@ -919,6 +1008,12 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     handleSelectSidebarProjectTab,
     handleSelectSidebarTab,
   ]);
+  const canvasPorts = useMemo<CanvasPorts>(() => ({
+    surfaceCatalog: CANVAS_SURFACE_CATALOG,
+    terminalPresentationRegistry: TERMINAL_PRESENTATION_REGISTRY,
+    moduleHostServices: MODULE_HOST_SERVICES,
+    moduleActivations,
+  }), [moduleActivations]);
   return (
     <CanvasAdapterRuntimeProvider adapterId={canvasAdapterId}>
     <div className="app-shell">
@@ -962,7 +1057,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         adapter={canvasAdapter}
         model={canvasModel}
         actions={canvasActions}
-        ports={CANVAS_PORTS}
+        ports={canvasPorts}
       />
     </div>
     </CanvasAdapterRuntimeProvider>

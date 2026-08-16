@@ -1,4 +1,8 @@
-import type { ModuleHostServices, ShipctlModule } from "@shipctl/module-api";
+import {
+  projectDocumentsService,
+  type ModuleHostServices,
+  type ShipctlModule,
+} from "@shipctl/module-api";
 
 import { useTodoStore } from "./store";
 import "./todos.css";
@@ -47,11 +51,17 @@ export const todosModule = {
     },
   ],
   projectLifecycle: {
-    onProjectsChanged(projectPaths, services) {
-      if (enabled(services)) void useTodoStore.getState().refreshAll([...projectPaths]);
+    onProjectsChanged(projectPaths, services, activation) {
+      if (enabled(services)) {
+        const documents = activation.services.require(projectDocumentsService);
+        void useTodoStore.getState().refreshAll(documents, [...projectPaths]);
+      }
     },
-    onFilesystemChanged(projectPaths, services) {
-      if (enabled(services)) void useTodoStore.getState().refreshAll([...projectPaths]);
+    onFilesystemChanged(projectPaths, services, activation) {
+      if (enabled(services)) {
+        const documents = activation.services.require(projectDocumentsService);
+        void useTodoStore.getState().refreshAll(documents, [...projectPaths]);
+      }
     },
     onProjectRemoved(projectPath) {
       useTodoStore.getState().removeProject(projectPath);

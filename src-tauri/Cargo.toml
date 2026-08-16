@@ -21,7 +21,7 @@ path = "src/main.rs"
 [features]
 default = ["todos-module", "ports-module", "skills-module", "git-module", "assistants-module", "usage-module", "semantic-terminal-module"]
 fixture-module = ["dep:shipctl-module-fixture"]
-todos-module = ["dep:shipctl-module-todos"]
+todos-module = ["dep:shipctl-module-todos", "dep:shipctl-module-todos-host"]
 ports-module = ["dep:shipctl-module-ports", "dep:shipctl-module-ports-host"]
 skills-module = ["dep:shipctl-module-skills", "dep:shipctl-module-skills-host"]
 git-module = ["dep:shipctl-module-git", "dep:shipctl-module-git-host"]
@@ -48,6 +48,7 @@ shipctl-tauri-adapter = { path = "../core/tauri" }
 shipctl-module-api = { path = "../module-api/backend" }
 shipctl-module-fixture = { package = "tauri-plugin-shipctl-fixture", path = "../examples/module-fixture/backend", optional = true }
 shipctl-module-todos = { package = "tauri-plugin-shipctl-todos", path = "../modules/todos/backend", optional = true }
+shipctl-module-todos-host = { path = "../modules/todos/host", optional = true }
 # Direct optional module dependencies make their generated Tauri ACL manifests
 # visible to `tauri::generate_context!()`. Runtime installation is delegated to
 # the matching `modules/<name>/host` crate below.

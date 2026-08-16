@@ -1,34 +1,34 @@
 import { create } from "zustand";
 
-import { gitStatus } from "./client";
+import type { GitClient } from "./gitClient";
 import type { GitStatus } from "./types";
 
 interface GitStore {
   projectGitStatus: Record<string, GitStatus>;
-  refreshStatus: (repoPath: string) => Promise<void>;
-  refreshAll: (repoPaths: readonly string[]) => Promise<void>;
+  refreshStatus: (repoPath: string, client: GitClient) => Promise<void>;
+  refreshAll: (repoPaths: readonly string[], client: GitClient) => Promise<void>;
   removeProject: (repoPath: string) => void;
 }
 
 function statusChanged(previous: GitStatus | undefined, next: GitStatus): boolean {
   return !previous
-    || previous.is_git_repo !== next.is_git_repo
-    || previous.branch !== next.branch
+    || previous.isRepository !== next.isRepository
+    || previous.branchName !== next.branchName
     || previous.dirty !== next.dirty
-    || previous.staged !== next.staged
-    || previous.unstaged !== next.unstaged
-    || previous.untracked !== next.untracked
-    || previous.ahead !== next.ahead
-    || previous.behind !== next.behind
-    || previous.worktree_parent !== next.worktree_parent;
+    || previous.stagedCount !== next.stagedCount
+    || previous.unstagedCount !== next.unstagedCount
+    || previous.untrackedCount !== next.untrackedCount
+    || previous.aheadCount !== next.aheadCount
+    || previous.behindCount !== next.behindCount
+    || previous.worktreeParentProjectId !== next.worktreeParentProjectId;
 }
 
 export const useGitStore = create<GitStore>((set) => ({
   projectGitStatus: {},
 
-  refreshStatus: async (repoPath) => {
+  refreshStatus: async (repoPath, client) => {
     try {
-      const status = await gitStatus(repoPath);
+      const status = await client.status(repoPath);
       set((state) => {
         const previous = state.projectGitStatus[repoPath];
         if (!statusChanged(previous, status)) return state;
@@ -41,8 +41,8 @@ export const useGitStore = create<GitStore>((set) => ({
     }
   },
 
-  refreshAll: async (repoPaths) => {
-    const results = await Promise.allSettled(repoPaths.map((path) => gitStatus(path)));
+  refreshAll: async (repoPaths, client) => {
+    const results = await Promise.allSettled(repoPaths.map((path) => client.status(path)));
     set((state) => {
       const next = { ...state.projectGitStatus };
       let changed = false;

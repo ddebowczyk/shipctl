@@ -1,9 +1,15 @@
-import type { ModuleSkillsSnapshot, ShipctlModule } from "@shipctl/module-api";
+import type {
+  ModuleActivationContext,
+  ModuleSkillsSnapshot,
+  ShipctlModule,
+} from "@shipctl/module-api";
 
+import { skillInstallationClientFor } from "./skillInstallationClient";
 import { useSkillStore } from "./store";
 
 let skillsSource: ReturnType<typeof useSkillStore.getState> | null = null;
 let skillsSnapshot: ModuleSkillsSnapshot = { byProject: {} };
+let activeActivation: ModuleActivationContext | null = null;
 
 function getSkillsSnapshot(): ModuleSkillsSnapshot {
   const source = useSkillStore.getState();
@@ -38,7 +44,16 @@ export const skillsModule = {
     port: {
       getSnapshot: getSkillsSnapshot,
       subscribe: (listener) => useSkillStore.subscribe(listener),
-      install: (projectPath, name) => useSkillStore.getState().install(projectPath, name),
+      install: (projectPath, name) => {
+        if (!activeActivation || activeActivation.disposed) {
+          return Promise.reject(new Error("Skills module is not active"));
+        }
+        return useSkillStore.getState().install(
+          projectPath,
+          name,
+          skillInstallationClientFor(activeActivation),
+        );
+      },
     },
   },
   projectActions: [
@@ -47,8 +62,11 @@ export const skillsModule = {
       moduleId: "shipctl.skills",
       order: 20,
       subscribe: (listener) => useSkillStore.subscribe(listener),
-      refresh: (project) => useSkillStore.getState().refresh(project.path),
-      getGroup: (project, services) => {
+      refresh: (project, _services, activation) => useSkillStore.getState().refresh(
+        project.path,
+        skillInstallationClientFor(activation),
+      ),
+      getGroup: (project, services, activation) => {
         const skills = useSkillStore.getState().skillsByRepo[project.path] ?? [];
         if (skills.length === 0) return null;
         return {
@@ -62,9 +80,10 @@ export const skillsModule = {
             run: async () => {
               try {
                 const store = useSkillStore.getState();
+                const client = skillInstallationClientFor(activation);
                 await (skill.installed
-                  ? store.uninstall(project.path, skill.name)
-                  : store.install(project.path, skill.name));
+                  ? store.uninstall(project.path, skill.name, client)
+                  : store.install(project.path, skill.name, client));
               } catch (error) {
                 services.notices.push({
                   tone: "error",
@@ -81,11 +100,28 @@ export const skillsModule = {
     },
   ],
   projectLifecycle: {
-    onProjectsChanged: (projectPaths) => useSkillStore.getState().refreshAll([...projectPaths]),
-    onFilesystemChanged: (projectPaths) => useSkillStore.getState().refreshAll([...projectPaths]),
+    onProjectsChanged: (projectPaths, _services, activation) => (
+      useSkillStore.getState().refreshAll(
+        projectPaths,
+        skillInstallationClientFor(activation),
+      )
+    ),
+    onFilesystemChanged: (projectPaths, _services, activation) => (
+      useSkillStore.getState().refreshAll(
+        projectPaths,
+        skillInstallationClientFor(activation),
+      )
+    ),
     onProjectRemoved: (projectPath) => useSkillStore.getState().removeProject(projectPath),
+  },
+  activate: ({ activation }) => {
+    activeActivation = activation;
+    return {
+      deactivate: () => {
+        if (activeActivation === activation) activeActivation = null;
+      },
+    };
   },
 } as const satisfies ShipctlModule;
 
-export { SKILL_COMMANDS } from "./client";
 export type { SkillInfo } from "./types";

@@ -1,5 +1,7 @@
 /** Development-only entry for the packaged semantic scenario harness. */
 
+import type { SemanticTerminalsService } from "@shipctl/module-api";
+
 /** The global the harness installs under. Named once for the release check. */
 export const TERMINAL_SCENARIO_GLOBAL = "__shipctlTerminalScenarios";
 
@@ -8,7 +10,11 @@ export interface TerminalScenarioHarness {
 }
 
 export type ScenarioHostLoader = () => Promise<{
-  runTerminalScenarios(terminalId: string, runId: string): Promise<{ ndjson: string }>;
+  runTerminalScenarios(
+    semanticTerminals: SemanticTerminalsService,
+    terminalId: string,
+    runId: string,
+  ): Promise<{ ndjson: string }>;
 }>;
 
 export function scenarioHarnessAllowed(env: { DEV?: boolean } | undefined): boolean {
@@ -18,6 +24,7 @@ export function scenarioHarnessAllowed(env: { DEV?: boolean } | undefined): bool
 export function installScenarioHarnessInto(
   target: Record<string, unknown>,
   allowed: boolean,
+  semanticTerminals: SemanticTerminalsService,
   load: ScenarioHostLoader,
   clock: () => number = () => Date.now(),
 ): boolean {
@@ -25,7 +32,7 @@ export function installScenarioHarnessInto(
   target[TERMINAL_SCENARIO_GLOBAL] = {
     run: async (terminalId: string, runId = `run-${clock()}`) => {
       const { runTerminalScenarios } = await load();
-      return (await runTerminalScenarios(terminalId, runId)).ndjson;
+      return (await runTerminalScenarios(semanticTerminals, terminalId, runId)).ndjson;
     },
   } satisfies TerminalScenarioHarness;
   return true;
@@ -38,11 +45,14 @@ export function installScenarioHarnessInto(
  * build and removes the dynamic import with the harness. The release bundle
  * check proves that result.
  */
-export function installSemanticTerminalScenarioHarness(): boolean {
+export function installSemanticTerminalScenarioHarness(
+  semanticTerminals: SemanticTerminalsService,
+): boolean {
   if (!import.meta.env.DEV) return false;
   return installScenarioHarnessInto(
     globalThis as unknown as Record<string, unknown>,
     true,
+    semanticTerminals,
     () => import("./semanticTerminalScenarioHost.ts"),
   );
 }

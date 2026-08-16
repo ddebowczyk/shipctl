@@ -44,15 +44,160 @@ export type {
 export type {
   ModuleAppearancePort,
   ModuleExternalLinksPort,
-  ModuleGlobalDataPort,
   ModuleHostServices,
   ModuleNoticesPort,
-  ModuleProjectDataPort,
   ModuleSettingsPort,
   ModuleSkillsPort,
   ModuleTerminalPresentationPort,
   ModuleTerminalSessionsPort,
 } from "./host/services";
+export { defineSemanticService } from "./protocol/semanticServices.ts";
+export type {
+  ModuleActivationContext,
+  ModuleActivationId,
+  ModuleActivationIdentity,
+  SemanticCancellation,
+  SemanticCleanup,
+  SemanticCorrelationId,
+  SemanticEventLease,
+  SemanticEventRecord,
+  SemanticEventSource,
+  SemanticLeaseId,
+  SemanticOrderedStream,
+  SemanticOwnedLease,
+  SemanticRequestCancellation,
+  SemanticRequestOperation,
+  SemanticRequestOptions,
+  SemanticRequestOutcome,
+  SemanticRequestPolicy,
+  SemanticRequestRetry,
+  SemanticResult,
+  SemanticServiceAccess,
+  SemanticServiceError,
+  SemanticServiceReference,
+  SemanticStreamAttachRequest,
+  SemanticStreamAttachment,
+  SemanticStreamAttachmentId,
+  SemanticStreamDelivery,
+  SemanticStreamDisconnect,
+  SemanticStreamFrame,
+  SemanticStreamGap,
+} from "./protocol/semanticServices";
+export type {
+  AnySemanticServiceProvider,
+  SemanticServiceProvider,
+  SemanticServiceProviderContext,
+} from "./host/semanticServices";
+export { processesService } from "./protocol/processes.ts";
+export type {
+  CommandInspection,
+  InspectCommandInput,
+  ListeningProcessInspection,
+  ProcessesErrorCode,
+  ProcessesService,
+  ProcessInspectionId,
+  TerminateInspectedProcessInput,
+  TerminatedProcess,
+} from "./protocol/processes";
+export { projectDocumentsService } from "./protocol/projectDocuments.ts";
+export type {
+  DiscoverProjectDocumentsInput,
+  ProjectDocument,
+  ProjectDocumentRevision,
+  ProjectDocumentsErrorCode,
+  ProjectDocumentsService,
+  ReadProjectDocumentInput,
+  WriteProjectDocumentInput,
+} from "./protocol/projectDocuments";
+export { gitService } from "./protocol/git.ts";
+export type {
+  GitBranchInput,
+  GitChangedFile,
+  GitCommitInput,
+  GitCreatedWorktree,
+  GitCreateWorktreeInput,
+  GitDiffStat,
+  GitErrorCode,
+  GitFileInput,
+  GitMutationReceipt,
+  GitProjectInput,
+  GitReadDiffInput,
+  GitReadFileInput,
+  GitRepositoryChanged,
+  GitRepositoryChangeScope,
+  GitRepositoryStatus,
+  GitService,
+  GitTextResult,
+  GitWorktree,
+} from "./protocol/git";
+export { skillId, skillInstallationService } from "./protocol/skillInstallation.ts";
+export type {
+  InspectSkillsInput,
+  SkillId,
+  SkillInspection,
+  SkillInstallationErrorCode,
+  SkillInstallationService,
+  SkillMutationInput,
+  SkillMutationReceipt,
+} from "./protocol/skillInstallation";
+export { credentialId, credentialStoreService } from "./protocol/credentials.ts";
+export type {
+  CredentialGrant,
+  CredentialId,
+  CredentialStatus,
+  CredentialStoreErrorCode,
+  CredentialStoreService,
+  DeleteCredentialInput,
+  InspectCredentialInput,
+  SaveCredentialInput,
+} from "./protocol/credentials";
+export { usageSourcesService } from "./protocol/usageSources.ts";
+export type {
+  InspectUsageSourceInput,
+  LocalUsageDetails,
+  ProviderUsageSnapshot,
+  RefreshUsageSourcesInput,
+  UsageBreakdownItem,
+  UsageConfidence,
+  UsageCost,
+  UsageCostBasis,
+  UsageCostKind,
+  UsageNamedTokens,
+  UsageOverview,
+  UsageOverviewProvider,
+  UsageProject,
+  UsageProvider,
+  UsageSourceDescriptor,
+  UsageSourceInspection,
+  UsageSourceKind,
+  UsageSourceObservationScope,
+  UsageSourceRefreshReceipt,
+  UsageSourcesChanged,
+  UsageSourcesErrorCode,
+  UsageSourcesGrant,
+  UsageSourcesService,
+  UsageSourceType,
+  UsageTask,
+  UsageTimeWindow,
+  UsageTrendBucket,
+  UsageTrendProviderValue,
+  UsageWindowSnapshot,
+} from "./protocol/usageSources";
+export { pluginDataService } from "./protocol/pluginData.ts";
+export type {
+  MigratePluginDataRecordsInput,
+  PluginDataErrorCode,
+  PluginDataGrant,
+  PluginDataMigrationProvenance,
+  PluginDataMigrationReceipt,
+  PluginDataMigrationWrite,
+  PluginDataRecord,
+  PluginDataRevision,
+  PluginDataScope,
+  PluginDataService,
+  ReadPluginDataRecordInput,
+  WritePluginDataRecordInput,
+} from "./protocol/pluginData";
 
 export type {
   ProjectActionSurfacePosition,
@@ -86,7 +231,6 @@ export type {
   SettingsContribution,
 } from "./module/surfaces";
 
-export type { ModuleTaskSchedule } from "./protocol/module";
 export type { ModuleHost } from "./host/module";
 export type {
   ModuleDeactivation,
@@ -94,6 +238,19 @@ export type {
   ShipctlModule,
   SkillsProviderContribution,
 } from "./module/module";
+export { defineShipctlPlugin } from "./module/plugins.ts";
+export type {
+  PluginActivationInspection,
+  PluginActivationStatus,
+  PluginActivationView,
+  PluginContributionFamily,
+  PluginContributionInspection,
+  PluginEffectInspection,
+  PluginEffectKind,
+  PluginRuntimeInspection,
+  ShipctlPluginDefinition,
+  ShipctlPluginRole,
+} from "./module/plugins.ts";
 
 export { terminalDriverId } from "./protocol/terminalHost.ts";
 export type {
@@ -112,10 +269,85 @@ export type {
 export type { TerminalPresentationProvider } from "./module/terminalHost";
 
 export {
+  TERMINAL_SESSION_GRANTS,
+  TERMINAL_SESSIONS_ERROR_CODES,
+  terminalSessionsService,
+} from "./protocol/terminalSessions.ts";
+export type {
+  AttachTerminalBytesInput,
+  FocusTerminalSessionInput,
+  InspectTerminalSessionsInput,
+  ResizeTerminalInput,
+  StartTerminalSessionInput,
+  StopTerminalSessionInput,
+  TerminalByteFrame,
+  TerminalByteStream,
+  TerminalSessionGrant,
+  TerminalSessionLifecycleScope,
+  TerminalSessionsErrorCode,
+  TerminalSessionsService,
+  UpdateTerminalSessionInput,
+  WriteTerminalInput,
+} from "./protocol/terminalSessions.ts";
+
+export {
+  SEMANTIC_TERMINAL_GRANTS,
+  SEMANTIC_TERMINALS_ERROR_CODES,
+  semanticTerminalsService,
+} from "./protocol/semanticTerminals.ts";
+export type {
+  AttachSemanticTerminalScreenInput,
+  CreateSemanticTerminalAnchorInput,
+  InputSemanticTerminalInput,
+  InspectSemanticTerminalPasteInput,
+  InspectSemanticTerminalPublicationInput,
+  InspectSemanticTerminalSnapshotInput,
+  ReadSemanticTerminalHistoryInput,
+  ReleaseSemanticTerminalAnchorInput,
+  ResizeSemanticTerminalInput,
+  ResolveSemanticTerminalAnchorInput,
+  SelectSemanticTerminalInput,
+  SemanticTerminalAnchor,
+  SemanticTerminalAnchorId,
+  SemanticTerminalAttachmentId,
+  SemanticTerminalCellWidth,
+  SemanticTerminalColor,
+  SemanticTerminalEffect,
+  SemanticTerminalGrant,
+  SemanticTerminalHistoryCell,
+  SemanticTerminalHistoryRow,
+  SemanticTerminalHistoryWindow,
+  SemanticTerminalId,
+  SemanticTerminalInput,
+  SemanticTerminalModifiers,
+  SemanticTerminalProjectedPoint,
+  SemanticTerminalProjectedSpace,
+  SemanticTerminalPrompt,
+  SemanticTerminalPublicationStats,
+  SemanticTerminalRevision,
+  SemanticTerminalScreenAttachment,
+  SemanticTerminalScreenFrame,
+  SemanticTerminalScreenRow,
+  SemanticTerminalScreenRun,
+  SemanticTerminalScreenSnapshot,
+  SemanticTerminalScreenState,
+  SemanticTerminalScreenStream,
+  SemanticTerminalSelectionMove,
+  SemanticTerminalSelectionRequest,
+  SemanticTerminalSelectionRow,
+  SemanticTerminalSelectionSpan,
+  SemanticTerminalSelectionState,
+  SemanticTerminalsErrorCode,
+  SemanticTerminalsService,
+} from "./protocol/semanticTerminals.ts";
+
+export {
   JSON_SCHEMA_DRAFT_2020_12,
   MESSAGE_CONTRACT_SCHEMA_VERSION,
   MESSAGE_DIAGNOSTIC_CODES,
+  MESSAGE_SERVICE_ERROR_CODES,
   MessageContractParseError,
+  messagesService,
   parseDeliveryReceipt,
   parseMessageDeclarations,
   parseMessageEnvelope,
@@ -141,12 +373,19 @@ export type {
   MessageRef,
   MessageRouteSnapshot,
   MessageSchemaDescriptor,
+  MessageServiceErrorCode,
   MessageTypeContract,
   MessageTypeId,
   ModuleMessageContributions,
   ModuleMessages,
+  PublishMessageInput,
+  PublishMessageOperation,
   PublishReceipt,
+  RequestMessageInput,
+  RequestMessageOperation,
   RouteEndpointRef,
+  SendMessageInput,
+  SendMessageOperation,
   WireBroadcastTopicDeclaration,
   WireCapabilityPortDeclaration,
   WireDirectedChannelDeclaration,
@@ -156,10 +395,17 @@ export {
   SCHEDULE_DIAGNOSTIC_CODES,
   SCHEDULE_INSPECTION_SCHEMA_VERSION,
   SCHEDULE_SCHEMA_VERSION,
+  SCHEDULER_REGISTER_GRANT,
+  SCHEDULER_SERVICE_ERROR_CODES,
+  SCHEDULER_SERVICE_SCHEMA_VERSION,
   ScheduleInspectionParseError,
   parseScheduleInspection,
+  schedulerService,
 } from "./protocol/schedules.ts";
 export type {
+  InspectSchedulesInput,
+  RegisterScheduleInput,
+  RegisterScheduleOperation,
   ScheduleDefinitionInspection,
   ScheduleDeliveryOutcome,
   ScheduleDeliverySummary,
@@ -167,9 +413,15 @@ export type {
   ScheduleDiagnosticCode,
   ScheduleDiagnosticSeverity,
   ScheduleInspection,
+  ScheduleLease,
+  ScheduleLeaseInspection,
+  ScheduleRegistrationTarget,
   ScheduleTarget,
   ScheduleTargetAvailability,
   ScheduleTargetKind,
+  ScheduledDeliveryEvent,
+  SchedulerService,
+  SchedulerServiceErrorCode,
 } from "./protocol/schedules";
 
 export {

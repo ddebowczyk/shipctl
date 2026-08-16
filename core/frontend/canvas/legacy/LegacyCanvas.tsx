@@ -49,6 +49,7 @@ function DefaultSidebar({ sidebar, actions, ports }: CanvasSidebarRendererProps)
       globalNavigation={sidebar.globalNavigation}
       sidebarContributions={ports.surfaceCatalog.sidebar()}
       projectNavigationContributions={ports.surfaceCatalog.projectNavigation()}
+      moduleActivations={ports.moduleActivations}
     />
   );
 }
@@ -85,6 +86,7 @@ function DefaultGlobalSurface({
       surfaceId={surfaceId}
       close={close}
       services={ports.moduleHostServices}
+      moduleActivations={ports.moduleActivations}
     />
   );
 }
@@ -105,6 +107,7 @@ function DefaultPanel({
       close={close}
       setTitle={setTitle}
       services={ports.moduleHostServices}
+      moduleActivations={ports.moduleActivations}
     />
   );
 }
@@ -114,8 +117,8 @@ function DefaultTerminal({ slot, ports }: CanvasTerminalRendererProps) {
     <TerminalErrorBoundary>
       <TerminalSlot
         descriptor={slot.descriptor}
-        host={ports.terminalHost}
         registry={ports.terminalPresentationRegistry}
+        moduleActivations={ports.moduleActivations}
         services={ports.moduleHostServices}
         visible={slot.visible}
       />
@@ -128,6 +131,7 @@ function DefaultTrailingLayout({ project, ports }: CanvasTrailingLayoutRendererP
     <ModuleProjectLayoutSurfaces
       contributions={ports.surfaceCatalog.projectLayout("workspace.trailing")}
       project={project}
+      moduleActivations={ports.moduleActivations}
     />
   );
 }

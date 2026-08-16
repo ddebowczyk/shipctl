@@ -1,0 +1,41 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: workspace
+version: 1.0.0
+title: Semantic workspace and contribution catalog
+status: proposed
+layer: application-runtime
+consumers: [commands, assistants, git, ports, skills, todos, usage]
+current_implementations:
+  - core/frontend/host/moduleComposition.ts
+  - core/frontend/canvas
+target_owners:
+  provider: core/frontend/workspace
+  tauri_adapter: core/frontend/platform/workspacePersistence
+  typescript_client: module-api/frontend/src/services/workspace
+operations:
+  - id: publishContributions
+    kind: request
+    contract: >-
+      Publish an activation-owned typed contribution set through one barrier.
+  - id: mutateWorkspace
+    kind: request
+    contract: >-
+      Apply a semantic open, close, move, focus, split, or reset command.
+  - id: observeWorkspace
+    kind: event
+    contract: Observe immutable workspace revisions with stable view identity.
+required_grants: []
+ownership:
+  authority: The TypeScript runtime owns catalog and semantic workspace state.
+  resources: View instances belong to workspace; registrations to activations.
+  activation_scope: Publication and disposal always name the activation owner.
+depends_on: [plugin-data]
+property_ids:
+  - PROP-F-ATOMIC-001
+  - PROP-G-WORKSPACE-001
+  - PROP-G-RENDERER-001
+  - PROP-G-LAYOUT-001
+  - PROP-G-CONTRIBUTION-CLEANUP-001
+  - PROP-G-CONTRIBUTION-SCHEMA-001

@@ -3,7 +3,9 @@ import type { ErrorInfo, ReactNode } from "react";
 import type {
   ContributionId,
   GlobalSurfaceContribution,
+  ModuleActivationContext,
   ModuleHostServices,
+  ModuleId,
 } from "@shipctl/module-api";
 
 interface GlobalSurfaceHostProps {
@@ -11,6 +13,7 @@ interface GlobalSurfaceHostProps {
   readonly surfaceId: ContributionId;
   readonly close: () => void;
   readonly services: ModuleHostServices;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
 class GlobalSurfaceBoundary extends Component<
@@ -64,6 +67,7 @@ export default function GlobalSurfaceHost({
   surfaceId,
   close,
   services,
+  moduleActivations,
 }: GlobalSurfaceHostProps) {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const Surface = useMemo(
@@ -87,6 +91,18 @@ export default function GlobalSurfaceHost({
     title: "Surface unavailable",
     description: `${contribution.id} could not be loaded.`,
   };
+  const activation = moduleActivations.get(contribution.moduleId);
+
+  if (!activation || activation.disposed) {
+    return (
+      <GlobalSurfaceUnavailable
+        title={unavailable.title}
+        description={`${contribution.moduleId} is not active.`}
+        retry={retry}
+        close={close}
+      />
+    );
+  }
 
   return (
     <GlobalSurfaceBoundary
@@ -101,7 +117,7 @@ export default function GlobalSurfaceHost({
       )}
     >
       <Suspense fallback={<div className="terminal-empty">Loading surface…</div>}>
-        <Surface close={close} services={services} />
+        <Surface close={close} activation={activation} services={services} />
       </Suspense>
     </GlobalSurfaceBoundary>
   );

@@ -1,0 +1,24 @@
+---
+$schema: ../schema/phase.v1.schema.yaml
+schema_version: phase/v1
+id: phase-h
+title: Architecture closure
+status: specified
+source: docs/4-layer-architecture/13-verification-cutover-and-rollback.md
+depends_on: [phase-d, phase-f, phase-g]
+semantics: []
+properties: []
+deliverables:
+  - All source, contract, unit, property, integration, and package proofs.
+  - Installed-app and live-control evidence for every end-state claim.
+  - Deletion of each compatibility path authorized by a passing proof.
+deletion_gates:
+  - id: DELETE-H-COMPATIBILITY
+    condition: >-
+      Every end-state and repository-closure proof passes in the packaged app.
+    removes:
+      - Static membership, restart-only loading, and raw compatibility shims.
+      - Legacy canvas only after a separate product decision authorizes it.
+decisions:
+  - >-
+    Layman selection is not required to close the four-layer architecture wall.

@@ -1,12 +1,9 @@
 import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Search, X, PanelLeft, PanelLeftOpen, FileText, Diff } from "lucide-react";
-import { listen } from "@tauri-apps/api/event";
-import type { ModulePanelProps } from "@shipctl/module-api";
+import type { ModulePanelProps, SemanticEventLease } from "@shipctl/module-api";
 import { useGitStore } from "./store";
 import { useGitPanelStore } from "./panelStore";
-import {
-  gitChangedFiles, gitFileContents, gitFileDiff, gitListFiles,
-} from "./client";
+import { gitClientFor } from "./gitClient";
 import type { ChangedFile } from "./types";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
@@ -19,9 +16,10 @@ const diffViewerLoader = () => import("./DiffViewer");
 diffViewerLoader();
 const DiffViewer = lazy(diffViewerLoader);
 
-export default function GitPanel({ project, services }: ModulePanelProps) {
+export default function GitPanel({ project, activation, services }: ModulePanelProps) {
   const activeProjectPath = project?.path ?? null;
   const pushNotice = services.notices.push;
+  const client = useMemo(() => gitClientFor(activation), [activation]);
 
   const gitStatus = useGitStore(
     (s) => activeProjectPath ? s.projectGitStatus[activeProjectPath] ?? null : null,
@@ -38,9 +36,9 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
   const sidebarCollapsed = panelState?.sidebarCollapsed ?? false;
   const repoScrollPositions = panelState?.repoScrollPositions ?? {};
 
-  const [files, setFiles] = useState<ChangedFile[]>([]);
+  const [files, setFiles] = useState<readonly ChangedFile[]>([]);
   const [changedFilesLoadedFor, setChangedFilesLoadedFor] = useState<string | null>(null);
-  const [repoFiles, setRepoFiles] = useState<string[]>([]);
+  const [repoFiles, setRepoFiles] = useState<readonly string[]>([]);
   const [repoFileContent, setRepoFileContent] = useState<string>("");
   const [repoFileError, setRepoFileError] = useState<string | null>(null);
   const [repoFileLoading, setRepoFileLoading] = useState<boolean>(false);
@@ -54,10 +52,12 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
   const [searchOpen, setSearchOpen] = useState(() => leftSearch.trim().length > 0);
   const codeViewCSSVariables = getCodeViewCSSVariables();
 
-  const canLoadGitFiles = !!activeProjectPath && !!gitStatus?.is_git_repo;
+  const canLoadGitFiles = !!activeProjectPath && !!gitStatus?.isRepository;
 
   const selectedFileChanges = useMemo(
-    () => (repoSelectedPath ? files.filter((file) => file.path === repoSelectedPath) : []),
+    () => (repoSelectedPath
+      ? files.filter((file) => file.relativePath === repoSelectedPath)
+      : []),
     [files, repoSelectedPath],
   );
 
@@ -92,17 +92,17 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
     }
     const repo = activeProjectPath;
     try {
-      const result = await gitChangedFiles(repo);
+      const result = await client.changedFiles(repo);
       setFiles(result);
     } catch {
       setFiles([]);
     } finally {
       setChangedFilesLoadedFor(repo);
     }
-  }, [canLoadGitFiles, activeProjectPath]);
+  }, [canLoadGitFiles, activeProjectPath, client]);
 
   const statusKey = gitStatus
-    ? `${gitStatus.staged}:${gitStatus.unstaged}:${gitStatus.untracked}`
+    ? `${gitStatus.stagedCount}:${gitStatus.unstagedCount}:${gitStatus.untrackedCount}`
     : "";
   useEffect(() => { fetchFiles(); }, [fetchFiles, statusKey]);
 
@@ -116,7 +116,7 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const result = await gitListFiles(repo);
+        const result = await client.listFiles(repo);
         if (!cancelled) setRepoFiles(result);
       } catch (error) {
         if (!cancelled) {
@@ -126,23 +126,32 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
       }
     })();
     return () => { cancelled = true; };
-  }, [canLoadGitFiles, activeProjectPath, pushNotice]);
+  }, [canLoadGitFiles, activeProjectPath, client, pushNotice]);
 
   // Live-refresh repo file list
   useEffect(() => {
     if (!canLoadGitFiles || !activeProjectPath) return;
     const repo = activeProjectPath;
-    const unlistenP = listen<{ paths: string[] }>("git-fs-changed", async (event) => {
-      if (!event.payload.paths.includes(repo)) return;
+    let disposed = false;
+    let lease: SemanticEventLease | null = null;
+    void client.subscribeChanges(repo, async () => {
       try {
-        const result = await gitListFiles(repo);
+        const result = await client.listFiles(repo);
         setRepoFiles(result);
       } catch {
         // Silent.
       }
+    }).then((value) => {
+      if (disposed) void value.dispose();
+      else lease = value;
+    }).catch(() => {
+      // A failed optional refresh subscription must not hide the Git panel.
     });
-    return () => { unlistenP.then((f) => f()); };
-  }, [canLoadGitFiles, activeProjectPath]);
+    return () => {
+      disposed = true;
+      if (lease) void lease.dispose();
+    };
+  }, [canLoadGitFiles, activeProjectPath, client]);
 
   // Fetch file contents when selection changes
   useEffect(() => {
@@ -160,7 +169,7 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
     setRepoFileLoading(true);
     void (async () => {
       try {
-        const content = await gitFileContents(repo, path, "working");
+        const content = await client.fileContents(repo, path, "working");
         if (!cancelled) setRepoFileContent(content);
       } catch (error) {
         if (!cancelled) setRepoFileError(getErrorMessage(error));
@@ -169,7 +178,7 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
       }
     })();
     return () => { cancelled = true; };
-  }, [canLoadGitFiles, activeProjectPath, repoSelectedPath]);
+  }, [canLoadGitFiles, activeProjectPath, client, repoSelectedPath]);
 
   useEffect(() => {
     if (!canLoadGitFiles || !activeProjectPath || !repoSelectedPath || !resolvedDiffArea) {
@@ -187,7 +196,7 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
     setRepoDiffLoading(true);
     void (async () => {
       try {
-        const diff = await gitFileDiff(repo, path, staged);
+        const diff = await client.fileDiff(repo, path, staged);
         if (!cancelled) setRepoDiffContent(diff);
       } catch (error) {
         if (!cancelled) setRepoDiffError(getErrorMessage(error));
@@ -196,43 +205,61 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
       }
     })();
     return () => { cancelled = true; };
-  }, [canLoadGitFiles, activeProjectPath, repoSelectedPath, resolvedDiffArea]);
+  }, [canLoadGitFiles, activeProjectPath, client, repoSelectedPath, resolvedDiffArea]);
 
   // Live-refresh open file contents
   useEffect(() => {
     if (!canLoadGitFiles || !activeProjectPath || !repoSelectedPath) return;
     const repo = activeProjectPath;
     const path = repoSelectedPath;
-    const unlistenP = listen<{ paths: string[] }>("git-fs-changed", async (event) => {
-      if (!event.payload.paths.includes(repo)) return;
+    let disposed = false;
+    let lease: SemanticEventLease | null = null;
+    void client.subscribeChanges(repo, async () => {
       try {
-        const content = await gitFileContents(repo, path, "working");
+        const content = await client.fileContents(repo, path, "working");
         setRepoFileContent(content);
         setRepoFileError(null);
       } catch (error) {
         setRepoFileError(getErrorMessage(error));
       }
+    }).then((value) => {
+      if (disposed) void value.dispose();
+      else lease = value;
+    }).catch((error) => {
+      if (!disposed) setRepoFileError(getErrorMessage(error));
     });
-    return () => { unlistenP.then((f) => f()); };
-  }, [canLoadGitFiles, activeProjectPath, repoSelectedPath]);
+    return () => {
+      disposed = true;
+      if (lease) void lease.dispose();
+    };
+  }, [canLoadGitFiles, activeProjectPath, client, repoSelectedPath]);
 
   useEffect(() => {
     if (!canLoadGitFiles || !activeProjectPath || !repoSelectedPath || !resolvedDiffArea) return;
     const repo = activeProjectPath;
     const path = repoSelectedPath;
     const staged = resolvedDiffArea === "staged";
-    const unlistenP = listen<{ paths: string[] }>("git-fs-changed", async (event) => {
-      if (!event.payload.paths.includes(repo)) return;
+    let disposed = false;
+    let lease: SemanticEventLease | null = null;
+    void client.subscribeChanges(repo, async () => {
       try {
-        const diff = await gitFileDiff(repo, path, staged);
+        const diff = await client.fileDiff(repo, path, staged);
         setRepoDiffContent(diff);
         setRepoDiffError(null);
       } catch (error) {
         setRepoDiffError(getErrorMessage(error));
       }
+    }).then((value) => {
+      if (disposed) void value.dispose();
+      else lease = value;
+    }).catch((error) => {
+      if (!disposed) setRepoDiffError(getErrorMessage(error));
     });
-    return () => { unlistenP.then((f) => f()); };
-  }, [canLoadGitFiles, activeProjectPath, repoSelectedPath, resolvedDiffArea]);
+    return () => {
+      disposed = true;
+      if (lease) void lease.dispose();
+    };
+  }, [canLoadGitFiles, activeProjectPath, client, repoSelectedPath, resolvedDiffArea]);
 
   // Cmd+F focuses the search input while this panel is mounted
   useEffect(() => {
@@ -264,7 +291,7 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
     for (const f of files) {
       const kind: "added" | "modified" =
         f.status === "A" || f.status === "?" ? "added" : "modified";
-      m.set(f.path, kind);
+      m.set(f.relativePath, kind);
     }
     return m;
   }, [files]);
@@ -272,7 +299,7 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
   const untrackedPaths = useMemo(() => {
     const s = new Set<string>();
     for (const f of files) {
-      if (f.status === "?") s.add(f.path);
+      if (f.status === "?") s.add(f.relativePath);
     }
     return s;
   }, [files]);
@@ -374,7 +401,7 @@ export default function GitPanel({ project, services }: ModulePanelProps) {
     );
   }
 
-  if (!gitStatus?.is_git_repo) {
+  if (!gitStatus?.isRepository) {
     return (
       <div className="absolute inset-0 flex items-center justify-center opacity-50">
         Not a git repository

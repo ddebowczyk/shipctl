@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 
 import { createServer, type ViteDevServer } from "vite";
 
-import { PORT_COMMANDS } from "../src/client.ts";
+import type {
+  ProcessesService,
+  ProcessInspectionId,
+} from "@shipctl/module-api";
 import type { PortInfo } from "../src/types.ts";
 
 type PortsPanelModule = typeof import("../src/PortsPanel.tsx");
@@ -14,17 +17,31 @@ let vite: ViteDevServer;
 let portsPanel: PortsPanelModule;
 let portsModule: PortsModuleEntry["portsModule"];
 let PORTS_SURFACE_ID: PortsModuleEntry["PORTS_SURFACE_ID"];
+let createFakeProcessesServiceProvider: typeof import("@shipctl/module-api/testing")["createFakeProcessesServiceProvider"];
+let createTestActivationIdentity: typeof import("@shipctl/module-api/testing")["createTestActivationIdentity"];
+let SemanticServiceTestHost: typeof import("@shipctl/module-api/testing")["SemanticServiceTestHost"];
+let processesService: typeof import("@shipctl/module-api")["processesService"];
 
 const fixturePort: PortInfo = {
+  inspectionId: "inspection-1" as ProcessInspectionId,
   port: 5173,
-  pid: 4242,
-  process: "node",
-  cwd: "/work/alpha",
-  project: "alpha",
+  processId: 4242,
+  name: "node",
+  workingDirectory: "/work/alpha",
+  projectName: "alpha",
   framework: "Vite",
   uptime: "01:02",
-  memory_kb: 2048,
+  memoryKilobytes: 2048,
 };
+
+function fakeProcesses(options: Parameters<typeof createFakeProcessesServiceProvider>[0] = {}) {
+  const host = new SemanticServiceTestHost([
+    createFakeProcessesServiceProvider(options),
+  ]);
+  return host.activate(
+    createTestActivationIdentity("shipctl.ports"),
+  ).context.services.require(processesService) as ProcessesService;
+}
 
 before(async () => {
   vite = await createServer({
@@ -39,6 +56,14 @@ before(async () => {
   ({ portsModule, PORTS_SURFACE_ID } = await vite.ssrLoadModule(
     "/modules/ports/frontend/src/index.ts",
   ) as PortsModuleEntry);
+  ({ processesService } = await vite.ssrLoadModule(
+    "/module-api/frontend/src/index.ts",
+  ));
+  ({
+    createFakeProcessesServiceProvider,
+    createTestActivationIdentity,
+    SemanticServiceTestHost,
+  } = await vite.ssrLoadModule("/module-api/frontend/src/testing.ts"));
 });
 
 after(async () => {
@@ -54,58 +79,55 @@ test("Ports owns a global surface and navigation contribution", () => {
   );
 });
 
-test("Ports frontend uses the namespaced plugin command contract", () => {
-  assert.deepEqual(PORT_COMMANDS, {
-    list: "plugin:shipctl-ports|list_listening_ports",
-    kill: "plugin:shipctl-ports|kill_port",
-  });
-});
-
 test("scan preserves occupied results and represents no listeners as an empty success", async () => {
   assert.deepEqual(
-    await portsPanel.scanPorts(async () => [fixturePort]),
+    await portsPanel.scanPorts(fakeProcesses({ inspections: () => [fixturePort] })),
     { status: "ready", ports: [fixturePort] },
   );
   assert.deepEqual(
-    await portsPanel.scanPorts(async () => []),
+    await portsPanel.scanPorts(fakeProcesses()),
     { status: "ready", ports: [] },
   );
 });
 
 test("scan failures become bounded UI error state", async () => {
   assert.deepEqual(
-    await portsPanel.scanPorts(async () => {
-      throw new Error("lsof unavailable");
-    }),
-    { status: "error", message: "lsof unavailable" },
+    await portsPanel.scanPorts(fakeProcesses({
+      deniedOperations: ["inspect-listening-ports"],
+    })),
+    {
+      status: "error",
+      message: "Fake process operation denied: inspect-listening-ports",
+    },
   );
 });
 
 test("stop reports success and failure without interpreting process state", async () => {
-  const stopped: number[] = [];
-  const success = await portsPanel.stopPort(fixturePort, async (pid) => {
-    stopped.push(pid);
-  });
-  assert.deepEqual(stopped, [4242]);
+  const successProcesses = fakeProcesses({ inspections: () => [fixturePort] });
+  await portsPanel.scanPorts(successProcesses);
+  const success = await portsPanel.stopPort(fixturePort, successProcesses);
   assert.equal(success.status, "stopped");
   assert.equal(success.notice.title, "Process killed");
 
-  const failure = await portsPanel.stopPort(fixturePort, async () => {
-    throw "permission denied";
+  const deniedProcesses = fakeProcesses({
+    inspections: () => [fixturePort],
+    deniedOperations: ["terminate-inspected-process"],
   });
+  await portsPanel.scanPorts(deniedProcesses);
+  const failure = await portsPanel.stopPort(fixturePort, deniedProcesses);
   assert.deepEqual(failure, {
     status: "error",
     notice: {
       tone: "error",
       title: "Kill failed",
-      message: "permission denied",
+      message: "Fake process operation denied: terminate-inspected-process",
     },
   });
 });
 
 test("ports group by matched project with unmatched listeners last", () => {
-  const beta = { ...fixturePort, port: 3000, project: "beta" };
-  const other = { ...fixturePort, port: 8080, project: "" };
+  const beta = { ...fixturePort, port: 3000, projectName: "beta" };
+  const other = { ...fixturePort, port: 8080, projectName: "" };
   const groups = portsPanel.groupPortsByProject([beta, other, fixturePort]);
 
   assert.deepEqual(portsPanel.sortPortGroupKeys(groups), ["alpha", "beta", "Other"]);

@@ -1,0 +1,299 @@
+---
+$schema: ../schema/phase.v1.schema.yaml
+schema_version: phase/v1
+id: phase-g
+title: Workspace contributions and wall closure
+status: specified
+source: >-
+  docs/4-layer-architecture/12-phase-g-workspace-contributions-and-closure.md
+depends_on: [phase-a, phase-b, phase-c, phase-e, phase-f]
+semantics:
+  - id: SEM-G-001
+    kind: MUST
+    rule: >-
+      The workspace consumes only accepted catalog snapshots and never
+      discovers, loads, authorizes, or activates plugins.
+  - id: SEM-G-002
+    kind: MUST-NOT
+    rule: >-
+      A semantic view contribution declares identity, metadata, scope,
+      cardinality, placement, capabilities, and a lazy view, but no Layman node.
+  - id: SEM-G-003
+    kind: MUST
+    rule: >-
+      Removed definitions become recoverable missing records or are removed by
+      stated policy without corrupting the workspace document.
+  - id: SEM-G-004
+    kind: MUST
+    rule: >-
+      Legacy and Layman adapters project one semantic workspace and invoke the
+      same workspace actions.
+  - id: SEM-G-005
+    kind: MUST
+    rule: >-
+      Layout mutations preserve document validity and reset to a deterministic
+      default derived from the accepted catalog.
+  - id: SEM-G-006
+    kind: MUST
+    rule: >-
+      Every contribution is activation-owned and leaves no stale component or
+      stylesheet after removal.
+  - id: SEM-G-007
+    kind: MUST
+    rule: >-
+      Built-in and installed plugins use one runtime path with no static module
+      list or native feature plugin dependency.
+  - id: SEM-G-008
+    kind: MUST
+    rule: >-
+      The app boots and remains operable when any individual plugin is absent,
+      disabled, incompatible, or broken.
+properties:
+  - id: PROP-G-WORKSPACE-001
+    claim: >-
+      Reconciliation always produces a valid document whose live instances
+      reference accepted definitions or explicit recoverable-missing records.
+    shapes: [state-machine]
+    evidence: [SEM-G-001, SEM-G-003]
+    domain:
+      generates: >-
+        View add, replace, disable, remove, re-enable, open, close, move, split,
+        focus, and restore histories.
+      excludes: [pixel geometry]
+      strategy: >-
+        Generate catalog revisions and valid workspace commands by state.
+      classifications: [added, replaced, missing, restored, moved, focused]
+    preconditions:
+      - Input catalogs are accepted and revisioned.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A pure model tracks definition and instance IDs and missing-view
+          policy.
+        independence: The model imports no renderer or workspace implementation.
+      alternative:
+        kind: metamorphic
+        description: >-
+          Validate each state and apply inverse commands where they exist.
+        independence: Schema and inverse checks do not use transition modeling.
+    failure_value: >-
+      Disabling usage corrupts layout and prevents terminal views from
+      reopening.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.workspace-reconcile.property
+      shrink: required
+      replay: required
+    tiers: [pr, nightly]
+    status: proposed
+    deletion_gates: [DELETE-G-STATIC-WORKSPACE]
+  - id: PROP-G-RENDERER-001
+    claim: >-
+      Legacy and Layman adapters expose equal semantic view IDs, active view,
+      tab order, and actions for every shared-subset document.
+    shapes: [differential]
+    evidence: [SEM-G-004]
+    domain:
+      generates: >-
+        Shared documents, focus and navigation actions, and missing
+        placeholders.
+      excludes: [Layman-only floating geometry, pixel output]
+      strategy: Project one generated semantic document through both adapters.
+      classifications: [tabs, split, focus, navigation, missing]
+    preconditions:
+      - The source workspace document passes schema validation.
+    oracle:
+      primary:
+        kind: reference
+        description: Compare normalized projections and semantic action logs.
+        independence: >-
+          Adapter harnesses are independent and share only input data.
+      alternative:
+        kind: reference
+        description: >-
+          Drive independent user harnesses and compare stable IDs and commands.
+        independence: DOM events do not use projection normalization.
+    failure_value: >-
+      Selecting thin terminal in Layman focuses a semantic terminal.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.canvas-adapter-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-G-STATIC-WORKSPACE]
+  - id: PROP-G-LAYOUT-001
+    claim: >-
+      Persistence and restore preserve semantic identity, topology, focus, and
+      restorable state after canonical normalization.
+    shapes: [roundtrip]
+    evidence: [SEM-G-005]
+    domain:
+      generates: >-
+        Splits, tabs, optional floating windows, schema-valid sizes, plugin view
+        state, and missing definitions.
+      excludes: [physical monitor coordinates normalized by migration policy]
+      strategy: Construct valid workspace trees directly from schema rules.
+      classifications: [tabs, splits, floating, plugin-state, missing]
+    preconditions:
+      - Source documents are valid for their schema version.
+    oracle:
+      primary:
+        kind: roundtrip
+        description: >-
+          Compare retained semantic source with restored canonical state.
+        independence: The retained source does not use Layman serialization.
+      alternative:
+        kind: reference
+        description: >-
+          Compare topology and identity using a schema-independent tree walk.
+        independence: >-
+          Tree walking is separate from the persistence canonicalizer.
+    failure_value: >-
+      Restart changes terminal identity because renderer state was persisted.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.workspace-roundtrip.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-G-STATIC-WORKSPACE]
+  - id: PROP-G-CONTRIBUTION-CLEANUP-001
+    claim: >-
+      After plugin removal, no catalog, view, stylesheet, route, menu,
+      navigation, or component cache references the removed activation.
+    shapes: [conservation]
+    evidence: [SEM-G-006]
+    domain:
+      generates: >-
+        Plugins contributing every UI family with open and closed views,
+        replacement, failure, and removal.
+      excludes: [unreachable browser engine module-cache bytes]
+      strategy: >-
+        Generate owner-tagged contribution families and lifecycle commands.
+      classifications: [view, style, command, menu, navigation, cache]
+    preconditions:
+      - The removal transition settles before inspection.
+    oracle:
+      primary:
+        kind: model
+        description: Compare generated owner ledger with host inspection.
+        independence: The ledger exists before registration and disposal.
+      alternative:
+        kind: invariant
+        description: >-
+          Catalog, DOM style, route, subscription, and resource canaries
+          disappear.
+        independence: Each canary is observed at its public boundary.
+    failure_value: A stale menu invokes a new plugin that reused its ID.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.contribution-cleanup.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-G-STATIC-WORKSPACE]
+  - id: PROP-G-ABSENCE-001
+    claim: >-
+      For every selected built-in subset, the host boots to an operable
+      workspace with that subset and no dependency on excluded packages.
+    shapes: [safety]
+    evidence: [SEM-G-007, SEM-G-008]
+    domain:
+      generates: >-
+        Admitted built-in subsets plus one injected load or readiness failure.
+      excludes: []
+      strategy: >-
+        Generate subset selections; enumerate only where plug-out contract does.
+      classifications:
+        - empty-optional
+        - singleton
+        - mixed
+        - load-failure
+        - not-ready
+    preconditions:
+      - Required platform services are available.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          Compare accepted IDs, owners, and core operability with subset model.
+        independence: The subset model does not import plugin implementations.
+      alternative:
+        kind: reference
+        description: Run plug-out profiles and core workspace operations.
+        independence: Build profiles validate package absence, not model state.
+    failure_value: A missing Git package prevents the host from starting.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.plugin-absence.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: proposed
+    deletion_gates: [DELETE-G-STATIC-WORKSPACE]
+  - id: PROP-G-CONTRIBUTION-SCHEMA-001
+    claim: >-
+      Contribution admission accepts renderer-neutral semantic views and
+      rejects any declaration that embeds a Layman node or another renderer
+      implementation detail.
+    shapes: [safety]
+    evidence: [SEM-G-002]
+    domain:
+      generates: >-
+        Valid semantic view definitions plus one renderer-specific field or
+        malformed lazy-view mutation.
+      excludes: [renderer projection output]
+      strategy: >-
+        Generate a valid contribution, then inject one typed schema mutation.
+      classifications:
+        - valid
+        - layman-node
+        - renderer-prop
+        - eager-view
+        - missing-identity
+    preconditions:
+      - Artifact and plugin identity have already passed admission.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A closed renderer-neutral field model computes admission.
+        independence: The model does not import a renderer or catalog code.
+      alternative:
+        kind: metamorphic
+        description: >-
+          Adding a forbidden renderer field changes acceptance to rejection.
+        independence: Mutations are derived from the normative field list.
+    failure_value: >-
+      A plugin persists a Layman node and prevents another renderer projection.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.workspace-contribution-schema.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-G-STATIC-WORKSPACE]
+deliverables:
+  - One activation-owned catalog family for all optional contributions.
+  - A versioned semantic workspace with legacy and Layman projections.
+  - Agent inspection and operation through stable semantic identities.
+deletion_gates:
+  - id: DELETE-G-STATIC-WORKSPACE
+    condition: >-
+      Workspace, renderer, cleanup, absence, package, and live proofs pass.
+    removes:
+      - Static module membership and remaining lifecycle shims.
+      - Hard-coded workspace contribution registries.
+      - Remaining native module crates and raw feature shims.

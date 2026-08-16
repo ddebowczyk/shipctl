@@ -1,0 +1,214 @@
+---
+$schema: ../schema/phase.v1.schema.yaml
+schema_version: phase/v1
+id: phase-a
+title: Executable contract and enforcement foundation
+status: complete
+source: >-
+  docs/4-layer-architecture/06-phase-a-contract-and-enforcement-foundation.md
+depends_on: []
+semantics:
+  - id: SEM-A-001
+    kind: MUST
+    rule: >-
+      A normative architecture record changes before its implementing test and
+      code when a rule changes.
+  - id: SEM-A-002
+    kind: MUST
+    rule: >-
+      Every specification dependency resolves and the dependency graph is
+      acyclic.
+  - id: SEM-A-003
+    kind: MUST
+    rule: >-
+      Every implemented property names an executable test and every required
+      failure can be replayed from recorded evidence.
+  - id: SEM-A-004
+    kind: MUST-NOT
+    rule: >-
+      Importing a plugin package must not perform I/O, registration, timer
+      creation, or a native call.
+  - id: SEM-A-005
+    kind: MUST
+    rule: >-
+      A compatibility bridge names both the old path and the proof that permits
+      deletion of that path.
+  - id: SEM-A-006
+    kind: MUST
+    rule: >-
+      Existing static module behavior remains the baseline until a later
+      semantic record explicitly changes it.
+properties:
+  - id: PROP-A-SPEC-001
+    claim: >-
+      A generated record set is valid exactly when IDs are unique, references
+      resolve, the graph is acyclic, and property evidence is local.
+    shapes: [differential]
+    evidence: [SEM-A-001, SEM-A-002, SEM-A-005]
+    domain:
+      generates: >-
+        Lexically valid records with valid and invalid IDs, references, cycles,
+        property IDs, evidence links, and deletion gates.
+      excludes: [filesystem I/O failures]
+      strategy: >-
+        Construct a valid small graph, then apply one or more typed mutations.
+      classifications: [valid, unresolved, cyclic, duplicate, uncovered]
+    preconditions:
+      - Records pass their per-file schema before cross-record rules run.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          An independent in-memory graph and set model computes validity.
+        independence: >-
+          It shares no traversal or diagnostic code with the repository checker.
+      alternative:
+        kind: metamorphic
+        description: >-
+          Apply a controlled mutation to a known corpus and check the resulting
+          diagnostic.
+        independence: >-
+          Expected codes come from reviewed fixture intent, not checker output.
+    failure_value: >-
+      A cyclic migration graph passes and produces an impossible task order.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.spec.graph.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: implemented
+    deletion_gates: []
+  - id: PROP-A-IMPORT-001
+    claim: >-
+      Importing a generated plugin entrypoint without activation causes no
+      observable I/O, timer, registration, or Tauri access.
+    shapes: [safety]
+    evidence: [SEM-A-004]
+    domain:
+      generates: >-
+        Import orders over fixture plugins with optional module dependencies.
+      excludes: [explicit activation calls]
+      strategy: >-
+        Generate passive and deliberately active top-level module bodies.
+      classifications: [passive, filesystem, network, timer, registry, tauri]
+    preconditions:
+      - Every fixture is a syntactically valid ECMAScript module.
+    oracle:
+      primary:
+        kind: invariant
+        description: >-
+          Fresh-process tripwires record native and global side-effect channels.
+        independence: >-
+          The probes run outside plugin code and activation code.
+      alternative:
+        kind: reference
+        description: >-
+          Static import inspection rejects top-level registration and forbidden
+          dependencies.
+        independence: >-
+          The source graph does not depend on runtime tripwire instrumentation.
+    failure_value: >-
+      Importing usage starts provider ingestion or opens its durable store.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.plugin.passive-import.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: implemented
+    deletion_gates: []
+  - id: PROP-A-COMPOSITION-001
+    claim: >-
+      A generated ordered legacy module set has exactly its modeled contribution
+      inventory and duplicate-owner decisions.
+    shapes: [differential]
+    evidence: [SEM-A-006]
+    domain:
+      generates: >-
+        Module objects with commands, panels, surfaces, settings, messages, and
+        lifecycle hooks.
+      excludes: [React rendering behavior]
+      strategy: >-
+        Construct declarations directly and vary order and duplicate identities.
+      classifications: [unique, duplicate-same-kind, duplicate-cross-kind]
+    preconditions:
+      - Generated declarations satisfy current TypeScript contracts.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A normalized test inventory applies only documented ownership rules.
+        independence: >-
+          The model does not call the production composition code.
+      alternative:
+        kind: reference
+        description: >-
+          Compare public projections from current registries with the candidate.
+        independence: >-
+          Registry queries are built separately from the normalized test model.
+    failure_value: >-
+      Cordis composition drops a settings contribution supplied by legacy code.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.legacy-composition.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: implemented
+    deletion_gates: []
+  - id: PROP-A-REPLAY-001
+    claim: >-
+      A minimized failure replays to the same property and normalized
+      counterexample on an unchanged repository and runner identity.
+    shapes: [roundtrip]
+    evidence: [SEM-A-003]
+    domain:
+      generates: >-
+        TypeScript and Rust evidence with seeds, paths, IDs, and serialized
+        counterexamples.
+      excludes: [runner-version changes, repository-revision changes]
+      strategy: >-
+        Construct valid evidence and mutate one identity or replay field.
+      classifications: [typescript, rust, identity-mismatch, replay-match]
+    preconditions:
+      - Recorded repository and runner identities match for a successful replay.
+    oracle:
+      primary:
+        kind: roundtrip
+        description: >-
+          Compare stored normalized failure data with a new isolated replay.
+        independence: >-
+          The evidence reader is separate from the property runner.
+      alternative:
+        kind: reference
+        description: >-
+          A fresh process compares IDs, exit class, and minimized artifact hash.
+        independence: >-
+          Process identity and hashes do not use counterexample normalization.
+    failure_value: >-
+      A lifecycle defect cannot be reproduced after an agent handoff.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.property-replay.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: implemented
+    deletion_gates: []
+deliverables:
+  - Closed schemas and records for the approved migration program.
+  - Cross-record validation with structured graph output.
+  - Property evidence and replay contracts for TypeScript and Rust.
+  - A generated baseline snapshot of current static architecture.
+deletion_gates:
+  - id: DELETE-A-ADHOC-INVENTORY
+    condition: >-
+      The architecture inspector emits all facts supplied by an ad hoc
+      inventory.
+    removes:
+      - Superseded ad hoc architecture inventory scripts only.

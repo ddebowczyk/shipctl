@@ -1,0 +1,343 @@
+---
+$schema: ../schema/phase.v1.schema.yaml
+schema_version: phase/v1
+id: phase-b
+title: Semantic TypeScript service wall
+status: implementing
+source: docs/4-layer-architecture/07-phase-b-semantic-service-wall.md
+depends_on: [phase-a]
+semantics:
+  - id: SEM-B-001
+    kind: MUST-NOT
+    rule: >-
+      A plugin source or artifact must not import Tauri, private core or IPC,
+      Layman, or another plugin implementation.
+  - id: SEM-B-002
+    kind: MUST
+    rule: >-
+      Public operations use semantic names and values and expose no Tauri wire
+      type.
+  - id: SEM-B-003
+    kind: MUST
+    rule: >-
+      Trusted adapters preserve characterized results, errors, cancellation,
+      ordering, and subscriptions until a specified change replaces them.
+  - id: SEM-B-004
+    kind: MUST
+    rule: Every public service call is attributable to one activation identity.
+  - id: SEM-B-005
+    kind: MUST
+    rule: >-
+      A module can execute against in-memory services without Tauri and without
+      a DOM when its role is headless.
+  - id: SEM-B-006
+    kind: MUST
+    rule: >-
+      Permanent frontend Tauri imports exist only below core/frontend/platform.
+  - id: SEM-B-007
+    kind: MUST
+    rule: >-
+      Public services distinguish requests, events, and ordered streams and
+      expose no generic invoke or event escape hatch.
+  - id: SEM-B-008
+    kind: MUST
+    rule: >-
+      A request has one typed outcome, stable error, correlation identity, and
+      defined cancellation and retry behavior.
+  - id: SEM-B-009
+    kind: MUST
+    rule: >-
+      An event subscription belongs to one activation lease and delivers
+      nothing after disposal.
+  - id: SEM-B-010
+    kind: MUST
+    rule: >-
+      An ordered stream defines attachment, sequence, credit, acknowledgement,
+      replay, and disconnect behavior outside the event bus.
+properties:
+  - id: PROP-B-BOUNDARY-001
+    claim: >-
+      A plugin import graph is valid exactly when its resolved owners are public
+      plugin API, peers, approved shared UI, or artifact-local code.
+    shapes: [safety]
+    evidence: [SEM-B-001, SEM-B-006]
+    domain:
+      generates: >-
+        Package graphs with relative, export, deep, alias, and literal dynamic
+        imports, including forbidden owners behind barrels.
+      excludes: [runtime-computed import strings]
+      strategy: >-
+        Generate packages and resolved ownership separately from source
+        spelling.
+      classifications:
+        - allowed
+        - tauri
+        - core
+        - layman
+        - cross-plugin
+        - hidden-barrel
+    preconditions:
+      - Every generated file parses as TypeScript or TSX.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A test-only resolved-owner classifier computes the allowed edge set.
+        independence: >-
+          It shares no production AST diagnostic implementation.
+      alternative:
+        kind: reference
+        description: >-
+          Inspect package-manager and bundler graphs for forbidden owners.
+        independence: >-
+          Resolved build metadata does not use source-rule classification code.
+    failure_value: >-
+      A barrel hides a Tauri core import and passes the boundary check.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.plugin-imports.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: implemented
+    deletion_gates: [DELETE-B-TAURI-EDGES]
+  - id: PROP-B-ADAPTER-001
+    claim: >-
+      A semantic adapter and legacy client return equivalent normalized results
+      and traces for every characterized operation request.
+    shapes: [differential]
+    evidence: [SEM-B-002, SEM-B-003]
+    domain:
+      generates: >-
+        Valid and invalid requests, transport errors, cancellation, empty
+        values, Unicode paths, and allowed numeric boundaries.
+      excludes: [capability-specific values excluded by its record]
+      strategy: >-
+        Generate one transport response trace and feed it to both paths.
+      classifications: [success, domain-error, transport-error, cancellation]
+    preconditions:
+      - Both paths receive the same recorded transport response.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare public results and ordered traces from legacy and new clients.
+        independence: >-
+          The fake transport is outside both clients.
+      alternative:
+        kind: model
+        description: >-
+          Apply a capability-specific request, result, and error model.
+        independence: >-
+          The model does not reuse either client or transport mapper.
+    failure_value: >-
+      Git maps a missing repository error to a generic unrecoverable failure.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.service-adapter.service.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: generator-ready
+    deletion_gates: [DELETE-B-TAURI-EDGES]
+  - id: PROP-B-FAKE-001
+    claim: >-
+      A module workflow that uses only declared services runs with in-memory
+      implementations and never touches a Tauri proxy.
+    shapes: [safety]
+    evidence: [SEM-B-005, SEM-B-007]
+    domain:
+      generates: Consumer actions for every declared service contract.
+      excludes: [DOM rendering]
+      strategy: >-
+        Generate valid service action sequences and matching fake responses.
+      classifications: [headless, presentation-logic, missing-binding]
+    preconditions:
+      - Required service bindings are present except in explicit refusal cases.
+    oracle:
+      primary:
+        kind: invariant
+        description: >-
+          A Tauri tripwire remains untouched and the fake log matches the model.
+        independence: >-
+          The tripwire and action model are outside module implementation code.
+      alternative:
+        kind: reference
+        description: >-
+          Run the workflow in a browser harness with no Tauri package.
+        independence: >-
+          Package resolution and browser globals fail independently of the fake.
+    failure_value: >-
+      A view still opens a native event listener outside its service adapter.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.plugin-service-fake.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: generator-ready
+    deletion_gates: [DELETE-B-TAURI-EDGES]
+  - id: PROP-B-ACTIVATION-001
+    claim: >-
+      Every generated service request carries the exact live activation that
+      issued it and never a different or disposed identity.
+    shapes: [safety]
+    evidence: [SEM-B-004, SEM-B-008]
+    domain:
+      generates: >-
+        Concurrent activations, service calls, disposal, and identity reuse.
+      excludes: [native authorization decisions]
+      strategy: >-
+        Allocate unique activations, then interleave calls and disposal.
+      classifications: [live, disposed, concurrent, reuse-attempt]
+    preconditions:
+      - Live activation identities are unique.
+    oracle:
+      primary:
+        kind: model
+        description: Compare issuing activation with captured request envelopes.
+        independence: The action ledger is created before adapter execution.
+      alternative:
+        kind: reference
+        description: >-
+          Check identity again at IPC against the admitted activation ledger.
+        independence: >-
+          The native-side ledger is separate from browser envelope capture.
+    failure_value: >-
+      A replacement calls Git with its predecessor's authority.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.service-activation.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: implemented
+    deletion_gates: [DELETE-B-TAURI-EDGES]
+  - id: PROP-B-REQUEST-001
+    claim: >-
+      Every bounded-request history has the result and native dispatch count
+      defined by the independent request-state model.
+    shapes: [state-machine]
+    evidence: [SEM-B-003, SEM-B-004, SEM-B-007, SEM-B-008]
+    domain:
+      generates: >-
+        Valid and invalid payloads, activation and grant states, failures,
+        cancellation positions, settlement, and permitted retries.
+      excludes: [retries not permitted by the capability record]
+      strategy: Generate valid state-machine commands from modeled state.
+      classifications: [denied, cancelled, failed, succeeded, retried]
+    preconditions:
+      - The capability defines cancellation, retry, and idempotency semantics.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A pure request model predicts outcome and native dispatch count.
+        independence: It shares no adapter or transport code.
+      alternative:
+        kind: reference
+        description: >-
+          Compare preserved operations with legacy traces and reviewed cases.
+        independence: Golden cases and legacy traces do not use the pure model.
+    failure_value: >-
+      A cancelled process termination executes after cancellation is reported.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.service-request.service.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: generator-ready
+    deletion_gates: [DELETE-B-TAURI-EDGES]
+  - id: PROP-B-EVENT-001
+    claim: >-
+      Every consumer sees exactly the ordered in-scope source events emitted
+      before its activation lease ends.
+    shapes: [state-machine]
+    evidence: [SEM-B-003, SEM-B-004, SEM-B-007, SEM-B-009]
+    domain:
+      generates: >-
+        Event logs, subscriptions, scopes, duplicate values, concurrent sources,
+        replacement, cancellation, and disposal.
+      excludes: [terminal byte streams]
+      strategy: Generate source logs first, then lease histories and filters.
+      classifications: [matching, filtered, disposed, duplicate-value]
+    preconditions:
+      - Sources define a stable identity and ordering rule.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          An independent lease and scope filter computes each expected sequence.
+        independence: The retained source log is outside the event service.
+      alternative:
+        kind: invariant
+        description: >-
+          Source sequence canaries prove per-lease delivery and disposal.
+        independence: Canaries are observed at the consumer boundary.
+    failure_value: >-
+      A disposed Git activation receives repository events through an old lease.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.service-event.service.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: generator-ready
+    deletion_gates: [DELETE-B-TAURI-EDGES]
+  - id: PROP-B-STREAM-001
+    claim: >-
+      Every attach, flow-control, disconnect, and reattach history produces the
+      consumer sequence defined by an independent ordered-stream model.
+    shapes: [state-machine]
+    evidence: [SEM-B-003, SEM-B-007, SEM-B-010]
+    domain:
+      generates: >-
+        Frames, boundary sequences, delayed duplicates, credit,
+        acknowledgements, replay, detach, reconnect, and replacement.
+      excludes: [operating-system process failure]
+      strategy: Generate valid commands from attachment and credit state.
+      classifications: [live, backpressured, replaying, detached, reattached]
+    preconditions:
+      - The stream begins with a valid attachment and retained replay bound.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A pure deque model owns sequence, credit, acknowledgement, and replay.
+        independence: It imports no terminal or transport implementation.
+      alternative:
+        kind: reference
+        description: >-
+          A packaged PTY canary compares sent, retained, and rendered hashes.
+        independence: >-
+          Native and rendered sequence probes bypass the deque model.
+    failure_value: >-
+      Backpressure drops output or reattachment replays a command twice.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.service-stream.semantic-terminal.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: generator-ready
+    deletion_gates: [DELETE-B-TAURI-EDGES]
+deliverables:
+  - Versioned semantic services with fake and trusted adapter implementations.
+  - Activation attribution at every TypeScript service boundary.
+  - Enforced rejection of direct plugin Tauri and private-core imports.
+deletion_gates:
+  - id: DELETE-B-TAURI-EDGES
+    condition: >-
+      Adapter parity and fake-host properties pass for the migrated consumer.
+    removes:
+      - The migrated module client.ts Tauri bridge.
+      - The migrated module direct native event listener.
+      - The migrated module Tauri frontend dependency.

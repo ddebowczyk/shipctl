@@ -379,6 +379,18 @@
           "markdownDescription": "Denies the get_pi_config command without any pre-configured scope."
         },
         {
+          "description": "Enables the has_pi_api_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-has-pi-api-key",
+          "markdownDescription": "Enables the has_pi_api_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the has_pi_api_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-has-pi-api-key",
+          "markdownDescription": "Denies the has_pi_api_key command without any pre-configured scope."
+        },
+        {
           "description": "Enables the list_restorable_assistant_sessions command without any pre-configured scope.",
           "type": "string",
           "const": "allow-list-restorable-assistant-sessions",

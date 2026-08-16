@@ -1,5 +1,7 @@
 # `@shipctl/core` — the host's own capabilities (frontend)
 
+<!-- markdownlint-disable MD013 -->
+
 Everything the app does that is *not* a pluggable module lives here, split by
 capability rather than by file kind. A capability owns its logic, its stores,
 its components and its assets in one directory, so that changing one concern
@@ -12,7 +14,8 @@ see `../backend/README.md`.
 
 | Directory | Owns | Depends on |
 | --- | --- | --- |
-| `platform/` | Tauri IPC bindings, the types those calls exchange with Rust, error extraction | nothing |
+| `platform/` | Tauri IPC bindings, private wire values, error extraction, and semantic capability adapters | `module-api` |
+| `runtime/` | activation-scoped semantic service binding and application lifecycle; Cordis adapter owner | `module-api` |
 | `shared/` | building blocks that more than one capability already imports: notices, UI state, `ContextMenu`, `a11y`, tab-kind metadata, well-known surface ids | `platform` |
 | `appearance/` | themes, custom themes, fonts (`fonts/`), `globals.css`, terminal colour derivation | `platform` |
 | `terminal-host/` | terminal session state, tab chrome, generic raw attachment, and the presentation port used by terminal modules | `platform`, `shared`, `appearance` |
@@ -79,6 +82,12 @@ not guess them.
 under `src/`, app imports into `ops/`, and host/module direction violations.
 Cross-capability imports use an exported `@shipctl/core/<capability>` entrypoint;
 `platform/` and `shared/` remain leaf foundations that may be imported directly.
+
+Frontend Tauri imports belong only in `platform/`. During Phase B, the checker
+also reads `ops/modularity/legacy-tauri-imports.json`, an exact counted ledger
+of existing imports outside that directory. It rejects every new edge and every
+stale ledger entry. A capability migration removes both its old import and its
+ledger record; the ledger must be empty at the Phase B exit.
 
 The checker carries exact exceptions for the host-service adapter's concrete
 store/session imports. Loading the corresponding barrels there would pull the

@@ -1,0 +1,52 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: plugin-data
+version: 1.0.0
+title: Namespaced durable plugin data
+status: implementing
+layer: native-kernel
+consumers: [commands, skills, assistants, usage]
+current_implementations:
+  - module-api/frontend/src/protocol/pluginData.ts
+  - module-api/frontend/src/testing/pluginData.ts
+  - core/backend/src/plugin_data/mod.rs
+  - core/tauri/src/plugin_data.rs
+  - core/frontend/platform/pluginData.ts
+  - modules/commands/frontend/src/commandsDataClient.ts
+  - modules/usage/frontend/src/usageSettingsDataClient.ts
+target_owners:
+  provider: core/backend/src/plugin_data
+  tauri_adapter: core/tauri/src/plugin_data.rs
+  typescript_client: core/frontend/platform/pluginData
+operations:
+  - id: readRecord
+    kind: request
+    contract: Read a versioned record from one admitted plugin namespace.
+  - id: writeRecord
+    kind: request
+    contract: >-
+      Atomically compare-and-write a JSON-safe record at an admitted schema
+      version.
+  - id: migrateRecords
+    kind: request
+    contract: Run one admitted data migration with recorded provenance.
+required_grants:
+  - plugin-data.read
+  - plugin-data.write
+  - plugin-data.migrate
+ownership:
+  authority: The native kernel owns atomicity, namespace, and schema admission.
+  resources: >-
+    Durable data survives activation removal. The exact admitted record catalog
+    is the initial quota; no byte limit is selected without owned evidence.
+  activation_scope: Artifact identity and plugin namespace authorize access.
+depends_on: []
+property_ids:
+  - PROP-B-ADAPTER-001
+  - PROP-B-REQUEST-001
+  - PROP-B-ACTIVATION-001
+  - PROP-B-FAKE-001
+  - PROP-D-PARITY-001
+  - PROP-D-AUTHORITY-001
+  - PROP-D-OWNERSHIP-001

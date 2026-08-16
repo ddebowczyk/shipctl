@@ -15,6 +15,7 @@ const COMMANDS: &[&str] = &[
     "get_models_for_provider",
     "get_pi_config",
     "save_pi_settings",
+    "has_pi_api_key",
     "save_pi_api_key",
     "delete_pi_api_key",
 ];

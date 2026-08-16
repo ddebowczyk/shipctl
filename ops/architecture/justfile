@@ -1,0 +1,57 @@
+validate:
+    node bin/check-spec.mjs
+
+inspect *args:
+    node bin/inspect.mjs {{args}}
+
+baseline:
+    node bin/inspect.mjs --check
+
+boundaries:
+    node ../modularity/bin/check-module-boundaries.mjs ../..
+
+test:
+    # These files create isolated Vite SSR servers. Vite shares one development
+    # WebSocket port across parallel Node test workers, so this lane is serial.
+    node --test --test-concurrency=1 tests/*.test.mjs
+
+graph:
+    node bin/check-spec.mjs --graph
+
+project-documents *args:
+    node bin/run-project-documents-properties.mjs {{args}}
+
+git *args:
+    node bin/run-git-properties.mjs {{args}}
+
+skill-installation *args:
+    node bin/run-skill-installation-properties.mjs {{args}}
+
+credential-store *args:
+    node bin/run-credential-store-properties.mjs {{args}}
+
+usage-sources *args:
+    node bin/run-usage-sources-properties.mjs {{args}}
+
+plugin-data *args:
+    node bin/run-plugin-data-properties.mjs {{args}}
+
+messages *args:
+    node bin/run-messages-properties.mjs {{args}}
+
+scheduler *args:
+    node bin/run-scheduler-properties.mjs {{args}}
+
+terminal-sessions *args:
+    node bin/run-terminal-sessions-properties.mjs {{args}}
+
+semantic-terminals *args:
+    node bin/run-semantic-terminals-properties.mjs {{args}}
+
+cordis *args:
+    node bin/run-cordis-properties.mjs {{args}}
+
+cordis-runtime *args:
+    node bin/build-cordis-runtime.mjs {{args}}
+
+all: validate boundaries baseline cordis-runtime test

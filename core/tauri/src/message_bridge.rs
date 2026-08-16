@@ -17,6 +17,7 @@ use shipctl_core::message_bus::{
     BRIDGE_CLOSED, DUPLICATE_CHANNEL_OWNER, HANDLER_FAILED, HANDLER_UNAVAILABLE,
     INVALID_IDENTIFIER, NO_ACTIVE_CHANNEL_OWNER, SUBSCRIBER_LAG, UNAUTHORIZED_SENDER,
 };
+use shipctl_core::scheduler::SchedulerLeaseService;
 struct OrderedChannel {
     bridge_id: String,
     next_sequence: u64,
@@ -186,6 +187,26 @@ impl FrontendBridge {
             })
     }
 
+    fn authority_and_module(
+        &self,
+        activation_id: &str,
+    ) -> Result<(String, ModuleMessageAuthority), MessageContractError> {
+        let module_id = self
+            .registration_inputs
+            .lock()
+            .expect("message bridge input lock poisoned")
+            .iter()
+            .find(|registration| registration.activation_id == activation_id)
+            .map(|registration| registration.module_id.clone())
+            .ok_or_else(|| {
+                MessageContractError::new(
+                    UNAUTHORIZED_SENDER,
+                    "Activation does not belong to this frontend bridge",
+                )
+            })?;
+        Ok((module_id, self.authority(activation_id)?))
+    }
+
     fn authority_for_module_publish(
         &self,
         module_id: &str,
@@ -308,6 +329,7 @@ impl FrontendBridge {
 pub struct MessageBusBridgeService {
     bus: RuntimeMessageBus,
     bridges: Arc<AsyncMutex<BTreeMap<String, Arc<FrontendBridge>>>>,
+    scheduler_leases: Option<SchedulerLeaseService>,
 }
 
 impl MessageBusBridgeService {
@@ -315,6 +337,18 @@ impl MessageBusBridgeService {
         Self {
             bus,
             bridges: Arc::new(AsyncMutex::new(BTreeMap::new())),
+            scheduler_leases: None,
+        }
+    }
+
+    pub fn with_scheduler_leases(
+        bus: RuntimeMessageBus,
+        scheduler_leases: SchedulerLeaseService,
+    ) -> Self {
+        Self {
+            bus,
+            bridges: Arc::new(AsyncMutex::new(BTreeMap::new())),
+            scheduler_leases: Some(scheduler_leases),
         }
     }
 
@@ -545,8 +579,26 @@ impl MessageBusBridgeService {
             .iter()
             .map(|registration| registration.activation_id().to_string())
             .collect::<Vec<_>>();
+        let mut cleanup_failed = false;
+        if let Some(scheduler_leases) = &self.scheduler_leases {
+            for activation_id in &activation_ids {
+                if scheduler_leases
+                    .release_activation(activation_id)
+                    .await
+                    .is_err()
+                {
+                    cleanup_failed = true;
+                }
+            }
+        }
         self.bus.withdraw_many(&activation_ids).await?;
         self.bus.reap_retired().await;
+        if cleanup_failed {
+            return Err(MessageContractError::new(
+                BRIDGE_CLOSED,
+                "Frontend bridge resource cleanup failed",
+            ));
+        }
         Ok(self.bus.snapshot())
     }
 
@@ -557,6 +609,19 @@ impl MessageBusBridgeService {
             .get(bridge_id)
             .cloned()
             .ok_or_else(|| MessageContractError::new(BRIDGE_CLOSED, "Frontend bridge is closed"))
+    }
+
+    /// Returns the exact authority admitted for one private bridge binding.
+    /// Semantic Tauri adapters use this instead of trusting module identity
+    /// supplied by the webview.
+    pub async fn activation_authority(
+        &self,
+        bridge_id: &str,
+        activation_id: &str,
+    ) -> Result<(String, ModuleMessageAuthority), MessageContractError> {
+        let bridge = self.bridge(bridge_id).await?;
+        let _transaction = bridge.transaction.lock().await;
+        bridge.authority_and_module(activation_id)
     }
 
     pub async fn send(
@@ -710,6 +775,15 @@ mod tests {
         MessageDeclarations, MessageSchemaDescriptor, MessageTypeContract, RouteEndpointRef,
     };
     use shipctl_core::module_control::ModuleGrant;
+    use shipctl_core::scheduler::leases::{
+        ScheduleRegistrationEndpoint, ScheduleRegistrationTarget,
+    };
+    use shipctl_core::scheduler::{
+        RegisterScheduleInput, ScheduleTargetKind, SchedulerActor, SchedulerLeaseService,
+        SchedulerService, SCHEDULER_REGISTER_GRANT,
+    };
+    use shipctl_module_api::DurableWriteBarrier;
+    use tempfile::tempdir;
 
     use super::*;
 
@@ -824,6 +898,7 @@ mod tests {
                 format!("message.publish.{TOPIC}"),
                 format!("message.subscribe.{TOPIC}"),
                 format!("message.request.{PORT}"),
+                SCHEDULER_REGISTER_GRANT.to_string(),
             ]
             .into_iter()
             .map(|id| ModuleGrant {
@@ -1077,5 +1152,62 @@ mod tests {
         service.close(&reopened.bridge_id).await.unwrap();
         let backend = bus.withdraw(backend.activation_id()).await.unwrap();
         backend.dispose().await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn bridge_close_releases_activation_owned_scheduler_resources() {
+        let temporary = tempdir().unwrap();
+        let mut context = context();
+        context.state_root = temporary.path().to_path_buf();
+        context.runtime_root = temporary.path().join("runtime");
+        let schedule_root = context.paths().schedule_root;
+        let bus = RuntimeMessageBus::new(context.clone());
+        let scheduler = SchedulerService::new(context, &schedule_root, bus.clone()).unwrap();
+        let leases = SchedulerLeaseService::new(scheduler.clone(), DurableWriteBarrier::default());
+        let service = MessageBusBridgeService::with_scheduler_leases(bus, leases.clone());
+        let registration = registration();
+        let activation_id = registration.activation_id.clone();
+        let receipt = service
+            .open(
+                vec![registration],
+                test_channel(Arc::new(Mutex::new(Vec::new()))),
+            )
+            .await
+            .unwrap();
+        let (module_id, authority) = service
+            .activation_authority(&receipt.bridge_id, &activation_id)
+            .await
+            .unwrap();
+        let actor = SchedulerActor {
+            module_id,
+            activation_id,
+        };
+        leases
+            .register(
+                actor.clone(),
+                &authority,
+                RegisterScheduleInput {
+                    schedule_id: "fixture.bridge-schedule".to_string(),
+                    cron: "* * * * * Etc/UTC".to_string(),
+                    target: ScheduleRegistrationTarget {
+                        kind: ScheduleTargetKind::Channel,
+                        endpoint: ScheduleRegistrationEndpoint {
+                            id: CHANNEL.to_string(),
+                            message: message(MESSAGE),
+                        },
+                    },
+                    payload: json!({"value": 1}),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(leases.inspect(&actor, &authority).unwrap().len(), 1);
+        assert_eq!(scheduler.accepted_snapshot().definitions.len(), 1);
+
+        service.close(&receipt.bridge_id).await.unwrap();
+
+        assert!(leases.inspect(&actor, &authority).unwrap().is_empty());
+        assert!(scheduler.accepted_snapshot().definitions.is_empty());
+        assert!(std::fs::read_dir(schedule_root).unwrap().next().is_none());
     }
 }

@@ -36,6 +36,32 @@ Denies the add_todo command without any pre-configured scope.
 <tr>
 <td>
 
+`shipctl-todos:allow-discover-project-documents`
+
+</td>
+<td>
+
+Enables the discover_project_documents command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shipctl-todos:deny-discover-project-documents`
+
+</td>
+<td>
+
+Denies the discover_project_documents command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `shipctl-todos:allow-move-todo`
 
 </td>
@@ -55,6 +81,32 @@ Enables the move_todo command without any pre-configured scope.
 <td>
 
 Denies the move_todo command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shipctl-todos:allow-read-project-document`
+
+</td>
+<td>
+
+Enables the read_project_document command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shipctl-todos:deny-read-project-document`
+
+</td>
+<td>
+
+Denies the read_project_document command without any pre-configured scope.
 
 </td>
 </tr>
@@ -107,6 +159,32 @@ Enables the toggle_todo command without any pre-configured scope.
 <td>
 
 Denies the toggle_todo command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shipctl-todos:allow-write-project-document`
+
+</td>
+<td>
+
+Enables the write_project_document command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shipctl-todos:deny-write-project-document`
+
+</td>
+<td>
+
+Denies the write_project_document command without any pre-configured scope.
 
 </td>
 </tr>

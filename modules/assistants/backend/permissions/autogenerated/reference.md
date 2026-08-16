@@ -192,6 +192,32 @@ Denies the get_pi_config command without any pre-configured scope.
 <tr>
 <td>
 
+`shipctl-assistants:allow-has-pi-api-key`
+
+</td>
+<td>
+
+Enables the has_pi_api_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`shipctl-assistants:deny-has-pi-api-key`
+
+</td>
+<td>
+
+Denies the has_pi_api_key command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `shipctl-assistants:allow-list-restorable-assistant-sessions`
 
 </td>

@@ -25,11 +25,14 @@ use shipctl_core::logs::{
 use shipctl_core::message_bus::RuntimeMessageBus;
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::module_control::registry::ModuleRegistrySnapshotProvider;
-use shipctl_core::scheduler::{SchedulerService, SchedulerSnapshotProvider};
+use shipctl_core::plugin_data::PluginDataService;
+use shipctl_core::scheduler::{
+    purge_stale_lease_sources, SchedulerLeaseService, SchedulerService, SchedulerSnapshotProvider,
+};
 use shipctl_core::state::archive::StateArchiveService;
 use shipctl_core::state::providers::{
-    LegacyStateSnapshotProvider, UiSnapshotProvider, WorkspaceLayoutSnapshotProvider,
-    WorkspaceSnapshotProvider,
+    LegacyStateSnapshotProvider, PluginDataSnapshotProvider, UiSnapshotProvider,
+    WorkspaceLayoutSnapshotProvider, WorkspaceSnapshotProvider,
 };
 use shipctl_core::state::ui::UiStateStore;
 use shipctl_core::state::workspace_layout::WorkspaceLayoutStore;
@@ -121,18 +124,29 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         paths.workspace_layouts.clone(),
         durable_writes.clone(),
     );
+    let plugin_data = PluginDataService::new_with_barrier(
+        paths.plugin_data.clone(),
+        workspace.clone(),
+        durable_writes.clone(),
+    );
     let message_bus = RuntimeMessageBus::new(context.clone());
-    let message_bridges = MessageBusBridgeService::new(message_bus.clone());
     let agent_capabilities = shipctl_core::module_control::agent::AgentCapabilityService::new(
         module_control.clone(),
         message_bus.clone(),
     );
+    purge_stale_lease_sources(&paths.schedule_root, &durable_writes)
+        .map_err(|error| error.to_string())?;
     let scheduler = SchedulerService::new(
         context.clone(),
         paths.schedule_root.clone(),
         message_bus.clone(),
     )
     .map_err(|error| error.to_string())?;
+    let scheduler_leases = SchedulerLeaseService::new(scheduler.clone(), durable_writes.clone());
+    let message_bridges = MessageBusBridgeService::with_scheduler_leases(
+        message_bus.clone(),
+        scheduler_leases.clone(),
+    );
     let scheduler_startup = scheduler.clone();
     let control_context = context.clone();
     let control_leases = leases.clone();
@@ -140,12 +154,14 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         builder,
         terminals.clone(),
         workspace.clone(),
+        plugin_data.clone(),
         paths.clone(),
         durable_writes,
         message_bridges.clone(),
     )
     .manage(terminals)
     .manage(workspace)
+    .manage(plugin_data)
     .manage(ui_state)
     .manage(workspace_layouts)
     .manage(state_archive)
@@ -154,6 +170,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     .manage(message_bus)
     .manage(message_bridges)
     .manage(scheduler)
+    .manage(scheduler_leases)
     .manage(paths)
     .manage(context)
     .setup(move |app| {
@@ -302,6 +319,9 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         shipctl_tauri_adapter::platform::check_command_exists,
         shipctl_tauri_adapter::platform::reveal_in_finder,
         shipctl_tauri_adapter::platform::open_url,
+        shipctl_tauri_adapter::plugin_data::read_plugin_data_record,
+        shipctl_tauri_adapter::plugin_data::write_plugin_data_record,
+        shipctl_tauri_adapter::plugin_data::migrate_plugin_data_records,
         shipctl_tauri_adapter::instance::inspect_instance,
         shipctl_tauri_adapter::state::get_ui_state,
         shipctl_tauri_adapter::state::set_last_repo_path,
@@ -317,8 +337,11 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         shipctl_tauri_adapter::message_bus::reply_runtime_message,
         shipctl_tauri_adapter::message_bus::report_runtime_message_failure,
         shipctl_tauri_adapter::message_bus::inspect_runtime_messages,
-        modules::capability_data::get_global_capability_data,
-        modules::capability_data::replace_global_capability_data,
+        shipctl_tauri_adapter::scheduler::register_semantic_schedule,
+        shipctl_tauri_adapter::scheduler::inspect_semantic_schedules,
+        shipctl_tauri_adapter::scheduler::cancel_semantic_schedule,
+        shipctl_tauri_adapter::scheduler::observe_semantic_schedule_deliveries,
+        shipctl_tauri_adapter::scheduler::stop_semantic_schedule_observer,
         lifecycle::shutdown_and_quit,
     ])
     .build(tauri::generate_context!())
@@ -350,6 +373,7 @@ fn snapshot_providers(
         Arc::new(WorkspaceLayoutSnapshotProvider::new(
             paths.workspace_layouts.clone(),
         )),
+        Arc::new(PluginDataSnapshotProvider::new(paths.plugin_data.clone())),
         Arc::new(ModuleRegistrySnapshotProvider::new(
             paths.module_registry_database.clone(),
         )),

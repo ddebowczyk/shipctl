@@ -6,18 +6,25 @@
 
 pub mod contracts;
 pub mod diagnostics;
+pub mod leases;
 pub mod loader;
 pub mod runtime;
 pub mod snapshot;
 
 pub use contracts::{
     parse_schedule_source, schedule_snapshot, ScheduleContractCatalog, ScheduleContractError,
-    ScheduleDefinition, ScheduleDefinitionInspection, ScheduleDiagnosticReport, ScheduleInspection,
-    ScheduleMessage, ScheduleRefreshReport, ScheduleSnapshot, ScheduleTarget,
-    ScheduleTargetAvailability, ScheduleTargetKind, ScheduleTriggerReport, ScheduleVerification,
-    SCHEDULE_CONTROL_SCHEMA_VERSION, SCHEDULE_INSPECTION_SCHEMA_VERSION, SCHEDULE_SCHEMA_VERSION,
+    ScheduleDefinition, ScheduleDefinitionInspection, ScheduleDeliveryObservation,
+    ScheduleDiagnosticReport, ScheduleInspection, ScheduleMessage, ScheduleRefreshReport,
+    ScheduleSnapshot, ScheduleTarget, ScheduleTargetAvailability, ScheduleTargetKind,
+    ScheduleTriggerReport, ScheduleVerification, SCHEDULE_CONTROL_SCHEMA_VERSION,
+    SCHEDULE_INSPECTION_SCHEMA_VERSION, SCHEDULE_SCHEMA_VERSION,
 };
 pub use diagnostics::{ScheduleDiagnostic, ScheduleDiagnosticSeverity};
+pub use leases::{
+    purge_stale_lease_sources, RegisterScheduleInput, ScheduleLeaseInspection, SchedulerActor,
+    SchedulerDeliveryFrame, SchedulerLeaseError, SchedulerLeaseService, SCHEDULER_INVALID_REQUEST,
+    SCHEDULER_REGISTER_GRANT, SCHEDULER_SERVICE_SCHEMA_VERSION,
+};
 pub use loader::{load_schedule_candidate, ScheduleLoadCandidate};
 pub use runtime::{
     AcceptedScheduleSnapshot, ScheduleRefreshResult, SchedulerControlError, SchedulerService,

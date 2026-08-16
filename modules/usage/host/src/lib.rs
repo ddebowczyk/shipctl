@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use shipctl_core::message_bus::{MessageEnvelope, MessageTypeId, MESSAGE_CONTRACT_SCHEMA_VERSION};
-use shipctl_core::workspace::manager::WorkspaceManager;
+use shipctl_core::plugin_data::{PluginDataScope, PluginDataService};
 use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
 use shipctl_module_usage::{GlobalCapabilityDataAuthority, HostServices, UsageIngestNotifier};
 use shipctl_tauri_adapter::MessageBusBridgeService;
@@ -13,8 +13,8 @@ use tauri::{AppHandle, Builder, Runtime};
 const USAGE_MODULE_ID: &str = "shipctl.usage";
 const USAGE_INGEST_COMPLETED: &str = "usage.ingest-completed";
 
-struct WorkspaceGlobalCapabilityData {
-    workspace: WorkspaceManager,
+struct PluginUsageData {
+    plugin_data: PluginDataService,
 }
 
 #[derive(Clone)]
@@ -45,28 +45,35 @@ impl UsageIngestNotifier for RuntimeMessageUsageIngestNotifier {
     }
 }
 
-impl GlobalCapabilityDataAuthority for WorkspaceGlobalCapabilityData {
+impl GlobalCapabilityDataAuthority for PluginUsageData {
     fn read(&self, capability_id: &str) -> Result<Option<serde_json::Value>, String> {
-        self.workspace.load_global_capability_data(capability_id)
+        if capability_id != "usage" {
+            return Err("Usage requested an unknown plugin-data record".to_string());
+        }
+        self.plugin_data
+            .read_owned_value(USAGE_MODULE_ID, &PluginDataScope::Global, "settings")
     }
 }
 
-fn host_services(workspace: WorkspaceManager, messages: MessageBusBridgeService) -> HostServices {
+fn host_services(
+    plugin_data: PluginDataService,
+    messages: MessageBusBridgeService,
+) -> HostServices {
     HostServices::with_ingest_notifier(
-        Arc::new(WorkspaceGlobalCapabilityData { workspace }),
+        Arc::new(PluginUsageData { plugin_data }),
         Arc::new(RuntimeMessageUsageIngestNotifier { messages }),
     )
 }
 
 pub fn install<R: Runtime>(
     builder: Builder<R>,
-    workspace: WorkspaceManager,
+    plugin_data: PluginDataService,
     messages: MessageBusBridgeService,
     database_path: PathBuf,
     durable_writes: DurableWriteBarrier,
 ) -> Builder<R> {
     builder.plugin(shipctl_module_usage::init(
-        host_services(workspace, messages),
+        host_services(plugin_data, messages),
         database_path,
         durable_writes,
     ))

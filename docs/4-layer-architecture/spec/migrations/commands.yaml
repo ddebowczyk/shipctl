@@ -1,0 +1,31 @@
+---
+$schema: ../schema/module-disposition.v1.schema.yaml
+schema_version: module-disposition/v1
+id: commands
+status: planned
+source_manifest: modules/commands/module.yaml
+current:
+  frontend: modules/commands/frontend
+  backend_crates: []
+  host_crates: []
+  direct_tauri: false
+  static_activation: true
+target:
+  roles: [compound]
+  responsibilities:
+    - Publish command palette actions as activation-owned contributions.
+    - Use terminal and workspace services without importing Tauri APIs.
+  capabilities:
+    - terminal-sessions
+    - plugin-data
+    - workspace
+phases: [phase-c, phase-e, phase-f, phase-g]
+prerequisites:
+  - Define command contribution identity, ordering, and disposal semantics.
+compatibility_paths:
+  - Wrap the current composition export as a built-in Cordis artifact.
+deletion_gates:
+  - id: DELETE-E-STATIC-IMPORT
+    proof_ids: [PROP-E-ARTIFACT-001, PROP-E-BUILTIN-PARITY-001]
+    targets:
+      - modules/commands/frontend/src/index.ts

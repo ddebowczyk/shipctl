@@ -1,0 +1,51 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: messages
+version: 1.0.0
+title: Typed module message routing
+status: implementing
+layer: application-runtime
+consumers: [usage]
+current_implementations:
+  - core/backend/src/message_bus
+  - module-api/frontend/src/protocol/messages.ts
+  - module-api/frontend/src/testing/messages.ts
+  - core/frontend/platform/messages.ts
+  - core/frontend/host/messageBusBridge.ts
+  - core/frontend/host/moduleComposition.ts
+target_owners:
+  provider: core/backend/src/message_bus
+  tauri_adapter: core/tauri/src/message_bus.rs
+  typescript_client: core/frontend/platform/messages.ts
+operations:
+  - id: sendMessage
+    kind: request
+    contract: Deliver one typed directed message to its accepted owner.
+  - id: publishMessage
+    kind: request
+    contract: Publish one typed event to accepted scoped subscribers.
+  - id: requestMessage
+    kind: request
+    contract: Request one typed response from an accepted capability-port owner.
+  - id: observeRoutes
+    kind: event
+    contract: Expose redacted route and delivery changes for inspection.
+required_grants:
+  - message.send
+  - message.publish
+  - message.subscribe
+ownership:
+  authority: The host owns schema admission, routing, bounds, and diagnostics.
+  resources: Subscriptions and handlers are activation-owned effects.
+  activation_scope: >-
+    Every route endpoint carries artifact and activation identity.
+depends_on: []
+property_ids:
+  - PROP-B-ADAPTER-001
+  - PROP-B-REQUEST-001
+  - PROP-B-EVENT-001
+  - PROP-B-ACTIVATION-001
+  - PROP-B-FAKE-001
+  - PROP-C-EFFECTS-001
+  - PROP-F-ATOMIC-001

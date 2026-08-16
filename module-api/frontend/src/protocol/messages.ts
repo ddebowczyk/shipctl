@@ -1,3 +1,10 @@
+import { defineSemanticService } from "./semanticServices.ts";
+import type {
+  SemanticRequestOptions,
+  SemanticRequestOutcome,
+  SemanticRequestPolicy,
+} from "./semanticServices.ts";
+
 export const MESSAGE_CONTRACT_SCHEMA_VERSION = 1 as const;
 export const JSON_SCHEMA_DRAFT_2020_12 =
   "https://json-schema.org/draft/2020-12/schema" as const;
@@ -78,20 +85,68 @@ export interface PublishReceipt extends DeliveryReceipt {
   readonly subscriberCount: number;
 }
 
-export interface ModuleMessages {
-  send<Payload>(
-    channel: DirectedChannel<Payload>,
-    payload: Payload,
-  ): Promise<DeliveryReceipt>;
-  publish<Payload>(
-    topic: BroadcastTopic<Payload>,
-    payload: Payload,
-  ): Promise<PublishReceipt>;
-  request<Request, Response>(
-    port: CapabilityPort<Request, Response>,
-    payload: Request,
-  ): Promise<Response>;
+export const MESSAGE_SERVICE_ERROR_CODES = {
+  cancelled: "message.request.cancelled",
+  activationDisposed: "message.activation.disposed",
+  transportFailed: "message.transport.failed",
+  unavailable: "message.transport.unavailable",
+  invalidResponse: "message.response.invalid",
+} as const;
+
+export type MessageServiceErrorCode =
+  | MessageDiagnosticCode
+  | (typeof MESSAGE_SERVICE_ERROR_CODES)[keyof typeof MESSAGE_SERVICE_ERROR_CODES];
+
+export interface SendMessageInput<Payload> {
+  readonly channel: DirectedChannel<Payload>;
+  readonly payload: Payload;
 }
+
+export interface PublishMessageInput<Payload> {
+  readonly topic: BroadcastTopic<Payload>;
+  readonly payload: Payload;
+}
+
+export interface RequestMessageInput<Request, Response> {
+  readonly port: CapabilityPort<Request, Response>;
+  readonly payload: Request;
+}
+
+export interface SendMessageOperation {
+  readonly policy: SemanticRequestPolicy;
+  execute<Payload>(
+    input: SendMessageInput<Payload>,
+    options?: SemanticRequestOptions,
+  ): Promise<SemanticRequestOutcome<DeliveryReceipt, MessageServiceErrorCode>>;
+}
+
+export interface PublishMessageOperation {
+  readonly policy: SemanticRequestPolicy;
+  execute<Payload>(
+    input: PublishMessageInput<Payload>,
+    options?: SemanticRequestOptions,
+  ): Promise<SemanticRequestOutcome<PublishReceipt, MessageServiceErrorCode>>;
+}
+
+export interface RequestMessageOperation {
+  readonly policy: SemanticRequestPolicy;
+  execute<Request, Response>(
+    input: RequestMessageInput<Request, Response>,
+    options?: SemanticRequestOptions,
+  ): Promise<SemanticRequestOutcome<Response, MessageServiceErrorCode>>;
+}
+
+export interface ModuleMessages {
+  readonly sendMessage: SendMessageOperation;
+  readonly publishMessage: PublishMessageOperation;
+  readonly requestMessage: RequestMessageOperation;
+}
+
+/** Typed, activation-owned access to the admitted runtime message graph. */
+export const messagesService = defineSemanticService<ModuleMessages>(
+  "shipctl.messages",
+  1,
+);
 
 export interface DirectedMessageHandler<Payload> {
   readonly channel: DirectedChannel<Payload>;

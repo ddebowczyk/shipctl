@@ -13,7 +13,10 @@
             "shipctl-todos:allow-read-todos",
             "shipctl-todos:allow-toggle-todo",
             "shipctl-todos:allow-add-todo",
-            "shipctl-todos:allow-move-todo"
+            "shipctl-todos:allow-move-todo",
+            "shipctl-todos:allow-discover-project-documents",
+            "shipctl-todos:allow-read-project-document",
+            "shipctl-todos:allow-write-project-document"
           ]
         },
         {
@@ -91,6 +94,7 @@
             "shipctl-assistants:allow-get-models-for-provider",
             "shipctl-assistants:allow-get-pi-config",
             "shipctl-assistants:allow-save-pi-settings",
+            "shipctl-assistants:allow-has-pi-api-key",
             "shipctl-assistants:allow-save-pi-api-key",
             "shipctl-assistants:allow-delete-pi-api-key"
           ]

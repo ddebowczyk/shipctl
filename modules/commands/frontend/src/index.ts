@@ -2,6 +2,11 @@ import type { ShipctlModule } from "@shipctl/module-api";
 
 import { loadProjectCommands } from "./runtime";
 import { useCommandsStore } from "./store";
+import {
+  activeCommandsDataClient,
+  commandsDataClientFor,
+  configureCommandsDataClient,
+} from "./commandsDataClient";
 import "./commands.css";
 
 export const COMMANDS_PANEL_ID = "core.commands" as const;
@@ -48,8 +53,19 @@ export const commandsModule = {
   projectLifecycle: {
     onProjectOpened: loadProjectCommands,
     onProjectRemoved: (projectPath) => {
+      // The active module client owns only revision metadata for this project.
+      // Removing the project invalidates that metadata with the module state.
+      activeCommandsDataClient().forget(projectPath);
       useCommandsStore.getState().removeProject(projectPath);
     },
+  },
+  activate({ activation }) {
+    configureCommandsDataClient(commandsDataClientFor(activation));
+    return {
+      deactivate() {
+        configureCommandsDataClient(null);
+      },
+    };
   },
 } as const satisfies ShipctlModule;
 

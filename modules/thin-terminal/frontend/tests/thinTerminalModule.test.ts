@@ -5,6 +5,15 @@ import { THIN_TERMINAL_DRIVER_ID, thinTerminalModule } from "../src/index.ts";
 
 test("thin terminal contributes exactly its raw-byte presentation", () => {
   assert.equal(thinTerminalModule.id, "shipctl.thin-terminal");
+  assert.deepEqual(thinTerminalModule.requiredGrants, [
+    "terminal.attach",
+    "terminal.input",
+    "terminal.resize",
+  ]);
+  assert.equal(
+    thinTerminalModule.terminalPresentations[0]?.moduleId,
+    thinTerminalModule.id,
+  );
   assert.deepEqual(
     thinTerminalModule.terminalPresentations.map((provider) => provider.driverId),
     [THIN_TERMINAL_DRIVER_ID],

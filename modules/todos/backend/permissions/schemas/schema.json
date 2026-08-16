@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the add_todo command without any pre-configured scope."
         },
         {
+          "description": "Enables the discover_project_documents command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-discover-project-documents",
+          "markdownDescription": "Enables the discover_project_documents command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the discover_project_documents command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-discover-project-documents",
+          "markdownDescription": "Denies the discover_project_documents command without any pre-configured scope."
+        },
+        {
           "description": "Enables the move_todo command without any pre-configured scope.",
           "type": "string",
           "const": "allow-move-todo",
@@ -317,6 +329,18 @@
           "type": "string",
           "const": "deny-move-todo",
           "markdownDescription": "Denies the move_todo command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_project_document command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-project-document",
+          "markdownDescription": "Enables the read_project_document command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_project_document command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-project-document",
+          "markdownDescription": "Denies the read_project_document command without any pre-configured scope."
         },
         {
           "description": "Enables the read_todos command without any pre-configured scope.",
@@ -341,6 +365,18 @@
           "type": "string",
           "const": "deny-toggle-todo",
           "markdownDescription": "Denies the toggle_todo command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the write_project_document command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-write-project-document",
+          "markdownDescription": "Enables the write_project_document command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the write_project_document command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-write-project-document",
+          "markdownDescription": "Denies the write_project_document command without any pre-configured scope."
         }
       ]
     }

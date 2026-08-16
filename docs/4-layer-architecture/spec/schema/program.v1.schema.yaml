@@ -1,0 +1,79 @@
+---
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: shipctl://architecture/schema/program.v1
+title: Shipctl four-layer migration program
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - id
+  - title
+  - status
+  - epic
+  - source_documents
+  - target_layers
+  - records
+  - evidence_schema
+  - invariants
+properties:
+  $schema:
+    type: string
+  schema_version:
+    const: architecture-program/v1
+  id:
+    const: shipctl-four-layer-migration
+  title:
+    type: string
+  status:
+    enum: [draft, approved, implementing, complete]
+  epic:
+    const: shep-vut
+  source_documents:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+  target_layers:
+    type: array
+    minItems: 4
+    uniqueItems: true
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, authority]
+      properties:
+        id:
+          enum:
+            - native-kernel
+            - tauri-adapters
+            - application-runtime
+            - application-plugins
+        authority:
+          type: string
+  records:
+    type: object
+    additionalProperties: false
+    required: [phases, capabilities, modules]
+    properties:
+      phases:
+        $ref: "#/$defs/files"
+      capabilities:
+        $ref: "#/$defs/files"
+      modules:
+        $ref: "#/$defs/files"
+  evidence_schema:
+    type: string
+  invariants:
+    type: array
+    minItems: 1
+    items:
+      type: string
+$defs:
+  files:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      pattern: ^[a-z][a-z0-9_./-]*\.yaml$

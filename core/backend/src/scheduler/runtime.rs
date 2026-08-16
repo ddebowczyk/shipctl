@@ -22,10 +22,10 @@ use crate::message_bus::{
 };
 
 use super::contracts::{
-    schedule_snapshot, ScheduleDefinition, ScheduleDeliveryOutcome, ScheduleDeliverySummary,
-    ScheduleDiagnosticReport, ScheduleInspection, ScheduleRefreshReport, ScheduleSnapshot,
-    ScheduleTargetAvailability, ScheduleTargetKind, ScheduleTriggerReport, ScheduleVerification,
-    SCHEDULE_CONTROL_SCHEMA_VERSION, SCHEDULE_INSPECTION_SCHEMA_VERSION,
+    schedule_snapshot, ScheduleDefinition, ScheduleDeliveryObservation, ScheduleDeliveryOutcome,
+    ScheduleDeliverySummary, ScheduleDiagnosticReport, ScheduleInspection, ScheduleRefreshReport,
+    ScheduleSnapshot, ScheduleTargetAvailability, ScheduleTargetKind, ScheduleTriggerReport,
+    ScheduleVerification, SCHEDULE_CONTROL_SCHEMA_VERSION, SCHEDULE_INSPECTION_SCHEMA_VERSION,
 };
 use super::diagnostics::{
     CRON_INVALID, NEXT_OCCURRENCE_UNAVAILABLE, PAYLOAD_INVALID, PAYLOAD_TOO_LARGE,
@@ -304,6 +304,8 @@ struct SchedulerServiceInner {
     jobs: Mutex<SchedulerJobs>,
     shutdown: watch::Sender<bool>,
     mutations: AsyncMutex<BTreeMap<Uuid, SchedulerMutationEntry>>,
+    delivery_listeners:
+        Mutex<BTreeMap<Uuid, Arc<dyn Fn(ScheduleDeliveryObservation) + Send + Sync>>>,
 }
 
 /// Instance-local schedule configuration service.
@@ -387,6 +389,7 @@ impl SchedulerService {
                 jobs: Mutex::new(SchedulerJobs::default()),
                 shutdown,
                 mutations: AsyncMutex::new(BTreeMap::new()),
+                delivery_listeners: Mutex::new(BTreeMap::new()),
             }),
         })
     }
@@ -412,6 +415,30 @@ impl SchedulerService {
     /// send on this channel.
     pub fn subscribe_snapshots(&self) -> watch::Receiver<Arc<AcceptedScheduleSnapshot>> {
         self.inner.snapshots.subscribe()
+    }
+
+    /// Observes only delivery results that commit to the current definition.
+    /// The returned identity removes exactly this listener.
+    pub fn observe_deliveries(
+        &self,
+        listener: impl Fn(ScheduleDeliveryObservation) + Send + Sync + 'static,
+    ) -> Uuid {
+        let id = Uuid::new_v4();
+        self.inner
+            .delivery_listeners
+            .lock()
+            .expect("scheduler delivery listener mutex must not be poisoned")
+            .insert(id, Arc::new(listener));
+        id
+    }
+
+    pub fn stop_observing_deliveries(&self, listener_id: Uuid) -> bool {
+        self.inner
+            .delivery_listeners
+            .lock()
+            .expect("scheduler delivery listener mutex must not be poisoned")
+            .remove(&listener_id)
+            .is_some()
     }
 
     /// Returns the number of still-running schedule jobs owned by this
@@ -644,6 +671,77 @@ impl SchedulerService {
     pub async fn refresh(&self) -> ScheduleRefreshResult {
         let _refresh = self.inner.refresh.lock().await;
         self.refresh_locked().await
+    }
+
+    /// Withdraws one accepted definition without admitting any new source.
+    /// This cleanup path cannot be blocked by an unrelated invalid source file.
+    pub async fn withdraw_schedule(&self, schedule_id: &str) -> bool {
+        let _refresh = self.inner.refresh.lock().await;
+        self.inner
+            .startup
+            .lock()
+            .expect("scheduler startup mutex must not be poisoned")
+            .candidate = None;
+
+        let accepted = {
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .expect("scheduler state mutex must not be poisoned");
+            if !state
+                .snapshot
+                .definitions
+                .iter()
+                .any(|definition| definition.id == schedule_id)
+            {
+                return false;
+            }
+            let definitions = state
+                .snapshot
+                .definitions
+                .iter()
+                .filter(|definition| definition.id != schedule_id)
+                .cloned()
+                .collect::<Vec<_>>();
+            let generation = state
+                .snapshot
+                .generation
+                .checked_add(1)
+                .expect("scheduler generation overflow");
+            let snapshot = schedule_snapshot(generation, definitions)
+                .expect("a subset of an accepted schedule snapshot is canonical");
+            let binding = state
+                .binding
+                .clone()
+                .expect("accepted scheduler state always has a route binding");
+            state.runtime.remove(schedule_id);
+            state.snapshot = snapshot.clone();
+            state.diagnostics.clear();
+            Arc::new(AcceptedScheduleSnapshot {
+                snapshot,
+                instance_id: binding.instance_id,
+                incarnation: binding.incarnation,
+                bus_route_generation: binding.route_generation,
+                removed_schedule_ids: vec![schedule_id.to_string()],
+            })
+        };
+        self.inner.snapshots.send_replace(Arc::clone(&accepted));
+        self.reconcile_jobs(accepted);
+        true
+    }
+
+    /// Validates one definition against the current typed route table without
+    /// publishing it or starting a job.
+    pub async fn preflight_definition(
+        &self,
+        definition: &ScheduleDefinition,
+    ) -> Result<(), Vec<ScheduleDiagnostic>> {
+        self.inner
+            .bus
+            .with_scheduler_preflight_all(&[preflight_request(definition)], |_| ())
+            .await
+            .map_err(|errors| preflight_diagnostics(std::slice::from_ref(definition), errors))
     }
 
     async fn refresh_locked(&self) -> ScheduleRefreshResult {
@@ -1193,8 +1291,8 @@ impl SchedulerService {
                 )),
             },
         };
-        self.record_delivery(definition, identity, summary.clone());
-        Some(summary)
+        self.record_delivery(definition, identity, summary.clone())
+            .then_some(summary)
     }
 
     /// Internally triggers one accepted enabled definition through the exact
@@ -1452,22 +1550,45 @@ impl SchedulerService {
         definition: &ScheduleDefinition,
         identity: &SchedulerJobIdentity,
         summary: ScheduleDeliverySummary,
-    ) {
-        let mut state = self
-            .inner
-            .state
-            .lock()
-            .expect("scheduler state mutex must not be poisoned");
-        if snapshot_definition_provenance_matches(&state.snapshot, definition, identity) {
-            if let Some(runtime) = state.runtime.get_mut(&definition.id) {
+    ) -> bool {
+        let committed = {
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .expect("scheduler state mutex must not be poisoned");
+            if !snapshot_definition_provenance_matches(&state.snapshot, definition, identity) {
+                false
+            } else if let Some(runtime) = state.runtime.get_mut(&definition.id) {
                 runtime.target_availability = match &summary.outcome {
                     ScheduleDeliveryOutcome::Delivered => ScheduleTargetAvailability::Available,
                     ScheduleDeliveryOutcome::Failed => ScheduleTargetAvailability::Unavailable,
                 };
                 runtime.diagnostic = summary.diagnostic.clone();
-                runtime.last_attempt = Some(summary);
+                runtime.last_attempt = Some(summary.clone());
+                true
+            } else {
+                false
+            }
+        };
+        if committed {
+            let observation = ScheduleDeliveryObservation {
+                schedule_id: definition.id.clone(),
+                delivery: summary,
+            };
+            let listeners = self
+                .inner
+                .delivery_listeners
+                .lock()
+                .expect("scheduler delivery listener mutex must not be poisoned")
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            for listener in listeners {
+                listener(observation.clone());
             }
         }
+        committed
     }
 
     fn reject(&self, mut diagnostics: Vec<ScheduleDiagnostic>) -> ScheduleRefreshResult {

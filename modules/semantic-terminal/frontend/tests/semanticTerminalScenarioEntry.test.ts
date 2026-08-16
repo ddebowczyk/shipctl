@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { SemanticTerminalsService } from "@shipctl/module-api";
 
 import {
   installScenarioHarnessInto,
@@ -7,6 +8,8 @@ import {
   TERMINAL_SCENARIO_GLOBAL,
   type ScenarioHostLoader,
 } from "@shipctl/module-semantic-terminal";
+
+const semanticTerminals = {} as SemanticTerminalsService;
 
 function loader(transcript: string): ScenarioHostLoader & { loads: number } {
   const fn = () => {
@@ -26,7 +29,7 @@ test("only a development build may install the harness", () => {
 test("a disallowed build installs and loads nothing", () => {
   const target: Record<string, unknown> = {};
   const load = loader("");
-  assert.equal(installScenarioHarnessInto(target, false, load), false);
+  assert.equal(installScenarioHarnessInto(target, false, semanticTerminals, load), false);
   assert.deepEqual(Object.keys(target), []);
   assert.equal(load.loads, 0);
 });
@@ -34,7 +37,10 @@ test("a disallowed build installs and loads nothing", () => {
 test("the named harness loads its live host only when run", async () => {
   const target: Record<string, unknown> = {};
   const load = loader('{"kind":"run-end"}');
-  assert.equal(installScenarioHarnessInto(target, true, load, () => 7), true);
+  assert.equal(
+    installScenarioHarnessInto(target, true, semanticTerminals, load, () => 7),
+    true,
+  );
   assert.deepEqual(Object.keys(target), [TERMINAL_SCENARIO_GLOBAL]);
   assert.equal(load.loads, 0);
   const harness = target[TERMINAL_SCENARIO_GLOBAL] as TerminalScenarioHarness;

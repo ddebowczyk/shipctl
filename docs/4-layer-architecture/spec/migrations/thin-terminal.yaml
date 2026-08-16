@@ -1,0 +1,35 @@
+---
+$schema: ../schema/module-disposition.v1.schema.yaml
+schema_version: module-disposition/v1
+id: thin-terminal
+status: planned
+source_manifest: modules/thin-terminal/module.yaml
+current:
+  frontend: modules/thin-terminal/frontend
+  backend_crates: []
+  host_crates: []
+  direct_tauri: false
+  static_activation: true
+target:
+  roles: [presentation]
+  responsibilities:
+    - Render terminal sessions through the public terminal capability client.
+    - Publish terminal views and commands through typed contributions.
+  capabilities:
+    - terminal-sessions
+    - workspace
+phases: [phase-b, phase-c, phase-e, phase-f, phase-g]
+prerequisites:
+  - Characterize focus, resize, paste, key input, and teardown behavior.
+compatibility_paths:
+  - Wrap the current composition export as a built-in Cordis artifact.
+  - Preserve terminal session identity when the view activation changes.
+deletion_gates:
+  - id: DELETE-E-STATIC-IMPORT
+    proof_ids: [PROP-E-ARTIFACT-001, PROP-E-BUILTIN-PARITY-001]
+    targets:
+      - modules/thin-terminal/frontend/src/index.ts
+  - id: DELETE-F-RESTART-LIFECYCLE
+    proof_ids: [PROP-F-CONTINUITY-001, PROP-F-RESTART-001]
+    targets:
+      - modules/thin-terminal/frontend/src/activation.ts

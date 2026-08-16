@@ -57,7 +57,7 @@ test("canvas rejects feature and Tauri imports while modules cannot import canva
     diagnostics.map(({ rule, specifier }) => ({ rule, specifier })),
     [
       { rule: "canvas-feature-module-import", specifier: "@shipctl/module-git" },
-      { rule: "canvas-tauri-import", specifier: "@tauri-apps/api/window" },
+      { rule: "tauri-import-outside-platform", specifier: "@tauri-apps/api/window" },
       { rule: "module-host-import", specifier: "@shipctl/core/canvas" },
     ],
   );

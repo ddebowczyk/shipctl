@@ -1,8 +1,8 @@
 import {
   MESSAGE_CONTRACT_SCHEMA_VERSION,
   MESSAGE_DIAGNOSTIC_CODES,
+  SCHEDULER_REGISTER_GRANT,
   type MessageEnvelope,
-  type ModuleMessages,
   type ShipctlModule,
 } from "@shipctl/module-api";
 import {
@@ -11,8 +11,11 @@ import {
   type MessageBridgeFailure,
   type RuntimeMessageTransport,
 } from "../platform/runtimeMessages.ts";
+import type { ActivationMessageClientBinding } from "../platform/messages.ts";
+import type { SchedulerTransportBinding } from "../platform/scheduler.ts";
+import type { TerminalSessionsTransportBinding } from "../platform/terminalSessions.ts";
 import {
-  createModuleMessages,
+  createActivationMessageClient,
   prepareModuleMessageActivation,
   type ModuleMessageActivation,
   type PreparedModuleMessageActivation,
@@ -26,7 +29,10 @@ export interface HostMessageDispatchResult {
 
 export interface OpenModuleMessageBridge {
   readonly bridge: MessageBusBridge;
-  readonly messagesByModule: ReadonlyMap<string, ModuleMessages>;
+  readonly clientsByActivation: ReadonlyMap<string, ActivationMessageClientBinding>;
+  readonly activationIdsByModule: ReadonlyMap<string, string>;
+  readonly schedulerBindingsByActivation: ReadonlyMap<string, SchedulerTransportBinding>;
+  readonly terminalBindingsByActivation: ReadonlyMap<string, TerminalSessionsTransportBinding>;
 }
 
 function failure(code: string, message: string): MessageBridgeFailure {
@@ -50,10 +56,12 @@ function responseEnvelope(
 export function moduleMessageGrants(module: ShipctlModule): readonly string[] {
   const messages = module.messages;
   return [...new Set([
+    ...(module.requiredGrants ?? []),
     ...(messages?.handles ?? []).map(({ requiredGrant }) => requiredGrant),
     ...(messages?.publishes ?? []).map(({ requiredGrant }) => requiredGrant),
     ...(messages?.ports ?? []).map(({ requiredGrant }) => requiredGrant),
     ...(messages?.subscribes ?? []).map(({ topic }) => `message.subscribe.${topic.id}`),
+    ...((module.scheduledTasks?.length ?? 0) > 0 ? [SCHEDULER_REGISTER_GRANT] : []),
   ])];
 }
 
@@ -63,7 +71,9 @@ export function createModuleMessageActivations(
     `${module.id}@${module.version}#${crypto.randomUUID()}`,
 ): readonly ModuleMessageActivation[] {
   return modules
-    .filter((module) => module.messages !== undefined)
+    .filter((module) => module.messages !== undefined
+      || (module.scheduledTasks?.length ?? 0) > 0
+      || (module.requiredGrants?.length ?? 0) > 0)
     .map((module) => ({
       module,
       activationId: activationId(module),
@@ -73,6 +83,7 @@ export function createModuleMessageActivations(
 
 export class MessageBusBridge {
   readonly #transport: RuntimeMessageTransport;
+  readonly #observeFrame?: (frame: HostMessageFrame) => void | Promise<void>;
   #activations: readonly PreparedModuleMessageActivation[];
   #byActivation: ReadonlyMap<string, PreparedModuleMessageActivation>;
   #bridgeId: string | null = null;
@@ -84,8 +95,10 @@ export class MessageBusBridge {
   constructor(
     activations: readonly ModuleMessageActivation[],
     transport: RuntimeMessageTransport = RUNTIME_MESSAGE_TRANSPORT,
+    observeFrame?: (frame: HostMessageFrame) => void | Promise<void>,
   ) {
     this.#transport = transport;
+    this.#observeFrame = observeFrame;
     this.#activations = activations.map(prepareModuleMessageActivation);
     this.#byActivation = new Map(
       this.#activations.map((activation) => [activation.activationId, activation]),
@@ -108,13 +121,30 @@ export class MessageBusBridge {
     this.#minimumRouteGeneration = receipt.snapshot.routeGeneration;
     return {
       bridge: this,
-      messagesByModule: this.#moduleMessages(receipt.bridgeId, this.#activations),
+      clientsByActivation: this.#messageClients(receipt.bridgeId, this.#activations),
+      activationIdsByModule: new Map(
+        this.#activations.map(({ moduleId, activationId }) => [moduleId, activationId]),
+      ),
+      schedulerBindingsByActivation: new Map(
+        this.#activations.map(({ moduleId, activationId }) => [activationId, {
+          moduleId,
+          activationId,
+          bridgeId: receipt.bridgeId,
+        }]),
+      ),
+      terminalBindingsByActivation: new Map(
+        this.#activations.map(({ moduleId, activationId, grants }) => [activationId, {
+          moduleId,
+          activationId,
+          grants,
+        }]),
+      ),
     };
   }
 
   async reconcile(
     activations: readonly ModuleMessageActivation[],
-  ): Promise<ReadonlyMap<string, ModuleMessages>> {
+  ): Promise<ReadonlyMap<string, ActivationMessageClientBinding>> {
     const bridgeId = this.#bridgeId;
     if (bridgeId === null || this.#closed) {
       throw new Error("Runtime message bridge is not open");
@@ -131,17 +161,32 @@ export class MessageBusBridge {
       prepared.map((activation) => [activation.activationId, activation]),
     );
     this.#minimumRouteGeneration = receipt.snapshot.routeGeneration;
-    return this.#moduleMessages(bridgeId, prepared);
+    return this.#messageClients(bridgeId, prepared);
   }
 
-  #moduleMessages(
+  #messageClients(
     bridgeId: string,
     activations: readonly PreparedModuleMessageActivation[],
-  ): ReadonlyMap<string, ModuleMessages> {
+  ): ReadonlyMap<string, ActivationMessageClientBinding> {
     return new Map(activations.map((activation) => [
-      activation.moduleId,
-      createModuleMessages(bridgeId, activation.activationId, this.#transport),
+      activation.activationId,
+      {
+        moduleId: activation.moduleId,
+        activationId: activation.activationId,
+        client: createActivationMessageClient(
+          bridgeId,
+          activation.activationId,
+          this.#transport,
+        ),
+      },
     ]));
+  }
+
+  /** Stop frontend delivery to one disposed activation before native teardown. */
+  deactivateActivation(activationId: string): void {
+    const next = new Map(this.#byActivation);
+    next.delete(activationId);
+    this.#byActivation = next;
   }
 
   async dispatch(frame: HostMessageFrame): Promise<HostMessageDispatchResult> {
@@ -164,6 +209,11 @@ export class MessageBusBridge {
     }
 
     try {
+      try {
+        await this.#observeFrame?.(frame);
+      } catch {
+        // Observation cannot change message delivery or backpressure.
+      }
       if (frame.kind === "directed") {
         const handlers = activation.handlers.directed.get(frame.endpoint);
         if (!handlers?.length) return this.#handlerUnavailable(frame);
@@ -273,10 +323,12 @@ export async function openModuleMessageBridge(
   modules: readonly ShipctlModule[],
   transport: RuntimeMessageTransport = RUNTIME_MESSAGE_TRANSPORT,
   activationId?: (module: ShipctlModule) => string,
+  observeFrame?: (frame: HostMessageFrame) => void | Promise<void>,
 ): Promise<OpenModuleMessageBridge> {
   const bridge = new MessageBusBridge(
     createModuleMessageActivations(modules, activationId),
     transport,
+    observeFrame,
   );
   return bridge.open();
 }

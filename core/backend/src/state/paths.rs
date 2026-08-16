@@ -10,6 +10,7 @@ pub struct ShipctlPaths {
     pub old_projects: PathBuf,
     pub ui_state: PathBuf,
     pub workspace_layouts: PathBuf,
+    pub plugin_data: PathBuf,
     pub assistant_sessions: PathBuf,
     pub usage_database: PathBuf,
     /// User-authored schedule definitions owned by this instance.
@@ -36,6 +37,7 @@ impl ShipctlPaths {
             old_projects: state_root.join("projects"),
             ui_state: state_root.join("ui-state.json"),
             workspace_layouts: state_root.join("workspace-layouts.json"),
+            plugin_data: state_root.join("plugin-data.json"),
             assistant_sessions: state_root.join("assistant-sessions.json"),
             usage_database: state_root.join("usage.sqlite3"),
             schedule_root: state_root.join("schedules"),
@@ -63,6 +65,11 @@ impl ShipctlPaths {
                 owner: "host.canvas_layout",
                 classification: "instance_owned",
                 path: self.workspace_layouts.clone(),
+            },
+            DurableSource {
+                owner: "host.plugin_data",
+                classification: "instance_owned",
+                path: self.plugin_data.clone(),
             },
             DurableSource {
                 owner: "assistants.continuity",
@@ -146,6 +153,18 @@ mod tests {
             .iter()
             .any(|source| source.owner == "module-control.evidence"
                 && source.path == paths.module_control_evidence_root));
+    }
+
+    #[test]
+    fn plugin_data_is_an_instance_owned_durable_source() {
+        let paths = ShipctlPaths::new(PathBuf::from("/profiles/test"), PathBuf::from("/run/test"));
+
+        assert_eq!(paths.plugin_data, paths.state_root.join("plugin-data.json"));
+        assert!(paths.durable_sources().iter().any(|source| {
+            source.owner == "host.plugin_data"
+                && source.classification == "instance_owned"
+                && source.path == paths.plugin_data
+        }));
     }
 
     #[test]

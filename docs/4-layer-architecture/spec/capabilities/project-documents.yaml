@@ -1,0 +1,52 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: project-documents
+version: 1.0.0
+title: Scoped project document access
+status: implementing
+layer: native-kernel
+consumers: [todos]
+current_implementations:
+  - module-api/frontend/src/protocol/projectDocuments.ts
+  - core/frontend/platform/projectDocuments.ts
+  - modules/todos/backend
+  - modules/todos/host
+target_owners:
+  provider: core/backend/src/project_documents
+  tauri_adapter: core/tauri/src/project_documents.rs
+  typescript_client: core/frontend/platform/projectDocuments
+operations:
+  - id: discoverDocuments
+    kind: request
+    contract: >-
+      Find bounded named text documents beneath an authorized project and
+      return only project-relative paths, contents, and revisions.
+  - id: readDocument
+    kind: request
+    contract: >-
+      Read text and revision from an authorized project-relative path without
+      returning an absolute filesystem path.
+  - id: writeDocument
+    kind: request
+    contract: >-
+      Atomically replace a document only when its expected revision still
+      matches.
+required_grants:
+  - project-document.read
+  - project-document.write
+ownership:
+  authority: The native kernel owns path scope and atomic filesystem writes.
+  resources: The project owns document bytes; the service owns no feature model.
+  activation_scope: Paths resolve beneath one granted project root.
+depends_on: []
+property_ids:
+  - PROP-B-ADAPTER-001
+  - PROP-B-REQUEST-001
+  - PROP-D-PARITY-001
+  - PROP-D-AUTHORITY-001
+open_questions:
+  - >-
+    The host ProjectRef identity is currently path-backed. Phase D must replace
+    that implementation detail with an opaque stable project identity before
+    third-party artifacts receive the capability.

@@ -1,8 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import type { SettingsContributionProps } from "@shipctl/module-api";
 
-import { useTodoStore } from "./store";
-
 function InfoTip({ text }: { readonly text: string }) {
   const [show, setShow] = useState(false);
   return (
@@ -21,7 +19,6 @@ function InfoTip({ text }: { readonly text: string }) {
 }
 
 export default function TodoSettingsSection({
-  projectPaths,
   services,
 }: SettingsContributionProps) {
   const settings = useSyncExternalStore(
@@ -44,7 +41,6 @@ export default function TodoSettingsSection({
           onClick={() => {
             const enabling = !showTodos;
             void services.settings.update({ showTodos: enabling });
-            if (enabling) void useTodoStore.getState().refreshAll([...projectPaths]);
           }}
           className={`option-card option-card--compact ${showTodos ? "selected" : ""}`}
         >

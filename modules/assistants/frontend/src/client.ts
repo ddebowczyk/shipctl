@@ -119,11 +119,3 @@ export function getPiConfig(): Promise<PiConfig> {
 export function savePiSettings(settings: PiSettings): Promise<void> {
   return invoke(assistantCommand("save_pi_settings"), { settings });
 }
-
-export function savePiApiKey(provider: string, apiKey: string): Promise<void> {
-  return invoke(assistantCommand("save_pi_api_key"), { provider, apiKey });
-}
-
-export function deletePiApiKey(provider: string): Promise<void> {
-  return invoke(assistantCommand("delete_pi_api_key"), { provider });
-}

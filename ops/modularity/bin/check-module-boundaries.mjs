@@ -15,6 +15,8 @@ const MODULE_PLATFORM_EVENT_LISTENERS = new Map([
 const HOST_PACKAGE = "@shipctl/core";
 const HOST_ROOTS = ["src", "core/frontend"];
 const CANVAS_ROOT = "core/frontend/canvas";
+const PLATFORM_ROOT = "core/frontend/platform";
+const LEGACY_TAURI_IMPORTS = "ops/modularity/legacy-tauri-imports.json";
 const COMPOSITION_FILES = new Set([
   "core/frontend/host/enabledModules.ts",
 ]);
@@ -34,12 +36,22 @@ const CORE_DEEP_IMPORT_EXCEPTIONS = new Set([
   "core/frontend/host/projectFacts.ts->projects/projectFacts.ts",
 ]);
 
+export function parseTypeScriptSource(file, source) {
+  return ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+}
+
 function isWithin(parent, child) {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-async function sourceFiles(directory) {
+export async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
@@ -61,7 +73,7 @@ async function allFiles(directory) {
   return files;
 }
 
-function importSpecifiers(sourceFile) {
+export function importSpecifiers(sourceFile) {
   const imports = [];
   function visit(node) {
     let literal = null;
@@ -88,7 +100,20 @@ function importSpecifiers(sourceFile) {
   return imports;
 }
 
-function moduleTauriEventUsage(sourceFile) {
+export function staticImportSpecifiers(sourceFile) {
+  return sourceFile.statements.flatMap((statement) => {
+    if (
+      (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))
+      && statement.moduleSpecifier
+      && ts.isStringLiteralLike(statement.moduleSpecifier)
+    ) {
+      return [statement.moduleSpecifier.text];
+    }
+    return [];
+  });
+}
+
+export function moduleTauriEventUsage(sourceFile) {
   const eventAliases = new Map();
   const namespaceAliases = new Set();
   for (const statement of sourceFile.statements) {
@@ -154,7 +179,7 @@ async function frontendPackage(root, relativeRoot) {
   }
 }
 
-async function frontendPackages(root) {
+export async function frontendPackages(root) {
   const modulesRoot = path.join(root, "modules");
   let entries = [];
   try {
@@ -171,6 +196,283 @@ async function frontendPackages(root) {
   const moduleApi = await frontendPackage(root, path.join("module-api", "frontend"));
   if (moduleApi) packages.push(moduleApi);
   return packages;
+}
+
+export const DEFAULT_PASSIVE_IMPORT_RULES = Object.freeze({
+  filesystemPackagePrefixes: Object.freeze(["node:fs"]),
+  moduleLoadGlobals: Object.freeze(["import"]),
+  networkGlobals: Object.freeze(["fetch", "WebSocket"]),
+  registryReceivers: Object.freeze(["customElements", "registry"]),
+  tauriPackagePrefixes: Object.freeze(["@tauri-apps/"]),
+  tauriReceivers: Object.freeze(["__TAURI_INTERNALS__"]),
+  timerGlobals: Object.freeze(["setInterval", "setTimeout"]),
+});
+
+function importBindings(sourceFile) {
+  const bindings = new Map();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteralLike(statement.moduleSpecifier)) {
+      continue;
+    }
+    const specifier = statement.moduleSpecifier.text;
+    const clause = statement.importClause;
+    if (clause?.name) {
+      bindings.set(clause.name.text, { imported: "default", specifier });
+    }
+    const named = clause?.namedBindings;
+    if (named && ts.isNamespaceImport(named)) {
+      bindings.set(named.name.text, { imported: "*", specifier });
+    } else if (named && ts.isNamedImports(named)) {
+      for (const element of named.elements) {
+        bindings.set(element.name.text, {
+          imported: element.propertyName?.text ?? element.name.text,
+          specifier,
+        });
+      }
+    }
+  }
+  return bindings;
+}
+
+function expressionSegments(expression) {
+  if (ts.isIdentifier(expression)) return [expression.text];
+  if (expression.kind === ts.SyntaxKind.ImportKeyword) return ["import"];
+  if (ts.isPropertyAccessExpression(expression)) {
+    return [...expressionSegments(expression.expression), expression.name.text];
+  }
+  if (
+    ts.isElementAccessExpression(expression)
+    && expression.argumentExpression
+    && ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return [...expressionSegments(expression.expression), expression.argumentExpression.text];
+  }
+  return [];
+}
+
+function startsWithAny(value, prefixes) {
+  return prefixes.some((prefix) => value === prefix || value.startsWith(prefix));
+}
+
+function effectForExpression(expression, bindings, rules) {
+  const segments = expressionSegments(expression);
+  const root = segments[0];
+  const binding = root ? bindings.get(root) : null;
+  if (binding && startsWithAny(binding.specifier, rules.filesystemPackagePrefixes)) {
+    return { channel: "filesystem", specifier: binding.specifier };
+  }
+  if (binding && startsWithAny(binding.specifier, rules.tauriPackagePrefixes)) {
+    return { channel: "tauri", specifier: binding.specifier };
+  }
+  if (segments.some((segment) => rules.tauriReceivers.includes(segment))) {
+    return { channel: "tauri", specifier: segments.join(".") };
+  }
+  if (segments.some((segment) => rules.registryReceivers.includes(segment))) {
+    return { channel: "registry", specifier: segments.join(".") };
+  }
+  if (root && rules.timerGlobals.includes(root)) {
+    return { channel: "timer", specifier: root };
+  }
+  if (root && rules.networkGlobals.includes(root)) {
+    return { channel: "network", specifier: root };
+  }
+  if (root && rules.moduleLoadGlobals.includes(root)) {
+    return { channel: "module-load", specifier: root };
+  }
+  return null;
+}
+
+/**
+ * Inspect only expressions evaluated while an entrypoint is imported. Function
+ * and class bodies are activation-time code and are deliberately excluded.
+ */
+export function moduleTopLevelEffects(
+  sourceFile,
+  rules = DEFAULT_PASSIVE_IMPORT_RULES,
+) {
+  const bindings = importBindings(sourceFile);
+  const effects = [];
+
+  function inspect(node) {
+    if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+      for (const member of node.members) {
+        const isStatic = ts.isClassStaticBlockDeclaration(member)
+          || member.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.StaticKeyword);
+        if (isStatic) inspect(member);
+      }
+      return;
+    }
+    if (
+      ts.isArrowFunction(node)
+      || ts.isFunctionDeclaration(node)
+      || ts.isFunctionExpression(node)
+      || ts.isMethodDeclaration(node)
+    ) {
+      return;
+    }
+    if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      const effect = effectForExpression(node.expression, bindings, rules);
+      if (effect) {
+        const position = sourceFile.getLineAndCharacterOfPosition(node.expression.getStart(sourceFile));
+        effects.push({
+          ...effect,
+          line: position.line + 1,
+          column: position.character + 1,
+        });
+      }
+    }
+    ts.forEachChild(node, inspect);
+  }
+
+  for (const statement of sourceFile.statements) inspect(statement);
+  return effects.sort((left, right) => left.line - right.line || left.column - right.column);
+}
+
+function resolveStaticModule(specifier, importer, sourceFileSet) {
+  if (!specifier.startsWith(".")) return null;
+  const base = path.resolve(path.dirname(importer), specifier);
+  const extension = path.extname(base);
+  const candidates = extension
+    ? [
+        base,
+        ...(
+          [".js", ".jsx", ".mjs", ".cjs"].includes(extension)
+            ? [...SOURCE_EXTENSIONS].map((sourceExtension) =>
+                `${base.slice(0, -extension.length)}${sourceExtension}`)
+            : []
+        ),
+      ]
+    : [
+        base,
+        ...[...SOURCE_EXTENSIONS].map((sourceExtension) => `${base}${sourceExtension}`),
+        ...[...SOURCE_EXTENSIONS].map((sourceExtension) => path.join(base, `index${sourceExtension}`)),
+      ];
+  return candidates.find((candidate) => sourceFileSet.has(candidate)) ?? null;
+}
+
+export function staticImportClosure(entrypoint, sourceFilesByPath) {
+  if (!entrypoint || !sourceFilesByPath.has(entrypoint)) return [];
+  const reachable = new Set();
+  const queue = [entrypoint];
+  while (queue.length > 0) {
+    const file = queue.shift();
+    if (reachable.has(file)) continue;
+    reachable.add(file);
+    const sourceFile = sourceFilesByPath.get(file);
+    for (const specifier of staticImportSpecifiers(sourceFile)) {
+      const target = resolveStaticModule(specifier, file, sourceFilesByPath);
+      if (target && !reachable.has(target)) queue.push(target);
+    }
+  }
+  return [...reachable].sort();
+}
+
+export async function inspectFrontendArchitecture(root = process.cwd()) {
+  const absoluteRoot = path.resolve(root);
+  const packages = (await frontendPackages(absoluteRoot))
+    .filter(({ name }) => name !== MODULE_API_PACKAGE);
+  const packageNames = new Set(packages.map(({ name }) => name));
+  const modules = [];
+  for (const packageRecord of packages.sort((left, right) => left.name.localeCompare(right.name))) {
+    const manifest = JSON.parse(await readFile(path.join(packageRecord.root, "package.json"), "utf8"));
+    const entryTarget = manifest.exports?.["."];
+    const entrypoint = typeof entryTarget === "string"
+      ? path.resolve(packageRecord.root, entryTarget)
+      : null;
+    const files = (await sourceFiles(path.join(packageRecord.root, "src"))).sort();
+    const imports = [];
+    const tauriImports = [];
+    const sourceFilesByPath = new Map();
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      const sourceFile = parseTypeScriptSource(file, source);
+      sourceFilesByPath.set(file, sourceFile);
+      for (const entry of importSpecifiers(sourceFile)) {
+        const item = {
+          file: path.relative(absoluteRoot, file),
+          line: entry.line,
+          specifier: entry.specifier,
+        };
+        imports.push(item);
+        if (entry.specifier.startsWith("@tauri-apps/")) tauriImports.push(item);
+      }
+    }
+    const importClosure = staticImportClosure(entrypoint, sourceFilesByPath);
+    const entrypointEffects = importClosure.flatMap((file) =>
+      moduleTopLevelEffects(sourceFilesByPath.get(file)).map((effect) => ({
+        file: path.relative(absoluteRoot, file),
+        ...effect,
+      })));
+    modules.push({
+      package: packageRecord.name,
+      package_root: path.relative(absoluteRoot, packageRecord.root),
+      entrypoint: entrypoint ? path.relative(absoluteRoot, entrypoint) : null,
+      source_files: files.map((file) => path.relative(absoluteRoot, file)),
+      import_closure: importClosure.map((file) => path.relative(absoluteRoot, file)),
+      imports: imports.sort((left, right) =>
+        left.file.localeCompare(right.file) || left.line - right.line || left.specifier.localeCompare(right.specifier)),
+      tauri_imports: tauriImports.sort((left, right) =>
+        left.file.localeCompare(right.file) || left.line - right.line || left.specifier.localeCompare(right.specifier)),
+      entrypoint_effects: entrypointEffects,
+    });
+  }
+  const compositionPath = path.join(absoluteRoot, "core/frontend/host/enabledModules.ts");
+  const compositionSource = await readFile(compositionPath, "utf8");
+  const compositionFile = parseTypeScriptSource(compositionPath, compositionSource);
+  const moduleBindings = new Map();
+  for (const statement of compositionFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement)
+      || !ts.isStringLiteralLike(statement.moduleSpecifier)
+      || !packageNames.has(statement.moduleSpecifier.text)
+    ) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const element of bindings.elements) {
+        moduleBindings.set(element.name.text, statement.moduleSpecifier.text);
+      }
+    }
+  }
+  const composition = [];
+  function inspectComposition(node) {
+    if (ts.isIdentifier(node) && moduleBindings.has(node.text)) {
+      let environment = null;
+      let current = node.parent;
+      while (current && !ts.isVariableDeclaration(current)) {
+        if (ts.isConditionalExpression(current)) {
+          const match = current.condition
+            .getText(compositionFile)
+            .match(/import\.meta\.env\.([A-Z0-9_]+)/);
+          if (match) {
+            environment = match[1];
+            break;
+          }
+        }
+        current = current.parent;
+      }
+      composition.push({
+        package: moduleBindings.get(node.text),
+        symbol: node.text,
+        environment,
+        position: node.getStart(compositionFile),
+      });
+      return;
+    }
+    ts.forEachChild(node, inspectComposition);
+  }
+  for (const statement of compositionFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.name.text === "ENABLED_MODULES") {
+        if (declaration.initializer) inspectComposition(declaration.initializer);
+      }
+    }
+  }
+  composition.sort((left, right) => left.position - right.position);
+  return {
+    composition: composition.map(({ position: _position, ...item }) => item),
+    modules,
+  };
 }
 
 async function coreEntrypoints(root) {
@@ -194,6 +496,40 @@ function packageMatch(specifier, packages) {
   return packages.find(({ name }) => specifier === name || specifier.startsWith(`${name}/`));
 }
 
+function legacyImportKey(file, specifier) {
+  return `${file}->${specifier}`;
+}
+
+async function legacyTauriImports(root) {
+  try {
+    const document = JSON.parse(
+      await readFile(path.join(root, LEGACY_TAURI_IMPORTS), "utf8"),
+    );
+    if (document.schema_version !== 1 || !Array.isArray(document.imports)) {
+      throw new Error(`${LEGACY_TAURI_IMPORTS} must use schema version 1`);
+    }
+    const entries = new Map();
+    for (const item of document.imports) {
+      if (
+        typeof item?.file !== "string"
+        || typeof item?.specifier !== "string"
+        || !Number.isSafeInteger(item?.count)
+        || item.count < 1
+        || !item.specifier.startsWith("@tauri-apps/")
+      ) {
+        throw new Error(`${LEGACY_TAURI_IMPORTS} contains an invalid import entry`);
+      }
+      const key = legacyImportKey(item.file, item.specifier);
+      if (entries.has(key)) throw new Error(`${LEGACY_TAURI_IMPORTS} repeats ${key}`);
+      entries.set(key, { ...item, seen: 0 });
+    }
+    return entries;
+  } catch (error) {
+    if (error?.code === "ENOENT") return new Map();
+    throw error;
+  }
+}
+
 function diagnostic(file, entry, rule, message, root) {
   return {
     file: path.relative(root, file),
@@ -208,8 +544,32 @@ function diagnostic(file, entry, rule, message, root) {
 export async function checkModuleBoundaries(root = process.cwd()) {
   const absoluteRoot = path.resolve(root);
   const packages = await frontendPackages(absoluteRoot);
+  const packagePassiveFiles = new Map();
+  for (const packageRecord of packages) {
+    const manifest = JSON.parse(await readFile(path.join(packageRecord.root, "package.json"), "utf8"));
+    const entryTarget = manifest.exports?.["."];
+    if (typeof entryTarget === "string") {
+      const entrypoint = path.resolve(packageRecord.root, entryTarget);
+      if (packageRecord.name !== MODULE_API_PACKAGE) {
+        const packageFiles = await sourceFiles(path.join(packageRecord.root, "src"));
+        const sourceFilesByPath = new Map();
+        for (const file of packageFiles) {
+          sourceFilesByPath.set(
+            file,
+            parseTypeScriptSource(file, await readFile(file, "utf8")),
+          );
+        }
+        packagePassiveFiles.set(
+          packageRecord.name,
+          new Set(staticImportClosure(entrypoint, sourceFilesByPath)),
+        );
+      }
+    }
+  }
   const coreRoot = path.join(absoluteRoot, "core/frontend");
+  const platformRoot = path.join(absoluteRoot, PLATFORM_ROOT);
   const opsRoot = path.join(absoluteRoot, "ops");
+  const tauriDebt = await legacyTauriImports(absoluteRoot);
   const coreEntries = await coreEntrypoints(absoluteRoot);
   const hostFiles = (await Promise.all(
     HOST_ROOTS.map(async (hostRoot) => {
@@ -252,16 +612,24 @@ export async function checkModuleBoundaries(root = process.cwd()) {
     const owner = packages.find(({ root: packageRoot }) => isWithin(packageRoot, file));
     const isCanvas = isWithin(path.join(absoluteRoot, CANVAS_ROOT), file);
     const source = await readFile(file, "utf8");
-    const sourceFile = ts.createSourceFile(
-      file,
-      source,
-      ts.ScriptTarget.Latest,
-      true,
-      file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-    );
+    const sourceFile = parseTypeScriptSource(file, source);
     const directTauriUsage = owner ? moduleTauriEventUsage(sourceFile) : { listeners: [], escapes: [] };
 
     if (owner) {
+      if (
+        owner.name !== MODULE_API_PACKAGE
+        && packagePassiveFiles.get(owner.name)?.has(file)
+      ) {
+        for (const effect of moduleTopLevelEffects(sourceFile)) {
+          diagnostics.push(diagnostic(
+            file,
+            effect,
+            "module-entrypoint-side-effect",
+            `module package import performs ${effect.channel}; move it behind explicit activation`,
+            absoluteRoot,
+          ));
+        }
+      }
       const allowedEvents = MODULE_PLATFORM_EVENT_LISTENERS.get(owner.name) ?? new Set();
       for (const event of directTauriUsage.listeners) {
         if (!allowedEvents.has(event.specifier)) {
@@ -291,6 +659,22 @@ export async function checkModuleBoundaries(root = process.cwd()) {
       const matchedPackage = packageMatch(entry.specifier, packages);
       const isComposition = COMPOSITION_FILES.has(relativeFile);
       const isRelative = entry.specifier.startsWith(".");
+      const isTauriImport = entry.specifier.startsWith("@tauri-apps/");
+
+      if (isTauriImport && !isWithin(platformRoot, file)) {
+        const debt = tauriDebt.get(legacyImportKey(relativeFile, entry.specifier));
+        if (!debt || debt.seen >= debt.count) {
+          diagnostics.push(diagnostic(
+            file,
+            entry,
+            "tauri-import-outside-platform",
+            "frontend Tauri imports belong in core/frontend/platform; modules use semantic services",
+            absoluteRoot,
+          ));
+          continue;
+        }
+        debt.seen += 1;
+      }
 
       if (isCanvas && entry.specifier.startsWith("@tauri-apps/")) {
         diagnostics.push(diagnostic(
@@ -376,6 +760,32 @@ export async function checkModuleBoundaries(root = process.cwd()) {
       }
 
       if (owner) {
+        if (
+          entry.specifier === "cordis"
+          || entry.specifier.startsWith("cordis/")
+          || entry.specifier.startsWith("@cordis")
+          || entry.specifier === "@shipctl/cordis-source"
+          || entry.specifier.startsWith("@shipctl/cordis-source/")
+        ) {
+          diagnostics.push(diagnostic(
+            file,
+            entry,
+            "module-cordis-import",
+            "plugins use the Shipctl runtime contract; Cordis lifecycle authority stays in the runtime adapter",
+            absoluteRoot,
+          ));
+          continue;
+        }
+        if (entry.specifier === "react-layman" || entry.specifier.startsWith("react-layman/")) {
+          diagnostics.push(diagnostic(
+            file,
+            entry,
+            "module-renderer-import",
+            "modules publish semantic views; canvas renderer implementations stay in core",
+            absoluteRoot,
+          ));
+          continue;
+        }
         if (entry.specifier === TAURI_EVENT_PACKAGE) {
           if (
             directTauriUsage.listeners.length === 0
@@ -426,6 +836,18 @@ export async function checkModuleBoundaries(root = process.cwd()) {
         }
       }
     }
+  }
+
+  for (const debt of tauriDebt.values()) {
+    if (debt.seen === debt.count) continue;
+    diagnostics.push({
+      file: LEGACY_TAURI_IMPORTS,
+      line: 1,
+      column: 1,
+      specifier: legacyImportKey(debt.file, debt.specifier),
+      rule: "legacy-tauri-import-stale",
+      message: `legacy Tauri debt records ${debt.count} import(s), found ${debt.seen}`,
+    });
   }
 
   return diagnostics.sort((left, right) =>

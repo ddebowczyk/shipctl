@@ -130,6 +130,7 @@ test("normal shutdown freezes ready records before terminals receive signals", (
 test("the restore manifest persists identity metadata, not transcripts or commands", () => {
   const manifest = source("../../backend/src/manifest.rs");
   const registry = source("../../backend/src/lib.rs");
+  const snapshot = source("../../backend/src/snapshot.rs");
   const nativeComposition = source("../../../../src-tauri/src/modules/mod.rs");
 
   assert.match(registry, /pub fn new\(path: PathBuf\) -> Self/);
@@ -139,6 +140,11 @@ test("the restore manifest persists identity metadata, not transcripts or comman
   assert.match(manifest, /let mode = if path\.is_dir\(\) \{ 0o700 \} else \{ 0o600 \}/);
   assert.match(manifest, /atomically replace restore manifest/);
   assert.doesNotMatch(manifest, /transcript_content|prompt|credential|command_args/);
+  assert.match(
+    snapshot,
+    /id: "provider_credentials",\s*classification: SnapshotClassification::Secret,\s*source_paths: Vec::new\(\),\s*target_path: None,/,
+  );
+  assert.match(snapshot, /excluded\("provider_credentials"\)/);
 });
 
 test("the Assistant implementation is module-owned behind generic host ports", () => {
@@ -152,6 +158,8 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   const piConfig = source("../../backend/src/pi_config.rs");
   const backend = source("../../backend/src/lib.rs");
   const client = source("../src/client.ts");
+  const credentialClient = source("../src/credentialStoreClient.ts");
+  const credentialAdapter = source("../../../../core/frontend/platform/credentials.ts");
 
   assert.match(moduleEntry, /id: "shipctl\.assistants"/);
   assert.match(moduleEntry, /load: \(\) => import\("\.\/SessionLauncher"\)/);
@@ -163,9 +171,8 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   assert.match(nativeComposition, /shipctl_module_assistants_host::install\(/);
   assert.match(terminalAdapter, /builder\.plugin\(shipctl_module_assistants::init\(/);
   assert.match(terminalAdapter, /impl TerminalAuthority for HostTerminalAuthority/);
-  // Terminal execution is the only thing this module cannot own. pi's own config —
-  // ~/.pi/agent and its Keychain entries — is module business and stays in the
-  // module crate; the host adapter must not grow a second authority for it.
+  // Terminal execution and credential authority are host capabilities. The
+  // module crate remains their transitional native implementation until Phase D.
   assert.match(terminalAdapter, /HostServices::new\(Arc::new\(HostTerminalAuthority \{ terminals \}\)\)/);
   assert.doesNotMatch(terminalAdapter, /Channel|TerminalOutput|TerminalEventSink/);
   assert.doesNotMatch(backend, /Channel<TerminalOutput>|on_data/);
@@ -174,10 +181,18 @@ test("the Assistant implementation is module-owned behind generic host ports", (
   assert.match(backend, /fn get_pi_config\(\) -> Result<PiConfig, String> \{\s*pi_config::get_pi_config\(\)/);
   assert.match(piConfig, /\.join\("\.pi"\)\s*\.join\("agent"\)/);
   assert.match(piConfig, /"add-generic-password"/);
+  assert.doesNotMatch(piConfig, /get_pi_config\(\)[\s\S]*migrate_legacy_api_key/);
   assert.match(backend, /app\.manage\(AssistantPluginState \{/);
   assert.match(
     backend,
     /pub fn init<R: Runtime>\(\s*services: HostServices,\s*manifest_path: PathBuf,\s*durable_writes: DurableWriteBarrier,\s*\) -> TauriPlugin<R>/,
   );
   assert.match(client, /const ASSISTANTS_COMMAND_NAMESPACE = "plugin:shipctl-assistants\|"/);
+  assert.doesNotMatch(client, /save_pi_api_key|delete_pi_api_key/);
+  assert.match(credentialClient, /credentialStoreService/);
+  assert.doesNotMatch(credentialClient, /@tauri-apps|invoke|Keychain|security/);
+  assert.match(credentialAdapter, /plugin:shipctl-assistants\|has_pi_api_key/);
+  assert.match(credentialAdapter, /activation\.moduleId === "shipctl\.assistants"/);
+  assert.match(credentialAdapter, /credential\.inspect/);
+  assert.match(credentialAdapter, /credential\.write/);
 });

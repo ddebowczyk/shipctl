@@ -3,6 +3,8 @@ import type { ErrorInfo, ReactNode } from "react";
 import type {
   ContributionId,
   ModuleHostServices,
+  ModuleActivationContext,
+  ModuleId,
   PanelContribution,
   ProjectRef,
 } from "@shipctl/module-api";
@@ -16,6 +18,7 @@ interface PanelHostProps {
   readonly close: () => void;
   readonly setTitle: (title: string | null) => void;
   readonly services: ModuleHostServices;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
 interface PanelRenderBoundaryProps {
@@ -79,6 +82,7 @@ export default function PanelHost({
   close,
   setTitle,
   services,
+  moduleActivations,
 }: PanelHostProps) {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const Panel = useMemo(
@@ -101,6 +105,18 @@ export default function PanelHost({
     title: `${contribution.label} unavailable`,
     description: `${contribution.id} could not be loaded.`,
   };
+  const activation = moduleActivations.get(contribution.moduleId);
+
+  if (!activation || activation.disposed) {
+    return (
+      <PanelUnavailable
+        title={unavailable.title}
+        description={`${contribution.moduleId} is not active.`}
+        onRetry={() => setLoadAttempt((attempt) => attempt + 1)}
+        onRemove={close}
+      />
+    );
+  }
 
   return (
     <PanelRenderBoundary
@@ -121,6 +137,7 @@ export default function PanelHost({
           visible={visible}
           close={close}
           setTitle={setTitle}
+          activation={activation}
           services={services}
         />
       </Suspense>

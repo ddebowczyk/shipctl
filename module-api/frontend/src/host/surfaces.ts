@@ -1,9 +1,11 @@
 import type { ProjectRef } from "../protocol/panels";
 import type { ProjectActionSurfacePosition } from "../protocol/surfaces";
+import type { ModuleActivationContext } from "../protocol/semanticServices";
 import type { ModuleHostServices } from "./services";
 
 export interface GlobalSurfaceContributionProps {
   readonly close: () => void;
+  readonly activation: ModuleActivationContext;
   readonly services: ModuleHostServices;
 }
 
@@ -21,6 +23,7 @@ export interface ProjectNavigationContributionProps {
 
 export interface ProjectLayoutContributionProps {
   readonly project: ProjectRef;
+  readonly activation: ModuleActivationContext;
   readonly services: ModuleHostServices;
 }
 
@@ -37,6 +40,7 @@ export interface ProjectActionSurfaceProps {
   readonly position: ProjectActionSurfacePosition;
   readonly close: () => void;
   readonly host: ProjectActionSurfaceHost;
+  readonly activation: ModuleActivationContext;
   readonly services: ModuleHostServices;
 }
 

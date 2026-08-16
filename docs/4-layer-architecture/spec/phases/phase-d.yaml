@@ -1,0 +1,223 @@
+---
+$schema: ../schema/phase.v1.schema.yaml
+schema_version: phase/v1
+id: phase-d
+title: Native provider extraction
+status: specified
+source: docs/4-layer-architecture/09-phase-d-native-provider-extraction.md
+depends_on: [phase-a, phase-b]
+semantics:
+  - id: SEM-D-001
+    kind: MUST
+    rule: >-
+      Native core code owns only OS authority, durable shared resources, or
+      enforcement outside plugin JavaScript.
+  - id: SEM-D-002
+    kind: MUST
+    rule: >-
+      Feature workflow, aggregation, labels, presentation, and plugin data
+      interpretation remain in TypeScript plugins.
+  - id: SEM-D-003
+    kind: MUST
+    rule: >-
+      Public services authorize activation, grant, and resource scope before
+      native work begins.
+  - id: SEM-D-004
+    kind: MUST
+    rule: >-
+      Extracted providers preserve characterized behavior until a record states
+      an intentional semantic change.
+  - id: SEM-D-005
+    kind: MUST
+    rule: >-
+      A native provider works without Tauri and its Tauri adapter has no feature
+      policy.
+  - id: SEM-D-006
+    kind: MUST-NOT
+    rule: >-
+      Plugin disable or replacement must not destroy a host-owned durable
+      resource without a separate explicit operation.
+  - id: SEM-D-007
+    kind: MUST-NOT
+    rule: >-
+      A cut-over module must not retain Rust, Cargo, Tauri plugin, ACL, or host
+      adapter ownership.
+  - id: SEM-D-008
+    kind: MUST-NOT
+    rule: >-
+      After native closure, module-api must not retain a Rust compatibility
+      crate.
+properties:
+  - id: PROP-D-PARITY-001
+    claim: >-
+      An extracted Tauri-free provider and legacy backend produce equal results,
+      transitions, and durable writes over the characterized domain.
+    shapes: [differential]
+    evidence: [SEM-D-004, SEM-D-005]
+    domain:
+      generates: >-
+        Capability-specific valid and invalid requests over isolated resources.
+      excludes: [real credentials, OS behavior assigned to integration fixtures]
+      strategy: Generate equivalent isolated roots and one request history.
+      classifications: [success, domain-error, state-change, durable-write]
+    preconditions:
+      - Both providers start from equivalent fixture state.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare public results and externally captured state from separate
+          roots.
+        independence: Comparison code is outside both providers.
+      alternative:
+        kind: reference
+        description: Compare both paths with reviewed semantic fixtures.
+        independence: Fixtures state expected behavior without either provider.
+    failure_value: >-
+      Extraction changes TODO ordering or Git path scope outside success tests.
+    runner:
+      language: rust
+      library: proptest
+      test_id: architecture.provider.capability.parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-D-NATIVE-MODULE]
+  - id: PROP-D-AUTHORITY-001
+    claim: >-
+      A native provider executes exactly when an independent authorization model
+      allows the activation, grant, scope, and request tuple.
+    shapes: [differential]
+    evidence: [SEM-D-003]
+    domain:
+      generates: >-
+        Admitted, unknown, and disposed activations; grant sets; normalized
+        paths; and valid requests inside and outside scope.
+      excludes: [hostile same-realm bypass of the supported API]
+      strategy: Generate authorization tuples independently from provider input.
+      classifications: [allowed, unknown, disposed, grant-denied, scope-denied]
+    preconditions:
+      - Paths are normalized before policy evaluation.
+    oracle:
+      primary:
+        kind: model
+        description: A small rule table computes allow or deny.
+        independence: It does not call provider authorization code.
+      alternative:
+        kind: invariant
+        description: >-
+          Denied canary resources and native audit traces prove fail-closed
+          scope.
+        independence: Canary observation occurs outside policy evaluation.
+    failure_value: >-
+      A disabled plugin terminates a process or reads outside its grant.
+    runner:
+      language: rust
+      library: proptest
+      test_id: architecture.provider.capability.authority.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-D-NATIVE-MODULE]
+  - id: PROP-D-OWNERSHIP-001
+    claim: >-
+      Activation removal releases its leases and preserves host-owned durable
+      resources until an explicit destructive operation succeeds.
+    shapes: [conservation]
+    evidence: [SEM-D-006]
+    domain:
+      generates: >-
+        Terminals, watchers, ingest leases, and data handles across disposal and
+        replacement.
+      excludes: [OS process death outside Shipctl control]
+      strategy: Generate resources with explicit host or activation ownership.
+      classifications: [host-owned, activation-owned, disposed, replaced]
+    preconditions:
+      - Every generated resource declares its owner class.
+    oracle:
+      primary:
+        kind: model
+        description: An independent ledger predicts live resources and leases.
+        independence: The ledger does not call runtime disposal code.
+      alternative:
+        kind: invariant
+        description: >-
+          Native identity canaries remain stable across plugin replacement.
+        independence: >-
+          Native identities are observed below the activation runtime.
+    failure_value: >-
+      Replacing semantic terminal kills its PTY or usage data is deleted.
+    runner:
+      language: rust
+      library: proptest
+      test_id: architecture.resource-ownership.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: proposed
+    deletion_gates: [DELETE-D-NATIVE-MODULE]
+  - id: PROP-D-CLOSURE-001
+    claim: >-
+      The native graph contains only declared authority providers and adapters;
+      an extracted module keeps feature policy in TypeScript and has no Rust,
+      Cargo, Tauri plugin, ACL, or private command edge.
+    shapes: [safety]
+    evidence: [SEM-D-001, SEM-D-002, SEM-D-007, SEM-D-008]
+    domain:
+      generates: >-
+        Architecture snapshots with one residual native edge mutation at a time.
+      excludes: [historical ignored plans]
+      strategy: Add a typed forbidden edge to a valid closed snapshot.
+      classifications:
+        - native-authority
+        - feature-policy
+        - rust
+        - cargo
+        - tauri
+        - acl
+        - private-command
+    preconditions:
+      - The disposition record marks the module complete.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          Compare source, Cargo, and ACL graphs with closed allowed-owner
+          records.
+        independence: Allowed owners come from the normative disposition record.
+      alternative:
+        kind: reference
+        description: >-
+          Inspect Cargo metadata, generated ACL, and packaged file inventory.
+        independence: Build outputs are separate from the source graph checker.
+    failure_value: >-
+      The frontend moves but src-tauri still builds a hidden module plugin.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.native-extraction-closure.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: proposed
+    deletion_gates:
+      - DELETE-D-NATIVE-MODULE
+      - DELETE-D-MODULE-API-BACKEND
+deliverables:
+  - One permanent native capability per authority boundary.
+  - A Tauri-free provider, private adapter, and authorization model per slice.
+  - Ports as the first complete native extraction.
+deletion_gates:
+  - id: DELETE-D-NATIVE-MODULE
+    condition: >-
+      Provider parity, authority, ownership, package, and closure proofs pass.
+    removes:
+      - The completed module backend and host crates.
+      - Its Cargo feature, Tauri registration, and ACL projection.
+  - id: DELETE-D-MODULE-API-BACKEND
+    condition: >-
+      Every surviving backend contract has a permanent core owner.
+    removes:
+      - module-api/backend and the shipctl-module-api Cargo edge.

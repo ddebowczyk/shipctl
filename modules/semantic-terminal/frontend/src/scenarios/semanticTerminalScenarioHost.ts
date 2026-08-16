@@ -5,20 +5,16 @@
  * semantic model and canvas binding. The catalog itself sees only its probe.
  */
 
-import {
-  attachSemanticTerminal,
-  creditSemanticTerminalScreen,
-  detachSemanticTerminal,
-  getSemanticTerminalAppMemory,
-  getSemanticTerminalPublicationStats,
-  inputSemanticTerminal,
-  resizeSemanticTerminal,
-  type SemanticTerminalPublicationStats,
-} from "../protocol/semanticTerminalClient.ts";
+import type {
+  SemanticServiceError,
+  SemanticTerminalAttachmentId,
+  SemanticTerminalPublicationStats,
+  SemanticTerminalsErrorCode,
+  SemanticTerminalsService,
+} from "@shipctl/module-api";
 import { terminalPresentation, terminalSession } from "../presentation/terminalCache.ts";
 import { TerminalClientModel } from "../presentation/terminalClientModel.ts";
 import { terminalClientPerformanceStats } from "../terminalPerformanceMetrics.ts";
-import type { SemanticTerminalWireEvent } from "../semanticTypes.ts";
 import {
   formatScenarioRecord,
   type ScenarioRecord,
@@ -47,9 +43,33 @@ function frameDeltas(count: number): Promise<number[]> {
   });
 }
 
-async function sampleHostMemory(): Promise<number | null> {
+class ScenarioServiceError extends Error {
+  readonly code: SemanticTerminalsErrorCode;
+
+  constructor(error: SemanticServiceError<SemanticTerminalsErrorCode>) {
+    super(error.message);
+    this.name = "ScenarioServiceError";
+    this.code = error.code;
+  }
+}
+
+async function semanticResult<Value>(
+  operation: Promise<{
+    readonly result:
+      | { readonly ok: true; readonly value: Value }
+      | { readonly ok: false; readonly error: SemanticServiceError<SemanticTerminalsErrorCode> };
+  }>,
+): Promise<Value> {
+  const outcome = await operation;
+  if (outcome.result.ok) return outcome.result.value;
+  throw new ScenarioServiceError(outcome.result.error);
+}
+
+async function sampleHostMemory(
+  semanticTerminals: SemanticTerminalsService,
+): Promise<number | null> {
   try {
-    return (await getSemanticTerminalAppMemory()).appRss;
+    return (await semanticResult(semanticTerminals.appMemory.execute({}))).appRss;
   } catch {
     return null;
   }
@@ -60,29 +80,42 @@ function nextFrame(): Promise<void> {
 }
 
 async function waitForPublication(
+  semanticTerminals: SemanticTerminalsService,
   terminalId: string,
   accepts: (stats: SemanticTerminalPublicationStats) => boolean,
 ): Promise<SemanticTerminalPublicationStats> {
   for (;;) {
-    const stats = await getSemanticTerminalPublicationStats(terminalId);
+    const stats = await semanticResult(
+      semanticTerminals.publicationStats.execute({ terminalId }),
+    );
     if (accepts(stats)) return stats;
     await nextFrame();
   }
 }
 
-async function sendScenarioText(terminalId: string, text: string): Promise<void> {
-  await inputSemanticTerminal(terminalId, { kind: "text", text });
+async function sendScenarioText(
+  semanticTerminals: SemanticTerminalsService,
+  terminalId: string,
+  text: string,
+): Promise<void> {
+  await semanticResult(semanticTerminals.input.execute({
+    terminalId,
+    input: { kind: "text", text },
+  }));
 }
 
 async function parkPrimaryScreenCredit(
+  semanticTerminals: SemanticTerminalsService,
   terminalId: string,
 ): Promise<SemanticTerminalPublicationStats> {
   const before = await waitForPublication(
+    semanticTerminals,
     terminalId,
     (stats) => stats.currentScreenTransactions === 0,
   );
-  await sendScenarioText(terminalId, ".");
+  await sendScenarioText(semanticTerminals, terminalId, ".");
   return waitForPublication(
+    semanticTerminals,
     terminalId,
     (stats) => stats.currentScreenTransactions > before.currentScreenTransactions,
   );
@@ -95,7 +128,10 @@ interface SemanticObserver {
 }
 
 /** Add a real semantic reader without adding another presentation surface. */
-async function openSemanticObserver(terminalId: string): Promise<SemanticObserver> {
+async function openSemanticObserver(
+  semanticTerminals: SemanticTerminalsService,
+  terminalId: string,
+): Promise<SemanticObserver> {
   const model = new TerminalClientModel();
   const waiting: Array<{ resolve(sequence: number): void; reject(error: Error): void }> = [];
   const screens: number[] = [];
@@ -104,48 +140,52 @@ async function openSemanticObserver(terminalId: string): Promise<SemanticObserve
     failure = new Error(detail);
     for (const waiter of waiting.splice(0)) waiter.reject(failure);
   };
-  const onEvent = (event: SemanticTerminalWireEvent): void => {
+  const lease = await semanticTerminals.screens.attach({
+    terminalId,
+    claimsResize: false,
+    afterSequence: null,
+    initialCredit: 0,
+  }, (delivery): void => {
     if (failure) return;
-    if (event.event === "screen") {
+    if (delivery.type === "frame") {
+      const effects = model.applyEffects(delivery.value.effects);
+      if (effects.status !== "committed") {
+        fail(`The observer refused effects: ${effects.detail}`);
+        return;
+      }
       const outcome = model.applyScreen({
-        sequence: event.sequence,
-        revision: event.revision,
-        state: event.state,
+        sequence: delivery.sequence,
+        revision: delivery.value.revision,
+        state: delivery.value.state,
       });
       if (outcome.status !== "committed") {
         fail(`The observer refused a screen: ${outcome.detail}`);
         return;
       }
       const waiter = waiting.shift();
-      if (waiter) waiter.resolve(event.sequence);
-      else screens.push(event.sequence);
+      if (waiter) waiter.resolve(delivery.sequence);
+      else screens.push(delivery.sequence);
       return;
     }
-    if (event.event === "effects") {
-      const outcome = model.applyEffects(event.effects);
-      if (outcome.status !== "committed") fail(`The observer refused effects: ${outcome.detail}`);
+    if (delivery.type === "gap") {
+      fail("The semantic observer could not resume its screen history");
+      return;
     }
-  };
-
-  const lease = await attachSemanticTerminal(terminalId, false, onEvent);
+    fail(`The semantic observer disconnected: ${delivery.reason}`);
+  });
   const state = lease.snapshot.state;
-  if (state === null) {
-    await detachSemanticTerminal(lease.attachmentId);
-    model.dispose();
-    throw new Error("The semantic observer received no baseline state");
-  }
   const baseline = model.installBaseline({
-    sequence: lease.snapshot.sequenceBoundary,
-    revision: lease.snapshot.descriptor.revision,
+    sequence: lease.snapshot.revision,
+    revision: lease.snapshot.revision,
     state,
   });
   if (baseline.status !== "committed") {
-    await detachSemanticTerminal(lease.attachmentId);
+    await lease.dispose();
     model.dispose();
     throw new Error(`The observer refused its baseline: ${baseline.detail}`);
   }
   lease.activate();
-  await creditSemanticTerminalScreen(lease.attachmentId, lease.snapshot.sequenceBoundary);
+  lease.grant(1);
 
   return {
     nextScreen: () => {
@@ -154,17 +194,23 @@ async function openSemanticObserver(terminalId: string): Promise<SemanticObserve
       if (sequence !== undefined) return Promise.resolve(sequence);
       return new Promise<number>((resolve, reject) => waiting.push({ resolve, reject }));
     },
-    credit: (sequence) => creditSemanticTerminalScreen(lease.attachmentId, sequence),
+    credit: async (sequence) => {
+      lease.acknowledge(sequence);
+      lease.grant(1);
+    },
     dispose: async () => {
       for (const waiter of waiting.splice(0)) waiter.reject(new Error("The semantic observer was disposed"));
       model.dispose();
-      await detachSemanticTerminal(lease.attachmentId);
+      await lease.dispose();
     },
   };
 }
 
 /** Bind scenario questions to the one selected semantic terminal. */
-function createSurfaceProbe(terminalId: string): TerminalSurfaceProbe {
+function createSurfaceProbe(
+  semanticTerminals: SemanticTerminalsService,
+  terminalId: string,
+): TerminalSurfaceProbe {
   const presentation = () => terminalPresentation(terminalId);
   return {
     failPrimaryRenderer: () => presentation()?.failPrimaryRenderer() ?? Promise.resolve(false),
@@ -176,6 +222,7 @@ function createSurfaceProbe(terminalId: string): TerminalSurfaceProbe {
         throw new Error(`Invalid sustained-output line count: ${lines}`);
       }
       await sendScenarioText(
+        semanticTerminals,
         terminalId,
         `i=0; while [ "$i" -lt ${lines} ]; do printf 'sustained output line %s\\r\\n' "$i"; i=$((i+1)); done\r`,
       );
@@ -187,10 +234,17 @@ function createSurfaceProbe(terminalId: string): TerminalSurfaceProbe {
     resize: async (columns, rows) => {
       const attachmentId = presentation()?.attachmentId() ?? null;
       if (!attachmentId) return;
-      await resizeSemanticTerminal(terminalId, attachmentId, columns, rows);
+      await semanticResult(semanticTerminals.resize.execute({
+        terminalId,
+        attachmentId: attachmentId as SemanticTerminalAttachmentId,
+        columns,
+        rows,
+      }));
       await nextFrame();
     },
-    publicationStats: () => getSemanticTerminalPublicationStats(terminalId),
+    publicationStats: () => semanticResult(
+      semanticTerminals.publicationStats.execute({ terminalId }),
+    ),
     clientPerformanceStats: () => terminalClientPerformanceStats(terminalId),
     measureHiddenCatchup: async () => {
       const session = terminalSession(terminalId);
@@ -201,14 +255,17 @@ function createSurfaceProbe(terminalId: string): TerminalSurfaceProbe {
       const visibleSequence = model.state.sequence;
       session.conceal();
       try {
-        await parkPrimaryScreenCredit(terminalId);
+        await parkPrimaryScreenCredit(semanticTerminals, terminalId);
         while ((model.state?.sequence ?? visibleSequence) <= visibleSequence) await nextFrame();
         await nextFrame();
         const hiddenBaselineSequence = model.state?.sequence ?? visibleSequence;
-        const hostBefore = await getSemanticTerminalPublicationStats(terminalId);
+        const hostBefore = await semanticResult(
+          semanticTerminals.publicationStats.execute({ terminalId }),
+        );
         const clientBefore = terminalClientPerformanceStats(terminalId);
-        await sendScenarioText(terminalId, "\u0015# shipctl-hidden-catchup\r");
+        await sendScenarioText(semanticTerminals, terminalId, "\u0015# shipctl-hidden-catchup\r");
         const hidden = await waitForPublication(
+          semanticTerminals,
           terminalId,
           (stats) => stats.screenChanges > hostBefore.screenChanges,
         );
@@ -218,7 +275,9 @@ function createSurfaceProbe(terminalId: string): TerminalSurfaceProbe {
           await nextFrame();
         }
         await nextFrame();
-        const revealed = await getSemanticTerminalPublicationStats(terminalId);
+        const revealed = await semanticResult(
+          semanticTerminals.publicationStats.execute({ terminalId }),
+        );
         const clientRevealed = terminalClientPerformanceStats(terminalId);
         return {
           screenChangesWhileHidden: hidden.screenChanges - hostBefore.screenChanges,
@@ -242,14 +301,17 @@ function createSurfaceProbe(terminalId: string): TerminalSurfaceProbe {
       const observers: SemanticObserver[] = [];
       session.conceal();
       try {
-        const parked = await parkPrimaryScreenCredit(terminalId);
-        observers.push(await openSemanticObserver(terminalId));
-        observers.push(await openSemanticObserver(terminalId));
-        const before = await getSemanticTerminalPublicationStats(terminalId);
+        const parked = await parkPrimaryScreenCredit(semanticTerminals, terminalId);
+        observers.push(await openSemanticObserver(semanticTerminals, terminalId));
+        observers.push(await openSemanticObserver(semanticTerminals, terminalId));
+        const before = await semanticResult(
+          semanticTerminals.publicationStats.execute({ terminalId }),
+        );
         const screens = observers.map((observer) => observer.nextScreen());
-        await sendScenarioText(terminalId, "\u0015f");
+        await sendScenarioText(semanticTerminals, terminalId, "\u0015f");
         await Promise.all(screens);
         const after = await waitForPublication(
+          semanticTerminals,
           terminalId,
           (stats) => stats.screenRecipientDeliveries - before.screenRecipientDeliveries >= observers.length
             && stats.currentScreenTransactions >= parked.currentScreenTransactions + observers.length,
@@ -277,26 +339,31 @@ function createSurfaceProbe(terminalId: string): TerminalSurfaceProbe {
       let observer: SemanticObserver | null = null;
       session.conceal();
       try {
-        await parkPrimaryScreenCredit(terminalId);
-        observer = await openSemanticObserver(terminalId);
-        const before = await getSemanticTerminalPublicationStats(terminalId);
+        await parkPrimaryScreenCredit(semanticTerminals, terminalId);
+        observer = await openSemanticObserver(semanticTerminals, terminalId);
+        const before = await semanticResult(
+          semanticTerminals.publicationStats.execute({ terminalId }),
+        );
         const firstScreen = observer.nextScreen();
-        await sendScenarioText(terminalId, "\u0015s");
+        await sendScenarioText(semanticTerminals, terminalId, "\u0015s");
         const firstSequence = await firstScreen;
         const afterFirst = await waitForPublication(
+          semanticTerminals,
           terminalId,
           (stats) => stats.currentScreenTransactions === before.currentScreenTransactions + 1,
         );
         let observedChanges = afterFirst.screenChanges;
         for (const text of ["1", "2"]) {
-          await sendScenarioText(terminalId, text);
+          await sendScenarioText(semanticTerminals, terminalId, text);
           const changed = await waitForPublication(
+            semanticTerminals,
             terminalId,
             (stats) => stats.screenChanges > observedChanges,
           );
           observedChanges = changed.screenChanges;
         }
         const blocked = await waitForPublication(
+          semanticTerminals,
           terminalId,
           (stats) => stats.currentScreenTransactions === before.currentScreenTransactions + 1,
         );
@@ -316,8 +383,12 @@ function createSurfaceProbe(terminalId: string): TerminalSurfaceProbe {
           effectEvents: blocked.effectEvents - before.effectEvents,
           effectEncodedBytes: blocked.effectEncodedBytes - before.effectEncodedBytes,
         };
-        await sendScenarioText(terminalId, "\u0015");
-        await waitForPublication(terminalId, (stats) => stats.screenChanges > blocked.screenChanges);
+        await sendScenarioText(semanticTerminals, terminalId, "\u0015");
+        await waitForPublication(
+          semanticTerminals,
+          terminalId,
+          (stats) => stats.screenChanges > blocked.screenChanges,
+        );
         return observation;
       } finally {
         await observer?.dispose();
@@ -333,6 +404,7 @@ export interface ScenarioRunResult extends ScenarioRunSummary {
 
 /** Run the complete catalog against the selected semantic terminal. */
 export async function runTerminalScenarios(
+  semanticTerminals: SemanticTerminalsService,
   terminalId: string,
   runId: string,
 ): Promise<ScenarioRunResult> {
@@ -344,9 +416,13 @@ export async function runTerminalScenarios(
       lines.push(line);
       console.log(line);
     },
-    sampleHostMemory,
+    sampleHostMemory: () => sampleHostMemory(semanticTerminals),
     frameDeltas,
   };
-  const summary = await runScenarios(runId, createTerminalScenarios(createSurfaceProbe(terminalId)), ports);
+  const summary = await runScenarios(
+    runId,
+    createTerminalScenarios(createSurfaceProbe(semanticTerminals, terminalId)),
+    ports,
+  );
   return { ...summary, ndjson: lines.join("\n") };
 }

@@ -2,8 +2,8 @@ import type {
   ContributionId,
   ModuleId,
 } from "../protocol/panels";
-import type { ModuleTaskSchedule } from "../protocol/module";
 import type { ModuleMessageContributions } from "../protocol/messages";
+import type { RegisterScheduleInput } from "../protocol/schedules";
 import type { ModuleHost } from "../host/module";
 import type { ModuleHostServices, ModuleSkillsPort } from "../host/services";
 import type { CommandContribution } from "./commands";
@@ -35,13 +35,14 @@ export interface SkillsProviderContribution {
 export interface ModuleScheduledTask {
   readonly id: ContributionId;
   readonly moduleId: ModuleId;
-  readonly schedule: ModuleTaskSchedule;
-  run(services: ModuleHostServices): void | Promise<void>;
+  readonly schedule: Omit<RegisterScheduleInput<unknown>, "scheduleId">;
 }
 
 export interface ShipctlModule {
   readonly id: ModuleId;
   readonly version: string;
+  /** Host capabilities that this activation must receive before module code runs. */
+  readonly requiredGrants?: readonly string[];
   /** Static frontend commands. Native menu placement stays host-owned. */
   readonly commands?: readonly CommandContribution[];
   readonly panels?: readonly PanelContribution[];

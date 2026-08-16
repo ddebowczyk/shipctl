@@ -1,7 +1,12 @@
 import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
-import type { ContributionId, ProjectRef } from "@shipctl/module-api";
+import type {
+  ContributionId,
+  ModuleActivationContext,
+  ModuleId,
+  ProjectRef,
+} from "@shipctl/module-api";
 import { gitModule } from "@shipctl/module-git";
 import { skillsModule } from "@shipctl/module-skills";
 
@@ -9,6 +14,11 @@ import "@shipctl/core/appearance/globals.css";
 import PanelHost from "../../../../core/frontend/host/PanelHost";
 import { createEnabledPanelRegistry } from "../../../../core/frontend/host/moduleComposition";
 import { MODULE_HOST_SERVICES } from "../../../../core/frontend/host/moduleHostServices";
+import { createGitServiceProvider } from "../../../../core/frontend/platform/git";
+import {
+  createModuleActivationIdentity,
+  SemanticServiceRegistry,
+} from "../../../../core/frontend/runtime/semanticServiceRuntime";
 import { useRepoStore } from "@shipctl/core/projects";
 
 const PROJECT_PATH = "/smoke/shipctl";
@@ -84,8 +94,27 @@ useRepoStore.setState({
   activeRepoPath: PROJECT_PATH,
   activeConfig: { name: PROJECT.name, commands: [] },
 });
-await gitModule.projectLifecycle.onProjectsChanged([PROJECT_PATH]);
-await skillsModule.projectLifecycle.onProjectsChanged([PROJECT_PATH]);
+const semanticServices = new SemanticServiceRegistry([createGitServiceProvider()]);
+const gitActivation = semanticServices.activate(
+  createModuleActivationIdentity(gitModule.id, gitModule.version),
+);
+const skillsActivation = semanticServices.activate(
+  createModuleActivationIdentity(skillsModule.id, skillsModule.version),
+);
+const moduleActivations = new Map<ModuleId, ModuleActivationContext>([
+  [gitModule.id, gitActivation.context],
+  [skillsModule.id, skillsActivation.context],
+]);
+await gitModule.projectLifecycle.onProjectsChanged(
+  [PROJECT_PATH],
+  MODULE_HOST_SERVICES,
+  gitActivation.context,
+);
+await skillsModule.projectLifecycle.onProjectsChanged(
+  [PROJECT_PATH],
+  MODULE_HOST_SERVICES,
+  skillsActivation.context,
+);
 
 const registry = createEnabledPanelRegistry();
 registry.register({
@@ -148,6 +177,7 @@ function SmokeApp() {
             close={() => setRemovedCount((count) => count + 1)}
             setTitle={setTitle}
             services={MODULE_HOST_SERVICES}
+            moduleActivations={moduleActivations}
           />
         </section>
     </main>

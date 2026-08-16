@@ -1,4 +1,5 @@
 import type { ProjectRef } from "../protocol/panels";
+import type { ModuleActivationContext } from "../protocol/semanticServices";
 import type { ModuleHostServices } from "./services";
 
 export interface ModulePanelProps {
@@ -7,6 +8,7 @@ export interface ModulePanelProps {
   readonly visible: boolean;
   readonly close: () => void;
   readonly setTitle: (title: string | null) => void;
+  readonly activation: ModuleActivationContext;
   readonly services: ModuleHostServices;
 }
 

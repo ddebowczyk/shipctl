@@ -1,0 +1,52 @@
+---
+schema_version: 1
+id: architecture
+provides: architecture
+description: Validate and inspect the executable four-layer migration program.
+status: supported
+requires:
+  tools: [cargo, node, rg, yamllint, yq, ys]
+  capabilities: []
+owns:
+  - docs/4-layer-architecture/spec/**
+  - ops/architecture/**
+reads:
+  - core/**
+  - docs/4-layer-architecture/*.md
+  - module-api/**
+  - modules/**
+  - ops/modularity/legacy-tauri-imports.json
+generates: []
+commands:
+  - name: validate
+    summary: Validate schemas, indexes, references, graphs, and proof coverage.
+    lane: fast
+    aggregate: check
+  - name: test
+    summary: Run generated architecture properties and replay proofs.
+    lane: fast
+    aggregate: test
+  - name: inspect
+    summary: Emit the current source and legacy-composition snapshot as JSON.
+    lane: fast
+  - name: baseline
+    summary: Compare the generated architecture with the reviewed baseline.
+    lane: fast
+    aggregate: check
+  - name: boundaries
+    summary: Enforce module imports and passive public entrypoints.
+    lane: fast
+    aggregate: check
+  - name: graph
+    summary: Print the phase, capability, and module dependency graph as JSON.
+    lane: fast
+  - name: messages
+    summary: Run the seeded Messages semantic-service property suite.
+    lane: fast
+  - name: cordis
+    summary: Run the seeded Cordis static-composition property suite.
+    lane: fast
+  - name: all
+    summary: Validate the program, boundaries, baseline, and property proofs.
+    lane: fast
+skills: []

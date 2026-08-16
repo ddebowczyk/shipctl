@@ -40,10 +40,18 @@ export class TerminalPresentationRegistry {
 }
 
 export function terminalPresentationRegistry(
-  modules: readonly object[],
+  modules: readonly { readonly id?: string; readonly terminalPresentations?: readonly TerminalPresentationProvider[] }[],
 ): TerminalPresentationRegistry {
-  return new TerminalPresentationRegistry(modules.flatMap((module) =>
-    (module as { readonly terminalPresentations?: readonly TerminalPresentationProvider[] })
-      .terminalPresentations ?? [],
-  ));
+  const providers = modules.flatMap((module) => {
+    const moduleId = module.id;
+    return (module.terminalPresentations ?? []).map((provider) => {
+      if (provider.moduleId !== moduleId) {
+        throw new Error(
+          `Terminal presentation ${provider.driverId} declares module ${provider.moduleId}; expected ${moduleId ?? "unknown"}`,
+        );
+      }
+      return provider;
+    });
+  });
+  return new TerminalPresentationRegistry(providers);
 }

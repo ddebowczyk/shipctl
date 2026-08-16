@@ -28,7 +28,10 @@ async function fixture(files) {
   ]) {
     const frontend = path.join(root, relativeRoot);
     await mkdir(path.join(frontend, "src"), { recursive: true });
-    await writeFile(path.join(frontend, "package.json"), JSON.stringify({ name: packageName }));
+    await writeFile(path.join(frontend, "package.json"), JSON.stringify({
+      name: packageName,
+      exports: { ".": "./src/index.ts" },
+    }));
   }
   for (const [relative, contents] of Object.entries(files)) {
     const target = path.join(root, relative);
@@ -46,6 +49,50 @@ test("accepts public composition and inward API imports", async (t) => {
   });
   t.after(() => rm(root, { recursive: true, force: true }));
   assert.deepEqual(await checkModuleBoundaries(root), []);
+});
+
+test("rejects observable work in a module public entrypoint", async (t) => {
+  const root = await fixture({
+    "modules/alpha/frontend/src/index.ts": [
+      "import { readFileSync } from 'node:fs';",
+      "readFileSync(new URL(import.meta.url));",
+      "setTimeout(() => undefined, 0);",
+      "globalThis.registry.register('alpha');",
+      "globalThis.__TAURI_INTERNALS__.invoke('alpha');",
+    ].join("\n"),
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.deepEqual(
+    (await checkModuleBoundaries(root)).map(({ rule, specifier }) => ({ rule, specifier })),
+    [
+      { rule: "module-entrypoint-side-effect", specifier: "node:fs" },
+      { rule: "module-entrypoint-side-effect", specifier: "setTimeout" },
+      { rule: "module-entrypoint-side-effect", specifier: "globalThis.registry.register" },
+      { rule: "module-entrypoint-side-effect", specifier: "globalThis.__TAURI_INTERNALS__.invoke" },
+    ],
+  );
+});
+
+test("rejects observable work in the static entrypoint dependency closure", async (t) => {
+  const root = await fixture({
+    "modules/alpha/frontend/src/index.ts": "export { value } from './runtime';",
+    "modules/alpha/frontend/src/runtime.ts": "setInterval(() => undefined, 1); export const value = 1;",
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.deepEqual(
+    (await checkModuleBoundaries(root)).map(({ file, rule, specifier }) => ({
+      file,
+      rule,
+      specifier,
+    })),
+    [{
+      file: "modules/alpha/frontend/src/runtime.ts",
+      rule: "module-entrypoint-side-effect",
+      specifier: "setInterval",
+    }],
+  );
 });
 
 test("discovers the top-level shared contract package", async (t) => {
@@ -123,7 +170,7 @@ test("rejects capability code in src and application imports into ops", async (t
   );
 });
 
-test("allows classified platform listeners and rejects direct module event escapes", async (t) => {
+test("freezes classified legacy listeners and rejects new direct event imports", async (t) => {
   const root = await fixture({
     "modules/git/frontend/src/index.ts": "import { emit, listen } from '@tauri-apps/api/event'; listen('git-fs-changed', () => undefined); emit('module-escape');",
     "modules/alpha/frontend/src/index.ts": "import { listen } from '@tauri-apps/api/event'; listen('usage-ingest-complete', () => undefined);",
@@ -132,12 +179,69 @@ test("allows classified platform listeners and rejects direct module event escap
 
   const diagnostics = await checkModuleBoundaries(root);
   assert.deepEqual(diagnostics.map(({ rule, specifier }) => ({ rule, specifier })), [{
+    rule: "tauri-import-outside-platform",
+    specifier: "@tauri-apps/api/event",
+  }, {
+    rule: "module-entrypoint-side-effect",
+    specifier: "@tauri-apps/api/event",
+  }, {
     rule: "module-direct-tauri-event",
     specifier: "usage-ingest-complete",
+  }, {
+    rule: "tauri-import-outside-platform",
+    specifier: "@tauri-apps/api/event",
+  }, {
+    rule: "module-entrypoint-side-effect",
+    specifier: "@tauri-apps/api/event",
+  }, {
+    rule: "module-entrypoint-side-effect",
+    specifier: "@tauri-apps/api/event",
   }, {
     rule: "module-direct-tauri-event",
     specifier: "@tauri-apps/api/event#emit",
   }]);
+});
+
+test("rejects Tauri behind a barrel and Layman in module source", async (t) => {
+  const root = await fixture({
+    "modules/alpha/frontend/src/index.ts": "export { native } from './barrel.ts';",
+    "modules/alpha/frontend/src/barrel.ts": "export { native } from './native.ts';",
+    "modules/alpha/frontend/src/native.ts": [
+      "import { invoke } from '@tauri-apps/api/core';",
+      "import { Layman } from 'react-layman';",
+      "export const native = [invoke, Layman];",
+    ].join("\n"),
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.deepEqual(
+    (await checkModuleBoundaries(root)).map(({ file, rule }) => ({ file, rule })),
+    [{
+      file: "modules/alpha/frontend/src/native.ts",
+      rule: "tauri-import-outside-platform",
+    }, {
+      file: "modules/alpha/frontend/src/native.ts",
+      rule: "module-renderer-import",
+    }],
+  );
+});
+
+test("allows Tauri only in the trusted platform tree", async (t) => {
+  const root = await fixture({
+    "core/frontend/platform/native.ts":
+      "import { invoke } from '@tauri-apps/api/core'; export { invoke };",
+    "core/frontend/host/native.ts":
+      "import { invoke } from '@tauri-apps/api/core'; export { invoke };",
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.deepEqual(
+    (await checkModuleBoundaries(root)).map(({ file, rule }) => ({ file, rule })),
+    [{
+      file: "core/frontend/host/native.ts",
+      rule: "tauri-import-outside-platform",
+    }],
+  );
 });
 
 test("holds terminal scenarios to their port", async (t) => {

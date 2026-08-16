@@ -12,11 +12,13 @@ import {
 } from "../terminalPresentationRegistry.ts";
 
 const thin: TerminalPresentationProvider = {
+  moduleId: "shipctl.thin-terminal",
   driverId: terminalDriverId("thin-terminal"),
   Presentation: () => null,
 };
 
 const semantic: TerminalPresentationProvider = {
+  moduleId: "shipctl.semantic-terminal",
   driverId: terminalDriverId("semantic-terminal"),
   Presentation: () => null,
 };
@@ -30,9 +32,22 @@ test("registry resolves semantic and TTY presentations side by side", () => {
 });
 
 test("registry resolves one installed presentation by selected driver", () => {
-  const registry = terminalPresentationRegistry([{ terminalPresentations: [thin] }]);
+  const registry = terminalPresentationRegistry([{
+    id: "shipctl.thin-terminal",
+    terminalPresentations: [thin],
+  }]);
   assert.equal(registry.resolve(thin.driverId), thin);
   assert.equal(registry.resolve(terminalDriverId("semantic-terminal")), null);
+});
+
+test("registry rejects a presentation attributed to a different module", () => {
+  assert.throws(
+    () => terminalPresentationRegistry([{
+      id: "shipctl.semantic-terminal",
+      terminalPresentations: [thin],
+    }]),
+    /declares module shipctl.thin-terminal; expected shipctl.semantic-terminal/,
+  );
 });
 
 test("registry rejects duplicate terminal driver ids", () => {

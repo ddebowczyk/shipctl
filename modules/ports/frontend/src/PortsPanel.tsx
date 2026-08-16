@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCcw, Skull, ExternalLink, Folder } from "lucide-react";
-import type { GlobalSurfaceContributionProps } from "@shipctl/module-api";
+import {
+  processesService,
+  type GlobalSurfaceContributionProps,
+  type ProcessesService,
+  type ProcessInspectionId,
+} from "@shipctl/module-api";
 
-import { listListeningPorts, killPort } from "./client";
 import type { PortInfo } from "./types";
 
 function getErrorMessage(error: unknown): string {
@@ -24,7 +28,7 @@ export function formatUptime(raw: string): string {
 
 export function groupPortsByProject(ports: readonly PortInfo[]): Record<string, PortInfo[]> {
   return ports.reduce<Record<string, PortInfo[]>>((groups, port) => {
-    const key = port.project || "Other";
+    const key = port.projectName || "Other";
     (groups[key] ??= []).push(port);
     return groups;
   }, {});
@@ -43,10 +47,13 @@ export type PortScanResult =
   | { readonly status: "error"; readonly message: string };
 
 export async function scanPorts(
-  scan: () => Promise<PortInfo[]> = listListeningPorts,
+  processes: ProcessesService,
 ): Promise<PortScanResult> {
   try {
-    return { status: "ready", ports: await scan() };
+    const outcome = await processes.inspectListeningPorts.execute({});
+    return outcome.result.ok
+      ? { status: "ready", ports: outcome.result.value }
+      : { status: "error", message: outcome.result.error.message };
   } catch (error) {
     return { status: "error", message: getErrorMessage(error) };
   }
@@ -72,16 +79,19 @@ export type StopPortResult =
 
 export async function stopPort(
   port: PortInfo,
-  stop: (pid: number) => Promise<void> = killPort,
+  processes: ProcessesService,
 ): Promise<StopPortResult> {
   try {
-    await stop(port.pid);
+    const outcome = await processes.terminateInspectedProcess.execute({
+      inspectionId: port.inspectionId,
+    });
+    if (!outcome.result.ok) throw new Error(outcome.result.error.message);
     return {
       status: "stopped",
       notice: {
         tone: "success",
         title: "Process killed",
-        message: `Stopped ${port.process} (pid ${port.pid}) on port ${port.port}`,
+        message: `Stopped ${port.name} (pid ${port.processId}) on port ${port.port}`,
       },
     };
   } catch (error) {
@@ -96,16 +106,17 @@ export async function stopPort(
   }
 }
 
-export default function PortsPanel({ services }: GlobalSurfaceContributionProps) {
+export default function PortsPanel({ activation, services }: GlobalSurfaceContributionProps) {
+  const processes = activation.services.require(processesService);
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [killing, setKilling] = useState<Set<number>>(new Set());
+  const [killing, setKilling] = useState<Set<ProcessInspectionId>>(new Set());
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const result = await scanPorts();
+    const result = await scanPorts(processes);
     if (result.status === "ready") {
       setPorts([...result.ports]);
     } else {
@@ -113,7 +124,7 @@ export default function PortsPanel({ services }: GlobalSurfaceContributionProps)
       if (import.meta.env.DEV) console.error("Port scan failed:", result.message);
     }
     setLoading(false);
-  }, []);
+  }, [processes]);
 
   // Load once when panel mounts
   useEffect(() => {
@@ -121,9 +132,9 @@ export default function PortsPanel({ services }: GlobalSurfaceContributionProps)
   }, [refresh]);
 
   const handleKill = useCallback(async (port: PortInfo) => {
-    setKilling((prev) => new Set(prev).add(port.pid));
+    setKilling((prev) => new Set(prev).add(port.inspectionId));
     try {
-      const result = await stopPort(port);
+      const result = await stopPort(port, processes);
       services.notices.push(result.notice);
       if (result.status === "stopped") {
         window.setTimeout(() => void refresh(), 500);
@@ -131,11 +142,11 @@ export default function PortsPanel({ services }: GlobalSurfaceContributionProps)
     } finally {
       setKilling((prev) => {
         const next = new Set(prev);
-        next.delete(port.pid);
+        next.delete(port.inspectionId);
         return next;
       });
     }
-  }, [refresh, services.notices]);
+  }, [processes, refresh, services.notices]);
 
   const handleOpenBrowser = useCallback((port: number) => {
     void services.externalLinks.open(`http://localhost:${port}`);
@@ -190,7 +201,7 @@ export default function PortsPanel({ services }: GlobalSurfaceContributionProps)
           <div className="flex flex-col gap-1">
             {grouped[group].map((port) => (
               <div
-                key={`${port.pid}-${port.port}`}
+                key={port.inspectionId}
                 className="flex items-center gap-3 px-3 py-2 rounded-md"
                 style={{ background: "var(--surface-hover)" }}
               >
@@ -203,7 +214,7 @@ export default function PortsPanel({ services }: GlobalSurfaceContributionProps)
 
                 <div className="flex flex-col min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm truncate">{port.process}</span>
+                    <span className="text-sm truncate">{port.name}</span>
                     {port.framework && (
                       <span
                         className="text-xs px-1.5 py-0.5 rounded shrink-0"
@@ -213,8 +224,8 @@ export default function PortsPanel({ services }: GlobalSurfaceContributionProps)
                       </span>
                     )}
                   </div>
-                  {port.cwd && (
-                    <span className="text-xs opacity-40 truncate">{port.cwd}</span>
+                  {port.workingDirectory && (
+                    <span className="text-xs opacity-40 truncate">{port.workingDirectory}</span>
                   )}
                 </div>
 
@@ -223,11 +234,11 @@ export default function PortsPanel({ services }: GlobalSurfaceContributionProps)
                 </span>
 
                 <span className="text-xs opacity-40 shrink-0" style={{ minWidth: "50px" }} title="Memory">
-                  {formatMemory(port.memory_kb)}
+                  {formatMemory(port.memoryKilobytes)}
                 </span>
 
                 <span className="text-xs opacity-30 shrink-0 font-mono" title="PID" style={{ minWidth: "44px" }}>
-                  {port.pid}
+                  {port.processId}
                 </span>
 
                 <div className="flex items-center gap-1 shrink-0">
@@ -242,8 +253,8 @@ export default function PortsPanel({ services }: GlobalSurfaceContributionProps)
                   <button
                     className="icon-btn"
                     onClick={() => void handleKill(port)}
-                    disabled={killing.has(port.pid)}
-                    title={`Kill ${port.process} (pid ${port.pid})`}
+                    disabled={killing.has(port.inspectionId)}
+                    title={`Kill ${port.name} (pid ${port.processId})`}
                     aria-label={`Kill process on port ${port.port}`}
                     style={{ color: "var(--text-danger, #e55)" }}
                   >

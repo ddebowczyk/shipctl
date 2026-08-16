@@ -7,8 +7,9 @@ import { usePiConfigStore } from "./piConfigStore";
 import { HandMetal, ChevronDown, Check, Info, X } from "lucide-react";
 import { assistantLogoSrc, getAssistantLogoClass } from "./branding";
 import { launchAssistant } from "./runtime";
+import { piCredentialClientFor } from "./credentialStoreClient";
 
-export default function SessionLauncher({ project, close, services }: ModulePanelProps) {
+export default function SessionLauncher({ project, close, activation, services }: ModulePanelProps) {
   const activeRepoPath = project?.path ?? null;
 
   const [selectedAssistant, setSelectedAssistant] = useState<CodingAssistant | null>(null);
@@ -37,6 +38,7 @@ export default function SessionLauncher({ project, close, services }: ModulePane
   const [selectedPiProvider, setSelectedPiProvider] = useState<string | null>(null);
   const [piKeyInputs, setPiKeyInputs] = useState({ provider: "", key: "" });
   const [piInfoOpen, setPiInfoOpen] = useState(false);
+  const piCredentials = useMemo(() => piCredentialClientFor(activation), [activation]);
 
   // Check which assistants are installed
   useEffect(() => {
@@ -155,7 +157,7 @@ export default function SessionLauncher({ project, close, services }: ModulePane
     if (!provider.trim() || !key.trim()) return;
     const providerId = provider.trim();
     try {
-      await setPiApiKey(providerId, key.trim());
+      await setPiApiKey(providerId, key.trim(), piCredentials);
       await updatePiSettings({ defaultProvider: providerId, defaultModel: null });
       setPiKeyInputs({ provider: "", key: "" });
       setSelectedPiProvider(providerId);
@@ -166,7 +168,7 @@ export default function SessionLauncher({ project, close, services }: ModulePane
 
   const handleRemovePiProvider = async (provider: string) => {
     try {
-      await removePiApiKey(provider);
+      await removePiApiKey(provider, piCredentials);
       const nextDefault = selectedPiProvider === provider ? null : selectedPiProvider;
       if (piConfig.settings.defaultProvider === provider) {
         await updatePiSettings({ defaultProvider: null, defaultModel: null });

@@ -198,12 +198,31 @@ test("activation facade binds identity and bridge while declarations stay data-o
   );
   const bridge = new MessageBusBridge(activations, transport);
   const opened = await bridge.open();
-  const messages = opened.messagesByModule.get("fixture");
-  assert(messages);
+  const client = opened.clientsByActivation.get("fixture@digest#one")?.client;
+  assert(client);
 
-  await messages.send(CHANNEL, { value: 1 });
-  await messages.publish(TOPIC, { value: 2 });
-  assert.deepEqual(await messages.request(PORT, { value: 3 }), { value: 4 });
+  await client.send({
+    schemaVersion: 1,
+    endpoint: CHANNEL.id,
+    message: CHANNEL.message,
+    payload: { value: 1 },
+    correlationId: "send-1",
+  });
+  await client.publish({
+    schemaVersion: 1,
+    endpoint: TOPIC.id,
+    message: TOPIC.message,
+    payload: { value: 2 },
+    correlationId: "publish-1",
+  });
+  const response = await client.request({
+    schemaVersion: 1,
+    endpoint: PORT.id,
+    message: PORT.request,
+    payload: { value: 3 },
+    correlationId: "request-1",
+  }) as MessageEnvelope;
+  assert.deepEqual(response.payload, { value: 4 });
   assert.deepEqual(
     transport.calls,
     [
@@ -220,6 +239,66 @@ test("activation facade binds identity and bridge while declarations stay data-o
   ]);
   assert.equal(transport.registrations[0]?.activationId, "fixture@digest#one");
   assert.equal(transport.registrations[0]?.declarations.handles[0]?.endpoint.id, CHANNEL.id);
+});
+
+test("schedule-only modules receive an admitted scheduler binding and grant", async () => {
+  const transport = new FakeTransport();
+  const module: ShipctlModule = {
+    id: "fixture.scheduler",
+    version: "1.0.0",
+    scheduledTasks: [{
+      id: "fixture.refresh",
+      moduleId: "fixture.scheduler",
+      schedule: {
+        cron: "* * * * * Etc/UTC",
+        target: { kind: "channel", endpoint: CHANNEL },
+        payload: { value: 1 },
+      },
+    }],
+  };
+  const activationId = "fixture.scheduler@digest#one";
+  const activations = createModuleMessageActivations([module], () => activationId);
+  assert.equal(activations.length, 1);
+  assert.deepEqual(moduleMessageGrants(module), ["schedule.register"]);
+
+  const bridge = new MessageBusBridge(activations, transport);
+  const opened = await bridge.open();
+  assert.deepEqual(opened.schedulerBindingsByActivation.get(activationId), {
+    moduleId: "fixture.scheduler",
+    activationId,
+    bridgeId: "fixture-bridge",
+  });
+  assert.deepEqual(transport.registrations[0]?.grants, [{
+    id: "schedule.register",
+    effective: true,
+  }]);
+  await bridge.close();
+});
+
+test("terminal-only modules receive one activation identity and exact grants", async () => {
+  const transport = new FakeTransport();
+  const module: ShipctlModule = {
+    id: "fixture.terminal",
+    version: "1.0.0",
+    requiredGrants: ["terminal.attach", "terminal.input", "terminal.attach"],
+  };
+  const activationId = "fixture.terminal@digest#one";
+  const activations = createModuleMessageActivations([module], () => activationId);
+  assert.equal(activations.length, 1);
+  assert.deepEqual(moduleMessageGrants(module), ["terminal.attach", "terminal.input"]);
+
+  const bridge = new MessageBusBridge(activations, transport);
+  const opened = await bridge.open();
+  assert.deepEqual(opened.activationIdsByModule.get("fixture.terminal"), activationId);
+  assert.deepEqual(
+    [...(opened.terminalBindingsByActivation.get(activationId)?.grants ?? [])],
+    ["terminal.attach", "terminal.input"],
+  );
+  assert.deepEqual(transport.registrations[0]?.grants, [
+    { id: "terminal.attach", effective: true },
+    { id: "terminal.input", effective: true },
+  ]);
+  await bridge.close();
 });
 
 test("ordered dispatch contains handler failure and rejects stale activations", async () => {
@@ -349,7 +428,7 @@ test("reconciliation swaps activation ownership only after native publication su
   const messages = await bridge.reconcile(
     createModuleMessageActivations([moduleFor("2.0.0", "b")], () => "fixture@sha-b#b"),
   );
-  assert(messages.has("fixture"));
+  assert(messages.has("fixture@sha-b#b"));
   assert.equal((await bridge.dispatch(
     frame(2, "directed", CHANNEL.id, "fixture@sha-a#a", 7),
   )).accepted, false);

@@ -2,9 +2,13 @@
 
 #![forbid(unsafe_code)]
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use tauri::{plugin::TauriPlugin, Manager, Runtime, State};
 
@@ -58,6 +62,189 @@ const BUILTIN_SKILLS: &[BuiltinSkill] = &[
     },
 ];
 
+static TRANSACTION_ID: AtomicU64 = AtomicU64::new(0);
+
+struct OriginalFile {
+    contents: Vec<u8>,
+    permissions: fs::Permissions,
+}
+
+fn transaction_path(parent: &Path, name: &str, role: &str) -> Result<PathBuf, String> {
+    loop {
+        let id = TRANSACTION_ID.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".{name}.shipctl-{role}-{}-{id}",
+            std::process::id()
+        ));
+        match candidate.symlink_metadata() {
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(candidate),
+            Ok(_) => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect transaction path {}: {error}",
+                    candidate.display()
+                ));
+            }
+        }
+    }
+}
+
+fn original_regular_file(path: &Path) -> Result<Option<OriginalFile>, String> {
+    match path.symlink_metadata() {
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("Failed to inspect {}: {error}", path.display())),
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            let contents = fs::read(path)
+                .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+            Ok(Some(OriginalFile {
+                contents,
+                permissions: metadata.permissions(),
+            }))
+        }
+        Ok(_) => Err(format!(
+            "Refusing to replace non-regular skill file: {}",
+            path.display()
+        )),
+    }
+}
+
+fn plain_directory(
+    root: &Path,
+    components: &[&str],
+    create: bool,
+) -> Result<Option<PathBuf>, String> {
+    let mut current = root.to_path_buf();
+    for component in components {
+        current.push(component);
+        match current.symlink_metadata() {
+            Err(error) if error.kind() == ErrorKind::NotFound && !create => return Ok(None),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                fs::create_dir(&current).map_err(|error| {
+                    format!(
+                        "Failed to create safe directory {}: {error}",
+                        current.display()
+                    )
+                })?;
+            }
+            Err(error) => {
+                return Err(format!("Failed to inspect {}: {error}", current.display()));
+            }
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => {
+                return Err(format!(
+                    "Refusing unsafe skill directory: {}",
+                    current.display()
+                ));
+            }
+        }
+    }
+    Ok(Some(current))
+}
+
+fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Missing parent for {}", path.display()))?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+    let staged = transaction_path(parent, name, "write")?;
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)
+            .map_err(|error| format!("Failed to stage {}: {error}", path.display()))?;
+        file.write_all(contents)
+            .map_err(|error| format!("Failed to stage {}: {error}", path.display()))?;
+        file.sync_all()
+            .map_err(|error| format!("Failed to sync {}: {error}", path.display()))?;
+        fs::rename(&staged, path)
+            .map_err(|error| format!("Failed to publish {}: {error}", path.display()))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&staged);
+    }
+    result
+}
+
+fn rollback_skill_file(
+    skill_file: &Path,
+    original: Option<&OriginalFile>,
+    remove_empty_skill_dir: bool,
+) -> Result<(), String> {
+    match original {
+        Some(original) => {
+            atomic_write(skill_file, &original.contents)?;
+            fs::set_permissions(skill_file, original.permissions.clone()).map_err(|error| {
+                format!(
+                    "Failed to restore permissions on {}: {error}",
+                    skill_file.display()
+                )
+            })?;
+        }
+        None => match fs::remove_file(skill_file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "Failed to roll back {}: {error}",
+                    skill_file.display()
+                ));
+            }
+        },
+    }
+    if remove_empty_skill_dir {
+        if let Some(skill_dir) = skill_file.parent() {
+            let _ = fs::remove_dir(skill_dir);
+        }
+    }
+    Ok(())
+}
+
+fn install_failure(
+    error: String,
+    skill_file: &Path,
+    original: Option<&OriginalFile>,
+    remove_empty_skill_dir: bool,
+) -> String {
+    match rollback_skill_file(skill_file, original, remove_empty_skill_dir) {
+        Ok(()) => error,
+        Err(rollback_error) => format!("{error}; rollback failed: {rollback_error}"),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum OwnedPointerKind {
+    Symlink,
+    Directory,
+}
+
+fn owned_pointer_kind(pointer: &Path) -> Result<Option<OwnedPointerKind>, String> {
+    let metadata = match pointer.symlink_metadata() {
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!("Failed to inspect {}: {error}", pointer.display()));
+        }
+        Ok(metadata) => metadata,
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(Some(OwnedPointerKind::Symlink));
+    }
+    if !metadata.is_dir() {
+        return Ok(None);
+    }
+    let only_skill_md = fs::read_dir(pointer)
+        .map_err(|error| format!("Failed to inspect {}: {error}", pointer.display()))?
+        .all(|entry| {
+            entry
+                .map(|entry| entry.file_name().to_string_lossy() == "SKILL.md")
+                .unwrap_or(false)
+        });
+    Ok(only_skill_md.then_some(OwnedPointerKind::Directory))
+}
+
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillInfo {
@@ -76,10 +263,13 @@ fn find_skill(name: &str) -> Result<&'static BuiltinSkill, String> {
 
 /// Whether the repo has the named skill installed at the standard location.
 pub fn has_skill(root: &Path, name: &str) -> bool {
-    root.join(".agents/skills")
-        .join(name)
-        .join("SKILL.md")
-        .is_file()
+    let Ok(Some(skill_dir)) = plain_directory(root, &[".agents", "skills", name], false) else {
+        return false;
+    };
+    matches!(
+        skill_dir.join("SKILL.md").symlink_metadata(),
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink()
+    )
 }
 
 /// All built-in skills with their install state for this repo.
@@ -104,27 +294,63 @@ pub fn install_skill(root: &Path, name: &str) -> Result<(), String> {
         return Err(format!("Not a directory: {}", root.display()));
     }
 
-    let skill_dir = root.join(".agents/skills").join(skill.name);
-    fs::create_dir_all(&skill_dir)
-        .map_err(|e| format!("Failed to create {}: {e}", skill_dir.display()))?;
-    fs::write(skill_dir.join("SKILL.md"), skill.markdown)
-        .map_err(|e| format!("Failed to write SKILL.md: {e}"))?;
+    let skill_dir_existed =
+        plain_directory(root, &[".agents", "skills", skill.name], false)?.is_some();
+    let skill_dir = plain_directory(root, &[".agents", "skills", skill.name], true)?
+        .expect("created skill directory");
+    let skill_file = skill_dir.join("SKILL.md");
+    let original = original_regular_file(&skill_file)?;
+    atomic_write(&skill_file, skill.markdown.as_bytes())?;
 
-    let claude_skills = root.join(".claude/skills");
+    let claude_skills = match plain_directory(root, &[".claude", "skills"], true) {
+        Ok(Some(directory)) => directory,
+        Ok(None) => unreachable!("create=true always returns a directory"),
+        Err(error) => {
+            return Err(install_failure(
+                error,
+                &skill_file,
+                original.as_ref(),
+                !skill_dir_existed,
+            ));
+        }
+    };
     let pointer = claude_skills.join(skill.name);
-    if pointer.symlink_metadata().is_ok() {
-        return Ok(()); // Something already there — leave the user's setup alone.
+    match pointer.symlink_metadata() {
+        Ok(_) => return Ok(()), // Something already there — leave the user's setup alone.
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(install_failure(
+                format!("Failed to inspect {}: {error}", pointer.display()),
+                &skill_file,
+                original.as_ref(),
+                !skill_dir_existed,
+            ));
+        }
     }
-    fs::create_dir_all(&claude_skills)
-        .map_err(|e| format!("Failed to create {}: {e}", claude_skills.display()))?;
     #[cfg(unix)]
-    std::os::unix::fs::symlink(Path::new("../../.agents/skills").join(skill.name), &pointer)
-        .map_err(|e| format!("Failed to link Claude skill: {e}"))?;
+    if let Err(error) =
+        std::os::unix::fs::symlink(Path::new("../../.agents/skills").join(skill.name), &pointer)
+    {
+        return Err(install_failure(
+            format!("Failed to link Claude skill: {error}"),
+            &skill_file,
+            original.as_ref(),
+            !skill_dir_existed,
+        ));
+    }
     #[cfg(not(unix))]
     {
-        fs::create_dir_all(&pointer).map_err(|e| format!("Failed to create skill dir: {e}"))?;
-        fs::write(pointer.join("SKILL.md"), skill.markdown)
-            .map_err(|e| format!("Failed to write SKILL.md: {e}"))?;
+        if let Err(error) = fs::create_dir_all(&pointer)
+            .and_then(|()| fs::write(pointer.join("SKILL.md"), skill.markdown))
+        {
+            let _ = fs::remove_dir_all(&pointer);
+            return Err(install_failure(
+                format!("Failed to create Claude skill: {error}"),
+                &skill_file,
+                original.as_ref(),
+                !skill_dir_existed,
+            ));
+        }
     }
     Ok(())
 }
@@ -135,28 +361,72 @@ pub fn install_skill(root: &Path, name: &str) -> Result<(), String> {
 pub fn uninstall_skill(root: &Path, name: &str) -> Result<(), String> {
     find_skill(name)?;
 
-    let skill_dir = root.join(".agents/skills").join(name);
-    if skill_dir.is_dir() {
-        fs::remove_dir_all(&skill_dir)
-            .map_err(|e| format!("Failed to remove {}: {e}", skill_dir.display()))?;
-    }
+    let skill_parent = plain_directory(root, &[".agents", "skills"], false)?;
+    let pointer_parent = plain_directory(root, &[".claude", "skills"], false)?;
+    let skill_dir = skill_parent
+        .as_ref()
+        .map(|parent| parent.join(name))
+        .unwrap_or_else(|| root.join(".agents/skills").join(name));
+    let pointer = pointer_parent
+        .as_ref()
+        .map(|parent| parent.join(name))
+        .unwrap_or_else(|| root.join(".claude/skills").join(name));
+    let pointer_kind = owned_pointer_kind(&pointer)?;
 
-    let pointer = root.join(".claude/skills").join(name);
-    if let Ok(meta) = pointer.symlink_metadata() {
-        if meta.file_type().is_symlink() {
-            fs::remove_file(&pointer)
-                .map_err(|e| format!("Failed to remove {}: {e}", pointer.display()))?;
-        } else if meta.is_dir() {
-            let only_skill_md = fs::read_dir(&pointer)
-                .map(|entries| {
-                    entries
-                        .flatten()
-                        .all(|e| e.file_name().to_string_lossy() == "SKILL.md")
-                })
-                .unwrap_or(false);
-            if only_skill_md {
-                fs::remove_dir_all(&pointer)
-                    .map_err(|e| format!("Failed to remove {}: {e}", pointer.display()))?;
+    let staged_skill = match skill_parent {
+        None => None,
+        Some(_) => match skill_dir.symlink_metadata() {
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect {}: {error}",
+                    skill_dir.display()
+                ));
+            }
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                let parent = skill_dir.parent().expect("skill directory has a parent");
+                let staged = transaction_path(parent, name, "remove")?;
+                fs::rename(&skill_dir, &staged)
+                    .map_err(|error| format!("Failed to stage {}: {error}", skill_dir.display()))?;
+                Some(staged)
+            }
+            Ok(_) => None,
+        },
+    };
+
+    let staged_pointer = if let Some(kind) = pointer_kind {
+        let parent = pointer.parent().expect("skill pointer has a parent");
+        let staged = transaction_path(parent, name, "remove")?;
+        if let Err(error) = fs::rename(&pointer, &staged) {
+            let rollback = staged_skill
+                .as_ref()
+                .map(|staged| fs::rename(staged, &skill_dir));
+            let rollback_error = rollback.and_then(Result::err);
+            return Err(match rollback_error {
+                Some(rollback_error) => format!(
+                    "Failed to stage {}: {error}; rollback failed: {rollback_error}",
+                    pointer.display()
+                ),
+                None => format!("Failed to stage {}: {error}", pointer.display()),
+            });
+        }
+        Some((staged, kind))
+    } else {
+        None
+    };
+
+    // Both public paths are now absent. Cleanup of transaction-private names
+    // does not change the successful uninstall result.
+    if let Some(staged) = staged_skill {
+        let _ = fs::remove_dir_all(staged);
+    }
+    if let Some((staged, kind)) = staged_pointer {
+        match kind {
+            OwnedPointerKind::Symlink => {
+                let _ = fs::remove_file(staged);
+            }
+            OwnedPointerKind::Directory => {
+                let _ = fs::remove_dir_all(staged);
             }
         }
     }
@@ -296,6 +566,68 @@ mod tests {
     }
 
     #[test]
+    fn setup_rolls_back_a_new_skill_when_pointer_publication_fails() {
+        let dir = temp_repo("setup-rollback-new");
+        fs::create_dir_all(dir.join(".claude")).unwrap();
+        fs::write(dir.join(".claude/skills"), "blocks the skills directory").unwrap();
+
+        let error = install_skill(&dir, "shipctl-todos").unwrap_err();
+
+        assert!(error.contains(".claude/skills"));
+        assert!(!has_skill(&dir, "shipctl-todos"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn setup_restores_an_existing_skill_when_pointer_publication_fails() {
+        let dir = temp_repo("setup-rollback-existing");
+        let skill_file = dir.join(".agents/skills/shipctl-todos/SKILL.md");
+        fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
+        fs::write(&skill_file, "existing user content\n").unwrap();
+        fs::create_dir_all(dir.join(".claude")).unwrap();
+        fs::write(dir.join(".claude/skills"), "blocks the skills directory").unwrap();
+
+        install_skill(&dir, "shipctl-todos").unwrap_err();
+
+        assert_eq!(
+            fs::read_to_string(skill_file).unwrap(),
+            "existing user content\n"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_rejects_an_agents_directory_that_escapes_the_project() {
+        let dir = temp_repo("setup-agents-symlink");
+        let outside = temp_repo("setup-agents-symlink-outside");
+        std::os::unix::fs::symlink(&outside, dir.join(".agents")).unwrap();
+
+        let error = install_skill(&dir, "shipctl-todos").unwrap_err();
+
+        assert!(error.contains("unsafe skill directory"));
+        assert!(!outside.join("skills/shipctl-todos/SKILL.md").exists());
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_rolls_back_when_the_claude_directory_escapes_the_project() {
+        let dir = temp_repo("setup-claude-symlink");
+        let outside = temp_repo("setup-claude-symlink-outside");
+        std::os::unix::fs::symlink(&outside, dir.join(".claude")).unwrap();
+
+        let error = install_skill(&dir, "shipctl-todos").unwrap_err();
+
+        assert!(error.contains("unsafe skill directory"));
+        assert!(!has_skill(&dir, "shipctl-todos"));
+        assert!(!outside.join("skills/shipctl-todos").exists());
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
     fn list_reflects_install_state() {
         let dir = temp_repo("list");
 
@@ -353,6 +685,27 @@ mod tests {
         assert!(foreign.join("notes.md").is_file());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_rejects_an_agents_directory_that_escapes_the_project() {
+        let dir = temp_repo("remove-agents-symlink");
+        let outside = temp_repo("remove-agents-symlink-outside");
+        let outside_skill = outside.join("skills/orchestrate/SKILL.md");
+        fs::create_dir_all(outside_skill.parent().unwrap()).unwrap();
+        fs::write(&outside_skill, "outside project\n").unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join(".agents")).unwrap();
+
+        let error = uninstall_skill(&dir, "orchestrate").unwrap_err();
+
+        assert!(error.contains("unsafe skill directory"));
+        assert_eq!(
+            fs::read_to_string(outside_skill).unwrap(),
+            "outside project\n"
+        );
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     #[test]

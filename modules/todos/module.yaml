@@ -10,7 +10,11 @@ backend:
   path: modules/todos/backend
   cargo_feature: todos-module
   dependency_alias: shipctl-module-todos
-  plugin_init: "shipctl_module_todos::init()"
+  install: "shipctl_module_todos_host::install(builder, workspace.clone())"
+  host:
+    crate: shipctl-module-todos-host
+    path: modules/todos/host
+    dependency_alias: shipctl-module-todos-host
 tauri:
   capability_identifier: todos
   permissions:
@@ -18,6 +22,9 @@ tauri:
     - shipctl-todos:allow-toggle-todo
     - shipctl-todos:allow-add-todo
     - shipctl-todos:allow-move-todo
+    - shipctl-todos:allow-discover-project-documents
+    - shipctl-todos:allow-read-project-document
+    - shipctl-todos:allow-write-project-document
 profile: ops/modularity/profiles/todos-disabled/tauri.conf.json
 tests:
   frontend: modules/todos/frontend/tests

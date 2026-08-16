@@ -70,9 +70,6 @@ export type {
   StartupModuleRuntimeSnapshot,
 } from "./moduleRuntimeSnapshot.ts";
 export {
-  activateModules,
-  activateModulesWithMessages,
-  activateModulesWithMessagesObserved,
   createEnabledGlobalSurfaceRegistry,
   createEnabledPanelRegistry,
   discoverRelatedProjectPaths,
@@ -99,10 +96,6 @@ export {
   notifyModulesProjectsChanged,
   selectProjectFactsProvider,
 } from "./moduleComposition.ts";
-export type {
-  ModuleActivationFailure,
-  ObservedModuleActivation,
-} from "./moduleComposition.ts";
 export {
   MessageBusBridge,
   createModuleMessageActivations,
@@ -114,7 +107,7 @@ export type {
   OpenModuleMessageBridge,
 } from "./messageBusBridge.ts";
 export {
-  createModuleMessages,
+  createActivationMessageClient,
   messageDeclarations,
   prepareModuleMessageActivation,
 } from "./moduleMessageContext.ts";
@@ -163,7 +156,6 @@ export type {
   ModuleHost,
   ModuleHostServices,
   ModuleScheduledTask,
-  ModuleTaskSchedule,
   ModulePanelProps,
   PanelContribution,
   PanelHostPort,

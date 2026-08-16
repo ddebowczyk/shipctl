@@ -1,0 +1,314 @@
+---
+$schema: ../schema/phase.v1.schema.yaml
+schema_version: phase/v1
+id: phase-f
+title: Live candidate reconciliation
+status: specified
+source: docs/4-layer-architecture/11-phase-f-live-reconciliation.md
+depends_on: [phase-a, phase-b, phase-c, phase-e]
+semantics:
+  - id: SEM-F-001
+    kind: MUST
+    rule: >-
+      Desired revisions are processed in order and applied revision never
+      decreases.
+  - id: SEM-F-002
+    kind: MUST
+    rule: >-
+      A candidate graph stays private until artifacts, dependencies, grants,
+      registrations, and readiness checks pass.
+  - id: SEM-F-003
+    kind: MUST
+    rule: >-
+      Service routes and every contribution catalog publish atomically.
+  - id: SEM-F-004
+    kind: MUST
+    rule: >-
+      Candidate failure preserves the last good graph and records a stable
+      diagnostic linked to the failed desired revision.
+  - id: SEM-F-005
+    kind: MUST
+    rule: >-
+      Repeating an applied desired snapshot creates no activation or effect.
+  - id: SEM-F-006
+    kind: MUST
+    rule: >-
+      Replacement routes new work to a digest-qualified candidate before it
+      disposes the predecessor.
+  - id: SEM-F-007
+    kind: MUST-NOT
+    rule: >-
+      A successful live transition must not reload the webview or destroy a
+      host-owned resource.
+  - id: SEM-F-008
+    kind: MUST
+    rule: >-
+      Inspection links activations, contributions, services, grants,
+      diagnostics, and leases by stable owner identity.
+  - id: SEM-F-009
+    kind: MUST
+    rule: >-
+      Provider replacement validates consumers, routes atomically, and disposes
+      the predecessor only after it is no longer public.
+properties:
+  - id: PROP-F-RECONCILE-001
+    claim: >-
+      After every settled generated desired-state transition, the applied
+      snapshot equals the model's last valid graph.
+    shapes: [state-machine]
+    evidence: [SEM-F-001, SEM-F-002, SEM-F-004, SEM-F-005, SEM-F-006]
+    domain:
+      generates: >-
+        Add, enable, replace, disable, remove, repeated and stale revisions,
+        dependency changes, and failure at each preparation stage.
+      excludes: [process crash]
+      strategy: >-
+        Generate desired commands from current model and candidate state.
+      classifications: [applied, rejected, repeated, stale, replaced, removed]
+    preconditions:
+      - Desired snapshots pass native structure except explicit invalid cases.
+    oracle:
+      primary:
+        kind: model
+        description: A pure graph model accepts only complete valid candidates.
+        independence: It imports neither Cordis nor the production planner.
+      alternative:
+        kind: metamorphic
+        description: >-
+          Coalesce or permute irrelevant notifications and compare final state.
+        independence: History transformations do not use planner decisions.
+    failure_value: A failed replacement removes the active predecessor.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.live-reconcile.property
+      shrink: required
+      replay: required
+    tiers: [pr, nightly]
+    status: proposed
+    deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
+  - id: PROP-F-ATOMIC-001
+    claim: >-
+      Every observer sees either the complete old service and catalog family or
+      the complete new family and never a mixture.
+    shapes: [safety]
+    evidence: [SEM-F-002, SEM-F-003]
+    domain:
+      generates: >-
+        Service, command, menu, navigation, view, settings, and message sets
+        with reads around publication yield points.
+      excludes: [browser rendering after snapshot delivery]
+      strategy: Generate two complete families and observer schedules.
+      classifications: [old, new, mixed, before-barrier, after-barrier]
+    preconditions:
+      - Both candidate families are internally valid.
+    oracle:
+      primary:
+        kind: invariant
+        description: Each observed digest equals the retained old or new digest.
+        independence: Digests are computed before publication begins.
+      alternative:
+        kind: reference
+        description: >-
+          Observe service and contribution boundaries around one shared barrier.
+        independence: Boundary observers do not use snapshot-family digest code.
+    failure_value: A menu becomes visible before its handler is routed.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.catalog-atomicity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
+  - id: PROP-F-REVISION-001
+    claim: >-
+      Applied revision is monotonic and converges to the highest successful
+      observed desired revision for every notification order.
+    shapes: [monotonicity]
+    evidence: [SEM-F-001, SEM-F-005]
+    domain:
+      generates: >-
+        Duplicate, delayed, skipped, and reordered notifications with rereads.
+      excludes: [permanent registry loss]
+      strategy: Generate revision logs and notification delivery permutations.
+      classifications: [ordered, duplicate, delayed, skipped, reordered]
+    preconditions:
+      - Values are valid native registry revisions.
+    oracle:
+      primary:
+        kind: model
+        description: An independent model retains maximum successful revision.
+        independence: It does not use runtime notification handling.
+      alternative:
+        kind: invariant
+        description: >-
+          The public JSON watch trace has monotonic accepted and applied values.
+        independence: The trace is observed through the control-plane boundary.
+    failure_value: A delayed event rolls the browser back to an older graph.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.runtime-revision.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
+  - id: PROP-F-CONTINUITY-001
+    claim: >-
+      Presentation replacement changes only activation leases and preserves
+      host-owned terminal identities and processes.
+    shapes: [conservation]
+    evidence: [SEM-F-006, SEM-F-007]
+    domain:
+      generates: >-
+        Raw and semantic sessions, attachments, replacement failure and success,
+        disable, and removal.
+      excludes: [explicit terminal stop, external process exit]
+      strategy: Generate host resources before plugin transition histories.
+      classifications: [raw, semantic, failed, replaced, disabled, removed]
+    preconditions:
+      - The terminal host remains healthy.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          Compare an independent host-resource ledger across commands.
+        independence: The ledger is outside plugin and reconciler state.
+      alternative:
+        kind: invariant
+        description: >-
+          Native PTY and durable-resource canaries retain identity and output.
+        independence: Native observations occur below presentation activation.
+    failure_value: Replacement kills or re-identifies a running CLI session.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.terminal-plugin-continuity.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: proposed
+    deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
+  - id: PROP-F-INSPECTION-001
+    claim: >-
+      Each live or failed activation has one inspection record with complete
+      links to artifact, revision, grants, effects, diagnostics, and leases.
+    shapes: [conservation]
+    evidence: [SEM-F-008]
+    domain:
+      generates: >-
+        Successful, failed, replaced, draining, and disposed activations.
+      excludes: [redacted private payload values]
+      strategy: Generate runtime entities and references before snapshot output.
+      classifications: [active, failed, replaced, draining, disposed]
+    preconditions:
+      - Inspection represents a settled transition.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A command model checks referential completeness of emitted records.
+        independence: >-
+          The model retains expected entities before inspection runs.
+      alternative:
+        kind: reference
+        description: >-
+          Follow only public links from contribution to every owning record.
+        independence: Link traversal does not use the command model.
+    failure_value: An agent cannot relate a failed service to its activation.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.runtime-inspection.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
+  - id: PROP-F-SERVICE-001
+    claim: >-
+      Every settled call reaches exactly the accepted provider or returns the
+      specified unavailable result, never a provisional or disposed provider.
+    shapes: [state-machine, safety]
+    evidence: [SEM-F-002, SEM-F-003, SEM-F-006, SEM-F-009]
+    domain:
+      generates: >-
+        Compatible and incompatible versions, consumers, readiness failure,
+        calls around publication, replacement, and provider disposal.
+      excludes: [in-flight drain policy not yet stated by its service]
+      strategy: Generate provider graphs, publication commands, and call timing.
+      classifications: [accepted, unavailable, provisional, disposed, replaced]
+    preconditions:
+      - Calls have stable service and consumer activation IDs.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          An independent ledger records accepted provider at each publication.
+        independence: The ledger does not use service-proxy routing state.
+      alternative:
+        kind: invariant
+        description: >-
+          Providers expose distinct immutable canary identities to consumers.
+        independence: Consumer observations do not inspect the routing ledger.
+    failure_value: >-
+      A consumer calls a disposed predecessor or a provisional candidate.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.service-routing.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
+  - id: PROP-F-RESTART-001
+    claim: >-
+      Restart reconstruction converges to the same accepted graph and inspection
+      identities as reconciliation from the same durable desired snapshot.
+    shapes: [differential]
+    evidence: [SEM-F-001, SEM-F-004, SEM-F-008]
+    domain:
+      generates: >-
+        Durable registries with accepted, disabled, rejected, replaced, and
+        dependency-ordered artifacts plus prior failure diagnostics.
+      excludes: [artifact bytes lost outside the registry contract]
+      strategy: Generate one durable desired snapshot and two fresh supervisors.
+      classifications: [empty, accepted, rejected, replaced, dependent]
+    preconditions:
+      - Native artifact admission and registry data remain available.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare normalized cold-start and live-reconcile runtime snapshots.
+        independence: The two paths share durable input but not runtime state.
+      alternative:
+        kind: model
+        description: >-
+          Build the expected graph directly from admitted desired records.
+        independence: The model invokes neither startup nor reconcile planner.
+    failure_value: >-
+      Restart activates a disabled plugin or forgets the last-good provider.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.runtime-restart.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: proposed
+    deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
+deliverables:
+  - Desired-state observation and pure reconciliation planning.
+  - Private candidate graphs, readiness, and atomic publication.
+  - Last-good recovery, provider routing, disposal, and structured inspection.
+deletion_gates:
+  - id: DELETE-F-RESTART-LIFECYCLE
+    condition: >-
+      Live, failure, restart, continuity, and inspection properties pass.
+    removes:
+      - Restart-only activation and its secondary lifecycle authority.

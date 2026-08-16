@@ -1,0 +1,49 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: processes
+version: 1.0.0
+title: Scoped process inspection and control
+status: implementing
+layer: native-kernel
+consumers: [ports, assistants]
+current_implementations:
+  - module-api/frontend/src/protocol/processes.ts
+  - core/frontend/platform/processes.ts
+  - modules/ports/frontend
+  - modules/ports/backend
+  - modules/assistants/backend
+target_owners:
+  provider: core/backend/src/processes
+  tauri_adapter: core/tauri/src/processes.rs
+  typescript_client: core/frontend/platform/processes
+operations:
+  - id: inspectListeningPorts
+    kind: request
+    contract: >-
+      Return scoped listeners with an identity that detects PID reuse.
+  - id: terminateInspectedProcess
+    kind: request
+    contract: >-
+      Terminate only the process proven by a current authorized inspection.
+  - id: inspectCommand
+    kind: request
+    contract: Report command availability without running the command.
+required_grants:
+  - process.inspect
+  - process.terminate
+ownership:
+  authority: The native kernel owns OS process access and scope enforcement.
+  resources: An inspection identity is immutable and expires by provider policy.
+  activation_scope: Every request carries activation, grant, and project scope.
+depends_on: []
+property_ids:
+  - PROP-B-ADAPTER-001
+  - PROP-B-REQUEST-001
+  - PROP-D-PARITY-001
+  - PROP-D-AUTHORITY-001
+open_questions:
+  - >-
+    Measure and select the stable macOS process identity fields for Phase D.
+    The Phase B adapter expires opaque identities after a successful rescan but
+    cannot yet prove that the OS did not reuse a PID before termination.

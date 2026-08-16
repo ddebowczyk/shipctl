@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import type { ModuleHostServices } from "@shipctl/module-api";
+import type {
+  ModuleActivationContext,
+  ModuleHostServices,
+  ModuleId,
+} from "@shipctl/module-api";
 import type { RepoInfo, RepoGroup, WorkspaceConfig } from "@shipctl/core/platform";
 import {
   listRepos,
@@ -45,6 +49,7 @@ interface RepoStore {
   addRepo: (
     repoPath: string,
     moduleServices: ModuleHostServices,
+    moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>,
   ) => Promise<WorkspaceConfig>;
   removeRepo: (repoPath: string) => Promise<void>;
   setActiveConfig: (config: WorkspaceConfig | null) => void;
@@ -86,7 +91,11 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     return config;
   },
 
-  addRepo: async (repoPath: string, moduleServices: ModuleHostServices) => {
+  addRepo: async (
+    repoPath: string,
+    moduleServices: ModuleHostServices,
+    moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>,
+  ) => {
     const knownPaths = new Set(get().repos.map((repo) => repo.path));
     const queuedPaths = new Set<string>();
     const queue: QueueEntry[] = [{ path: repoPath, mode: "expand-main", isPrimary: true }];
@@ -121,6 +130,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
           expandRelated: next.mode === "expand-main",
         },
         moduleServices,
+        moduleActivations,
       );
 
       for (const relatedPath of uniquePaths([...relatedPaths])) {

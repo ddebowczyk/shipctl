@@ -1,19 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectActionSurfaceProps } from "@shipctl/module-api";
 
 import { getErrorMessage } from "./errors";
-import { gitCreateWorktree } from "./client";
+import { gitClientFor } from "./gitClient";
 
 export default function CreateWorktreeProjectActionSurface({
   project,
   position,
   close,
   host,
+  activation,
   services,
 }: ProjectActionSurfaceProps) {
   const [branchName, setBranchName] = useState("");
   const [creating, setCreating] = useState(false);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const client = useMemo(() => gitClientFor(activation), [activation]);
 
   useEffect(() => {
     const handlePointer = (event: MouseEvent) => {
@@ -46,10 +48,10 @@ export default function CreateWorktreeProjectActionSurface({
     if (!requestedBranch || creating) return;
     setCreating(true);
     try {
-      const created = await gitCreateWorktree(project.path, requestedBranch);
-      await host.addProject(created.path);
+      const created = await client.createWorktree(project.path, requestedBranch);
+      await host.addProject(created.projectId);
       if (project.groupId) {
-        await host.moveProjectToGroup(created.path, project.groupId);
+        await host.moveProjectToGroup(created.projectId, project.groupId);
       }
       close();
     } catch (error) {

@@ -31,15 +31,6 @@ fn pi_auth_path() -> Result<PathBuf, String> {
 
 pub fn get_pi_config() -> Result<PiConfig, String> {
     let configured_providers = load_configured_providers()?;
-
-    // Copy any pre-rename Keychain entries across the first time we see them.
-    // Best-effort: a provider whose key cannot be copied still lists, it just
-    // keeps resolving through its legacy entry.
-    for provider in &configured_providers {
-        let _ = migrate_legacy_api_key(provider);
-    }
-
-    // Read settings after migration so a rewritten auth entry is reflected.
     let settings = load_pi_settings()?;
     Ok(PiConfig {
         settings,
@@ -128,10 +119,10 @@ pub fn save_pi_settings(settings: PiSettings) -> Result<(), String> {
 
 // Keychain identity for stored provider API keys.
 //
-// Legacy keys are copied to the current account on demand; their originals
-// stay intact for a predecessor installation. Nothing here ever deletes a
-// legacy entry — only `delete_pi_api_key`, acting on an explicit user request,
-// removes anything, and then only the current-name entry.
+// Existing auth references can still report legacy keys as configured. Nothing
+// here copies or deletes a legacy entry. `delete_pi_api_key`, acting on an
+// explicit user request, removes only the current-name entry and the auth
+// reference.
 const KEYCHAIN_ACCOUNT: &str = "shipctl-pi";
 const LEGACY_KEYCHAIN_ACCOUNT: &str = "shep-pi";
 
@@ -185,23 +176,18 @@ fn auth_command(service: &str) -> String {
     format!("!security find-generic-password -a {KEYCHAIN_ACCOUNT} -ws {service}")
 }
 
-/// Copy a provider's pre-rename Keychain entry to the current name, once.
-///
-/// Returns `true` when a legacy key was found and copied. The legacy entry is
-/// left untouched so the old build keeps working.
-pub fn migrate_legacy_api_key(provider: &str) -> Result<bool, String> {
+pub fn has_pi_api_key(provider: &str) -> Result<bool, String> {
     validate_provider_id(provider)?;
-    if keychain_password(KEYCHAIN_ACCOUNT, &service_name(provider)).is_some() {
+    if !load_configured_providers()?
+        .iter()
+        .any(|configured| configured == provider)
+    {
         return Ok(false);
     }
-    let Some(secret) = keychain_password(LEGACY_KEYCHAIN_ACCOUNT, &legacy_service_name(provider))
-    else {
-        return Ok(false);
-    };
-
-    let service = write_keychain(provider, &secret)?;
-    update_auth_entry(provider, &auth_command(&service))?;
-    Ok(true)
+    Ok(
+        keychain_password(KEYCHAIN_ACCOUNT, &service_name(provider)).is_some()
+            || keychain_password(LEGACY_KEYCHAIN_ACCOUNT, &legacy_service_name(provider)).is_some(),
+    )
 }
 
 pub fn save_pi_api_key(provider: &str, api_key: &str) -> Result<(), String> {

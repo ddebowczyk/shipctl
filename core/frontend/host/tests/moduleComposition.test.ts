@@ -2,11 +2,19 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import type { ModuleHostServices, ModuleMessages, ShipctlModule } from "@shipctl/module-api";
+import type {
+  ModuleActivationContext,
+  ModuleHostServices,
+  ShipctlModule,
+} from "@shipctl/module-api";
+import { messagesService } from "@shipctl/module-api";
+import type {
+  FakeSchedulerClock as FakeSchedulerClockType,
+  createFakeSchedulerServiceProvider as CreateFakeSchedulerServiceProvider,
+} from "@shipctl/module-api/testing";
 import { createServer, type ViteDevServer } from "vite";
 
 import type { BuiltinGlobalSurfaceLoaders } from "../builtinGlobalSurfaceAdapters.ts";
-import type { ModuleTaskScheduler } from "../moduleComposition.ts";
 import {
   hydratePanelReference,
   PANEL_REFERENCE_SCHEMA_VERSION,
@@ -14,12 +22,17 @@ import {
 import { matchesPanelShortcut } from "../panelShortcuts.ts";
 
 type ModuleComposition = typeof import("../moduleComposition.ts");
+type StaticPluginRuntime = typeof import("../../runtime/cordis/staticPluginRuntime.ts");
 
 let vite: ViteDevServer;
 let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
 let createEnabledGlobalSurfaceRegistry: ModuleComposition["createEnabledGlobalSurfaceRegistry"];
-let activateModules: ModuleComposition["activateModules"];
-let activateModulesWithMessages: ModuleComposition["activateModulesWithMessages"];
+let activateStaticPluginsObserved: StaticPluginRuntime["activateStaticPluginsObserved"];
+let createMessagesServiceProvider: typeof import("../../platform/messages.ts")["createMessagesServiceProvider"];
+let createFakeSchedulerServiceProvider: typeof CreateFakeSchedulerServiceProvider;
+let FakeSchedulerClock: typeof FakeSchedulerClockType;
+let SemanticServiceRegistry: typeof import("../../runtime/semanticServiceRuntime.ts")["SemanticServiceRegistry"];
+let discoverRelatedProjectPaths: ModuleComposition["discoverRelatedProjectPaths"];
 let moduleProjectNavigationContributions: ModuleComposition["moduleProjectNavigationContributions"];
 let moduleScheduledTasks: ModuleComposition["moduleScheduledTasks"];
 let moduleSidebarContributions: ModuleComposition["moduleSidebarContributions"];
@@ -45,10 +58,9 @@ before(async () => {
     server: { middlewareMode: true },
   });
   ({
-    activateModules,
-    activateModulesWithMessages,
     createEnabledPanelRegistry,
     createEnabledGlobalSurfaceRegistry,
+    discoverRelatedProjectPaths,
     enabledProjectActionContributions,
     enabledProjectFactsProvider,
     enabledProjectLayoutContributions,
@@ -68,6 +80,18 @@ before(async () => {
   } = await vite.ssrLoadModule(
     "/core/frontend/host/moduleComposition.ts",
   ) as ModuleComposition);
+  ({ activateStaticPluginsObserved } = await vite.ssrLoadModule(
+    "/core/frontend/runtime/cordis/staticPluginRuntime.ts",
+  ) as StaticPluginRuntime);
+  ({ createMessagesServiceProvider } = await vite.ssrLoadModule(
+    "/core/frontend/platform/messages.ts",
+  ));
+  ({ SemanticServiceRegistry } = await vite.ssrLoadModule(
+    "/core/frontend/runtime/semanticServiceRuntime.ts",
+  ));
+  ({ createFakeSchedulerServiceProvider, FakeSchedulerClock } = await vite.ssrLoadModule(
+    "/module-api/frontend/src/testing.ts",
+  ));
 });
 
 after(async () => {
@@ -177,14 +201,6 @@ const services = {
   appearance: {
     getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
     subscribe: () => () => undefined,
-  },
-  globalData: {
-    read: async () => undefined,
-    replace: async () => undefined,
-  },
-  projectData: {
-    read: async () => undefined,
-    replace: async () => undefined,
   },
   terminalSessions: {
     list: () => [],
@@ -376,33 +392,24 @@ test("sidebar contributions are ordered, module-owned, and absent when disabled"
   );
 });
 
-test("module scheduling supports startup, delayed, and periodic work with cleanup", async () => {
+test("module schedules use typed targets and activation-owned cleanup", async () => {
   const calls: string[] = [];
-  const timeouts = new Map<number, () => void>();
-  const intervals = new Map<number, () => void>();
-  const clearedTimeouts: number[] = [];
-  const clearedIntervals: number[] = [];
-  let nextHandle = 1;
-  const scheduler: ModuleTaskScheduler = {
-    setTimeout(callback) {
-      const handle = nextHandle++;
-      timeouts.set(handle, callback);
-      return handle;
-    },
-    clearTimeout(handle) {
-      clearedTimeouts.push(handle);
-      timeouts.delete(handle);
-    },
-    setInterval(callback) {
-      const handle = nextHandle++;
-      intervals.set(handle, callback);
-      return handle;
-    },
-    clearInterval(handle) {
-      clearedIntervals.push(handle);
-      intervals.delete(handle);
-    },
-  };
+  const clock = new FakeSchedulerClock(0);
+  clock.setOccurrences("scheduled.first", [1_000, 2_000]);
+  clock.setOccurrences("scheduled.second", [1_000, 2_000]);
+  const registry = new SemanticServiceRegistry([
+    createFakeSchedulerServiceProvider({
+      clock,
+      deliver: (input) => {
+        calls.push(input.scheduleId);
+        return { outcome: "delivered", routeGeneration: 1 };
+      },
+    }),
+  ]);
+  const endpoint = {
+    id: "scheduled.refresh",
+    message: { id: "scheduled.refresh", version: 1 },
+  } as const;
   const scheduledModule: ShipctlModule = {
     id: "shipctl.scheduled",
     version: "0",
@@ -412,45 +419,44 @@ test("module scheduling supports startup, delayed, and periodic work with cleanu
     },
     scheduledTasks: [
       {
-        id: "scheduled.startup",
+        id: "scheduled.first",
         moduleId: "shipctl.scheduled",
-        schedule: { kind: "startup" },
-        run: () => { calls.push("startup"); },
+        schedule: {
+          cron: "* * * * * Etc/UTC",
+          target: { kind: "channel", endpoint },
+          payload: {},
+        },
       },
       {
-        id: "scheduled.delay",
+        id: "scheduled.second",
         moduleId: "shipctl.scheduled",
-        schedule: { kind: "delay", delayMs: 3_000 },
-        run: () => { calls.push("delay"); },
-      },
-      {
-        id: "scheduled.interval",
-        moduleId: "shipctl.scheduled",
-        schedule: { kind: "interval", intervalMs: 60_000 },
-        run: () => { calls.push("interval"); },
+        schedule: {
+          cron: "*/5 * * * * Etc/UTC",
+          target: { kind: "channel", endpoint },
+          payload: {},
+        },
       },
     ],
   };
 
   assert.deepEqual(
     moduleScheduledTasks([scheduledModule]).map(({ id }) => id),
-    ["scheduled.startup", "scheduled.delay", "scheduled.interval"],
+    ["scheduled.first", "scheduled.second"],
   );
-  const deactivate = activateModules(services, [scheduledModule], scheduler);
-  await Promise.resolve();
-  assert.deepEqual(calls, ["activate", "startup"]);
-  assert.equal(timeouts.size, 1);
-  assert.equal(intervals.size, 1);
+  const activation = await activateStaticPluginsObserved(
+    services,
+    [scheduledModule],
+    new Map(),
+    registry,
+  );
+  assert.deepEqual(activation.failures, []);
+  assert.deepEqual(calls, ["activate"]);
+  await clock.advanceTo(1_000);
+  assert.deepEqual(calls, ["activate", "scheduled.first", "scheduled.second"]);
 
-  timeouts.values().next().value?.();
-  intervals.values().next().value?.();
-  await Promise.resolve();
-  assert.deepEqual(calls, ["activate", "startup", "delay", "interval"]);
-
-  await deactivate();
-  assert.deepEqual(calls, ["activate", "startup", "delay", "interval", "deactivate"]);
-  assert.deepEqual(clearedTimeouts, [1]);
-  assert.deepEqual(clearedIntervals, [2]);
+  await activation.deactivate();
+  await clock.advanceTo(2_000);
+  assert.deepEqual(calls, ["activate", "scheduled.first", "scheduled.second", "deactivate"]);
 });
 
 test("disabled and invalid scheduled-task profiles fail safely", () => {
@@ -462,8 +468,14 @@ test("disabled and invalid scheduled-task profiles fail safely", () => {
       scheduledTasks: [{
         id: "invalid.task",
         moduleId: "shipctl.owner",
-        schedule: { kind: "startup" },
-        run: () => undefined,
+        schedule: {
+          cron: "* * * * * Etc/UTC",
+          target: {
+            kind: "channel",
+            endpoint: { id: "invalid.task", message: { id: "invalid.task", version: 1 } },
+          },
+          payload: {},
+        },
       }],
     }]),
     /belongs to shipctl\.owner, not shipctl\.invalid/,
@@ -472,12 +484,27 @@ test("disabled and invalid scheduled-task profiles fail safely", () => {
 
 test("partial scheduler registration is rolled back with module activation", async () => {
   const calls: string[] = [];
-  const cleared: number[] = [];
-  const scheduler: ModuleTaskScheduler = {
-    setTimeout: () => 7,
-    clearTimeout: (handle) => { cleared.push(handle); },
-    setInterval: () => { throw new Error("scheduler unavailable"); },
-    clearInterval: () => undefined,
+  const clock = new FakeSchedulerClock(0);
+  clock.setOccurrences("rollback.first", [1_000]);
+  const registry = new SemanticServiceRegistry([
+    createFakeSchedulerServiceProvider({
+      clock,
+      deliver: () => {
+        calls.push("delivered");
+        return { outcome: "delivered", routeGeneration: 1 };
+      },
+    }),
+  ]);
+  const schedule = {
+    cron: "* * * * * Etc/UTC",
+    target: {
+      kind: "channel" as const,
+      endpoint: {
+        id: "rollback.refresh",
+        message: { id: "rollback.refresh", version: 1 },
+      },
+    },
+    payload: {},
   };
   const module: ShipctlModule = {
     id: "shipctl.rollback",
@@ -485,16 +512,14 @@ test("partial scheduler registration is rolled back with module activation", asy
     activate: () => ({ deactivate: () => { calls.push("deactivate"); } }),
     scheduledTasks: [
       {
-        id: "rollback.delay",
+        id: "rollback.first",
         moduleId: "shipctl.rollback",
-        schedule: { kind: "delay", delayMs: 1 },
-        run: () => undefined,
+        schedule,
       },
       {
-        id: "rollback.interval",
+        id: "rollback.invalid",
         moduleId: "shipctl.rollback",
-        schedule: { kind: "interval", intervalMs: 1 },
-        run: () => undefined,
+        schedule: { ...schedule, cron: "* * * * *" },
       },
     ],
   };
@@ -502,38 +527,132 @@ test("partial scheduler registration is rolled back with module activation", asy
   const originalConsoleError = console.error;
   console.error = () => undefined;
   try {
-    const deactivate = activateModules(services, [module], scheduler);
-    await Promise.resolve();
-    await deactivate();
+    const activation = await activateStaticPluginsObserved(
+      services,
+      [module],
+      new Map(),
+      registry,
+    );
+    assert.deepEqual(activation.failures, [{ moduleId: module.id }]);
+    await activation.deactivate();
   } finally {
     console.error = originalConsoleError;
   }
 
-  assert.deepEqual(cleared, [7]);
+  await clock.advanceTo(1_000);
   assert.deepEqual(calls, ["deactivate"]);
 });
 
-test("module activation receives only its activation-scoped message facade", async () => {
-  const messages = {} as ModuleMessages;
-  let received: ModuleMessages | undefined;
+test("module activation resolves only its activation-scoped message service", async () => {
+  const activationId = "shipctl.messages@0#message-bridge";
+  let received: unknown;
   let receivedServices: ModuleHostServices | undefined;
+  let receivedActivation: ModuleActivationContext | undefined;
+  const deactivated: string[] = [];
   const module: ShipctlModule = {
     id: "shipctl.messages",
     version: "0",
+    messages: {},
     activate: (host) => {
-      received = host.messages;
+      received = host.activation.services.require(messagesService);
       receivedServices = host.services;
+      receivedActivation = host.activation;
     },
   };
-  const deactivate = activateModulesWithMessages(
+  const client = {
+    send: async () => ({}),
+    publish: async () => ({}),
+    request: async () => ({}),
+  };
+  const registry = new SemanticServiceRegistry([
+    createMessagesServiceProvider({
+      clientsByActivation: new Map([[activationId, {
+        moduleId: module.id,
+        activationId,
+        client,
+      }]]),
+      deactivateActivation: (id) => { deactivated.push(id); },
+    }),
+  ]);
+  const activation = await activateStaticPluginsObserved(
     services,
-    new Map([[module.id, messages]]),
     [module],
+    new Map([[module.id, activationId]]),
+    registry,
   );
-  assert.equal(received, messages);
+  assert.deepEqual(activation.failures, []);
+  assert(received);
   assert.notEqual(receivedServices, services);
   assert.equal(receivedServices?.panels, services.panels);
-  await deactivate();
+  assert.deepEqual(receivedActivation?.identity, {
+    moduleId: module.id,
+    activationId,
+  });
+  await activation.deactivate();
+  assert.deepEqual(deactivated, [activationId]);
+});
+
+test("surface composition exposes the exact active module context", async () => {
+  let receivedActivation: ModuleActivationContext | undefined;
+  const module: ShipctlModule = {
+    id: "shipctl.surface-context",
+    version: "0",
+    activate: ({ activation }) => {
+      receivedActivation = activation;
+    },
+  };
+  const observed = await activateStaticPluginsObserved(
+    services,
+    [module],
+  );
+  assert.equal(
+    observed.activationContextsByModule.get(module.id),
+    receivedActivation,
+  );
+  await observed.deactivate();
+  assert.equal(receivedActivation?.disposed, true);
+});
+
+test("related-project discovery receives only its owning module activation", async () => {
+  const exactActivation = { disposed: false } as ModuleActivationContext;
+  let receivedActivation: ModuleActivationContext | undefined;
+  const module: ShipctlModule = {
+    id: "shipctl.related-projects",
+    version: "0",
+    projectImport: {
+      id: "fixture.related-projects",
+      moduleId: "shipctl.related-projects",
+      relatedPaths: async (_projectPath, _options, _services, activation) => {
+        receivedActivation = activation;
+        return ["/fixture-related"];
+      },
+    },
+  };
+
+  assert.deepEqual(
+    await discoverRelatedProjectPaths(
+      "/fixture",
+      { expandRelated: true },
+      services,
+      new Map([[module.id, exactActivation]]),
+      [module],
+    ),
+    ["/fixture-related"],
+  );
+  assert.equal(receivedActivation, exactActivation);
+
+  receivedActivation = undefined;
+  assert.deepEqual(
+    await discoverRelatedProjectPaths(
+      "/fixture",
+      { expandRelated: true },
+      services,
+      new Map(),
+      [module],
+    ),
+    [],
+  );
+  assert.equal(receivedActivation, undefined);
 });
 
 test("project rails are optional, ordered, and absent from disabled composition", () => {
@@ -600,6 +719,7 @@ test("Skills provider selection is optional, singular, and module-owned", () => 
 
 test("project lifecycle dispatch isolates module failures", async () => {
   const calls: Array<readonly string[] | string> = [];
+  const activationIds: string[] = [];
   const modules: ShipctlModule[] = [
     {
       id: "fixture.failing",
@@ -614,8 +734,9 @@ test("project lifecycle dispatch isolates module failures", async () => {
       id: "fixture.working",
       version: "0",
       projectLifecycle: {
-        onProjectOpened: (path) => {
+        onProjectOpened: (path, _services, activation) => {
           calls.push(path);
+          activationIds.push(activation.identity.activationId);
         },
         onFilesystemChanged: (paths) => {
           calls.push([...paths]);
@@ -623,10 +744,28 @@ test("project lifecycle dispatch isolates module failures", async () => {
       },
     },
   ];
+  const observed = await activateStaticPluginsObserved(
+    services,
+    modules,
+  );
 
-  await notifyModulesProjectOpened("/fixture", services, modules);
-  await notifyModulesFilesystemChanged(["/fixture"], services, modules);
+  await notifyModulesProjectOpened(
+    "/fixture",
+    services,
+    observed.activationContextsByModule,
+    modules,
+  );
+  await notifyModulesFilesystemChanged(
+    ["/fixture"],
+    services,
+    observed.activationContextsByModule,
+    modules,
+  );
   assert.deepEqual(calls, ["/fixture", ["/fixture"]]);
+  assert.deepEqual(activationIds, [
+    observed.activationContextsByModule.get("fixture.working")?.identity.activationId,
+  ]);
+  await observed.deactivate();
 });
 
 test("pre-shutdown lifecycle is ordered and stops before native shutdown on failure", async () => {

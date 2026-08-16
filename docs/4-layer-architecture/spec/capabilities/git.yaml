@@ -1,0 +1,51 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: git
+version: 1.0.0
+title: Scoped Git operations and repository observation
+status: implementing
+layer: native-kernel
+consumers: [git]
+current_implementations:
+  - module-api/frontend/src/protocol/git.ts
+  - module-api/frontend/src/testing/git.ts
+  - core/frontend/platform/git.ts
+  - modules/git/frontend/src/gitClient.ts
+  - modules/git/backend
+  - modules/git/host
+target_owners:
+  provider: core/backend/src/git
+  tauri_adapter: core/tauri/src/git.rs
+  typescript_client: core/frontend/platform/git
+operations:
+  - id: inspectRepository
+    kind: request
+    contract: >-
+      Read repository, branch, worktree, status, diff, and file projections.
+  - id: mutateRepository
+    kind: request
+    contract: >-
+      Perform a named init, stage, commit, branch, worktree, or push operation.
+  - id: observeRepository
+    kind: event
+    contract: >-
+      Deliver ordered scoped changes through an activation-owned lease.
+required_grants:
+  - git.read
+  - git.write
+  - git.observe
+ownership:
+  authority: The native kernel owns scoped Git execution and watcher resources.
+  resources: Watchers are activation leases; repository state is external.
+  activation_scope: Repository roots must be inside the granted project scope.
+depends_on: []
+property_ids:
+  - PROP-B-ADAPTER-001
+  - PROP-B-REQUEST-001
+  - PROP-B-ACTIVATION-001
+  - PROP-B-EVENT-001
+  - PROP-B-FAKE-001
+  - PROP-D-PARITY-001
+  - PROP-D-AUTHORITY-001
+  - PROP-D-OWNERSHIP-001

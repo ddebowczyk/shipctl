@@ -1,0 +1,13 @@
+[
+  {
+    "date": "2026-08-16",
+    "mode": "Tech Debt Assessment",
+    "score": 70,
+    "findings": {
+      "critical": 0,
+      "warning": 6,
+      "suggestion": 0
+    },
+    "scope": "Four-layer migration seams across the full Shipctl repository at ac14b3d"
+  }
+]

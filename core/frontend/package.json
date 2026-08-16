@@ -15,6 +15,7 @@
     "./shared": "./shared/index.ts",
     "./settings": "./settings/index.ts",
     "./projects": "./projects/index.ts",
+    "./runtime": "./runtime/index.ts",
     "./terminal-host/views": "./terminal-host/views.ts",
     "./shared/views": "./shared/views.ts",
     "./projects/views": "./projects/views.ts",
@@ -26,8 +27,11 @@
     "./shell": "./shell/index.ts"
   },
   "dependencies": {
+    "@shipctl/cordis-source": "github:cordiverse/cordis#8cc9e33fab69e2d0476d126baaf2acb24e6a6ab4",
     "@shipctl/module-api": "workspace:*",
+    "@standard-schema/spec": "^1.1.0",
     "@tauri-apps/api": "^2.11.1",
+    "cosmokit": "^1.8.1",
     "react-layman": "github:ddebowczyk/react-layman#8d0c41a0a52830f3072771af674d63d80215384e"
   },
   "peerDependencies": {

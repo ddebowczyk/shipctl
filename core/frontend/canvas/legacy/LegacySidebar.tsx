@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "r
 import type {
   ContributionId,
   GlobalNavigationContribution,
+  ModuleActivationContext,
+  ModuleId,
 } from "@shipctl/module-api";
 import type { RepoInfo, RepoGroup } from "@shipctl/core/platform";
 import { useTerminalStore } from "@shipctl/core/terminal-host";
@@ -46,6 +48,7 @@ export interface LegacySidebarProps {
   readonly globalNavigation: readonly GlobalNavigationContribution[];
   readonly sidebarContributions: readonly CanvasSidebarSurface[];
   readonly projectNavigationContributions: readonly CanvasProjectNavigationSurface[];
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
 export default function LegacySidebar({
@@ -72,6 +75,7 @@ export default function LegacySidebar({
   globalNavigation,
   sidebarContributions,
   projectNavigationContributions,
+  moduleActivations,
 }: LegacySidebarProps) {
   // Projects always starts expanded on launch; collapsing is per-session only.
   const [projectsCollapsed, setProjectsCollapsed] = useState(false);
@@ -228,6 +232,7 @@ export default function LegacySidebar({
               onMoveToGroup={onMoveToGroup}
               tabDropProjectPath={tabDropProjectPath}
               projectNavigationContributions={projectNavigationContributions}
+              moduleActivations={moduleActivations}
             />
           )}
         </div>

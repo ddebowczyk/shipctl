@@ -1,0 +1,77 @@
+---
+$schema: schema/program.v1.schema.yaml
+schema_version: architecture-program/v1
+id: shipctl-four-layer-migration
+title: Shipctl four-layer architecture migration
+status: approved
+epic: shep-vut
+source_documents:
+  - docs/4-layer-architecture/README.md
+  - docs/4-layer-architecture/02-target-boundaries-and-collaboration.md
+  - docs/4-layer-architecture/05-specification-and-property-method.md
+  - docs/4-layer-architecture/06-phase-a-contract-and-enforcement-foundation.md
+  - docs/4-layer-architecture/07-phase-b-semantic-service-wall.md
+  - docs/4-layer-architecture/08-phase-c-cordis-static-composition.md
+  - docs/4-layer-architecture/09-phase-d-native-provider-extraction.md
+  - docs/4-layer-architecture/10-phase-e-immutable-plugin-artifacts.md
+  - docs/4-layer-architecture/11-phase-f-live-reconciliation.md
+  - docs/4-layer-architecture/12-phase-g-workspace-contributions-and-closure.md
+  - docs/4-layer-architecture/13-verification-cutover-and-rollback.md
+  - docs/4-layer-architecture/14-module-disposition-matrix.md
+  - docs/4-layer-architecture/15-artifacts-repository-layout-and-agent-ops.md
+  - docs/4-layer-architecture/16-execution-graph-and-task-contracts.md
+  - docs/4-layer-architecture/18-property-oracle-review.md
+  - docs/4-layer-architecture/19-requirement-traceability.md
+  - docs/4-layer-architecture/20-cordis-application-runtime-and-plugin-roles.md
+target_layers:
+  - id: native-kernel
+    authority: Own OS access, durable resources, grants, and audit boundaries.
+  - id: tauri-adapters
+    authority: Translate typed service contracts to Tauri transport only.
+  - id: application-runtime
+    authority: Own Cordis activation, services, effects, and contributions.
+  - id: application-plugins
+    authority: Own product policy, background work, commands, and optional UI.
+records:
+  phases:
+    - phases/phase-a.yaml
+    - phases/phase-b.yaml
+    - phases/phase-c.yaml
+    - phases/phase-d.yaml
+    - phases/phase-e.yaml
+    - phases/phase-f.yaml
+    - phases/phase-g.yaml
+    - phases/phase-h.yaml
+  capabilities:
+    - capabilities/assistant-launch.yaml
+    - capabilities/credential-store.yaml
+    - capabilities/git.yaml
+    - capabilities/messages.yaml
+    - capabilities/plugin-data.yaml
+    - capabilities/processes.yaml
+    - capabilities/project-documents.yaml
+    - capabilities/scheduler.yaml
+    - capabilities/semantic-terminals.yaml
+    - capabilities/skill-installation.yaml
+    - capabilities/terminal-sessions.yaml
+    - capabilities/usage-sources.yaml
+    - capabilities/workspace.yaml
+  modules:
+    - migrations/assistants.yaml
+    - migrations/commands.yaml
+    - migrations/git.yaml
+    - migrations/ports.yaml
+    - migrations/semantic-terminal.yaml
+    - migrations/skills.yaml
+    - migrations/thin-terminal.yaml
+    - migrations/todos.yaml
+    - migrations/usage.yaml
+evidence_schema: schema/property-evidence.v1.schema.yaml
+invariants:
+  - Product plugins do not import Tauri or Rust implementation details.
+  - Native authority is available only through explicit typed capabilities.
+  - All plugin effects and contributions belong to an activation lease.
+  - Headless and presentation plugins use the same activation contract.
+  - Built-in and external artifacts pass through one loader and validator.
+  - Every mandatory semantic claim has independent executable evidence.
+  - Deletion occurs only after its named property proofs pass.

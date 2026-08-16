@@ -1,0 +1,49 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: scheduler
+version: 1.0.0
+title: Activation-owned schedule delivery
+status: implementing
+layer: application-runtime
+consumers: [usage]
+current_implementations:
+  - core/backend/src/scheduler
+  - module-api/frontend/src/protocol/schedules.ts
+  - module-api/frontend/src/testing/scheduler.ts
+  - core/frontend/platform/scheduler.ts
+  - core/frontend/host/moduleComposition.ts
+target_owners:
+  provider: core/backend/src/scheduler
+  tauri_adapter: core/tauri/src/scheduler.rs
+  typescript_client: core/frontend/platform/scheduler
+operations:
+  - id: registerSchedule
+    kind: request
+    contract: Register a typed target under one activation-owned lease.
+  - id: inspectSchedules
+    kind: request
+    contract: >-
+      Return redacted lease identity and definition digests for the calling
+      activation.
+  - id: observeDelivery
+    kind: event
+    contract: >-
+      Report ordered delivery results without embedding feature payloads.
+required_grants:
+  - schedule.register
+ownership:
+  authority: The host owns clocks, persistence, delivery, and target admission.
+  resources: >-
+    Schedule registrations and delivery observers are activation-owned leases.
+  activation_scope: >-
+    The schedule grant and typed target route are checked at registration;
+    activation retirement releases native sources, jobs, and observers.
+depends_on: [messages]
+property_ids:
+  - PROP-B-ADAPTER-001
+  - PROP-B-REQUEST-001
+  - PROP-B-EVENT-001
+  - PROP-B-ACTIVATION-001
+  - PROP-B-FAKE-001
+  - PROP-D-OWNERSHIP-001

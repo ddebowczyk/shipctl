@@ -138,6 +138,14 @@ pub struct ScheduleDeliverySummary {
     pub diagnostic: Option<ScheduleDiagnostic>,
 }
 
+/// One committed delivery result. It contains no feature payload.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScheduleDeliveryObservation {
+    pub schedule_id: String,
+    pub delivery: ScheduleDeliverySummary,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScheduleDefinitionInspection {

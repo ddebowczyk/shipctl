@@ -36,20 +36,6 @@ export interface ModuleExternalLinksPort {
   open(url: string): Promise<void>;
 }
 
-export interface ModuleProjectDataPort {
-  read(projectPath: string, capabilityId: string): Promise<unknown>;
-  replace(
-    projectPath: string,
-    capabilityId: string,
-    value: unknown,
-  ): Promise<void>;
-}
-
-export interface ModuleGlobalDataPort {
-  read(capabilityId: string): Promise<unknown>;
-  replace(capabilityId: string, value: unknown): Promise<void>;
-}
-
 /**
  * Browser support supplied by the terminal host, without a renderer or
  * terminal-state type. A presentation owns its DOM and protocol; the host
@@ -102,8 +88,6 @@ export interface ModuleAppearancePort {
 export interface ModuleHostServices {
   readonly panels: PanelHostPort;
   readonly appearance: ModuleAppearancePort;
-  readonly globalData: ModuleGlobalDataPort;
-  readonly projectData: ModuleProjectDataPort;
   readonly terminalSessions: ModuleTerminalSessionsPort;
   readonly terminalPresentation?: ModuleTerminalPresentationPort;
   readonly settings: ModuleSettingsPort;

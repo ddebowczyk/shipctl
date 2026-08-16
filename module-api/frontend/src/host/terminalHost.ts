@@ -6,6 +6,7 @@ import type {
   TerminalHostLifecycleEvent,
 } from "../protocol/terminalHost";
 import type { ModuleHostServices } from "./services";
+import type { ModuleActivationContext } from "../protocol/semanticServices";
 
 /**
  * The only common frontend authority for terminal implementations. It exposes
@@ -19,9 +20,18 @@ export interface TerminalHostPort {
    * The provider states its id on attachment. The host must reject a provider
    * that does not match the terminal's immutable selected driver.
    */
-  attachRaw(terminalId: string, driverId: TerminalDriverId): Promise<RawTerminalAttachment>;
+  attachRaw(
+    terminalId: string,
+    driverId: TerminalDriverId,
+    claimsResize: boolean,
+  ): Promise<RawTerminalAttachment>;
   write(terminalId: string, bytes: Uint8Array): Promise<void>;
-  resize(terminalId: string, columns: number, rows: number): Promise<void>;
+  resize(
+    terminalId: string,
+    attachmentId: string,
+    columns: number,
+    rows: number,
+  ): Promise<void>;
   close(terminalId: string): Promise<void>;
 }
 
@@ -29,7 +39,8 @@ export interface TerminalPresentationProps {
   readonly terminalId: string;
   readonly descriptor: TerminalHostDescriptor;
   readonly visible: boolean;
-  readonly host: TerminalHostPort;
+  /** Activation-scoped semantic services. Native transports stay private. */
+  readonly activation: ModuleActivationContext;
   /** Host browser services available to the selected presentation only. */
   readonly services: Pick<
     ModuleHostServices,

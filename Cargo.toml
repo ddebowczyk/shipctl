@@ -8,6 +8,7 @@ members = [
     "modules/*/backend",
     "modules/*/core",
     "modules/*/host",
+    "ops/architecture/fixtures/proptest-replay",
     "examples/module-fixture/backend",
     "examples/rapid-terminal-probe",
 ]

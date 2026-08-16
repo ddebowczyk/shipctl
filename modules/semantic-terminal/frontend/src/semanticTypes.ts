@@ -111,9 +111,13 @@ export type SemanticTerminalWireEvent =
       readonly effects: readonly TerminalEffect[];
     }
   | {
-      readonly event: "metadata_changed" | "agent_activity_changed" | "exited";
+      readonly event: "metadata_changed" | "agent_activity_changed";
       readonly sequence: number;
       readonly descriptor: TerminalHostDescriptor;
+    }
+  | {
+      readonly event: "exited";
+      readonly sequence: number;
     }
   | {
       readonly event: "resync_required" | "detached";

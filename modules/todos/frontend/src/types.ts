@@ -1,3 +1,5 @@
+import type { ProjectDocumentRevision } from "@shipctl/module-api";
+
 export interface TodoItem {
   readonly line: number;
   readonly text: string;
@@ -14,8 +16,10 @@ export interface TodoSection {
 }
 
 export interface TodoFile {
-  readonly path: string;
+  readonly projectId: string;
   readonly relativePath: string;
+  readonly revision: ProjectDocumentRevision;
+  readonly contents: string;
   readonly sections: readonly TodoSection[];
   readonly items: readonly TodoItem[];
 }

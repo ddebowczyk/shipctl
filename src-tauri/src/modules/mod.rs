@@ -5,12 +5,12 @@
 
 use std::sync::Arc;
 
-pub mod capability_data;
 pub mod inventory;
 
 use tauri::{AppHandle, Builder, Runtime};
 
 use shipctl_core::menu::{NativeMenuContribution, NativeMenuSlot};
+use shipctl_core::plugin_data::PluginDataService;
 use shipctl_core::state::paths::ShipctlPaths;
 use shipctl_core::terminal_host::TerminalService;
 use shipctl_core::workspace::manager::WorkspaceManager;
@@ -21,6 +21,7 @@ pub fn install<R: Runtime>(
     builder: Builder<R>,
     terminals: TerminalService,
     workspace: WorkspaceManager,
+    plugin_data: PluginDataService,
     paths: ShipctlPaths,
     durable_writes: DurableWriteBarrier,
     message_bridges: MessageBusBridgeService,
@@ -29,7 +30,7 @@ pub fn install<R: Runtime>(
     let builder = builder.plugin(shipctl_module_fixture::init());
 
     #[cfg(feature = "todos-module")]
-    let builder = builder.plugin(shipctl_module_todos::init());
+    let builder = shipctl_module_todos_host::install(builder, workspace.clone());
 
     #[cfg(feature = "semantic-terminal-module")]
     let builder = shipctl_module_semantic_terminal_host::install(builder, terminals.clone());
@@ -54,13 +55,20 @@ pub fn install<R: Runtime>(
     #[cfg(feature = "usage-module")]
     let builder = shipctl_module_usage_host::install(
         builder,
-        workspace.clone(),
+        plugin_data.clone(),
         message_bridges.clone(),
         paths.usage_database.clone(),
         durable_writes.clone(),
     );
 
-    let _ = (terminals, workspace, paths, durable_writes, message_bridges);
+    let _ = (
+        terminals,
+        workspace,
+        plugin_data,
+        paths,
+        durable_writes,
+        message_bridges,
+    );
 
     builder
 }

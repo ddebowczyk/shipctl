@@ -9,8 +9,7 @@
     "./presentation/*": "./src/presentation/*.ts"
   },
   "dependencies": {
-    "@shipctl/module-api": "workspace:*",
-    "@tauri-apps/api": "^2.11.1"
+    "@shipctl/module-api": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.2.4"

@@ -2,192 +2,162 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createServer, type Plugin, type ViteDevServer } from "vite";
-
-import type { TodoFile } from "../src/types.ts";
+import type { ProjectDocumentsService } from "@shipctl/module-api";
+import type {
+  FakeProjectDocumentSeed,
+  FakeProjectDocumentsProviderOptions,
+  FakeProjectDocumentsTrace,
+} from "@shipctl/module-api/testing";
+import { createServer, type ViteDevServer } from "vite";
 
 type TodoStoreModule = typeof import("../src/store.ts");
 
-interface NativeMock {
-  readTodos: (repoPath: string) => Promise<TodoFile[]>;
-  toggleTodo: (
-    filePath: string,
-    line: number,
-    expectedText: string,
-    checked: boolean,
-  ) => Promise<void>;
-  addTodo: (
-    repoPath: string,
-    filePath: string | null,
-    text: string,
-    sectionLine: number | null,
-    kanban: boolean,
-  ) => Promise<void>;
-  moveTodo: (
-    filePath: string,
-    line: number,
-    expectedText: string,
-    targetSectionLine: number,
-    setChecked: boolean | null,
-  ) => Promise<void>;
-}
-
-const virtualNativeId = "\0todos-native-characterization";
-const nativeGlobal = globalThis as typeof globalThis & { __shipctlTodoNativeMock: NativeMock };
-
-const nativePlugin: Plugin = {
-  name: "todos-native-characterization",
-  enforce: "pre",
-  resolveId(source, importer) {
-    if (source === "./client" && importer?.endsWith("/modules/todos/frontend/src/store.ts")) {
-      return virtualNativeId;
-    }
-    return null;
-  },
-  load(id) {
-    if (id !== virtualNativeId) return null;
-    return `
-      const native = () => globalThis.__shipctlTodoNativeMock;
-      export const readTodos = (...args) => native().readTodos(...args);
-      export const toggleTodo = (...args) => native().toggleTodo(...args);
-      export const addTodo = (...args) => native().addTodo(...args);
-      export const moveTodo = (...args) => native().moveTodo(...args);
-    `;
-  },
-};
-
 let vite: ViteDevServer;
 let useTodoStore: TodoStoreModule["useTodoStore"];
-let calls: Array<{ operation: string; args: unknown[] }>;
-let readImplementations: Map<string, () => Promise<TodoFile[]>>;
-let toggleError: Error | null;
+let createFakeProjectDocumentsServiceProvider: typeof import("@shipctl/module-api/testing")["createFakeProjectDocumentsServiceProvider"];
+let createTestActivationIdentity: typeof import("@shipctl/module-api/testing")["createTestActivationIdentity"];
+let SemanticServiceTestHost: typeof import("@shipctl/module-api/testing")["SemanticServiceTestHost"];
+let projectDocumentsService: typeof import("@shipctl/module-api")["projectDocumentsService"];
 
-function todoFile(repoPath: string, text: string): TodoFile {
-  return {
-    path: `${repoPath}/TODO.md`,
-    relativePath: "TODO.md",
-    sections: [],
-    items: [{
-      line: 0,
-      text,
-      checked: false,
-      indent: 0,
-      section: null,
-      sectionLine: null,
-    }],
-  };
+function fakeDocuments(
+  documents: readonly FakeProjectDocumentSeed[] = [],
+  options: Omit<FakeProjectDocumentsProviderOptions, "documents"> = {},
+): ProjectDocumentsService {
+  const host = new SemanticServiceTestHost([
+    createFakeProjectDocumentsServiceProvider({ ...options, documents }),
+  ]);
+  return host.activate(
+    createTestActivationIdentity("shipctl.todos"),
+  ).context.services.require(projectDocumentsService);
 }
 
 before(async () => {
   vite = await createServer({
     configFile: false,
     optimizeDeps: { noDiscovery: true },
-    plugins: [nativePlugin],
     root: fileURLToPath(new URL("../../../..", import.meta.url)),
     server: { hmr: false, middlewareMode: true },
   });
   ({ useTodoStore } = await vite.ssrLoadModule(
     "/modules/todos/frontend/src/store.ts",
   ) as TodoStoreModule);
+  ({ projectDocumentsService } = await vite.ssrLoadModule(
+    "/module-api/frontend/src/index.ts",
+  ));
+  ({
+    createFakeProjectDocumentsServiceProvider,
+    createTestActivationIdentity,
+    SemanticServiceTestHost,
+  } = await vite.ssrLoadModule("/module-api/frontend/src/testing.ts"));
 });
 
 after(async () => {
   await vite.close();
-  delete (globalThis as Partial<typeof nativeGlobal>).__shipctlTodoNativeMock;
 });
 
 beforeEach(() => {
-  calls = [];
-  readImplementations = new Map();
-  toggleError = null;
-  nativeGlobal.__shipctlTodoNativeMock = {
-    async readTodos(repoPath) {
-      calls.push({ operation: "readTodos", args: [repoPath] });
-      return (readImplementations.get(repoPath) ?? (async () => []))();
-    },
-    async toggleTodo(...args) {
-      calls.push({ operation: "toggleTodo", args });
-      if (toggleError) throw toggleError;
-    },
-    async addTodo(...args) {
-      calls.push({ operation: "addTodo", args });
-    },
-    async moveTodo(...args) {
-      calls.push({ operation: "moveTodo", args });
-    },
-  };
   useTodoStore.setState({ projectTodos: {} });
 });
 
-test("refreshAll merges fulfilled projects and leaves failed caches untouched", async () => {
-  const oldA = todoFile("/a", "old a");
-  const oldB = todoFile("/b", "old b");
-  const nextA = todoFile("/a", "next a");
-  useTodoStore.setState({ projectTodos: { "/a": [oldA], "/b": [oldB] } });
-  readImplementations.set("/a", async () => [nextA]);
-  readImplementations.set("/b", async () => {
-    throw new Error("missing repo");
-  });
+test("refresh discovers project-relative documents and keeps failed caches", async () => {
+  const documents = fakeDocuments([
+    { projectId: "/a", relativePath: "TODO.md", contents: "- [ ] alpha\n" },
+  ]);
+  await useTodoStore.getState().refreshAll(documents, ["/a", "/b"]);
+  assert.equal(useTodoStore.getState().projectTodos["/a"][0].relativePath, "TODO.md");
+  assert.equal(useTodoStore.getState().projectTodos["/a"][0].items[0].text, "alpha");
 
-  await useTodoStore.getState().refreshAll(["/a", "/b"]);
-
-  assert.deepEqual(useTodoStore.getState().projectTodos, {
-    "/a": [nextA],
-    "/b": [oldB],
-  });
+  const previous = useTodoStore.getState().projectTodos;
+  const denied = fakeDocuments([], { deniedOperations: ["discover"] });
+  await useTodoStore.getState().refreshAll(denied, ["/a"]);
+  assert.equal(useTodoStore.getState().projectTodos, previous);
 });
 
-test("toggle forwards optimistic-concurrency fields and refreshes after failure", async () => {
-  const refreshed = todoFile("/repo", "changed on disk");
-  readImplementations.set("/repo", async () => [refreshed]);
-  toggleError = new Error("stale item");
+test("toggle compares the rendered revision and refreshes the cache", async () => {
+  const trace: FakeProjectDocumentsTrace[] = [];
+  const documents = fakeDocuments([
+    { projectId: "/repo", relativePath: "TODO.md", contents: "- [ ] task\n" },
+  ], { trace });
+  await useTodoStore.getState().refreshTodos(documents, "/repo");
+  const file = useTodoStore.getState().projectTodos["/repo"][0];
+  await useTodoStore.getState().toggleItem(documents, file, 0, "task", true);
+
+  const write = trace.find((entry) => entry.operation === "write");
+  assert.deepEqual(write?.request.input, {
+    projectId: "/repo",
+    relativePath: "TODO.md",
+    expectedRevision: file.revision,
+    contents: "- [x] task\n",
+  });
+  assert.equal(useTodoStore.getState().projectTodos["/repo"][0].items[0].checked, true);
+});
+
+test("a stale revision fails closed and refreshes external contents", async () => {
+  const documents = fakeDocuments([
+    { projectId: "/repo", relativePath: "TODO.md", contents: "- [ ] task\n" },
+  ]);
+  await useTodoStore.getState().refreshTodos(documents, "/repo");
+  const stale = useTodoStore.getState().projectTodos["/repo"][0];
+  const external = await documents.writeDocument.execute({
+    projectId: "/repo",
+    relativePath: "TODO.md",
+    expectedRevision: stale.revision,
+    contents: "- [ ] external\n",
+  });
+  assert.equal(external.result.ok, true);
 
   await assert.rejects(
-    useTodoStore.getState().toggleItem("/repo", "/repo/TODO.md", 7, "old text", true),
-    /stale item/,
+    useTodoStore.getState().toggleItem(documents, stale, 0, "task", true),
+    /revision does not match/,
   );
-
-  assert.deepEqual(calls, [
-    { operation: "toggleTodo", args: ["/repo/TODO.md", 7, "old text", true] },
-    { operation: "readTodos", args: ["/repo"] },
-  ]);
-  assert.deepEqual(useTodoStore.getState().projectTodos["/repo"], [refreshed]);
+  assert.equal(useTodoStore.getState().projectTodos["/repo"][0].items[0].text, "external");
 });
 
-test("add and move preserve native argument order and refresh after mutation", async () => {
-  const refreshed = todoFile("/repo", "new item");
-  readImplementations.set("/repo", async () => [refreshed]);
+test("a stale add fails closed and refreshes external contents", async () => {
+  const documents = fakeDocuments([
+    { projectId: "/repo", relativePath: "TODO.md", contents: "- [ ] task\n" },
+  ]);
+  await useTodoStore.getState().refreshTodos(documents, "/repo");
+  const stale = useTodoStore.getState().projectTodos["/repo"][0];
+  const external = await documents.writeDocument.execute({
+    projectId: "/repo",
+    relativePath: "TODO.md",
+    expectedRevision: stale.revision,
+    contents: "- [ ] external\n",
+  });
+  assert.equal(external.result.ok, true);
 
-  await useTodoStore.getState().addItem(
-    "/repo",
-    "/repo/TODO.md",
-    "new item",
-    4,
+  await assert.rejects(
+    useTodoStore.getState().addItem(documents, "/repo", stale, "local", null, false),
+    /revision does not match/,
+  );
+  assert.equal(useTodoStore.getState().projectTodos["/repo"][0].items[0].text, "external");
+});
+
+test("add creates TODO.md and move publishes transformed contents", async () => {
+  const documents = fakeDocuments();
+  await useTodoStore.getState().addItem(documents, "/repo", null, "first", null, true);
+  const created = useTodoStore.getState().projectTodos["/repo"][0];
+  assert.equal(created.relativePath, "TODO.md");
+  assert.equal(created.items[0].text, "first");
+
+  await useTodoStore.getState().moveItem(
+    documents,
+    created,
+    created.items[0].line,
+    "first",
+    created.sections.at(-1)!.line,
     true,
   );
-  await useTodoStore.getState().moveItem(
-    "/repo",
-    "/repo/TODO.md",
-    8,
-    "new item",
-    12,
-    false,
-  );
-
-  assert.deepEqual(calls, [
-    { operation: "addTodo", args: ["/repo", "/repo/TODO.md", "new item", 4, true] },
-    { operation: "readTodos", args: ["/repo"] },
-    { operation: "moveTodo", args: ["/repo/TODO.md", 8, "new item", 12, false] },
-    { operation: "readTodos", args: ["/repo"] },
-  ]);
+  assert.equal(useTodoStore.getState().projectTodos["/repo"][0].items[0].checked, true);
 });
 
-test("removing a project evicts only its render cache", () => {
-  const a = todoFile("/a", "a");
-  const b = todoFile("/b", "b");
-  useTodoStore.setState({ projectTodos: { "/a": [a], "/b": [b] } });
-
+test("removing a project evicts only its render cache", async () => {
+  const documents = fakeDocuments([
+    { projectId: "/a", relativePath: "TODO.md", contents: "- [ ] a\n" },
+    { projectId: "/b", relativePath: "TODO.md", contents: "- [ ] b\n" },
+  ]);
+  await useTodoStore.getState().refreshAll(documents, ["/a", "/b"]);
   useTodoStore.getState().removeProject("/a");
-
-  assert.deepEqual(useTodoStore.getState().projectTodos, { "/b": [b] });
+  assert.deepEqual(Object.keys(useTodoStore.getState().projectTodos), ["/b"]);
 });

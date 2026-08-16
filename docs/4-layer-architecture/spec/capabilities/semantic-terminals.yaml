@@ -1,0 +1,54 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: semantic-terminals
+version: 1.0.0
+title: Semantic terminal screen protocol
+status: implementing
+layer: native-kernel
+consumers: [semantic-terminal]
+current_implementations:
+  - modules/semantic-terminal/core
+  - modules/semantic-terminal/backend
+  - modules/semantic-terminal/host
+  - module-api/frontend/src/protocol/semanticTerminals.ts
+  - module-api/frontend/src/testing/semanticTerminals.ts
+  - core/frontend/platform/semanticTerminals.ts
+  - modules/semantic-terminal/frontend/src/presentation/semanticTerminalBrowserSession.ts
+target_owners:
+  provider: core/backend/src/semantic_terminal
+  tauri_adapter: core/tauri/src/semantic_terminal.rs
+  typescript_client: core/frontend/platform/semanticTerminal
+operations:
+  - id: attachScreen
+    kind: stream
+    contract: >-
+      Attach to monotonic snapshots with credit, acknowledgement, and replay.
+  - id: controlScreen
+    kind: request
+    contract: Input, resize, selection, and paste safety for one attachment.
+  - id: manageAnchor
+    kind: request
+    contract: Create, resolve, and release durable semantic anchors.
+  - id: inspectScreen
+    kind: request
+    contract: Return redacted publication and memory diagnostics.
+required_grants:
+  - semantic-terminal.attach
+  - semantic-terminal.input
+  - semantic-terminal.inspect
+ownership:
+  authority: The native kernel owns screen state, history, and anchor validity.
+  resources: Screen and PTY resources are host-owned; attachments are leases.
+  activation_scope: Requests bind terminal, attachment, and activation identity.
+depends_on: [terminal-sessions]
+property_ids:
+  - PROP-B-ADAPTER-001
+  - PROP-B-FAKE-001
+  - PROP-B-ACTIVATION-001
+  - PROP-B-REQUEST-001
+  - PROP-B-STREAM-001
+  - PROP-D-PARITY-001
+  - PROP-D-AUTHORITY-001
+  - PROP-D-OWNERSHIP-001
+  - PROP-F-CONTINUITY-001

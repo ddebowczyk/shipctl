@@ -20,6 +20,7 @@ import {
   ModuleProjectNavigationSurfaces,
 } from "@shipctl/core/host/views";
 import { groupProjects } from "@shipctl/core/projects";
+import type { ModuleActivationContext, ModuleId } from "@shipctl/module-api";
 
 interface ProjectListProps {
   repos: RepoInfo[];
@@ -41,6 +42,7 @@ interface ProjectListProps {
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
   tabDropProjectPath: string | null;
   projectNavigationContributions: readonly CanvasProjectNavigationSurface[];
+  moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
 export default function ProjectList({
@@ -63,6 +65,7 @@ export default function ProjectList({
   onMoveToGroup,
   tabDropProjectPath,
   projectNavigationContributions,
+  moduleActivations,
 }: ProjectListProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
     () => new Set(activeRepoPath ? [activeRepoPath] : []),
@@ -222,6 +225,7 @@ export default function ProjectList({
           onClick={() => handleProjectClick(repo.path)}
           onAddProject={onAddProject}
           onMoveToGroup={onMoveToGroup}
+          moduleActivations={moduleActivations}
           isDropTarget={tabDropProjectPath === repo.path}
           onNewGroupForRepo={(repoPath) => {
             pendingMoveRepoPath.current = repoPath;

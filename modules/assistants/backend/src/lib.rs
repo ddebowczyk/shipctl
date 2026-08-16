@@ -67,6 +67,7 @@ pub const GET_MODELS_FOR_PROVIDER_COMMAND: &str =
     "plugin:shipctl-assistants|get_models_for_provider";
 pub const GET_PI_CONFIG_COMMAND: &str = "plugin:shipctl-assistants|get_pi_config";
 pub const SAVE_PI_SETTINGS_COMMAND: &str = "plugin:shipctl-assistants|save_pi_settings";
+pub const HAS_PI_API_KEY_COMMAND: &str = "plugin:shipctl-assistants|has_pi_api_key";
 pub const SAVE_PI_API_KEY_COMMAND: &str = "plugin:shipctl-assistants|save_pi_api_key";
 pub const DELETE_PI_API_KEY_COMMAND: &str = "plugin:shipctl-assistants|delete_pi_api_key";
 
@@ -879,6 +880,11 @@ fn save_pi_settings(settings: PiSettings) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn has_pi_api_key(provider: String) -> Result<bool, String> {
+    pi_config::has_pi_api_key(&provider)
+}
+
+#[tauri::command]
 fn save_pi_api_key(provider: String, api_key: String) -> Result<(), String> {
     pi_config::save_pi_api_key(&provider, &api_key)
 }
@@ -922,6 +928,7 @@ pub fn init<R: Runtime>(
             get_models_for_provider,
             get_pi_config,
             save_pi_settings,
+            has_pi_api_key,
             save_pi_api_key,
             delete_pi_api_key,
         ])

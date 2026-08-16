@@ -176,7 +176,11 @@ export class TerminalHostAdapter implements TerminalHostPort {
     return () => subscription.dispose();
   }
 
-  async attachRaw(terminalId: string, driverId: TerminalDriverId): Promise<RawTerminalAttachment> {
+  async attachRaw(
+    terminalId: string,
+    driverId: TerminalDriverId,
+    claimsResize: boolean,
+  ): Promise<RawTerminalAttachment> {
     const descriptor = (await listTerminals())
       .find((candidate) => candidate.id === terminalId);
     if (!descriptor) throw new Error(`Terminal ${terminalId} was not found`);
@@ -196,19 +200,24 @@ export class TerminalHostAdapter implements TerminalHostPort {
       }
       },
     };
-    const attachment = await attachRawTerminal(terminalId as PlatformTerminalId, true, bootstrap);
+    const attachment = await attachRawTerminal(
+      terminalId as PlatformTerminalId,
+      claimsResize,
+      bootstrap,
+    );
     bootstrap.activate();
     const state = { attachmentId: attachment.attachmentId, queue };
-    this.#attachments.set(terminalId, state);
+    this.#attachments.set(attachment.attachmentId, state);
 
     return {
       id: attachment.attachmentId,
       terminalId,
       driverId,
+      sequenceBoundary: attachment.sequenceBoundary,
       occurrences: queue,
       detach: async () => {
-        if (this.#attachments.get(terminalId) !== state) return;
-        this.#attachments.delete(terminalId);
+        if (this.#attachments.get(attachment.attachmentId) !== state) return;
+        this.#attachments.delete(attachment.attachmentId);
         queue.close();
         await detachTerminal(attachment.attachmentId as PlatformAttachmentId);
       },
@@ -219,12 +228,17 @@ export class TerminalHostAdapter implements TerminalHostPort {
     return writeTerminal(terminalId as PlatformTerminalId, bytes);
   }
 
-  async resize(terminalId: string, columns: number, rows: number): Promise<void> {
-    const attachment = this.#attachments.get(terminalId);
+  async resize(
+    terminalId: string,
+    attachmentId: string,
+    columns: number,
+    rows: number,
+  ): Promise<void> {
+    const attachment = this.#attachments.get(attachmentId);
     if (!attachment) throw new Error(`Terminal ${terminalId} has no raw attachment`);
     await resizeTerminal(
       terminalId as PlatformTerminalId,
-      attachment.attachmentId as PlatformAttachmentId,
+      attachmentId as PlatformAttachmentId,
       columns,
       rows,
     );

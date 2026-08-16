@@ -1,12 +1,13 @@
 import type {
   ContributionId,
   GlobalNavigationContribution,
+  ModuleActivationContext,
   ModuleHostServices,
+  ModuleId,
   PanelContribution,
   ProjectRef,
   TerminalDriverId,
   TerminalHostDescriptor,
-  TerminalHostPort,
 } from "@shipctl/module-api";
 import type {
   CanvasSurfaceCatalog,
@@ -124,7 +125,7 @@ export interface CanvasActions {
 /** Host-owned rendering dependencies. Feature modules are reached through these ports. */
 export interface CanvasPorts {
   readonly surfaceCatalog: CanvasSurfaceCatalog;
-  readonly terminalHost: TerminalHostPort;
   readonly terminalPresentationRegistry: TerminalPresentationRegistry;
   readonly moduleHostServices: ModuleHostServices;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }

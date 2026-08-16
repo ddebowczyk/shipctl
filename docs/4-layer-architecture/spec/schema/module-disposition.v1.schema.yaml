@@ -1,0 +1,110 @@
+---
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: shipctl://architecture/schema/module-disposition.v1
+title: Shipctl module disposition record
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - id
+  - status
+  - source_manifest
+  - current
+  - target
+  - phases
+  - prerequisites
+  - compatibility_paths
+  - deletion_gates
+properties:
+  $schema:
+    type: string
+  schema_version:
+    const: module-disposition/v1
+  id:
+    type: string
+    pattern: ^[a-z][a-z0-9]*(-[a-z0-9]+)*$
+  status:
+    enum: [planned, migrating, complete]
+  source_manifest:
+    type: string
+  current:
+    type: object
+    additionalProperties: false
+    required:
+      - frontend
+      - backend_crates
+      - host_crates
+      - direct_tauri
+      - static_activation
+    properties:
+      frontend:
+        type: string
+      backend_crates:
+        type: array
+        items:
+          type: string
+      host_crates:
+        type: array
+        items:
+          type: string
+      direct_tauri:
+        type: boolean
+      static_activation:
+        type: boolean
+  target:
+    type: object
+    additionalProperties: false
+    required: [roles, responsibilities, capabilities]
+    properties:
+      roles:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          enum: [headless, presentation, compound]
+      responsibilities:
+        type: array
+        items:
+          type: string
+      capabilities:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+  phases:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      pattern: ^phase-[a-h]$
+  prerequisites:
+    type: array
+    items:
+      type: string
+  compatibility_paths:
+    type: array
+    items:
+      type: string
+  deletion_gates:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, proof_ids, targets]
+      properties:
+        id:
+          type: string
+          pattern: ^DELETE-[A-H]-[A-Z0-9-]+$
+        proof_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            pattern: ^PROP-[A-H]-[A-Z0-9-]+-[0-9]{3}$
+        targets:
+          type: array
+          minItems: 1
+          items:
+            type: string

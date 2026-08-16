@@ -13,6 +13,7 @@ import type {
   SettingsSlot,
 } from "../protocol/surfaces";
 import type { ModuleHostServices } from "../host/services";
+import type { ModuleActivationContext } from "../protocol/semanticServices";
 import type {
   GlobalSurfaceContributionProps,
   ProjectActionSurfaceProps,
@@ -126,14 +127,17 @@ export interface ProjectActionContribution {
   subscribe?(
     listener: () => void,
     services: ModuleHostServices,
+    activation: ModuleActivationContext,
   ): () => void;
   refresh?(
     project: ProjectRef,
     services: ModuleHostServices,
+    activation: ModuleActivationContext,
   ): void | Promise<void>;
   getGroup(
     project: ProjectRef,
     services: ModuleHostServices,
+    activation: ModuleActivationContext,
   ): ProjectActionGroup | null;
 }
 
@@ -151,18 +155,22 @@ export interface ModuleProjectLifecycle {
   onProjectOpened?(
     projectPath: string,
     services: ModuleHostServices,
+    activation: ModuleActivationContext,
   ): void | Promise<void>;
   onProjectsChanged?(
     projectPaths: readonly string[],
     services: ModuleHostServices,
+    activation: ModuleActivationContext,
   ): void | Promise<void>;
   onFilesystemChanged?(
     projectPaths: readonly string[],
     services: ModuleHostServices,
+    activation: ModuleActivationContext,
   ): void | Promise<void>;
   onProjectRemoved?(
     projectPath: string,
     services: ModuleHostServices,
+    activation: ModuleActivationContext,
   ): void | Promise<void>;
 }
 
@@ -173,5 +181,6 @@ export interface ProjectImportContribution {
     projectPath: string,
     options: { readonly expandRelated: boolean },
     services: ModuleHostServices,
+    activation: ModuleActivationContext,
   ): readonly string[] | Promise<readonly string[]>;
 }

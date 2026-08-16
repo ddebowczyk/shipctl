@@ -1,3 +1,4 @@
+mod architecture 'ops/architecture/justfile'
 mod build 'ops/build/justfile'
 mod check 'ops/check/justfile'
 mod execution 'ops/execution/justfile'

@@ -7,11 +7,16 @@ import type {
 
 import "./usage.css";
 
-import { refreshUsageData } from "./client";
+import {
+  activeUsageSourcesClient,
+  configureUsageSourcesClient,
+  usageSourcesClientFor,
+} from "./usageSourcesClient";
 import {
   configureUsageSettingsPersistence,
   useUsageSettingsStore,
 } from "./usageSettingsStore";
+import { usageSettingsDataClientFor } from "./usageSettingsDataClient";
 import { useUsageStore } from "./usageStore";
 import { notifyUsageIngestCompleted } from "./ingestCompleted";
 
@@ -85,7 +90,7 @@ function fetchUsageSnapshots() {
 }
 
 async function refreshUsageAndSnapshots() {
-  await refreshUsageData();
+  await activeUsageSourcesClient().refreshUsageData();
   await fetchUsageSnapshots();
 }
 
@@ -133,16 +138,13 @@ export const usageModule = {
   ],
   scheduledTasks: [
     {
-      id: "usage.snapshots-after-startup",
-      moduleId: "shipctl.usage",
-      schedule: { kind: "delay", delayMs: 3_000 },
-      run: fetchUsageSnapshots,
-    },
-    {
       id: "usage.periodic-refresh",
       moduleId: "shipctl.usage",
-      schedule: { kind: "interval", intervalMs: 60_000 },
-      run: refreshUsageAndSnapshots,
+      schedule: {
+        cron: "* * * * * Etc/UTC",
+        target: { kind: "channel", endpoint: USAGE_REFRESH_CHANNEL },
+        payload: {},
+      },
     },
   ],
   messages: {
@@ -166,22 +168,30 @@ export const usageModule = {
     }],
     subscribes: [{
       topic: USAGE_INGEST_COMPLETED_TOPIC,
-      async handle() {
-        await Promise.allSettled([
-          fetchUsageSnapshots(),
-          notifyUsageIngestCompleted(),
-        ]);
-      },
+      // The semantic Usage Sources observer performs the refresh. Retain this
+      // handler until the declared compatibility topic can be removed.
+      handle() {},
     }],
   },
-  activate({ services }) {
-    configureUsageSettingsPersistence(services.globalData);
+  activate({ activation }) {
+    const usageSources = usageSourcesClientFor(activation);
+    configureUsageSourcesClient(usageSources);
+    configureUsageSettingsPersistence(usageSettingsDataClientFor(activation));
     void useUsageSettingsStore.getState().loadSettings();
     void fetchUsageSnapshots();
-    void refreshUsageData();
+    void usageSources.refreshUsageData();
+    void usageSources.subscribeChanges(async () => {
+      await Promise.allSettled([
+        fetchUsageSnapshots(),
+        notifyUsageIngestCompleted(),
+      ]);
+    }).catch((error) => {
+      if (import.meta.env.DEV) console.error("Usage source observation failed:", error);
+    });
 
     return {
       deactivate() {
+        configureUsageSourcesClient(null);
         configureUsageSettingsPersistence(null);
       },
     };

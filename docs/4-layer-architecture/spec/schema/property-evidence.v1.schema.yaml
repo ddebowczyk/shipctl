@@ -1,0 +1,74 @@
+---
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: shipctl://architecture/schema/property-evidence.v1
+title: Shipctl property execution evidence
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - property_id
+  - test_id
+  - phase_id
+  - repository
+  - runner
+  - campaign
+  - result
+  - deletion_gates
+properties:
+  schema_version:
+    const: property-evidence/v1
+  property_id:
+    type: string
+    pattern: ^PROP-[A-H]-[A-Z0-9-]+-[0-9]{3}$
+  test_id:
+    type: string
+  phase_id:
+    type: string
+    pattern: ^phase-[a-h]$
+  repository:
+    type: object
+    additionalProperties: false
+    required: [revision, dirty]
+    properties:
+      revision:
+        type: string
+      dirty:
+        type: boolean
+      diff_digest:
+        type: string
+  runner:
+    type: object
+    additionalProperties: false
+    required: [language, library, version]
+    properties:
+      language:
+        enum: [typescript, rust]
+      library:
+        enum: [fast-check, proptest]
+      version:
+        type: string
+  campaign:
+    type: object
+    additionalProperties: false
+    required: [kind, seed, classifications, replay_command]
+    properties:
+      kind:
+        enum: [fresh, replay]
+      seed:
+        type: string
+      shrink_path:
+        type: string
+      classifications:
+        type: object
+      counterexample_path:
+        type: string
+      replay_command:
+        type: string
+  result:
+    enum: [pass, fail, excluded]
+  deletion_gates:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+      pattern: ^DELETE-[A-H]-[A-Z0-9-]+$

@@ -1,0 +1,39 @@
+---
+$schema: ../schema/module-disposition.v1.schema.yaml
+schema_version: module-disposition/v1
+id: todos
+status: migrating
+source_manifest: modules/todos/module.yaml
+current:
+  frontend: modules/todos/frontend
+  backend_crates:
+    - modules/todos/backend
+  host_crates:
+    - modules/todos/host
+  direct_tauri: false
+  static_activation: true
+target:
+  roles: [compound]
+  responsibilities:
+    - Implement todo document policy and workflow in TypeScript.
+    - Publish todo views and commands through typed contributions.
+  capabilities:
+    - project-documents
+    - workspace
+phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
+prerequisites:
+  - Characterize todo parsing, ordering, mutation, and conflict behavior.
+compatibility_paths:
+  - >-
+    Route current calls through the project documents capability client and a
+    transitional Todos-native provider until Phase D extracts its authority.
+  - Keep the built-in module active until artifact parity is proven.
+deletion_gates:
+  - id: DELETE-D-NATIVE-MODULE
+    proof_ids: [PROP-D-PARITY-001, PROP-D-CLOSURE-001]
+    targets:
+      - modules/todos/backend
+  - id: DELETE-E-STATIC-IMPORT
+    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    targets:
+      - modules/todos/frontend/src/index.ts

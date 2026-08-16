@@ -37,6 +37,8 @@ export interface RawTerminalAttachment {
   readonly terminalId: string;
   /** The driver that the host authorized for this attachment. */
   readonly driverId: TerminalDriverId;
+  /** Last host sequence before this live-only attachment began. */
+  readonly sequenceBoundary: number;
   readonly occurrences: AsyncIterable<RawTerminalOccurrence>;
   detach(): Promise<void>;
 }

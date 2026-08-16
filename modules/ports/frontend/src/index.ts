@@ -28,5 +28,4 @@ export const portsModule = {
   ],
 } as const satisfies ShipctlModule;
 
-export { PORT_COMMANDS } from "./client";
 export type { PortInfo } from "./types";

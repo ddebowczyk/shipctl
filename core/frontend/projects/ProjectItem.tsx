@@ -1,5 +1,10 @@
 import { useState, useCallback, useMemo } from "react";
-import type { ProjectAction, ProjectSurfaceAction } from "@shipctl/module-api";
+import type {
+  ModuleActivationContext,
+  ModuleId,
+  ProjectAction,
+  ProjectSurfaceAction,
+} from "@shipctl/module-api";
 import type { RepoInfo, RepoGroup } from "@shipctl/core/platform";
 import { getEditorLabel } from "@shipctl/core/settings";
 import { useEditorStore } from "@shipctl/core/settings";
@@ -44,6 +49,7 @@ interface ProjectItemProps {
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
   onNewGroupForRepo: (repoPath: string) => void;
   isDropTarget: boolean;
+  moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
 export default function ProjectItem({
@@ -60,6 +66,7 @@ export default function ProjectItem({
   onMoveToGroup,
   onNewGroupForRepo,
   isDropTarget,
+  moduleActivations,
 }: ProjectItemProps) {
   const activityStatus = getAggregateActivityStatus({
     hasCrash: activity?.hasCrash,
@@ -70,6 +77,7 @@ export default function ProjectItem({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [actionSurface, setActionSurface] = useState<{
     action: ProjectSurfaceAction;
+    moduleId: ModuleId;
     position: { x: number; y: number };
   } | null>(null);
   const projectRef = useMemo(() => ({
@@ -78,7 +86,7 @@ export default function ProjectItem({
     path: repo.path,
     groupId: repo.group,
   }), [repo.group, repo.name, repo.path]);
-  const projectActions = useModuleProjectActions(projectRef);
+  const projectActions = useModuleProjectActions(projectRef, moduleActivations);
   const preferredEditor = useEditorStore((s) => s.settings.preferredEditor);
   const pushNotice = useNoticeStore((s) => s.pushNotice);
   const preferredEditorLabel = getEditorLabel(preferredEditor);
@@ -119,7 +127,7 @@ export default function ProjectItem({
       : []),
   ];
 
-  const actionMenuItem = (action: ProjectAction): ContextMenuItem => ({
+  const actionMenuItem = (action: ProjectAction, moduleId: ModuleId): ContextMenuItem => ({
     label: action.label,
     icon: action.selected === undefined
       ? action.icon?.name === "plus"
@@ -132,6 +140,7 @@ export default function ProjectItem({
       if (action.surface) {
         setActionSurface({
           action,
+          moduleId,
           position: menu ?? { x: 200, y: 200 },
         });
         return;
@@ -142,7 +151,7 @@ export default function ProjectItem({
     },
   });
   const contributedActionItems: ContextMenuItem[] = projectActions.groups.flatMap((group) => {
-    const actions = group.actions.map(actionMenuItem);
+    const actions = group.actions.map((action) => actionMenuItem(action, group.moduleId));
     return group.label === null
       ? actions
       : [{
@@ -246,6 +255,7 @@ export default function ProjectItem({
       {actionSurface && (
         <ModuleProjectActionSurface
           action={actionSurface.action}
+          moduleId={actionSurface.moduleId}
           project={projectRef}
           position={actionSurface.position}
           close={() => setActionSurface(null)}
@@ -253,6 +263,7 @@ export default function ProjectItem({
             addProject: onAddProject,
             moveProjectToGroup: onMoveToGroup,
           }}
+          moduleActivations={moduleActivations}
         />
       )}
     </>

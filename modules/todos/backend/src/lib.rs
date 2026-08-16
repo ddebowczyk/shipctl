@@ -3,15 +3,41 @@
 #![forbid(unsafe_code)]
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
-use tauri::{plugin::TauriPlugin, Runtime};
+use sha2::{Digest, Sha256};
+use tauri::{plugin::TauriPlugin, Manager, Runtime};
 
 pub const PLUGIN_NAME: &str = "shipctl-todos";
 pub const READ_TODOS_COMMAND: &str = "plugin:shipctl-todos|read_todos";
 pub const TOGGLE_TODO_COMMAND: &str = "plugin:shipctl-todos|toggle_todo";
 pub const ADD_TODO_COMMAND: &str = "plugin:shipctl-todos|add_todo";
 pub const MOVE_TODO_COMMAND: &str = "plugin:shipctl-todos|move_todo";
+pub const DISCOVER_PROJECT_DOCUMENTS_COMMAND: &str =
+    "plugin:shipctl-todos|discover_project_documents";
+pub const READ_PROJECT_DOCUMENT_COMMAND: &str = "plugin:shipctl-todos|read_project_document";
+pub const WRITE_PROJECT_DOCUMENT_COMMAND: &str = "plugin:shipctl-todos|write_project_document";
+
+pub trait ProjectCatalog: Send + Sync {
+    fn registered_project_paths(&self) -> Result<Vec<String>, String>;
+}
+
+#[derive(Clone)]
+pub struct HostServices {
+    projects: Arc<dyn ProjectCatalog>,
+    document_write_lock: Arc<Mutex<()>>,
+}
+
+impl HostServices {
+    pub fn new(projects: Arc<dyn ProjectCatalog>) -> Self {
+        Self {
+            projects,
+            document_write_lock: Arc::new(Mutex::new(())),
+        }
+    }
+}
 
 /// Directories never scanned for todo files — build artifacts, deps, VCS internals.
 const IGNORED_DIRS: &[&str] = &[
@@ -41,6 +67,351 @@ const MAX_TODO_FILES: usize = 20;
 
 /// Skip parsing files larger than this — a real todo list is never 1 MB.
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectDocumentError {
+    code: &'static str,
+    message: String,
+}
+
+impl ProjectDocumentError {
+    fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoverProjectDocumentsRequest {
+    project_id: String,
+    file_names: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadProjectDocumentRequest {
+    project_id: String,
+    relative_path: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WriteProjectDocumentRequest {
+    project_id: String,
+    relative_path: String,
+    expected_revision: Option<String>,
+    contents: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectDocument {
+    project_id: String,
+    relative_path: String,
+    contents: String,
+    revision: String,
+}
+
+fn document_error(code: &'static str, message: impl Into<String>) -> ProjectDocumentError {
+    ProjectDocumentError::new(code, message)
+}
+
+fn project_root(
+    services: &HostServices,
+    project_id: &str,
+) -> Result<PathBuf, ProjectDocumentError> {
+    let projects = services
+        .projects
+        .registered_project_paths()
+        .map_err(|error| {
+            document_error(
+                "project-documents.transport-failed",
+                format!("Failed to inspect registered projects: {error}"),
+            )
+        })?;
+    let registered = projects
+        .iter()
+        .find(|candidate| candidate.as_str() == project_id)
+        .ok_or_else(|| {
+            document_error(
+                "project-documents.invalid-project",
+                "Project is not registered with Shipctl",
+            )
+        })?;
+    fs::canonicalize(registered).map_err(|error| {
+        document_error(
+            "project-documents.invalid-project",
+            format!("Registered project cannot be resolved: {error}"),
+        )
+    })
+}
+
+fn relative_document_path(relative_path: &str) -> Result<&Path, ProjectDocumentError> {
+    let path = Path::new(relative_path);
+    let valid = !relative_path.is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)));
+    if !valid {
+        return Err(document_error(
+            "project-documents.invalid-path",
+            "Document path must be a normalized relative path",
+        ));
+    }
+    Ok(path)
+}
+
+fn existing_document_path(
+    root: &Path,
+    relative_path: &str,
+) -> Result<PathBuf, ProjectDocumentError> {
+    let relative = relative_document_path(relative_path)?;
+    let candidate = root.join(relative);
+    let metadata = fs::symlink_metadata(&candidate).map_err(|error| {
+        let code = if error.kind() == std::io::ErrorKind::NotFound {
+            "project-documents.not-found"
+        } else {
+            "project-documents.transport-failed"
+        };
+        document_error(code, format!("Failed to inspect {relative_path}: {error}"))
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(document_error(
+            "project-documents.denied",
+            "Symbolic-link documents are outside the granted path scope",
+        ));
+    }
+    let canonical = fs::canonicalize(&candidate).map_err(|error| {
+        document_error(
+            "project-documents.transport-failed",
+            format!("Failed to resolve {relative_path}: {error}"),
+        )
+    })?;
+    if !canonical.starts_with(root) || !canonical.is_file() {
+        return Err(document_error(
+            "project-documents.denied",
+            "Document is outside the granted project path",
+        ));
+    }
+    Ok(canonical)
+}
+
+fn revision(contents: &str) -> String {
+    format!("{:x}", Sha256::digest(contents.as_bytes()))
+}
+
+fn read_document(
+    project_id: &str,
+    relative_path: &str,
+    path: &Path,
+) -> Result<ProjectDocument, ProjectDocumentError> {
+    let metadata = fs::metadata(path).map_err(|error| {
+        document_error(
+            "project-documents.transport-failed",
+            format!("Failed to inspect {relative_path}: {error}"),
+        )
+    })?;
+    if metadata.len() > MAX_FILE_BYTES {
+        return Err(document_error(
+            "project-documents.too-large",
+            format!("Document exceeds {MAX_FILE_BYTES} bytes"),
+        ));
+    }
+    let contents = fs::read_to_string(path).map_err(|error| {
+        document_error(
+            "project-documents.invalid-content",
+            format!("Document is not valid UTF-8 text: {error}"),
+        )
+    })?;
+    Ok(ProjectDocument {
+        project_id: project_id.to_string(),
+        relative_path: relative_path.to_string(),
+        revision: revision(&contents),
+        contents,
+    })
+}
+
+fn validate_discovery_names(file_names: &[String]) -> Result<Vec<String>, ProjectDocumentError> {
+    if file_names.is_empty() {
+        return Err(document_error(
+            "project-documents.invalid-path",
+            "At least one discovery file name is required",
+        ));
+    }
+    file_names
+        .iter()
+        .map(|name| {
+            let path = relative_document_path(name)?;
+            if path.components().count() != 1 {
+                return Err(document_error(
+                    "project-documents.invalid-path",
+                    "Discovery entries must be file names",
+                ));
+            }
+            Ok(name.to_lowercase())
+        })
+        .collect()
+}
+
+fn discover_project_documents_impl(
+    request: DiscoverProjectDocumentsRequest,
+    services: &HostServices,
+) -> Result<Vec<ProjectDocument>, ProjectDocumentError> {
+    let root = project_root(services, &request.project_id)?;
+    let names = validate_discovery_names(&request.file_names)?;
+    let mut found = Vec::new();
+    scan_document_paths(&root, 0, &names, &mut found);
+    found.sort_by_key(|path| {
+        let relative = path.strip_prefix(&root).unwrap_or(path);
+        (relative.components().count(), relative.to_path_buf())
+    });
+    found.truncate(MAX_TODO_FILES);
+    found
+        .into_iter()
+        .filter_map(|path| {
+            let relative = path.strip_prefix(&root).ok()?.to_string_lossy().to_string();
+            Some(
+                existing_document_path(&root, &relative).and_then(|canonical| {
+                    read_document(&request.project_id, &relative, &canonical)
+                }),
+            )
+        })
+        .collect()
+}
+
+fn read_project_document_impl(
+    request: ReadProjectDocumentRequest,
+    services: &HostServices,
+) -> Result<ProjectDocument, ProjectDocumentError> {
+    let root = project_root(services, &request.project_id)?;
+    let path = existing_document_path(&root, &request.relative_path)?;
+    read_document(&request.project_id, &request.relative_path, &path)
+}
+
+fn write_project_document_impl(
+    request: WriteProjectDocumentRequest,
+    services: &HostServices,
+) -> Result<ProjectDocument, ProjectDocumentError> {
+    if request.contents.len() as u64 > MAX_FILE_BYTES {
+        return Err(document_error(
+            "project-documents.too-large",
+            format!("Document exceeds {MAX_FILE_BYTES} bytes"),
+        ));
+    }
+    let _guard = services.document_write_lock.lock().map_err(|_| {
+        document_error(
+            "project-documents.transport-failed",
+            "Project document write lock is unavailable",
+        )
+    })?;
+    let root = project_root(services, &request.project_id)?;
+    let relative = relative_document_path(&request.relative_path)?;
+    let target = root.join(relative);
+    let current = if target.exists() {
+        let canonical = existing_document_path(&root, &request.relative_path)?;
+        Some(read_document(
+            &request.project_id,
+            &request.relative_path,
+            &canonical,
+        )?)
+    } else {
+        None
+    };
+    let matches = match (&request.expected_revision, &current) {
+        (None, None) => true,
+        (Some(expected), Some(document)) => expected == &document.revision,
+        _ => false,
+    };
+    if !matches {
+        return Err(document_error(
+            "project-documents.conflict",
+            "Project document revision does not match",
+        ));
+    }
+    let parent = target.parent().ok_or_else(|| {
+        document_error(
+            "project-documents.invalid-path",
+            "Document path has no project-relative parent",
+        )
+    })?;
+    let canonical_parent = fs::canonicalize(parent).map_err(|error| {
+        document_error(
+            "project-documents.invalid-path",
+            format!("Document parent does not exist: {error}"),
+        )
+    })?;
+    if !canonical_parent.starts_with(&root) {
+        return Err(document_error(
+            "project-documents.denied",
+            "Document parent is outside the granted project path",
+        ));
+    }
+
+    let mut temporary = tempfile::NamedTempFile::new_in(&canonical_parent).map_err(|error| {
+        document_error(
+            "project-documents.transport-failed",
+            format!("Failed to create temporary document: {error}"),
+        )
+    })?;
+    if let Ok(metadata) = fs::metadata(&target) {
+        temporary
+            .as_file()
+            .set_permissions(metadata.permissions())
+            .map_err(|error| {
+                document_error(
+                    "project-documents.transport-failed",
+                    format!("Failed to preserve document permissions: {error}"),
+                )
+            })?;
+    }
+    temporary
+        .write_all(request.contents.as_bytes())
+        .and_then(|_| temporary.flush())
+        .and_then(|_| temporary.as_file().sync_all())
+        .map_err(|error| {
+            document_error(
+                "project-documents.transport-failed",
+                format!("Failed to write temporary document: {error}"),
+            )
+        })?;
+    temporary.persist(&target).map_err(|error| {
+        document_error(
+            "project-documents.transport-failed",
+            format!("Failed to publish project document: {}", error.error),
+        )
+    })?;
+    let _ = fs::File::open(&canonical_parent).and_then(|directory| directory.sync_all());
+    read_document(&request.project_id, &request.relative_path, &target)
+}
+
+#[tauri::command]
+fn discover_project_documents(
+    request: DiscoverProjectDocumentsRequest,
+    services: tauri::State<'_, HostServices>,
+) -> Result<Vec<ProjectDocument>, ProjectDocumentError> {
+    discover_project_documents_impl(request, &services)
+}
+
+#[tauri::command]
+fn read_project_document(
+    request: ReadProjectDocumentRequest,
+    services: tauri::State<'_, HostServices>,
+) -> Result<ProjectDocument, ProjectDocumentError> {
+    read_project_document_impl(request, &services)
+}
+
+#[tauri::command]
+fn write_project_document(
+    request: WriteProjectDocumentRequest,
+    services: tauri::State<'_, HostServices>,
+) -> Result<ProjectDocument, ProjectDocumentError> {
+    write_project_document_impl(request, &services)
+}
 
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -325,6 +696,32 @@ fn scan_dir(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
     }
 }
 
+fn scan_document_paths(dir: &Path, depth: usize, file_names: &[String], found: &mut Vec<PathBuf>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if path.is_dir() {
+            if depth + 1 > MAX_SCAN_DEPTH || name.starts_with('.') || IGNORED_DIRS.contains(&name) {
+                continue;
+            }
+            scan_document_paths(&path, depth + 1, file_names, found);
+        } else if file_names.contains(&name.to_lowercase()) {
+            let small = entry
+                .metadata()
+                .map(|metadata| metadata.len() <= MAX_FILE_BYTES)
+                .unwrap_or(false);
+            if small {
+                found.push(path);
+            }
+        }
+    }
+}
+
 struct ParsedCheckbox<'a> {
     text: &'a str,
     checked: bool,
@@ -486,13 +883,20 @@ fn section_insert_position(lines: &[String], heading_line: usize, level: usize) 
     end
 }
 
-pub fn init<R: Runtime>() -> TauriPlugin<R> {
+pub fn init<R: Runtime>(host_services: HostServices) -> TauriPlugin<R> {
     tauri::plugin::Builder::new(PLUGIN_NAME)
+        .setup(move |app, _api| {
+            app.manage(host_services.clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             read_todos,
             toggle_todo,
             add_todo,
             move_todo,
+            discover_project_documents,
+            read_project_document,
+            write_project_document,
         ])
         .build()
 }
@@ -508,6 +912,18 @@ mod tests {
         assert_eq!(TOGGLE_TODO_COMMAND, "plugin:shipctl-todos|toggle_todo");
         assert_eq!(ADD_TODO_COMMAND, "plugin:shipctl-todos|add_todo");
         assert_eq!(MOVE_TODO_COMMAND, "plugin:shipctl-todos|move_todo");
+        assert_eq!(
+            DISCOVER_PROJECT_DOCUMENTS_COMMAND,
+            "plugin:shipctl-todos|discover_project_documents"
+        );
+        assert_eq!(
+            READ_PROJECT_DOCUMENT_COMMAND,
+            "plugin:shipctl-todos|read_project_document"
+        );
+        assert_eq!(
+            WRITE_PROJECT_DOCUMENT_COMMAND,
+            "plugin:shipctl-todos|write_project_document"
+        );
     }
 
     fn parse_items(content: &str) -> Vec<TodoItem> {
@@ -714,6 +1130,124 @@ mod tests {
         let files = read_todos(&dir.to_string_lossy()).unwrap();
         let rels: Vec<&str> = files.iter().map(|f| f.relative_path.as_str()).collect();
         assert_eq!(rels, vec!["todo.md", "docs/TODOS.md"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    struct TestProjectCatalog {
+        paths: Vec<String>,
+    }
+
+    impl ProjectCatalog for TestProjectCatalog {
+        fn registered_project_paths(&self) -> Result<Vec<String>, String> {
+            Ok(self.paths.clone())
+        }
+    }
+
+    fn test_services(root: &Path) -> HostServices {
+        HostServices::new(Arc::new(TestProjectCatalog {
+            paths: vec![root.to_string_lossy().to_string()],
+        }))
+    }
+
+    #[test]
+    fn project_documents_compare_revisions_and_publish_complete_contents() {
+        let dir = temp_repo("project-documents-write");
+        let project_id = dir.to_string_lossy().to_string();
+        let services = test_services(&dir);
+        let created = write_project_document_impl(
+            WriteProjectDocumentRequest {
+                project_id: project_id.clone(),
+                relative_path: "TODO.md".to_string(),
+                expected_revision: None,
+                contents: "first\n".to_string(),
+            },
+            &services,
+        )
+        .unwrap();
+        assert_eq!(created.contents, "first\n");
+
+        let stale = write_project_document_impl(
+            WriteProjectDocumentRequest {
+                project_id: project_id.clone(),
+                relative_path: "TODO.md".to_string(),
+                expected_revision: Some("stale".to_string()),
+                contents: "lost\n".to_string(),
+            },
+            &services,
+        )
+        .unwrap_err();
+        assert_eq!(stale.code, "project-documents.conflict");
+        assert_eq!(fs::read_to_string(dir.join("TODO.md")).unwrap(), "first\n");
+
+        let updated = write_project_document_impl(
+            WriteProjectDocumentRequest {
+                project_id: project_id.clone(),
+                relative_path: "TODO.md".to_string(),
+                expected_revision: Some(created.revision),
+                contents: "second\n".to_string(),
+            },
+            &services,
+        )
+        .unwrap();
+        assert_eq!(updated.contents, "second\n");
+        assert_ne!(updated.revision, revision("first\n"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn project_documents_fail_closed_for_unregistered_and_traversal_paths() {
+        let dir = temp_repo("project-documents-scope");
+        let services = test_services(&dir);
+        let traversal = read_project_document_impl(
+            ReadProjectDocumentRequest {
+                project_id: dir.to_string_lossy().to_string(),
+                relative_path: "../outside.md".to_string(),
+            },
+            &services,
+        )
+        .unwrap_err();
+        assert_eq!(traversal.code, "project-documents.invalid-path");
+
+        let unregistered = read_project_document_impl(
+            ReadProjectDocumentRequest {
+                project_id: "/not/registered".to_string(),
+                relative_path: "TODO.md".to_string(),
+            },
+            &services,
+        )
+        .unwrap_err();
+        assert_eq!(unregistered.code, "project-documents.invalid-project");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn project_document_discovery_returns_relative_content_and_revision() {
+        let dir = temp_repo("project-documents-discovery");
+        fs::write(dir.join("TODO.md"), "- [ ] root\n").unwrap();
+        fs::create_dir_all(dir.join("docs")).unwrap();
+        fs::write(dir.join("docs/todos.md"), "- [ ] nested\n").unwrap();
+        let project_id = dir.to_string_lossy().to_string();
+        let documents = discover_project_documents_impl(
+            DiscoverProjectDocumentsRequest {
+                project_id: project_id.clone(),
+                file_names: vec!["todo.md".to_string(), "todos.md".to_string()],
+            },
+            &test_services(&dir),
+        )
+        .unwrap();
+        assert_eq!(
+            documents
+                .iter()
+                .map(|document| document.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["TODO.md", "docs/todos.md"]
+        );
+        assert!(documents
+            .iter()
+            .all(|document| document.project_id == project_id));
+        assert!(documents
+            .iter()
+            .all(|document| document.revision == revision(&document.contents)));
         let _ = fs::remove_dir_all(&dir);
     }
 }

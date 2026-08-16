@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { watchRepo, unwatchRepo } from "@shipctl/core/platform";
+import type { ModuleActivationContext, ModuleId } from "@shipctl/module-api";
 import {
   MODULE_HOST_SERVICES,
   notifyModulesFilesystemChanged,
@@ -15,18 +16,25 @@ interface FsChangedPayload {
  * Watches project paths and forwards file-system events to module lifecycles.
  * Each project (including worktrees added as separate projects) is watched independently.
  */
-export function useProjectWatcher(projectPaths: string[]) {
+export function useProjectWatcher(
+  projectPaths: string[],
+  moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>,
+) {
   const watchedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const unlisten = listen<FsChangedPayload>("git-fs-changed", (event) => {
-      void notifyModulesFilesystemChanged(event.payload.paths, MODULE_HOST_SERVICES);
+      void notifyModulesFilesystemChanged(
+        event.payload.paths,
+        MODULE_HOST_SERVICES,
+        moduleActivations,
+      );
     });
 
     return () => {
       unlisten.then((f) => f());
     };
-  }, []);
+  }, [moduleActivations]);
 
   useEffect(() => {
     const current = new Set(projectPaths);
@@ -51,8 +59,12 @@ export function useProjectWatcher(projectPaths: string[]) {
     }
 
     // Initial refresh
-    void notifyModulesProjectsChanged(projectPaths, MODULE_HOST_SERVICES);
-  }, [projectPaths.join("\0")]);
+    void notifyModulesProjectsChanged(
+      projectPaths,
+      MODULE_HOST_SERVICES,
+      moduleActivations,
+    );
+  }, [projectPaths.join("\0"), moduleActivations]);
 
   useEffect(() => {
     return () => {

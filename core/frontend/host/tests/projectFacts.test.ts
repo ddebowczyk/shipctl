@@ -57,14 +57,6 @@ const services = {
     getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
     subscribe: () => () => undefined,
   },
-  globalData: {
-    read: async () => undefined,
-    replace: async () => undefined,
-  },
-  projectData: {
-    read: async () => undefined,
-    replace: async () => undefined,
-  },
   terminalSessions: {
     list: () => [],
     getDimensions: () => ({ columns: 80, rows: 24 }),
@@ -174,15 +166,15 @@ test("the Git module maps revision and lineage into stable generic facts", () =>
   useGitStore.setState({
     projectGitStatus: {
       [project.path]: {
-        is_git_repo: true,
-        branch: "feature/rails",
+        isRepository: true,
+        branchName: "feature/rails",
         dirty: true,
         staged: 1,
         unstaged: 2,
         untracked: 3,
         ahead: 0,
         behind: 0,
-        worktree_parent: "shipctl",
+        worktreeParentProjectId: "shipctl",
       },
     },
   });

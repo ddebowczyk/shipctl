@@ -78,6 +78,7 @@
             "shipctl-assistants:allow-get-models-for-provider",
             "shipctl-assistants:allow-get-pi-config",
             "shipctl-assistants:allow-save-pi-settings",
+            "shipctl-assistants:allow-has-pi-api-key",
             "shipctl-assistants:allow-save-pi-api-key",
             "shipctl-assistants:allow-delete-pi-api-key"
           ]

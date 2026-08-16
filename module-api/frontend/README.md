@@ -12,8 +12,11 @@ The implementation tree makes the ownership direction explicit:
 - `src/protocol/` contains shared identifiers, DTOs, and parsers that neither
   side owns.
 
-`src/index.ts` is the only public package entrypoint and re-exports all three
-categories. Consumers must import `@shipctl/module-api`, never a subpath.
+`src/index.ts` is the production package entrypoint and re-exports all three
+categories. Production consumers must import `@shipctl/module-api`, never a
+subpath. `@shipctl/module-api/testing` is a test-only entrypoint for the
+DOM-free and Tauri-free semantic service host. The boundary checker rejects it
+from module production source.
 
 Allowed dependency direction:
 
@@ -49,6 +52,28 @@ host internals ─────────────────────�
 - Module activation owns runtime subscriptions, and project-lifecycle callbacks
   receive project paths after host state changes. Notices may include bounded
   actions so retry and recovery policy can stay inside the module.
+- Every module activation receives one immutable activation identity and one
+  typed semantic service lookup. Public services expose named operations,
+  events, or ordered streams. They do not expose command strings or generic
+  native dispatch.
+- A rendered global surface receives its owning module's exact activation
+  context. It cannot resolve services through another active module.
+- Usage source access returns host-managed descriptors and redacted records.
+  Provider paths and credential bytes stay behind the trusted platform
+  adapter. The current overview projection is a named migration seam, not a
+  generic native query escape hatch.
+- Plugin Data exposes only admitted owner/scope/key records, schema versions,
+  revisions, compare-and-write, and atomic migrations. Plugins never receive a
+  filesystem path, file handle, database handle, or generic key-value store.
+- Messages exposes directed send, scoped publish, and capability-port request
+  as `shipctl.messages@1`. Message declarations remain passive module
+  contributions. Bridge IDs, Tauri channels, command names, and raw transport
+  errors stay behind the trusted adapter.
+- Scheduler exposes typed target registration, activation-scoped inspection,
+  and ordered delivery observations as `shipctl.scheduler@1`. A module declares
+  schedule data and receives an owned lease. The host owns the clock, YAML
+  source, route admission, cancellation, and activation cleanup. Raw browser
+  timers are not part of this scheduling contract.
 
 The host's boundary and profile tests enforce this dependency direction. A
 capability may be disabled without requiring placeholder implementations in the

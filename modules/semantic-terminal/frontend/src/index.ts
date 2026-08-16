@@ -1,6 +1,10 @@
 import { createElement, lazy } from "react";
 import {
+  SEMANTIC_TERMINAL_GRANTS,
+  TERMINAL_SESSION_GRANTS,
+  semanticTerminalsService,
   terminalDriverId,
+  terminalSessionsService,
   type ShipctlModule,
   type TerminalPresentationProps,
 } from "@shipctl/module-api";
@@ -48,9 +52,6 @@ export * from "./presentation/keybindingPresets.ts";
 export * from "./presentation/semanticTerminalCanvasBinding.ts";
 export * from "./presentation/semanticTerminalBrowserSession.ts";
 export * from "./semanticTypes.ts";
-export * from "./protocol/terminalEventDecoder.ts";
-export * from "./protocol/terminalAttachmentBootstrap.ts";
-export * from "./protocol/semanticTerminalClient.ts";
 export * from "./scenarios/scenarioContract.ts";
 export * from "./scenarios/capabilityRegister.ts";
 export * from "./scenarios/scenarioRunner.ts";
@@ -76,8 +77,18 @@ function SemanticTerminalProvider(props: TerminalPresentationProps) {
 export const semanticTerminalModule = {
   id: "shipctl.semantic-terminal",
   version: "0.0.0",
+  requiredGrants: [
+    TERMINAL_SESSION_GRANTS.attach,
+    TERMINAL_SESSION_GRANTS.input,
+    TERMINAL_SESSION_GRANTS.resize,
+    SEMANTIC_TERMINAL_GRANTS.attach,
+    SEMANTIC_TERMINAL_GRANTS.input,
+    SEMANTIC_TERMINAL_GRANTS.inspect,
+  ],
   terminalPresentations: [{
+    moduleId: "shipctl.semantic-terminal",
     driverId: SEMANTIC_TERMINAL_DRIVER_ID,
+    requiredServices: [terminalSessionsService, semanticTerminalsService],
     Presentation: SemanticTerminalProvider,
   }],
 } as const satisfies ShipctlModule;

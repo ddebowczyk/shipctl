@@ -1,0 +1,55 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: terminal-sessions
+version: 1.0.0
+title: Host-owned terminal sessions
+status: implementing
+layer: native-kernel
+consumers: [commands, thin-terminal, assistants, semantic-terminal]
+current_implementations:
+  - core/backend/src/terminal_host
+  - core/tauri/src/terminal_host.rs
+  - module-api/frontend/src/protocol/terminalSessions.ts
+  - module-api/frontend/src/testing/terminalSessions.ts
+  - core/frontend/platform/terminalSessions.ts
+  - core/frontend/terminal-host/terminalSessions.ts
+  - modules/thin-terminal/frontend/src/ThinTerminalPresentation.tsx
+target_owners:
+  provider: core/backend/src/terminal_host
+  tauri_adapter: core/tauri/src/terminal_host.rs
+  typescript_client: core/frontend/platform/terminalSessions.ts
+operations:
+  - id: startSession
+    kind: request
+    contract: Start one host-owned PTY session and return stable identity.
+  - id: controlSession
+    kind: request
+    contract: Send authorized input, resize, signal, or stop to one session.
+  - id: observeSession
+    kind: event
+    contract: Observe lifecycle without transferring process ownership.
+  - id: attachBytes
+    kind: stream
+    contract: >-
+      Attach to ordered terminal bytes with sequence and backpressure semantics.
+required_grants:
+  - terminal.start
+  - terminal.attach
+  - terminal.input
+  - terminal.resize
+  - terminal.stop
+ownership:
+  authority: The native kernel owns PTY process identity and terminal transport.
+  resources: Sessions are host-owned and survive presentation replacement.
+  activation_scope: Activations receive replaceable attachment leases.
+depends_on: []
+property_ids:
+  - PROP-B-ADAPTER-001
+  - PROP-B-FAKE-001
+  - PROP-B-ACTIVATION-001
+  - PROP-B-REQUEST-001
+  - PROP-B-EVENT-001
+  - PROP-B-STREAM-001
+  - PROP-D-OWNERSHIP-001
+  - PROP-F-CONTINUITY-001

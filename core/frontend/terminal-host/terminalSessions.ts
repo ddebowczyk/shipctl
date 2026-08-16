@@ -5,6 +5,8 @@ import type {
   ModuleTerminalSessionExitReason,
   ModuleTerminalSessionLifecycleEvent,
   ModuleTerminalSessionPresentation,
+  ModuleTerminalSessionLaunchRequest,
+  ModuleTerminalSessionUpdate,
   ModuleTerminalSessionsPort,
 } from "@shipctl/module-api";
 
@@ -15,7 +17,31 @@ export type TerminalSessionsRuntime = Pick<
   "launch" | "launchManaged" | "update" | "observe" | "stop" | "focus"
 > & {
   list(): readonly ModuleTerminalSession[];
+  launchForModule(
+    moduleId: string,
+    request: ModuleTerminalSessionLaunchRequest,
+  ): Promise<ModuleTerminalSession>;
 };
+
+export interface ActivationTerminalSessionsRuntime {
+  getDimensions(): ModuleTerminalDimensions;
+  list(moduleId: string): readonly ModuleTerminalSession[];
+  launch(
+    moduleId: string,
+    request: ModuleTerminalSessionLaunchRequest,
+  ): Promise<ModuleTerminalSession>;
+  update(
+    moduleId: string,
+    sessionId: string,
+    patch: ModuleTerminalSessionUpdate,
+  ): Promise<ModuleTerminalSession>;
+  focus(moduleId: string, sessionId: string): Promise<ModuleTerminalSession>;
+  stop(moduleId: string, sessionId: string): Promise<ModuleTerminalSession>;
+  subscribe(
+    moduleId: string,
+    listener: (event: ModuleTerminalSessionLifecycleEvent) => void | Promise<void>,
+  ): () => void;
+}
 
 export type TerminalSessionOwnerRequest = Extract<
   ModuleTerminalSessionLifecycleEvent,
@@ -123,6 +149,13 @@ function replayAdoptions(
   }
 }
 
+function ownedSession(moduleId: string, sessionId: string): ModuleTerminalSession {
+  const session = getRuntime().list().find((candidate) =>
+    candidate.id === sessionId && candidate.moduleId === moduleId);
+  if (!session) throw new Error(`Terminal session ${sessionId} is unavailable`);
+  return session;
+}
+
 export function bindTerminalSessionsRuntime(next: TerminalSessionsRuntime) {
   runtime = next;
   for (const listener of listeners) replayAdoptions(listener);
@@ -187,5 +220,40 @@ export const MODULE_TERMINAL_SESSIONS: ModuleTerminalSessionsPort = {
     listeners.add(listener);
     replayAdoptions(listener);
     return () => listeners.delete(listener);
+  },
+};
+
+/** Activation-attributed facade used by the semantic terminal-session service. */
+export const ACTIVATION_TERMINAL_SESSIONS: ActivationTerminalSessionsRuntime = {
+  getDimensions: () => dimensionsProvider(),
+  list: (moduleId) => getRuntime().list().filter((session) => session.moduleId === moduleId),
+  launch: (moduleId, request) => getRuntime().launchForModule(moduleId, request),
+  async update(moduleId, sessionId, patch) {
+    ownedSession(moduleId, sessionId);
+    return getRuntime().update(sessionId, patch);
+  },
+  async focus(moduleId, sessionId) {
+    const session = ownedSession(moduleId, sessionId);
+    await getRuntime().focus(sessionId);
+    return session;
+  },
+  async stop(moduleId, sessionId) {
+    const session = ownedSession(moduleId, sessionId);
+    await getRuntime().stop(sessionId);
+    return session;
+  },
+  subscribe(moduleId, listener) {
+    const scoped = (event: ModuleTerminalSessionLifecycleEvent) => {
+      if (event.session.moduleId === moduleId) return listener(event);
+    };
+    listeners.add(scoped);
+    if (runtime) {
+      for (const session of runtime.list()) {
+        if (session.moduleId === moduleId) {
+          void Promise.resolve(listener({ type: "adopted", session })).catch(() => undefined);
+        }
+      }
+    }
+    return () => listeners.delete(scoped);
   },
 };

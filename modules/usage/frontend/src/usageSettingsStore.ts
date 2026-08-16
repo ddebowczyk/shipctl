@@ -1,8 +1,7 @@
 import { create } from "zustand";
-import type { ModuleGlobalDataPort } from "@shipctl/module-api";
+import type { ModuleJsonValue } from "@shipctl/module-api";
+import type { UsageSettingsDataClient } from "./usageSettingsDataClient";
 import type { UsageSettings, UsageProvider, ProviderBudgetConfig } from "./types";
-
-const USAGE_SETTINGS_KEY = "usage";
 
 const DEFAULT_SETTINGS: UsageSettings = {
   claude: { show: true, budgetMode: "subscription", monthlyBudget: null },
@@ -13,7 +12,7 @@ const DEFAULT_SETTINGS: UsageSettings = {
   pi: { show: false, budgetMode: "custom", monthlyBudget: null },
 };
 
-let globalData: ModuleGlobalDataPort | null = null;
+let pluginData: UsageSettingsDataClient | null = null;
 let persistedDocument: Record<string, unknown> = {};
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -58,14 +57,14 @@ function mergeSettingsDocument(settings: UsageSettings): Record<string, unknown>
   ]);
 }
 
-export function configureUsageSettingsPersistence(port: ModuleGlobalDataPort | null) {
-  globalData = port;
-  if (!port) persistedDocument = {};
+export function configureUsageSettingsPersistence(client: UsageSettingsDataClient | null) {
+  pluginData = client;
+  if (!client) persistedDocument = {};
 }
 
-function persistence(): ModuleGlobalDataPort {
-  if (!globalData) throw new Error("Usage settings persistence is unavailable");
-  return globalData;
+function persistence(): UsageSettingsDataClient {
+  if (!pluginData) throw new Error("Usage settings persistence is unavailable");
+  return pluginData;
 }
 
 interface UsageSettingsStore {
@@ -86,7 +85,7 @@ export const useUsageSettingsStore = create<UsageSettingsStore>((set, get) => ({
   error: null,
   loadSettings: async () => {
     try {
-      const value = await persistence().read(USAGE_SETTINGS_KEY);
+      const value = await persistence().read();
       persistedDocument = asRecord(value);
       const settings = normalizeSettings(value);
       set({ settings, hasLoaded: true, error: null });
@@ -103,7 +102,7 @@ export const useUsageSettingsStore = create<UsageSettingsStore>((set, get) => ({
     set({ settings: next, isSaving: true });
     try {
       const document = mergeSettingsDocument(next);
-      await persistence().replace(USAGE_SETTINGS_KEY, document);
+      await persistence().replace(document as ModuleJsonValue);
       persistedDocument = document;
       set({ isSaving: false, error: null });
     } catch (error) {

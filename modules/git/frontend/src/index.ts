@@ -2,22 +2,22 @@ import type { ProjectFacts, ShipctlModule } from "@shipctl/module-api";
 
 import "./git.css";
 
-import * as client from "./client";
+import { gitClientFor } from "./gitClient";
 import { useGitStore } from "./store";
 import type { GitStatus } from "./types";
 
 const factCache = new WeakMap<GitStatus, ProjectFacts>();
 
 function factsForStatus(status: GitStatus | undefined): ProjectFacts | null {
-  if (!status?.is_git_repo) return null;
+  if (!status?.isRepository) return null;
   const cached = factCache.get(status);
   if (cached) return cached;
   const facts: ProjectFacts = {
-    ...(status.branch
-      ? { revision: { label: status.branch, state: status.dirty ? "changed" : "clean" } }
+    ...(status.branchName
+      ? { revision: { label: status.branchName, state: status.dirty ? "changed" : "clean" } }
       : {}),
-    ...(status.worktree_parent
-      ? { lineage: { parentLabel: status.worktree_parent } }
+    ...(status.worktreeParentProjectId
+      ? { lineage: { parentLabel: status.worktreeParentProjectId } }
       : {}),
   };
   factCache.set(status, facts);
@@ -88,26 +88,29 @@ export const gitModule = {
       useGitStore.getState().projectGitStatus[project.path],
     ),
     subscribe: (listener) => useGitStore.subscribe(listener),
-    refresh: (project) => useGitStore.getState().refreshStatus(project.path),
   },
   projectLifecycle: {
-    onProjectsChanged: (projectPaths) => useGitStore.getState().refreshAll(projectPaths),
-    onFilesystemChanged: (projectPaths) => useGitStore.getState().refreshAll(projectPaths),
+    onProjectsChanged: (projectPaths, _services, activation) => (
+      useGitStore.getState().refreshAll(projectPaths, gitClientFor(activation))
+    ),
+    onFilesystemChanged: (projectPaths, _services, activation) => (
+      useGitStore.getState().refreshAll(projectPaths, gitClientFor(activation))
+    ),
     onProjectRemoved: (projectPath) => useGitStore.getState().removeProject(projectPath),
   },
   projectImport: {
     id: "git.related-projects",
     moduleId: "shipctl.git",
-    relatedPaths: async (projectPath, { expandRelated }, services) => {
-      const worktrees = await client.gitListWorktrees(projectPath);
-      const current = worktrees.find((worktree) => worktree.path === projectPath);
+    relatedPaths: async (projectPath, { expandRelated }, services, activation) => {
+      const worktrees = await gitClientFor(activation).listWorktrees(projectPath);
+      const current = worktrees.find((worktree) => worktree.projectId === projectPath);
       if (!current) return [];
-      if (!current.is_main) {
-        return worktrees.filter((worktree) => worktree.is_main).map((worktree) => worktree.path);
+      if (!current.isMain) {
+        return worktrees.filter((worktree) => worktree.isMain).map((worktree) => worktree.projectId);
       }
       const autoImportWorktrees = services.settings.getSnapshot().values.autoImportWorktrees !== false;
       return expandRelated && autoImportWorktrees
-        ? worktrees.filter((worktree) => !worktree.is_main).map((worktree) => worktree.path)
+        ? worktrees.filter((worktree) => !worktree.isMain).map((worktree) => worktree.projectId)
         : [];
     },
   },

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCcw } from "lucide-react";
-import { getUsageOverview, refreshUsageData } from "./client";
+import type { GlobalSurfaceContributionProps } from "@shipctl/module-api";
+import { usageSourcesClientFor } from "./usageSourcesClient";
 import { subscribeUsageIngestCompleted } from "./ingestCompleted";
 import type {
   UsageCost,
@@ -706,7 +707,8 @@ function OverviewPanel({ overview, snapshots }: { overview: UsageOverview; snaps
   );
 }
 
-export default function UsagePanel() {
+export default function UsagePanel({ activation }: GlobalSurfaceContributionProps) {
+  const usageSources = useMemo(() => usageSourcesClientFor(activation), [activation]);
   const fetchSnapshots = useUsageStore((s) => s.fetchSnapshots);
   const snapshots = useUsageStore((s) => s.snapshots);
   const loading = useUsageStore((s) => s.loading);
@@ -719,11 +721,11 @@ export default function UsagePanel() {
   const fetchOverview = useCallback(async () => {
     setOverviewLoading(true);
     try {
-      setOverview(await getUsageOverview(window));
+      setOverview(await usageSources.getUsageOverview(window));
     } finally {
       setOverviewLoading(false);
     }
-  }, [window]);
+  }, [usageSources, window]);
 
   // Fetch overview on initial mount
   useEffect(() => {
@@ -737,10 +739,10 @@ export default function UsagePanel() {
   }, [fetchOverview]);
 
   const handleRefresh = useCallback(async () => {
-    await refreshUsageData();
+    await usageSources.refreshUsageData();
     void fetchSnapshots();
     void fetchOverview();
-  }, [fetchOverview, fetchSnapshots]);
+  }, [fetchOverview, fetchSnapshots, usageSources]);
 
   const isBusy = loading || overviewLoading;
 
@@ -758,7 +760,7 @@ export default function UsagePanel() {
                 // fetchOverview depends on window via its useCallback dep —
                 // but the store hasn't flushed yet, so build a fresh fetcher inline.
                 setOverviewLoading(true);
-                getUsageOverview(timeWindow.key).then(setOverview).finally(() => setOverviewLoading(false));
+                usageSources.getUsageOverview(timeWindow.key).then(setOverview).finally(() => setOverviewLoading(false));
               }}
             >
               {timeWindow.label}

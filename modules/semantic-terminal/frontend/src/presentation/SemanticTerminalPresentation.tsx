@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react";
-import type { TerminalPresentationProps } from "@shipctl/module-api";
+import {
+  semanticTerminalsService,
+  type TerminalPresentationProps,
+} from "@shipctl/module-api";
 
 import "./semanticTerminalPresentation.css";
 
@@ -15,11 +18,13 @@ import {
 
 /** The selected semantic terminal's module-owned browser presentation. */
 export function SemanticTerminalPresentation({
+  activation,
   terminalId,
   descriptor,
   visible,
   services,
 }: TerminalPresentationProps) {
+  const semanticTerminals = activation.services.require(semanticTerminalsService);
   const containerRef = useRef<HTMLDivElement>(null);
   const bindingRef = useRef<TerminalContainerBinding | null>(null);
   const lifecycleRef = useRef(descriptor.lifecycle);
@@ -43,13 +48,14 @@ export function SemanticTerminalPresentation({
       notices: services.notices,
       externalLinks: services.externalLinks,
       presentation,
+      semanticTerminals,
     };
     // Keep the harness behind a literal Vite development branch. It must be
     // installed only when a real semantic presentation exists, and Rollup
     // must remove its dynamic import from a release bundle.
     if (import.meta.env.DEV) {
       void import("../scenarios/semanticTerminalScenarioEntry.ts").then((module) => {
-        module.installSemanticTerminalScenarioHarness();
+        module.installSemanticTerminalScenarioHarness(semanticTerminals);
       });
     }
     const binding = bindTerminalContainer(
@@ -68,7 +74,7 @@ export function SemanticTerminalPresentation({
       binding.dispose();
       bindingRef.current = null;
     };
-  }, [services, terminalId]);
+  }, [semanticTerminals, services, terminalId]);
 
   useEffect(() => {
     if (visible) bindingRef.current?.reveal();

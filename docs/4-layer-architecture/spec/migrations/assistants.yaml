@@ -1,0 +1,47 @@
+---
+$schema: ../schema/module-disposition.v1.schema.yaml
+schema_version: module-disposition/v1
+id: assistants
+status: migrating
+source_manifest: modules/assistants/module.yaml
+current:
+  frontend: modules/assistants/frontend
+  backend_crates:
+    - modules/assistants/backend
+  host_crates:
+    - modules/assistants/host
+  direct_tauri: true
+  static_activation: true
+target:
+  roles: [compound]
+  responsibilities:
+    - Provide assistant launch and recovery policy as plugin application logic.
+    - Publish assistant session views and commands through typed contributions.
+  capabilities:
+    - processes
+    - terminal-sessions
+    - assistant-launch
+    - credential-store
+    - plugin-data
+    - workspace
+phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
+prerequisites:
+  - Characterize launch, capture, resume, placement, and shutdown behavior.
+  - Define provider-neutral assistant launch and recovery records.
+compatibility_paths:
+  - Keep the built-in module active through the same Cordis activation path.
+  - Keep native commands behind typed capability clients during migration.
+deletion_gates:
+  - id: DELETE-D-NATIVE-MODULE
+    proof_ids: [PROP-D-PARITY-001, PROP-D-AUTHORITY-001]
+    targets:
+      - modules/assistants/backend
+      - modules/assistants/host
+  - id: DELETE-E-STATIC-IMPORT
+    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    targets:
+      - modules/assistants/frontend/src/index.ts
+  - id: DELETE-F-RESTART-LIFECYCLE
+    proof_ids: [PROP-F-CONTINUITY-001, PROP-F-RESTART-001]
+    targets:
+      - modules/assistants/frontend/src/activation.ts

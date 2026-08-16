@@ -106,8 +106,8 @@ test("snapshot and persisted-settings stores bound success and failure behavior"
   assert.match(snapshots, /error instanceof Error \? error\.message : "Failed to fetch usage snapshots"/);
   assert.match(settings, /const prev = get\(\)\.settings/);
   assert.match(settings, /set\(\{ settings: next, isSaving: true \}\)/);
-  assert.match(settings, /persistence\(\)\.read\(USAGE_SETTINGS_KEY\)/);
-  assert.match(settings, /persistence\(\)\.replace\(USAGE_SETTINGS_KEY, document\)/);
+  assert.match(settings, /persistence\(\)\.read\(\)/);
+  assert.match(settings, /persistence\(\)\.replace\(document as ModuleJsonValue\)/);
   assert.match(settings, /\.\.\.asRecord\(persistedDocument\[provider\]\)/);
   assert.match(settings, /settings: prev,[\s\S]*"Failed to save usage settings"/);
 });
@@ -115,6 +115,8 @@ test("snapshot and persisted-settings stores bound success and failure behavior"
 test("Usage remains global across project switches and refreshes through its declared route", () => {
   const shell = source("../../../../core/frontend/shell/AppShell.tsx");
   const adapter = source("../src/index.ts");
+  const client = source("../src/usageSourcesClient.ts");
+  const dataClient = source("../src/usageSettingsDataClient.ts");
   const completion = source("../src/ingestCompleted.ts");
   const panel = source("../src/UsagePanel.tsx");
   const store = source("../src/usageStore.ts");
@@ -122,11 +124,20 @@ test("Usage remains global across project switches and refreshes through its dec
   assert.doesNotMatch(store, /useRepoStore|activeRepoPath|projectPath/);
   assert.doesNotMatch(shell, /useUsageStore|useUsageSettingsStore|refreshUsageData/);
   assert.match(adapter, /useUsageSettingsStore\.getState\(\)\.loadSettings\(\)/);
-  assert.match(adapter, /schedule: \{ kind: "delay", delayMs: 3_000 \}/);
-  assert.match(adapter, /schedule: \{ kind: "interval", intervalMs: 60_000 \}/);
-  assert.match(adapter, /await refreshUsageData\(\);[\s\S]*await fetchUsageSnapshots\(\)/);
+  assert.match(adapter, /cron: "\* \* \* \* \* Etc\/UTC"/);
+  assert.match(adapter, /target: \{ kind: "channel", endpoint: USAGE_REFRESH_CHANNEL \}/);
+  assert.doesNotMatch(adapter, /delayMs|intervalMs|setTimeout|setInterval/);
+  assert.match(adapter, /await activeUsageSourcesClient\(\)\.refreshUsageData\(\);[\s\S]*await fetchUsageSnapshots\(\)/);
+  assert.match(adapter, /const usageSources = usageSourcesClientFor\(activation\)/);
+  assert.match(adapter, /configureUsageSourcesClient\(usageSources\)/);
+  assert.match(adapter, /usageSources\.subscribeChanges/);
+  assert.match(adapter, /configureUsageSourcesClient\(null\)/);
+  assert.match(client, /activation\.services\.require\(usageSourcesService\)/);
+  assert.match(dataClient, /activation\.services\.require\(pluginDataService\)/);
+  assert.doesNotMatch(dataClient, /@tauri-apps|invoke\(/);
   assert.match(adapter, /usage\.ingest-completed/);
   assert.match(adapter, /publishes:[\s\S]*usage\.ingest-completed/);
+  assert.match(adapter, /semantic Usage Sources observer performs the refresh/);
   assert.match(panel, /subscribeUsageIngestCompleted\(fetchOverview\)/);
   assert.doesNotMatch(adapter, /["']usage-ingest-complete["']/);
   assert.match(completion, /Promise\.allSettled/);
@@ -151,7 +162,7 @@ test("usage refresh exposes a strict, bounded scheduler-directed message contrac
   );
   assert.match(
     adapter,
-    /async function refreshUsageAndSnapshots\(\) \{\s*await refreshUsageData\(\);\s*await fetchUsageSnapshots\(\);\s*\}/,
+    /async function refreshUsageAndSnapshots\(\) \{\s*await activeUsageSourcesClient\(\)\.refreshUsageData\(\);\s*await fetchUsageSnapshots\(\);\s*\}/,
   );
   assert.match(adapter, /one pending[\s\S]*refresh coalescing semantics/);
 
@@ -201,7 +212,9 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
     "terminal_host",
     "appearance",
   ].map((capability) => source(`../../../../core/tauri/src/${capability}.rs`)).join("\n");
-  const client = source("../src/client.ts");
+  const client = source("../src/usageSourcesClient.ts");
+  const trustedAdapter = source("../../../../core/frontend/platform/usageSources.ts");
+  const packageManifest = source("../package.json");
   const plugin = source("../../backend/src/lib.rs");
   const usage = source("../../backend/src/usage/mod.rs");
   const providers = source("../../backend/src/usage/providers.rs");
@@ -210,9 +223,9 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
   assert.doesNotMatch(host, /usage::run_background_ingest\(&db\)/);
   assert.match(
     installer,
-    /shipctl_module_usage_host::install\([\s\S]*workspace\.clone\(\)[\s\S]*message_bridges\.clone\(\)[\s\S]*paths\.usage_database\.clone\(\)/,
+    /shipctl_module_usage_host::install\([\s\S]*plugin_data\.clone\(\)[\s\S]*message_bridges\.clone\(\)[\s\S]*paths\.usage_database\.clone\(\)/,
   );
-  assert.match(adapter, /builder\.plugin\(shipctl_module_usage::init\([\s\S]*host_services\(workspace, messages\)[\s\S]*database_path/);
+  assert.match(adapter, /builder\.plugin\(shipctl_module_usage::init\([\s\S]*host_services\(plugin_data, messages\)[\s\S]*database_path/);
   assert.match(plugin, /plugin::Builder::new\(PLUGIN_NAME\)/);
   assert.match(plugin, /app\.manage\(UsagePluginState/);
   assert.match(plugin, /spawn_ingest\(state\.db\.clone\(\), state\.services\.clone\(\)\)/);
@@ -224,8 +237,13 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
     /ControlServer::start[\s\S]*modules::start_background_tasks\(app\.handle\(\), reconcile_external_sources\)/,
   );
   assert.match(plugin, /"plugin:shipctl-usage\|get_all_usage_snapshots"/);
-  assert.match(client, /invoke\("plugin:shipctl-usage\|get_all_usage_snapshots"\)/);
-  assert.match(client, /invoke\("plugin:shipctl-usage\|refresh_usage_data"\)/);
+  assert.match(client, /activation\.services\.require\(usageSourcesService\)/);
+  assert.doesNotMatch(client, /@tauri-apps|invoke\(/);
+  assert.doesNotMatch(packageManifest, /@tauri-apps\/api/);
+  assert.match(trustedAdapter, /plugin:shipctl-usage\|get_all_usage_snapshots/);
+  assert.match(trustedAdapter, /plugin:shipctl-usage\|get_usage_overview/);
+  assert.match(trustedAdapter, /plugin:shipctl-usage\|refresh_usage_data/);
+  assert.match(trustedAdapter, /observeUsageSourceMessageFrame/);
   assert.doesNotMatch(commands, /get_all_usage_snapshots|get_usage_settings|refresh_usage_data/);
   assert.doesNotMatch(host, /commands::get_all_usage_snapshots/);
   assert.doesNotMatch(host, /commands::refresh_usage_data/);

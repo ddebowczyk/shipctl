@@ -1,0 +1,104 @@
+---
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: shipctl://architecture/schema/capability.v1
+title: Shipctl platform capability record
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - id
+  - version
+  - title
+  - status
+  - layer
+  - consumers
+  - current_implementations
+  - target_owners
+  - operations
+  - required_grants
+  - ownership
+  - depends_on
+  - property_ids
+properties:
+  $schema:
+    type: string
+  schema_version:
+    const: capability/v1
+  id:
+    type: string
+    pattern: ^[a-z][a-z0-9]*(-[a-z0-9]+)*$
+  version:
+    type: string
+    pattern: ^[0-9]+\.[0-9]+\.[0-9]+$
+  title:
+    type: string
+  status:
+    enum: [proposed, specified, implementing, implemented, deprecated]
+  layer:
+    enum: [native-kernel, tauri-adapter, application-runtime]
+  consumers:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+  current_implementations:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+  target_owners:
+    type: object
+    additionalProperties: false
+    required: [provider, tauri_adapter, typescript_client]
+    properties:
+      provider:
+        type: string
+      tauri_adapter:
+        type: string
+      typescript_client:
+        type: string
+  operations:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, kind, contract]
+      properties:
+        id:
+          type: string
+          pattern: ^[a-z][a-zA-Z0-9]*$
+        kind:
+          enum: [request, event, stream]
+        contract:
+          type: string
+  required_grants:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+  ownership:
+    type: object
+    additionalProperties: false
+    required: [authority, resources, activation_scope]
+    properties:
+      authority:
+        type: string
+      resources:
+        type: string
+      activation_scope:
+        type: string
+  depends_on:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+  property_ids:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+      pattern: ^PROP-[A-H]-[A-Z0-9-]+-[0-9]{3}$
+  open_questions:
+    type: array
+    items:
+      type: string

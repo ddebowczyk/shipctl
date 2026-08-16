@@ -1,20 +1,13 @@
 /** Browser composition for one module-owned semantic terminal. */
 
-import type { ModuleTerminalPresentationPort } from "@shipctl/module-api";
-
 import {
-  anchorSemanticTerminal,
-  attachSemanticTerminal,
-  creditSemanticTerminalScreen,
-  detachSemanticTerminal,
-  historySemanticTerminal,
-  inputSemanticTerminal,
-  isSemanticTerminalPasteSafe,
-  releaseSemanticTerminalAnchor,
-  resolveSemanticTerminalAnchor,
-  resizeSemanticTerminal,
-  selectSemanticTerminal,
-} from "../protocol/semanticTerminalClient.ts";
+  SEMANTIC_TERMINALS_ERROR_CODES,
+  type ModuleTerminalPresentationPort,
+  type SemanticServiceError,
+  type SemanticTerminalScreenAttachment,
+  type SemanticTerminalsErrorCode,
+  type SemanticTerminalsService,
+} from "@shipctl/module-api";
 import { reportTerminalEffectOutcome, reviewTerminalPaste } from "../browserInteraction.ts";
 import type { TerminalInputOutcome } from "../semanticTypes.ts";
 import {
@@ -53,7 +46,27 @@ const BROWSER_TIMING: SemanticTerminalViewSessionPorts["timing"] = {
   fontsReady: () => ("fonts" in document ? document.fonts.ready.then(() => undefined) : null),
 };
 
-const EXPECTED_INPUT_UNAVAILABILITY = new Set(["not_found", "exited", "closing", "shutting_down"]);
+class SemanticTerminalRequestError extends Error {
+  readonly code: SemanticTerminalsErrorCode;
+
+  constructor(error: SemanticServiceError<SemanticTerminalsErrorCode>) {
+    super(error.message);
+    this.name = "SemanticTerminalRequestError";
+    this.code = error.code;
+  }
+}
+
+async function semanticResult<Value>(
+  operation: Promise<{
+    readonly result:
+      | { readonly ok: true; readonly value: Value }
+      | { readonly ok: false; readonly error: SemanticServiceError<SemanticTerminalsErrorCode> };
+  }>,
+): Promise<Value> {
+  const outcome = await operation;
+  if (outcome.result.ok) return outcome.result.value;
+  throw new SemanticTerminalRequestError(outcome.result.error);
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -66,19 +79,22 @@ function errorMessage(error: unknown): string {
 async function submitSemanticInput(
   terminalId: string,
   isRunning: () => boolean,
-  presentation: ModuleTerminalPresentationPort,
+  semanticTerminals: SemanticTerminalsService,
   input: TerminalInput,
 ): Promise<TerminalInputOutcome> {
   if (!isRunning()) return { status: "unavailable", reason: "exited" };
-  try {
-    const encodedBytes = await inputSemanticTerminal(terminalId, input);
-    return { status: "accepted", encodedBytes };
-  } catch (error) {
-    const code = presentation.errorCode(error);
-    return code && EXPECTED_INPUT_UNAVAILABILITY.has(code)
-      ? { status: "unavailable", reason: code }
-      : { status: "failed", error };
+  const outcome = await semanticTerminals.input.execute({ terminalId, input });
+  if (outcome.result.ok) {
+    return { status: "accepted", encodedBytes: outcome.result.value.encodedBytes };
   }
+  const { error } = outcome.result;
+  const unavailable = error.code === SEMANTIC_TERMINALS_ERROR_CODES.notFound
+    || error.code === SEMANTIC_TERMINALS_ERROR_CODES.unavailable
+    || error.code === SEMANTIC_TERMINALS_ERROR_CODES.activationDisposed
+    || error.code === SEMANTIC_TERMINALS_ERROR_CODES.cancelled;
+  return unavailable
+    ? { status: "unavailable", reason: error.code }
+    : { status: "failed", error: new SemanticTerminalRequestError(error) };
 }
 
 function bindOrReusePresentation(
@@ -118,6 +134,7 @@ export interface SemanticTerminalBrowserPorts {
   };
   readonly externalLinks: { open(url: string): Promise<void> };
   readonly presentation: ModuleTerminalPresentationPort;
+  readonly semanticTerminals: SemanticTerminalsService;
 }
 
 export function createSemanticTerminalSessionPorts(
@@ -129,8 +146,15 @@ export function createSemanticTerminalSessionPorts(
     tone: "error", title, message: errorMessage(error),
   });
   const model = terminalModel(terminalId);
+  const attachments = new Map<string, {
+    readonly attachment: SemanticTerminalScreenAttachment;
+    readonly baselineRevision: number;
+  }>();
   const { surface } = bindOrReusePresentation(terminalId, model, container, ports.presentation, {
-    select: (request) => selectSemanticTerminal(terminalId, request).catch((error: unknown) => {
+    select: (request) => semanticResult(ports.semanticTerminals.select.execute({
+      terminalId,
+      request,
+    })).catch((error: unknown) => {
       notify("Terminal selection failed", error);
       return null;
     }),
@@ -139,7 +163,9 @@ export function createSemanticTerminalSessionPorts(
     },
     reviewPaste: (text, submit) => reviewTerminalPaste({
       confirmationEnabled: () => ports.presentation.getSnapshot().confirmUnsafePaste,
-      classify: isSemanticTerminalPasteSafe,
+      classify: (text) => semanticResult(
+        ports.semanticTerminals.inspectPaste.execute({ text }),
+      ).then(({ safe }) => safe),
       requestConfirmation: (accept, cancel) => ports.notices.push({
         tone: "info",
         title: "Paste multiple lines?",
@@ -171,23 +197,110 @@ export function createSemanticTerminalSessionPorts(
     surface,
     model,
     runtime: {
-      attach: (onEvent) => attachSemanticTerminal(
-        terminalId,
-        true,
-        onEvent,
-        (milliseconds) => ports.presentation.recordMetric(terminalId, "decode", milliseconds),
-      ),
-      detach: detachSemanticTerminal,
-      creditScreen: creditSemanticTerminalScreen,
+      attach: async (onEvent) => {
+        let lastSequence = 0;
+        const attachment = await ports.semanticTerminals.screens.attach({
+          terminalId,
+          claimsResize: true,
+          afterSequence: null,
+          initialCredit: 0,
+        }, (delivery) => {
+          if (delivery.type === "frame") {
+            lastSequence = delivery.sequence;
+            if (delivery.value.effects.length > 0) {
+              onEvent({
+                event: "effects",
+                sequence: delivery.sequence,
+                effects: delivery.value.effects,
+              });
+            }
+            onEvent({
+              event: "screen",
+              sequence: delivery.sequence,
+              revision: delivery.value.revision,
+              state: delivery.value.state,
+            });
+            return;
+          }
+          if (delivery.type === "gap") {
+            lastSequence = delivery.earliestAvailableSequence;
+            onEvent({
+              event: "resync_required",
+              sequence: delivery.earliestAvailableSequence,
+              reason: "semantic screen history is unavailable",
+            });
+            return;
+          }
+          if (delivery.resumable) {
+            onEvent({
+              event: "resync_required",
+              sequence: lastSequence,
+              reason: delivery.reason,
+            });
+          } else {
+            onEvent({ event: "exited", sequence: lastSequence });
+          }
+        });
+        lastSequence = attachment.snapshot.revision;
+        attachments.set(attachment.id, {
+          attachment,
+          baselineRevision: attachment.snapshot.revision,
+        });
+        return {
+          attachmentId: attachment.id,
+          live: attachment.live,
+          snapshot: {
+            descriptor: { revision: attachment.snapshot.revision },
+            sequenceBoundary: attachment.snapshot.revision,
+            state: attachment.snapshot.state,
+          },
+          activate: () => attachment.activate(),
+        };
+      },
+      detach: async (attachmentId) => {
+        const held = attachments.get(attachmentId);
+        attachments.delete(attachmentId);
+        await held?.attachment.dispose();
+      },
+      creditScreen: async (attachmentId, committedSequence) => {
+        const held = attachments.get(attachmentId);
+        if (!held) throw new Error(`Semantic terminal attachment ${attachmentId} is unavailable`);
+        if (committedSequence !== held.baselineRevision) {
+          held.attachment.acknowledge(committedSequence);
+        }
+        held.attachment.grant(1);
+      },
       acceptsInput: ports.isRunning,
-      sendInput: (input) => submitSemanticInput(terminalId, ports.isRunning, ports.presentation, input),
-      readHistory: (startRow, rows) => historySemanticTerminal(terminalId, startRow, rows),
+      sendInput: (input) => submitSemanticInput(
+        terminalId,
+        ports.isRunning,
+        ports.semanticTerminals,
+        input,
+      ),
+      readHistory: (startRow, rows) => semanticResult(
+        ports.semanticTerminals.history.execute({ terminalId, startRow, rows }),
+      ),
       recordModelCommit: (milliseconds) => ports.presentation.recordMetric(terminalId, "modelCommit", milliseconds),
-      resize: (attachmentId, size) => resizeSemanticTerminal(terminalId, attachmentId, size.columns, size.rows),
+      resize: async (attachmentId, size) => {
+        const held = attachments.get(attachmentId);
+        if (!held) throw new Error(`Semantic terminal attachment ${attachmentId} is unavailable`);
+        await semanticResult(ports.semanticTerminals.resize.execute({
+          terminalId,
+          attachmentId: held.attachment.id,
+          columns: size.columns,
+          rows: size.rows,
+        }));
+      },
       anchors: {
-        anchor: (space, at) => anchorSemanticTerminal(terminalId, space, at),
-        resolveAnchor: (anchor) => resolveSemanticTerminalAnchor(terminalId, anchor),
-        releaseAnchor: (anchor) => releaseSemanticTerminalAnchor(terminalId, anchor),
+        anchor: (space, at) => semanticResult(
+          ports.semanticTerminals.createAnchor.execute({ terminalId, space, at }),
+        ),
+        resolveAnchor: (anchorId) => semanticResult(
+          ports.semanticTerminals.resolveAnchor.execute({ terminalId, anchorId }),
+        ),
+        releaseAnchor: (anchorId) => semanticResult(
+          ports.semanticTerminals.releaseAnchor.execute({ terminalId, anchorId }),
+        ),
       },
     },
     timing: BROWSER_TIMING,

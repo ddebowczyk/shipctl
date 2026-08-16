@@ -1,10 +1,9 @@
-import type { ModuleMessages } from "../protocol/messages";
+import type { ModuleActivationContext } from "../protocol/semanticServices";
 import type { PanelHostPort } from "./panels";
 import type { ModuleHostServices } from "./services";
 
 export interface ModuleHost {
+  readonly activation: ModuleActivationContext;
   readonly panels: PanelHostPort;
   readonly services: ModuleHostServices;
-  /** Present for activations whose artifact declares message contributions. */
-  readonly messages?: ModuleMessages;
 }

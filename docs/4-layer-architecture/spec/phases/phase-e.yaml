@@ -1,0 +1,333 @@
+---
+$schema: ../schema/phase.v1.schema.yaml
+schema_version: phase/v1
+id: phase-e
+title: Immutable TypeScript application artifacts
+status: specified
+source: docs/4-layer-architecture/10-phase-e-immutable-plugin-artifacts.md
+depends_on: [phase-a, phase-b, phase-c]
+semantics:
+  - id: SEM-E-001
+    kind: MUST
+    rule: >-
+      Runtime installation consumes compiled immutable artifacts and never runs
+      TypeScript compilation or package-manager scripts.
+  - id: SEM-E-002
+    kind: MUST
+    rule: >-
+      Artifact identity includes a content digest and every import URL is
+      qualified by that digest.
+  - id: SEM-E-003
+    kind: MUST
+    rule: >-
+      Admitted declarations equal runtime registrations for services, grants,
+      messages, effects, and optional contributions.
+  - id: SEM-E-004
+    kind: MUST-NOT
+    rule: >-
+      React, React DOM, Cordis, and the plugin API must not be bundled in an
+      artifact; the host supplies their singleton identities.
+  - id: SEM-E-005
+    kind: MUST
+    rule: >-
+      Artifact import is passive and activation requires an explicit supervisor
+      action.
+  - id: SEM-E-006
+    kind: MUST-NOT
+    rule: >-
+      Invalid, incompatible, or tampered artifacts must not affect active state.
+  - id: SEM-E-007
+    kind: MUST
+    rule: >-
+      Built-in and installed artifacts use the same loader and runtime contract.
+  - id: SEM-E-008
+    kind: MUST
+    rule: >-
+      Admission fails closed on incompatible plugin API, manifest, service, or
+      contribution schema versions.
+  - id: SEM-E-009
+    kind: MUST
+    rule: >-
+      The application entrypoint is required, but React, CSS, assets, and all
+      presentation contributions are optional.
+properties:
+  - id: PROP-E-ARTIFACT-001
+    claim: >-
+      Packing, admission, reading, and canonicalization preserve manifest
+      meaning and every exact byte of a valid generated plugin tree.
+    shapes: [roundtrip]
+    evidence: [SEM-E-001, SEM-E-002]
+    domain:
+      generates: >-
+        Normal paths, JavaScript, CSS, assets, schemas, Unicode metadata, empty
+        optional directories, and file orders.
+      excludes: [files outside authoritative artifact contract limits]
+      strategy: Generate normalized path-byte tuples before manifest creation.
+      classifications: [code-only, headless, compound, unicode, empty-optional]
+    preconditions:
+      - Generated manifests pass the versioned schema.
+    oracle:
+      primary:
+        kind: roundtrip
+        description: >-
+          Compare retained path-byte tuples with admitted files and manifest.
+        independence: Retained values exist before the packer runs.
+      alternative:
+        kind: reference
+        description: >-
+          An independent archive reader builds a path-to-digest map.
+        independence: The reader and digest map do not use packer normalization.
+    failure_value: >-
+      Packaging changes asset bytes or loses a schema under a valid digest.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.artifact-roundtrip.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-TAMPER-001
+    claim: >-
+      Any covered byte, path, integrity, identity, or digest mutation fails
+      before artifact activation.
+    shapes: [safety]
+    evidence: [SEM-E-002, SEM-E-006]
+    domain:
+      generates: >-
+        Single and combined byte changes, traversal, symlinks, missing or extra
+        files, digest mismatch, and manifest mismatch.
+      excludes: [corruption after a separately successful native read]
+      strategy: Start with a valid artifact and apply typed mutations.
+      classifications: [byte, path, symlink, missing, extra, digest, manifest]
+    preconditions:
+      - Mutation starts from a valid generated artifact.
+    oracle:
+      primary:
+        kind: invariant
+        description: >-
+          Compare retained bytes and independently recomputed SHA-256 values.
+        independence: Digest computation is separate from admission code.
+      alternative:
+        kind: metamorphic
+        description: >-
+          Mutate every indexed field and require native preflight rejection.
+        independence: >-
+          Expected rejection follows mutation location, not parser output.
+    failure_value: A changed plugin.js runs under the admitted code digest.
+    runner:
+      language: rust
+      library: proptest
+      test_id: architecture.artifact-tamper.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-EXTERNALS-001
+    claim: >-
+      Every shared runtime import resolves to its host seed and no artifact
+      contains a bundled second copy.
+    shapes: [safety]
+    evidence: [SEM-E-004]
+    domain:
+      generates: >-
+        Plugin graphs importing React, React DOM, Cordis, plugin API, and
+        allowed bundled dependencies.
+      excludes: [minifier details that preserve module identity]
+      strategy: Generate dependency graphs and externalization selections.
+      classifications:
+        - all-external
+        - react-bundled
+        - cordis-bundled
+        - api-bundled
+    preconditions:
+      - The generated artifact build succeeds.
+    oracle:
+      primary:
+        kind: invariant
+        description: Inspect bundler metadata and runtime identity probes.
+        independence: Probes ignore plugin source declarations.
+      alternative:
+        kind: reference
+        description: >-
+          Inspect every emitted chunk for forbidden imports and signatures.
+        independence: >-
+          Whole-output inspection does not trust the bundler metafile.
+    failure_value: A second React copy breaks hooks at runtime.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.artifact-externals.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: proposed
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-MANIFEST-RUNTIME-001
+    claim: >-
+      A candidate activates only when its canonical runtime registration set
+      equals its admitted manifest declarations.
+    shapes: [differential]
+    evidence: [SEM-E-003, SEM-E-006]
+    domain:
+      generates: >-
+        Missing, extra, reordered, duplicate, or changed services, grants,
+        messages, effects, and contributions.
+      excludes: []
+      strategy: Generate declarations and registrations independently.
+      classifications: [equal, missing, extra, duplicate, changed]
+    preconditions:
+      - Artifact bytes and plugin API version are valid.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare independent native declaration and provisional runtime sets.
+        independence: >-
+          The collectors run on opposite sides of the loader boundary.
+      alternative:
+        kind: invariant
+        description: >-
+          Canary plugins attempt each declared and undeclared registration.
+        independence: Canary intent is fixed before runtime collection.
+    failure_value: >-
+      A plugin registers an undeclared menu command after admission.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.manifest-runtime.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-BUILTIN-PARITY-001
+    claim: >-
+      Commands through built-in artifact and static reference paths produce
+      equal public contributions, terminal launches, and notices.
+    shapes: [differential]
+    evidence: [SEM-E-007]
+    domain:
+      generates: >-
+        Saved commands, project paths, launch results, and service failures.
+      excludes: [pixel rendering]
+      strategy: Run the same generated actions against two isolated fake hosts.
+      classifications: [launch-success, launch-failure, notice, panel-action]
+    preconditions:
+      - Both paths receive equivalent in-memory services.
+    oracle:
+      primary:
+        kind: reference
+        description: Compare normalized catalogs and fake-host action logs.
+        independence: The isolated hosts do not share plugin state.
+      alternative:
+        kind: reference
+        description: >-
+          Compare visible results and ordered semantic command traces.
+        independence: The action trace is captured below contribution callbacks.
+    failure_value: Artifact commands launch terminals with changed metadata.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.commands-artifact-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: proposed
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-COMPATIBILITY-001
+    claim: >-
+      Admission accepts exactly the host and artifact version tuples allowed by
+      an independent compatibility model.
+    shapes: [differential]
+    evidence: [SEM-E-006, SEM-E-008]
+    domain:
+      generates: >-
+        API ranges, prereleases, schema versions, required and optional service
+        versions, contribution versions, absent requirements, and malformed
+        ranges.
+      excludes: []
+      strategy: Generate each compatibility dimension independently.
+      classifications:
+        - compatible
+        - api
+        - manifest
+        - service
+        - contribution
+        - malformed
+    preconditions:
+      - Version values are valid or explicit malformed generator cases.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          A small table evaluates dimensions and combines required ones
+          fail-closed.
+        independence: It calls neither manifest parser nor range evaluator.
+      alternative:
+        kind: reference
+        description: >-
+          Compare with a separate standards library and reviewed boundary cases.
+        independence: The reference library is not a runtime dependency.
+    failure_value: >-
+      A newer terminal stream contract activates on an older unsafe host.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.artifact-compatibility.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: proposed
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-HEADLESS-001
+    claim: >-
+      A valid headless artifact completes pack, admission, activation, service
+      use, inspection, and disposal without presentation declarations.
+    shapes: [roundtrip, state-machine]
+    evidence: [SEM-E-001, SEM-E-003, SEM-E-005, SEM-E-009]
+    domain:
+      generates: >-
+        Providers, consumers, background effects, commands, configuration, and
+        zero presentation files.
+      excludes: [native process crash]
+      strategy: Generate minimal and compound headless service graphs.
+      classifications: [provider, consumer, background, command, no-assets]
+    preconditions:
+      - Service versions and native grants are compatible.
+    oracle:
+      primary:
+        kind: roundtrip
+        description: >-
+          Compare manifest, admitted descriptor, inspection, and effect ledgers.
+        independence: The retained manifest exists before artifact loading.
+      alternative:
+        kind: reference
+        description: >-
+          Exercise a no-React artifact through native preflight and packaged
+          host.
+        independence: The packaged boundary does not use the in-memory ledger.
+    failure_value: >-
+      Admission assumes every plugin has a React component or stylesheet.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.headless-artifact.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: proposed
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+deliverables:
+  - A closed manifest and digest-qualified immutable artifact format.
+  - One no-React service artifact and the commands compound artifact.
+  - One loader and lifecycle contract for built-in and installed plugins.
+deletion_gates:
+  - id: DELETE-E-STATIC-IMPORT
+    condition: >-
+      Artifact integrity, parity, compatibility, and package proofs pass.
+    removes:
+      - Direct source import and root dependency of the migrated built-in.
+      - The legacy contribution allowlist after candidate validation parity.

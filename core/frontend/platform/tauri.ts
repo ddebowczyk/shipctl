@@ -82,17 +82,6 @@ export function saveWorkspace(
   return invoke("save_workspace", { repoPath, config });
 }
 
-export function getGlobalCapabilityData(capabilityId: string): Promise<unknown> {
-  return invoke("get_global_capability_data", { capabilityId });
-}
-
-export function replaceGlobalCapabilityData(
-  capabilityId: string,
-  value: unknown,
-): Promise<void> {
-  return invoke("replace_global_capability_data", { capabilityId, value });
-}
-
 export function getEditorSettings(): Promise<EditorSettings> {
   return invoke("get_editor_settings");
 }

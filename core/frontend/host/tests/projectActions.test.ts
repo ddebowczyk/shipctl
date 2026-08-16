@@ -4,6 +4,7 @@ import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import type {
+  ModuleActivationContext,
   ModuleHostServices,
   ProjectActionContribution,
   ProjectRef,
@@ -38,6 +39,8 @@ after(async () => {
 });
 
 const project: ProjectRef = { id: "/fixture", name: "fixture", path: "/fixture" };
+const activation = { disposed: false } as ModuleActivationContext;
+const activations = new Map([["fixture", activation]]);
 const services = {
   panels: {
     open: () => "fixture-panel",
@@ -47,14 +50,6 @@ const services = {
   appearance: {
     getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
     subscribe: () => () => undefined,
-  },
-  globalData: {
-    read: async () => undefined,
-    replace: async () => undefined,
-  },
-  projectData: {
-    read: async () => undefined,
-    replace: async () => undefined,
   },
   terminalSessions: {
     list: () => [],
@@ -109,7 +104,7 @@ test("group resolution omits a crashing contribution and keeps siblings", () => 
     },
   ];
 
-  const groups = resolveProjectActionGroups(project, services, contributions);
+  const groups = resolveProjectActionGroups(project, services, contributions, activations);
 
   assert.deepEqual(groups.map(({ label }) => label), ["Working"]);
 });
@@ -136,9 +131,82 @@ test("refresh waits for every contribution without propagating failures", async 
     },
   ];
 
-  await refreshProjectActions(project, services, contributions);
+  await refreshProjectActions(project, services, contributions, activations);
 
   assert.deepEqual(calls, ["crashing", "working"]);
+});
+
+test("project actions receive only their owning live activation", async () => {
+  const otherActivation = { disposed: false } as ModuleActivationContext;
+  const disposedActivation = { disposed: true } as ModuleActivationContext;
+  const calls: Array<[string, ModuleActivationContext]> = [];
+  const contributions: ProjectActionContribution[] = [
+    {
+      id: "fixture.live",
+      moduleId: "fixture",
+      getGroup: (_project, _services, received) => {
+        calls.push(["group", received]);
+        return null;
+      },
+      refresh: async (_project, _services, received) => {
+        calls.push(["refresh", received]);
+      },
+      subscribe: (_listener, _services, received) => {
+        calls.push(["subscribe", received]);
+        return undefined;
+      },
+    },
+    {
+      id: "other.live",
+      moduleId: "other",
+      getGroup: (_project, _services, received) => {
+        calls.push(["other-group", received]);
+        return null;
+      },
+    },
+    {
+      id: "disposed.action",
+      moduleId: "disposed",
+      getGroup: () => {
+        throw new Error("disposed contribution must not run");
+      },
+      refresh: async () => {
+        throw new Error("disposed contribution must not run");
+      },
+      subscribe: () => {
+        throw new Error("disposed contribution must not run");
+      },
+    },
+    {
+      id: "missing.action",
+      moduleId: "missing",
+      getGroup: () => {
+        throw new Error("unowned contribution must not run");
+      },
+    },
+  ];
+  const ownedActivations = new Map([
+    ["fixture", activation],
+    ["other", otherActivation],
+    ["disposed", disposedActivation],
+  ]);
+
+  resolveProjectActionGroups(project, services, contributions, ownedActivations);
+  await refreshProjectActions(project, services, contributions, ownedActivations);
+  const cleanup = subscribeProjectActions(
+    () => undefined,
+    services,
+    contributions,
+    ownedActivations,
+  );
+  cleanup();
+
+  assert.deepEqual(calls, [
+    ["group", activation],
+    ["other-group", otherActivation],
+    ["refresh", activation],
+    ["subscribe", activation],
+  ]);
 });
 
 test("subscriptions and cleanups isolate contribution failures", () => {
@@ -168,6 +236,7 @@ test("subscriptions and cleanups isolate contribution failures", () => {
     () => calls.push("notified"),
     services,
     contributions,
+    activations,
   );
   cleanup();
 
@@ -192,7 +261,12 @@ test("inline interactive actions remain data until the host opens their surface"
     },
   ];
 
-  const [group] = resolveProjectActionGroups(project, services, contributions);
+  const [group] = resolveProjectActionGroups(
+    project,
+    services,
+    contributions,
+    activations,
+  );
   const [action] = group.actions;
 
   assert.equal(group.label, null);

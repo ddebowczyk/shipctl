@@ -2,7 +2,8 @@ import type {
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
   ModuleHostServices,
-  ModuleMessages,
+  ModuleActivationContext,
+  ModuleId,
   ModuleScheduledTask,
   ModuleSkillsPort,
   PanelContribution,
@@ -16,7 +17,6 @@ import type {
   SettingsSlot,
   ShipctlModule,
 } from "@shipctl/module-api";
-
 import type { BuiltinGlobalSurfaceLoaders } from "./builtinGlobalSurfaceAdapters.ts";
 import type { PanelMigrationAlias } from "./panelPersistence.ts";
 import {
@@ -126,11 +126,17 @@ export async function discoverRelatedProjectPaths(
   projectPath: string,
   options: { readonly expandRelated: boolean },
   services: ModuleHostServices,
+  moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>,
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): Promise<readonly string[]> {
   const results = await Promise.allSettled(
-    moduleProjectImportContributions(modules).map((contribution) =>
-      contribution.relatedPaths(projectPath, options, services)),
+    moduleProjectImportContributions(modules).map(async (contribution) => {
+      const activation = moduleActivations.get(contribution.moduleId);
+      if (!activation || activation.disposed) {
+        throw new Error(`Module ${contribution.moduleId} is not active`);
+      }
+      return contribution.relatedPaths(projectPath, options, services, activation);
+    }),
   );
   return [...new Set(results.flatMap((result) =>
     result.status === "fulfilled" ? result.value : []))];
@@ -209,156 +215,6 @@ export function moduleScheduledTasks(
   }));
 }
 
-export interface ModuleTaskScheduler {
-  setTimeout(callback: () => void, delayMs: number): number;
-  clearTimeout(handle: number): void;
-  setInterval(callback: () => void, intervalMs: number): number;
-  clearInterval(handle: number): void;
-}
-
-const BROWSER_TASK_SCHEDULER: ModuleTaskScheduler = {
-  setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
-  clearTimeout: (handle) => window.clearTimeout(handle),
-  setInterval: (callback, intervalMs) => window.setInterval(callback, intervalMs),
-  clearInterval: (handle) => window.clearInterval(handle),
-};
-
-function reportModuleFailure(message: string, error: unknown) {
-  if (import.meta.env.DEV) console.error(message, error);
-}
-
-function activationScopedServices(services: ModuleHostServices): ModuleHostServices {
-  // Message authority is already bound separately to the exact module
-  // activation. A distinct facade prevents module activation from treating the
-  // process-wide composition object as its own mutable singleton while keeping
-  // existing host ports stable.
-  return Object.freeze({ ...services });
-}
-
-function scheduleModuleTask(
-  task: ModuleScheduledTask,
-  services: ModuleHostServices,
-  scheduler: ModuleTaskScheduler,
-): () => void {
-  let active = true;
-  const run = () => {
-    void Promise.resolve()
-      .then(() => active ? task.run(services) : undefined)
-      .catch((error) => reportModuleFailure(`Scheduled task ${task.id} failed:`, error));
-  };
-
-  if (task.schedule.kind === "startup") {
-    run();
-    return () => { active = false; };
-  }
-
-  if (task.schedule.kind === "delay") {
-    if (task.schedule.delayMs < 0) {
-      throw new Error(`Scheduled task ${task.id} delay must not be negative`);
-    }
-    const handle = scheduler.setTimeout(run, task.schedule.delayMs);
-    return () => {
-      active = false;
-      scheduler.clearTimeout(handle);
-    };
-  }
-
-  if (task.schedule.intervalMs <= 0) {
-    throw new Error(`Scheduled task ${task.id} interval must be positive`);
-  }
-  const handle = scheduler.setInterval(run, task.schedule.intervalMs);
-  return () => {
-    active = false;
-    scheduler.clearInterval(handle);
-  };
-}
-
-export function activateModules(
-  services: ModuleHostServices,
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
-  scheduler: ModuleTaskScheduler = BROWSER_TASK_SCHEDULER,
-): () => Promise<void> {
-  return activateModulesWithMessages(services, new Map(), modules, scheduler);
-}
-
-export function activateModulesWithMessages(
-  services: ModuleHostServices,
-  messagesByModule: ReadonlyMap<string, ModuleMessages>,
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
-  scheduler: ModuleTaskScheduler = BROWSER_TASK_SCHEDULER,
-): () => Promise<void> {
-  return activateModulesWithMessagesObserved(
-    services,
-    messagesByModule,
-    modules,
-    scheduler,
-  ).deactivate;
-}
-
-export interface ModuleActivationFailure {
-  readonly moduleId: string;
-}
-
-export interface ObservedModuleActivation {
-  readonly activeModuleIds: ReadonlySet<string>;
-  readonly failures: readonly ModuleActivationFailure[];
-  readonly deactivate: () => Promise<void>;
-}
-
-/**
- * Activate one restart-bound composition and retain only redacted per-module
- * outcomes. The backend joins these identities with admitted registry truth;
- * arbitrary frontend exception text never crosses the IPC boundary.
- */
-export function activateModulesWithMessagesObserved(
-  services: ModuleHostServices,
-  messagesByModule: ReadonlyMap<string, ModuleMessages>,
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
-  scheduler: ModuleTaskScheduler = BROWSER_TASK_SCHEDULER,
-): ObservedModuleActivation {
-  const activeModuleIds = new Set<string>();
-  const failures: ModuleActivationFailure[] = [];
-  const activeModules = modules.flatMap((module) => {
-    const scheduledTaskCancellations: Array<() => void> = [];
-    const moduleServices = activationScopedServices(services);
-    let deactivation: ReturnType<NonNullable<ShipctlModule["activate"]>> = undefined;
-    try {
-      const tasks = moduleScheduledTasks([module]);
-      deactivation = module.activate?.({
-        panels: moduleServices.panels,
-        services: moduleServices,
-        ...(messagesByModule.has(module.id)
-          ? { messages: messagesByModule.get(module.id) }
-          : {}),
-      });
-      for (const task of tasks) {
-        scheduledTaskCancellations.push(scheduleModuleTask(task, moduleServices, scheduler));
-      }
-      activeModuleIds.add(module.id);
-      return [{ deactivation, scheduledTaskCancellations }];
-    } catch (error) {
-      for (const cancel of [...scheduledTaskCancellations].reverse()) cancel();
-      if (deactivation) {
-        void Promise.resolve(deactivation.deactivate()).catch((cleanupError) =>
-          reportModuleFailure(`Module ${module.id} cleanup failed:`, cleanupError));
-      }
-      reportModuleFailure(`Module ${module.id} activation failed:`, error);
-      failures.push({ moduleId: module.id });
-      return [];
-    }
-  });
-  const deactivate = async () => {
-    for (const { scheduledTaskCancellations } of [...activeModules].reverse()) {
-      for (const cancel of [...scheduledTaskCancellations].reverse()) cancel();
-    }
-    await Promise.allSettled(
-      [...activeModules].reverse().flatMap(({ deactivation }) =>
-        deactivation ? [deactivation.deactivate()] : []),
-    );
-  };
-  return { activeModuleIds, failures, deactivate };
-}
-
 /**
  * Run sequentially in registration order. Shutdown is a transaction boundary:
  * a failed module preparation must prevent native PTYs from being signalled.
@@ -374,51 +230,57 @@ async function notifyProjectLifecycle(
   callback: "onProjectOpened" | "onProjectsChanged" | "onFilesystemChanged" | "onProjectRemoved",
   value: readonly string[] | string,
   services: ModuleHostServices,
+  activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): Promise<void> {
   await Promise.allSettled(modules.map(async (module) => {
     const handler = module.projectLifecycle?.[callback];
-    if (!handler) return undefined;
+    const activation = activations.get(module.id);
+    if (!handler || !activation || activation.disposed) return undefined;
     await (callback === "onProjectOpened"
-      ? module.projectLifecycle?.onProjectOpened?.(value as string, services)
+      ? module.projectLifecycle?.onProjectOpened?.(value as string, services, activation)
       : callback === "onProjectRemoved"
-      ? module.projectLifecycle?.onProjectRemoved?.(value as string, services)
+      ? module.projectLifecycle?.onProjectRemoved?.(value as string, services, activation)
       : callback === "onFilesystemChanged"
-        ? module.projectLifecycle?.onFilesystemChanged?.(value as readonly string[], services)
-        : module.projectLifecycle?.onProjectsChanged?.(value as readonly string[], services));
+        ? module.projectLifecycle?.onFilesystemChanged?.(value as readonly string[], services, activation)
+        : module.projectLifecycle?.onProjectsChanged?.(value as readonly string[], services, activation));
   }));
 }
 
 export function notifyModulesProjectOpened(
   projectPath: string,
   services: ModuleHostServices,
+  activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
   modules?: readonly ShipctlModule[],
 ): Promise<void> {
-  return notifyProjectLifecycle("onProjectOpened", projectPath, services, modules);
+  return notifyProjectLifecycle("onProjectOpened", projectPath, services, activations, modules);
 }
 
 export function notifyModulesProjectsChanged(
   projectPaths: readonly string[],
   services: ModuleHostServices,
+  activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
   modules?: readonly ShipctlModule[],
 ): Promise<void> {
-  return notifyProjectLifecycle("onProjectsChanged", projectPaths, services, modules);
+  return notifyProjectLifecycle("onProjectsChanged", projectPaths, services, activations, modules);
 }
 
 export function notifyModulesFilesystemChanged(
   projectPaths: readonly string[],
   services: ModuleHostServices,
+  activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
   modules?: readonly ShipctlModule[],
 ): Promise<void> {
-  return notifyProjectLifecycle("onFilesystemChanged", projectPaths, services, modules);
+  return notifyProjectLifecycle("onFilesystemChanged", projectPaths, services, activations, modules);
 }
 
 export function notifyModulesProjectRemoved(
   projectPath: string,
   services: ModuleHostServices,
+  activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
   modules?: readonly ShipctlModule[],
 ): Promise<void> {
-  return notifyProjectLifecycle("onProjectRemoved", projectPath, services, modules);
+  return notifyProjectLifecycle("onProjectRemoved", projectPath, services, activations, modules);
 }
 
 export function createEnabledPanelRegistry(

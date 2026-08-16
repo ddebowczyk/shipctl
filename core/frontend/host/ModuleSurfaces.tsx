@@ -2,6 +2,8 @@ import { Component, lazy, Suspense, useMemo } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type {
+  ModuleActivationContext,
+  ModuleId,
   ProjectActionSurfaceHost,
   ProjectActionSurfacePosition,
   ProjectRef,
@@ -45,15 +47,23 @@ class ModuleSurfaceBoundary extends Component<
 function ProjectLayoutSurface({
   contribution,
   project,
+  moduleActivations,
 }: {
   readonly contribution: CanvasProjectLayoutSurface;
   readonly project: ProjectRef;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
+  const activation = moduleActivations.get(contribution.moduleId);
+  if (!activation || activation.disposed) return null;
   return (
     <ModuleSurfaceBoundary>
       <Suspense fallback={null}>
-        <Surface project={project} services={MODULE_HOST_SERVICES} />
+        <Surface
+          project={project}
+          activation={activation}
+          services={MODULE_HOST_SERVICES}
+        />
       </Suspense>
     </ModuleSurfaceBoundary>
   );
@@ -62,33 +72,42 @@ function ProjectLayoutSurface({
 export function ModuleProjectLayoutSurfaces({
   contributions,
   project,
+  moduleActivations,
 }: {
   readonly contributions: readonly CanvasProjectLayoutSurface[];
   readonly project: ProjectRef;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   return contributions.map((contribution) => (
     <ProjectLayoutSurface
       key={contribution.id}
       contribution={contribution}
       project={project}
+      moduleActivations={moduleActivations}
     />
   ));
 }
 
 export function ModuleProjectActionSurface({
   action,
+  moduleId,
   project,
   position,
   close,
   host,
+  moduleActivations,
 }: {
   readonly action: ProjectSurfaceAction;
+  readonly moduleId: ModuleId;
   readonly project: ProjectRef;
   readonly position: ProjectActionSurfacePosition;
   readonly close: () => void;
   readonly host: ProjectActionSurfaceHost;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   const Surface = useMemo(() => lazy(action.surface.load), [action]);
+  const activation = moduleActivations.get(moduleId);
+  if (!activation || activation.disposed) return null;
   return createPortal(
     <ModuleSurfaceBoundary key={`${action.id}:${position.x}:${position.y}`}>
       <Suspense fallback={null}>
@@ -97,6 +116,7 @@ export function ModuleProjectActionSurface({
           position={position}
           close={close}
           host={host}
+          activation={activation}
           services={MODULE_HOST_SERVICES}
         />
       </Suspense>

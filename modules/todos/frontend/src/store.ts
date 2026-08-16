@@ -1,119 +1,183 @@
+import type {
+  ProjectDocumentsErrorCode,
+  ProjectDocumentsService,
+  SemanticRequestOutcome,
+} from "@shipctl/module-api";
 import { create } from "zustand";
+
+import {
+  addTodoContents,
+  createTodoContents,
+  moveTodoContents,
+  parseTodoDocument,
+  toggleTodoContents,
+} from "./todoDocuments";
 import type { TodoFile } from "./types";
-import { readTodos, toggleTodo, addTodo, moveTodo } from "./client";
 
 interface TodoStore {
-  /** TODO.md files per repo. The file on disk is the source of truth — this
-   *  is only a render cache, refreshed from fs events and after every write. */
+  /** Project documents remain the source of truth. This is only a render cache. */
   projectTodos: Record<string, TodoFile[]>;
-  refreshTodos: (repoPath: string) => Promise<void>;
-  refreshAll: (repoPaths: string[]) => Promise<void>;
+  refreshTodos: (documents: ProjectDocumentsService, projectId: string) => Promise<void>;
+  refreshAll: (documents: ProjectDocumentsService, projectIds: string[]) => Promise<void>;
   toggleItem: (
-    repoPath: string,
-    filePath: string,
+    documents: ProjectDocumentsService,
+    file: TodoFile,
     line: number,
     expectedText: string,
     checked: boolean,
   ) => Promise<void>;
   addItem: (
-    repoPath: string,
-    filePath: string | null,
+    documents: ProjectDocumentsService,
+    projectId: string,
+    file: TodoFile | null,
     text: string,
     sectionLine: number | null,
     kanban: boolean,
   ) => Promise<void>;
   moveItem: (
-    repoPath: string,
-    filePath: string,
+    documents: ProjectDocumentsService,
+    file: TodoFile,
     line: number,
     expectedText: string,
     targetSectionLine: number,
     setChecked: boolean | null,
   ) => Promise<void>;
-  removeProject: (repoPath: string) => void;
+  removeProject: (projectId: string) => void;
+}
+
+class ProjectDocumentRequestError extends Error {
+  readonly code: ProjectDocumentsErrorCode;
+
+  constructor(code: ProjectDocumentsErrorCode, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function resultValue<Value>(
+  outcome: SemanticRequestOutcome<Value, ProjectDocumentsErrorCode>,
+): Value {
+  if (outcome.result.ok) return outcome.result.value;
+  throw new ProjectDocumentRequestError(outcome.result.error.code, outcome.result.error.message);
+}
+
+async function readTodos(
+  documents: ProjectDocumentsService,
+  projectId: string,
+): Promise<TodoFile[]> {
+  const outcome = await documents.discoverDocuments.execute({
+    projectId,
+    fileNames: ["todo.md", "todos.md"],
+  });
+  return resultValue(outcome).map(parseTodoDocument);
 }
 
 function todoFilesEqual(a: readonly TodoFile[] | undefined, b: readonly TodoFile[]): boolean {
   if (!a || a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i].path !== b[i].path || a[i].items.length !== b[i].items.length) return false;
-    if (a[i].sections.length !== b[i].sections.length) return false;
-    for (let j = 0; j < a[i].sections.length; j++) {
-      const x = a[i].sections[j];
-      const y = b[i].sections[j];
-      if (x.line !== y.line || x.title !== y.title || x.level !== y.level) return false;
-    }
-    for (let j = 0; j < a[i].items.length; j++) {
-      const x = a[i].items[j];
-      const y = b[i].items[j];
-      if (x.line !== y.line || x.text !== y.text || x.checked !== y.checked) return false;
-      if (x.sectionLine !== y.sectionLine) return false;
-    }
-  }
-  return true;
+  return a.every((file, index) =>
+    file.projectId === b[index].projectId
+    && file.relativePath === b[index].relativePath
+    && file.revision === b[index].revision);
 }
 
 export const useTodoStore = create<TodoStore>((set, get) => ({
   projectTodos: {},
 
-  refreshTodos: async (repoPath: string) => {
+  refreshTodos: async (documents, projectId) => {
     try {
-      const files = await readTodos(repoPath);
+      const files = await readTodos(documents, projectId);
       set((state) =>
-        todoFilesEqual(state.projectTodos[repoPath], files)
+        todoFilesEqual(state.projectTodos[projectId], files)
           ? state
-          : { projectTodos: { ...state.projectTodos, [repoPath]: files } },
-      );
+          : { projectTodos: { ...state.projectTodos, [projectId]: files } });
     } catch {
-      // Repo may have been removed from disk — leave the cache untouched
+      // The project may have left the authorized catalog. Keep the last render cache.
     }
   },
 
-  refreshAll: async (repoPaths: string[]) => {
-    const results = await Promise.allSettled(repoPaths.map((p) => readTodos(p)));
-
+  refreshAll: async (documents, projectIds) => {
+    const results = await Promise.allSettled(
+      projectIds.map((projectId) => readTodos(documents, projectId)),
+    );
     set((state) => {
       let changed = false;
       const nextTodos = { ...state.projectTodos };
-
-      for (let i = 0; i < repoPaths.length; i++) {
-        const result = results[i];
-        if (result.status === "fulfilled" && !todoFilesEqual(state.projectTodos[repoPaths[i]], result.value)) {
-          nextTodos[repoPaths[i]] = result.value;
+      for (let index = 0; index < projectIds.length; index += 1) {
+        const result = results[index];
+        const projectId = projectIds[index];
+        if (
+          result.status === "fulfilled"
+          && !todoFilesEqual(state.projectTodos[projectId], result.value)
+        ) {
+          nextTodos[projectId] = result.value;
           changed = true;
         }
       }
-
       return changed ? { projectTodos: nextTodos } : state;
     });
   },
 
-  toggleItem: async (repoPath, filePath, line, expectedText, checked) => {
+  toggleItem: async (documents, file, line, expectedText, checked) => {
     try {
-      await toggleTodo(filePath, line, expectedText, checked);
+      const contents = toggleTodoContents(file.contents, line, expectedText, checked);
+      resultValue(await documents.writeDocument.execute({
+        projectId: file.projectId,
+        relativePath: file.relativePath,
+        expectedRevision: file.revision,
+        contents,
+      }));
     } finally {
-      // Reload even on failure — a mismatch error means the file changed
-      // under us and the UI should catch up.
-      await get().refreshTodos(repoPath);
+      await get().refreshTodos(documents, file.projectId);
     }
   },
 
-  addItem: async (repoPath, filePath, text, sectionLine, kanban) => {
-    await addTodo(repoPath, filePath, text, sectionLine, kanban);
-    await get().refreshTodos(repoPath);
-  },
-
-  moveItem: async (repoPath, filePath, line, expectedText, targetSectionLine, setChecked) => {
+  addItem: async (documents, projectId, file, text, sectionLine, kanban) => {
+    const relativePath = file?.relativePath ?? "TODO.md";
+    const contents = file
+      ? addTodoContents(file.contents, text, sectionLine)
+      : createTodoContents(text, kanban);
     try {
-      await moveTodo(filePath, line, expectedText, targetSectionLine, setChecked);
+      resultValue(await documents.writeDocument.execute({
+        projectId,
+        relativePath,
+        expectedRevision: file?.revision ?? null,
+        contents,
+      }));
     } finally {
-      await get().refreshTodos(repoPath);
+      await get().refreshTodos(documents, projectId);
     }
   },
 
-  removeProject: (repoPath: string) => {
+  moveItem: async (
+    documents,
+    file,
+    line,
+    expectedText,
+    targetSectionLine,
+    setChecked,
+  ) => {
+    try {
+      const contents = moveTodoContents(
+        file.contents,
+        line,
+        expectedText,
+        targetSectionLine,
+        setChecked,
+      );
+      resultValue(await documents.writeDocument.execute({
+        projectId: file.projectId,
+        relativePath: file.relativePath,
+        expectedRevision: file.revision,
+        contents,
+      }));
+    } finally {
+      await get().refreshTodos(documents, file.projectId);
+    }
+  },
+
+  removeProject: (projectId) => {
     set((state) => {
-      const { [repoPath]: _, ...rest } = state.projectTodos;
+      const { [projectId]: _, ...rest } = state.projectTodos;
       return { projectTodos: rest };
     });
   },
