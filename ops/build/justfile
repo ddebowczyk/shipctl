@@ -4,7 +4,13 @@ app:
     pnpm --dir ../.. exec vite build
 
 local *args:
-    bash bin/build-local.sh {{args}}
+    bash bin/build-local.sh --flavor preview {{args}}
+
+package *args:
+    bash bin/build-local.sh --flavor package {{args}}
+
+unregister-legacy *args:
+    bash bin/unregister-legacy-apps.sh {{args}}
 
 module-fixture:
     node ../modularity/bin/check-module-boundaries.mjs ../..

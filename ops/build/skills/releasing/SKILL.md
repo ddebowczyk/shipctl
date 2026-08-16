@@ -54,10 +54,10 @@ git push origin main
 git tag -a v<version> -m "Shipctl v<version>"
 git push origin v<version>
 just version verify-release
-just build local
+just build package
 ```
 
-`just build local` builds an ad-hoc signed, unnotarized app and DMG, verifies
+`just build package` builds the canonical ad-hoc signed, unnotarized app and DMG, verifies
 the full app-bundle signature and the small `shipctl` command, and creates one
 immutable directory under `builds/`. Its `build.yaml` binds the artifacts to the
 Git commit and source fingerprint. Use the printed `dmg:` path for the GitHub

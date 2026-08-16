@@ -5,9 +5,13 @@ set -euo pipefail
 usage() {
   printf '%s\n' \
     'usage: just build local [--target <triple>]' \
+    '       just build package [--target <triple>]' \
     '' \
-    'Builds an ad-hoc signed, unnotarized macOS app and DMG. Every successful invocation creates' \
-    'a unique builds/<build-id>/ directory with build.yaml and version.yaml.' \
+    '`just build local` builds an isolated Shipctl preview app and DMG. It never uses the' \
+    'installed application name or bundle identifier, so `open -a shipctl` remains unambiguous.' \
+    '`just build package` builds the canonical ad-hoc signed release app and DMG for distribution.' \
+    'Every successful invocation creates a unique builds/<build-id>/ directory with build.yaml' \
+    'and version.yaml.' \
     '' \
     'options:' \
     '  --target TRIPLE  Rust target triple (default: aarch64-apple-darwin).' \
@@ -28,6 +32,7 @@ if [ "${1:-}" = '--' ]; then
 fi
 
 target='aarch64-apple-darwin'
+flavor='preview'
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --archive-only)
@@ -36,6 +41,11 @@ while [ "$#" -gt 0 ]; do
     --target)
       [ "$#" -ge 2 ] || fail '--target requires a target triple' 2
       target="$2"
+      shift 2
+      ;;
+    --flavor)
+      [ "$#" -ge 2 ] || fail '--flavor requires preview or package' 2
+      flavor="$2"
       shift 2
       ;;
     -h|--help)
@@ -53,6 +63,10 @@ done
 if ! printf '%s' "$target" | grep -Eq '^[A-Za-z0-9._-]+$'; then
   fail "target contains characters that are unsafe in a build identifier: $target" 2
 fi
+case "$flavor" in
+  preview|package) ;;
+  *) fail '--flavor must be preview or package' 2 ;;
+esac
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../../.." && pwd)"
@@ -107,9 +121,15 @@ trap cleanup EXIT
 # applications. The pseudo-identity requests Tauri's documented ad-hoc signing
 # without selecting an Apple Developer identity or changing the signed-release
 # command path.
-adhoc_signing_config='{"bundle":{"macOS":{"signingIdentity":"-"}}}'
-build_command=(pnpm tauri build --target "$target" --bundles app,dmg --config "$adhoc_signing_config")
+flavor_json="$(node "$script_dir/build-flavor.mjs" "$flavor" "$build_id")" \
+  || fail 'could not prepare the Tauri configuration for this build flavor'
+app_name="$(jq -r '.appName' <<<"$flavor_json")"
+app_bundle_name="$(jq -r '.appBundleName' <<<"$flavor_json")"
+bundle_identifier="$(jq -r '.bundleIdentifier' <<<"$flavor_json")"
+tauri_build_config="$(jq -c '.tauriConfig' <<<"$flavor_json")"
+build_command=(pnpm tauri build --target "$target" --bundles app,dmg --config "$tauri_build_config")
 printf 'build_id: %s\n' "$build_id" >&2
+printf 'flavor: %s\n' "$flavor" >&2
 printf 'build: %s\n' "${build_command[*]}" >&2
 SHIPCTL_BUILD_ID="$build_id" "${build_command[@]}"
 
@@ -125,10 +145,10 @@ fi
 cargo_target_dir="$(bash "$script_dir/cargo-target-dir.sh")" \
   || fail 'could not determine Cargo target directory'
 bundle_root="${cargo_target_dir}/${target}/release/bundle"
-app_source="${bundle_root}/macos/shipctl.app"
+app_source="${bundle_root}/macos/${app_bundle_name}"
 [ -d "$app_source" ] || fail "app artifact not found: $app_source"
 shopt -s nullglob
-dmg_matches=("${bundle_root}/dmg/shipctl_${version}_"*.dmg)
+dmg_matches=("${bundle_root}/dmg/${app_name}_${version}_"*.dmg)
 shopt -u nullglob
 [ "${#dmg_matches[@]}" -eq 1 ] \
   || fail "expected exactly one DMG for version ${version}; found ${#dmg_matches[@]}"
@@ -136,21 +156,23 @@ dmg_source="${dmg_matches[0]}"
 dmg_name="$(basename "$dmg_source")"
 
 staging_dir="$(mktemp -d "${repo_root}/builds/.${build_id}.XXXXXX")"
-ditto "$app_source" "${staging_dir}/shipctl.app" \
+ditto "$app_source" "${staging_dir}/${app_bundle_name}" \
   || fail 'could not copy the app bundle into the build directory'
 cp -p "$dmg_source" "${staging_dir}/${dmg_name}" \
   || fail 'could not copy the DMG into the build directory'
 cp -p ops/version/current.yaml "${staging_dir}/version.yaml" \
   || fail 'could not copy the authoritative version record'
 
-ui_path='shipctl.app/Contents/MacOS/shipctl-ui'
-cli_path='shipctl.app/Contents/MacOS/shipctl'
+ui_path="${app_bundle_name}/Contents/MacOS/shipctl-ui"
+cli_path="${app_bundle_name}/Contents/MacOS/shipctl"
 bash "$script_dir/verify-app-bundle.sh" \
-  --app "${staging_dir}/shipctl.app" \
+  --app "${staging_dir}/${app_bundle_name}" \
   --target "$target" \
   --version "$version" \
+  --product-name "$app_name" \
+  --identifier "$bundle_identifier" \
   || fail 'final app bundle verification failed'
-app_sha256="$(node ops/build/bin/hash-tree.mjs "${staging_dir}/shipctl.app")"
+app_sha256="$(node ops/build/bin/hash-tree.mjs "${staging_dir}/${app_bundle_name}")"
 ui_sha256="$(shasum -a 256 "${staging_dir}/${ui_path}" | awk '{print $1}')"
 cli_sha256="$(shasum -a 256 "${staging_dir}/${cli_path}" | awk '{print $1}')"
 dmg_sha256="$(shasum -a 256 "${staging_dir}/${dmg_name}" | awk '{print $1}')"
@@ -168,9 +190,10 @@ jq -n \
   --arg build_id "$build_id" \
   --arg created_at "$created_at" \
   --arg product_version "$version" \
+  --arg app_bundle_name "$app_bundle_name" \
   --arg version_sha256 "$version_sha256" \
   --arg target "$target" \
-  --arg adhoc_signing_config "$adhoc_signing_config" \
+  --arg tauri_build_config "$tauri_build_config" \
   --argjson source "$source_start" \
   --arg rustc "$rustc_version" \
   --arg pnpm "$pnpm_version" \
@@ -194,10 +217,10 @@ jq -n \
     target: $target,
     mode: "build",
     source: $source,
-    command: ["pnpm", "tauri", "build", "--target", $target, "--bundles", "app,dmg", "--config", $adhoc_signing_config],
+    command: ["pnpm", "tauri", "build", "--target", $target, "--bundles", "app,dmg", "--config", $tauri_build_config],
     toolchain: { rustc: $rustc, pnpm: $pnpm, tauri_cli: $tauri_cli },
     artifacts: [
-      { kind: "app-bundle", path: "shipctl.app", digest: { algorithm: "sha256", scope: "tree", value: $app_sha256 } },
+      { kind: "app-bundle", path: $app_bundle_name, digest: { algorithm: "sha256", scope: "tree", value: $app_sha256 } },
       { kind: "ui-executable", path: $ui_path, size_bytes: $ui_size, digest: { algorithm: "sha256", scope: "file", value: $ui_sha256 } },
       { kind: "cli-executable", path: $cli_path, size_bytes: $cli_size, digest: { algorithm: "sha256", scope: "file", value: $cli_sha256 } },
       { kind: "dmg", path: $dmg_name, size_bytes: $dmg_size, digest: { algorithm: "sha256", scope: "file", value: $dmg_sha256 } }
@@ -216,10 +239,21 @@ mv "$staging_dir" "$archive_dir" || fail 'could not publish the complete build d
 staging_dir=''
 completed=true
 
+# A canonical package is a distribution input, not a local application. Tauri,
+# Finder, and mounted DMGs can each register a release-identity bundle with
+# LaunchServices. Remove every competing registration so `open -a shipctl`
+# keeps selecting the installed application. Preview builds intentionally keep
+# their distinct identity and are not touched here.
+if [ "$flavor" = package ]; then
+  bash "$script_dir/unregister-legacy-apps.sh" --apply \
+    || fail 'could not remove competing Shipctl registrations from LaunchServices'
+fi
+
 printf '%s\n' \
   "build_id: ${build_id}" \
+  "flavor: ${flavor}" \
   "build: ${archive_dir}" \
-  "app: ${archive_dir}/shipctl.app" \
+  "app: ${archive_dir}/${app_bundle_name}" \
   "dmg: ${archive_dir}/${dmg_name}" \
   "record: ${archive_dir}/build.yaml" \
   "version_record: ${archive_dir}/version.yaml" \

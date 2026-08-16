@@ -87,6 +87,14 @@ For a complete, validated map of every root-level item, run
 `just repository map` or read
 [`ops/repository/README.md`](ops/repository/README.md).
 
+## Inspired by Shep
+
+Shipctl began as a fork of [Shep](https://shep.tools), the native terminal
+workspace created by [Doug Dement](https://github.com/stumptowndoug). We are
+grateful to Doug for creating Shep and for the inspiration that led to Shipctl.
+Learn more at [https://shep.tools](https://shep.tools) and in the [Shep
+source repository](https://github.com/stumptowndoug/shep).
+
 ## License
 
 MIT

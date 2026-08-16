@@ -4,7 +4,7 @@ set -euo pipefail
 
 usage() {
   printf '%s\n' \
-    'usage: verify-app-bundle.sh --app PATH --target TRIPLE --version VERSION' \
+    'usage: verify-app-bundle.sh --app PATH --target TRIPLE --version VERSION --product-name NAME --identifier ID' \
     '' \
     'Checks the two bundled executables, the app metadata, target architecture,' \
     'and the CLI through the symlink shape installed by a Homebrew cask.'
@@ -18,6 +18,8 @@ fail() {
 app=''
 target=''
 version=''
+product_name=''
+identifier=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --app)
@@ -35,6 +37,16 @@ while [ "$#" -gt 0 ]; do
       version="$2"
       shift 2
       ;;
+    --product-name)
+      [ "$#" -ge 2 ] || fail '--product-name requires a value'
+      product_name="$2"
+      shift 2
+      ;;
+    --identifier)
+      [ "$#" -ge 2 ] || fail '--identifier requires a value'
+      identifier="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -48,8 +60,12 @@ done
 [ -n "$app" ] || fail '--app is required'
 [ -n "$target" ] || fail '--target is required'
 [ -n "$version" ] || fail '--version is required'
+[ -n "$product_name" ] || fail '--product-name is required'
+[ -n "$identifier" ] || fail '--identifier is required'
 [ -d "$app" ] || fail "app bundle does not exist: $app"
 app="$(cd -- "$app" && pwd -P)"
+[ "$(basename "$app")" = "${product_name}.app" ] \
+  || fail "app bundle must be ${product_name}.app, found $(basename "$app")"
 
 case "$target" in
   aarch64-apple-darwin) expected_arch='arm64' ;;
@@ -80,6 +96,21 @@ bundle_version="$(plutil -extract CFBundleShortVersionString raw "$plist")" \
   || fail 'could not read CFBundleShortVersionString from Info.plist'
 [ "$bundle_version" = "$version" ] \
   || fail "Info.plist product version is $bundle_version, expected $version"
+
+bundle_name="$(plutil -extract CFBundleDisplayName raw "$plist")" \
+  || fail 'could not read CFBundleDisplayName from Info.plist'
+[ "$bundle_name" = "$product_name" ] \
+  || fail "Info.plist display name is $bundle_name, expected $product_name"
+
+bundle_name="$(plutil -extract CFBundleName raw "$plist")" \
+  || fail 'could not read CFBundleName from Info.plist'
+[ "$bundle_name" = "$product_name" ] \
+  || fail "Info.plist bundle name is $bundle_name, expected $product_name"
+
+bundle_identifier="$(plutil -extract CFBundleIdentifier raw "$plist")" \
+  || fail 'could not read CFBundleIdentifier from Info.plist'
+[ "$bundle_identifier" = "$identifier" ] \
+  || fail "Info.plist identifier is $bundle_identifier, expected $identifier"
 
 for executable in "$ui" "$cli"; do
   architectures="$(lipo -archs "$executable")" \

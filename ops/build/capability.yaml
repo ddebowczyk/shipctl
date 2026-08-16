@@ -33,9 +33,17 @@ commands:
     summary: Build the production frontend application.
     lane: slow
   - name: local
-    summary: Build a local application bundle.
+    summary: Build an isolated Shipctl preview bundle.
     lane: slow
     args: [target]
+  - name: package
+    summary: Build the canonical ad-hoc Shipctl distribution bundle.
+    lane: slow
+    args: [target]
+  - name: unregister-legacy
+    summary: Unregister competing Shipctl release-identity apps from macOS LaunchServices.
+    lane: fast
+    args: [apply]
   - name: module-fixture
     summary: Build the module-composition smoke fixture.
     lane: slow

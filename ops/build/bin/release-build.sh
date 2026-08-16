@@ -144,13 +144,22 @@ app_path="${bundle_root}/macos/shipctl.app"
 bash "$script_dir/verify-app-bundle.sh" \
   --app "$app_path" \
   --target "$target" \
-  --version "$VERSION"
+  --version "$VERSION" \
+  --product-name shipctl \
+  --identifier com.cognesy.shipctl
 codesign --verify --deep --strict --verbose=2 "$app_path"
 spctl --assess --type execute --verbose "$app_path"
 ok 'signed app bundle passed executable and Gatekeeper verification'
 
 step "Patching DMG (post-build-dmg.sh)"
 bash ops/build/bin/post-build-dmg.sh
+
+# The signed bundle is a release input. Tauri, Finder, and mounted DMGs can
+# register a second Shipctl release identity. The installed app owns this name,
+# so remove every competing registration before the release is handed off.
+bash "$script_dir/unregister-legacy-apps.sh" --apply \
+  || fail 'could not remove competing Shipctl registrations from LaunchServices'
+ok 'removed competing Shipctl registrations from LaunchServices'
 
 # ── Step 8: summary ─────────────────────────────────────────────────
 
