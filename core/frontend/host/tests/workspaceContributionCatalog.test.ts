@@ -11,11 +11,15 @@ import type {
 import { createServer, type ViteDevServer } from "vite";
 
 type WorkspaceContributionCatalogModule = typeof import("../workspaceContributionCatalog.ts");
+type AcceptedWorkspaceContributionEntriesModule = typeof import(
+  "../acceptedWorkspaceContributionEntries.ts"
+);
 type WorkspaceProfilesModule = typeof import("../../workspace/profiles.ts");
 
 let vite: ViteDevServer;
 let WorkspaceContributionCatalog: WorkspaceContributionCatalogModule["WorkspaceContributionCatalog"];
 let WorkspaceContributionCatalogError: WorkspaceContributionCatalogModule["WorkspaceContributionCatalogError"];
+let activeWorkspaceContributionEntries: AcceptedWorkspaceContributionEntriesModule["activeWorkspaceContributionEntries"];
 let createCurrentCanvasWorkspaceCatalog: WorkspaceProfilesModule["createCurrentCanvasWorkspaceCatalog"];
 let CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID: WorkspaceProfilesModule["CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID"];
 let shippedViewModules: readonly ShipctlModule[];
@@ -30,6 +34,9 @@ before(async () => {
   ({ WorkspaceContributionCatalog, WorkspaceContributionCatalogError } = await vite.ssrLoadModule(
     "/core/frontend/host/workspaceContributionCatalog.ts",
   ) as WorkspaceContributionCatalogModule);
+  ({ activeWorkspaceContributionEntries } = await vite.ssrLoadModule(
+    "/core/frontend/host/acceptedWorkspaceContributionEntries.ts",
+  ) as AcceptedWorkspaceContributionEntriesModule);
   ({
     createCurrentCanvasWorkspaceCatalog,
     CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
@@ -358,6 +365,48 @@ test("catalog removal drops every removed owner record and retained revisions ke
   assert.equal(reduced.workspaceCatalog().definitions.some((item) => item.viewTypeId === "additional.panel"), false);
   assert.equal(reduced.inspect().contributions.some((item) => item.ownerModuleId === "shipctl.additional"), false);
   assert.equal(reduced.renderer("additional.panel"), undefined);
+});
+
+test("accepted entry selection rejects a stale activation after replacement or removal", () => {
+  const fixtureActivation = activation(fixtureModule.id, "one");
+  const coreActivation = activation("core");
+  const catalog = WorkspaceContributionCatalog.create({
+    registryRevision: 1,
+    modules: [fixtureModule],
+    activationContextsByModule: new Map([[fixtureModule.id, fixtureActivation]]),
+    hostContributions: hostContributions(coreActivation),
+  });
+  const acceptedActivations = new Map([
+    [fixtureModule.id, fixtureActivation],
+    ["core", coreActivation],
+  ]);
+
+  assert.deepEqual(
+    activeWorkspaceContributionEntries(catalog.projectActions(), acceptedActivations)
+      .map(({ contribution }) => contribution.id),
+    ["fixture.project-action"],
+  );
+  assert.deepEqual(
+    activeWorkspaceContributionEntries(catalog.settings(), acceptedActivations)
+      .map(({ contribution }) => contribution.id),
+    ["fixture.settings"],
+  );
+
+  const replacement = activation(fixtureModule.id, "two");
+  const noStaleEntries = new Map([
+    [fixtureModule.id, replacement],
+    ["core", coreActivation],
+  ]);
+  assert.deepEqual(
+    activeWorkspaceContributionEntries(catalog.projectActions(), noStaleEntries),
+    [],
+  );
+  assert.deepEqual(
+    activeWorkspaceContributionEntries(catalog.settings(), noStaleEntries), []);
+  assert.deepEqual(
+    activeWorkspaceContributionEntries(catalog.projectActions(), new Map([["core", coreActivation]])),
+    [],
+  );
 });
 
 test("catalog admits the host compatibility definition without a module renderer", () => {

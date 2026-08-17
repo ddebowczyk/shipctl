@@ -5,11 +5,13 @@ import type {
   ModuleHostServices,
   ModuleId,
   PanelContribution,
+  ProjectActionContribution,
   ProjectRef,
   TerminalDriverId,
   TerminalHostDescriptor,
 } from "@shipctl/module-api";
 import type {
+  ActivatedWorkspaceContribution,
   CanvasSurfaceCatalog,
 } from "@shipctl/core/host";
 import type { TerminalPresentationRegistry } from "@shipctl/core/terminal-host";
@@ -126,6 +128,14 @@ export interface CanvasActions {
 export interface CanvasPorts {
   readonly projectPaths: readonly string[];
   readonly surfaceCatalog: CanvasSurfaceCatalog;
+  /**
+   * The accepted runtime's project-menu contributions. This stays separate
+   * from the canvas surface catalog because it supplies actions, not a canvas
+   * placement surface.
+   */
+  readonly projectActionContributions: readonly ActivatedWorkspaceContribution<
+    ProjectActionContribution
+  >[];
   readonly terminalPresentationRegistry: TerminalPresentationRegistry;
   readonly moduleHostServices: ModuleHostServices;
   readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;

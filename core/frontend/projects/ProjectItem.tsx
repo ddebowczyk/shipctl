@@ -1,8 +1,10 @@
 import { useState, useCallback, useMemo } from "react";
 import type {
   ModuleActivationContext,
+  ModuleActivationId,
   ModuleId,
   ProjectAction,
+  ProjectActionContribution,
   ProjectSurfaceAction,
 } from "@shipctl/module-api";
 import type { RepoInfo, RepoGroup } from "@shipctl/core/platform";
@@ -30,6 +32,7 @@ import { revealInFinder } from "@shipctl/core/platform";
 import {
   useModuleProjectActions,
 } from "@shipctl/core/host";
+import type { ActivatedWorkspaceContribution } from "@shipctl/core/host";
 import {
   ModuleProjectActionSurface,
 } from "@shipctl/core/host/views";
@@ -49,6 +52,9 @@ interface ProjectItemProps {
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
   onNewGroupForRepo: (repoPath: string) => void;
   isDropTarget: boolean;
+  projectActionContributions: readonly ActivatedWorkspaceContribution<
+    ProjectActionContribution
+  >[];
   moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
@@ -66,6 +72,7 @@ export default function ProjectItem({
   onMoveToGroup,
   onNewGroupForRepo,
   isDropTarget,
+  projectActionContributions,
   moduleActivations,
 }: ProjectItemProps) {
   const activityStatus = getAggregateActivityStatus({
@@ -78,6 +85,7 @@ export default function ProjectItem({
   const [actionSurface, setActionSurface] = useState<{
     action: ProjectSurfaceAction;
     moduleId: ModuleId;
+    activationId: ModuleActivationId;
     position: { x: number; y: number };
   } | null>(null);
   const projectRef = useMemo(() => ({
@@ -86,7 +94,11 @@ export default function ProjectItem({
     path: repo.path,
     groupId: repo.group,
   }), [repo.group, repo.name, repo.path]);
-  const projectActions = useModuleProjectActions(projectRef, moduleActivations);
+  const projectActions = useModuleProjectActions(
+    projectRef,
+    moduleActivations,
+    projectActionContributions,
+  );
   const preferredEditor = useEditorStore((s) => s.settings.preferredEditor);
   const pushNotice = useNoticeStore((s) => s.pushNotice);
   const preferredEditorLabel = getEditorLabel(preferredEditor);
@@ -127,7 +139,11 @@ export default function ProjectItem({
       : []),
   ];
 
-  const actionMenuItem = (action: ProjectAction, moduleId: ModuleId): ContextMenuItem => ({
+  const actionMenuItem = (
+    action: ProjectAction,
+    moduleId: ModuleId,
+    activationId: ModuleActivationId,
+  ): ContextMenuItem => ({
     label: action.label,
     icon: action.selected === undefined
       ? action.icon?.name === "plus"
@@ -141,6 +157,7 @@ export default function ProjectItem({
         setActionSurface({
           action,
           moduleId,
+          activationId,
           position: menu ?? { x: 200, y: 200 },
         });
         return;
@@ -151,7 +168,9 @@ export default function ProjectItem({
     },
   });
   const contributedActionItems: ContextMenuItem[] = projectActions.groups.flatMap((group) => {
-    const actions = group.actions.map((action) => actionMenuItem(action, group.moduleId));
+    const actions = group.actions.map((action) => (
+      actionMenuItem(action, group.moduleId, group.activationId)
+    ));
     return group.label === null
       ? actions
       : [{
@@ -256,6 +275,7 @@ export default function ProjectItem({
         <ModuleProjectActionSurface
           action={actionSurface.action}
           moduleId={actionSurface.moduleId}
+          activationId={actionSurface.activationId}
           project={projectRef}
           position={actionSurface.position}
           close={() => setActionSurface(null)}

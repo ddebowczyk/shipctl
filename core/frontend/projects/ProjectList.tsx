@@ -15,12 +15,19 @@ import { TerminalList } from "@shipctl/core/terminal-host/views";
 import {
   useProjectFactsMap,
 } from "@shipctl/core/host";
-import type { CanvasProjectNavigationSurface } from "@shipctl/core/host";
+import type {
+  ActivatedWorkspaceContribution,
+  CanvasProjectNavigationSurface,
+} from "@shipctl/core/host";
 import {
   ModuleProjectNavigationSurfaces,
 } from "@shipctl/core/host/views";
 import { groupProjects } from "@shipctl/core/projects";
-import type { ModuleActivationContext, ModuleId } from "@shipctl/module-api";
+import type {
+  ModuleActivationContext,
+  ModuleId,
+  ProjectActionContribution,
+} from "@shipctl/module-api";
 
 interface ProjectListProps {
   repos: RepoInfo[];
@@ -42,6 +49,9 @@ interface ProjectListProps {
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
   tabDropProjectPath: string | null;
   projectNavigationContributions: readonly CanvasProjectNavigationSurface[];
+  projectActionContributions: readonly ActivatedWorkspaceContribution<
+    ProjectActionContribution
+  >[];
   moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
@@ -65,6 +75,7 @@ export default function ProjectList({
   onMoveToGroup,
   tabDropProjectPath,
   projectNavigationContributions,
+  projectActionContributions,
   moduleActivations,
 }: ProjectListProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
@@ -225,6 +236,7 @@ export default function ProjectList({
           onClick={() => handleProjectClick(repo.path)}
           onAddProject={onAddProject}
           onMoveToGroup={onMoveToGroup}
+          projectActionContributions={projectActionContributions}
           moduleActivations={moduleActivations}
           isDropTarget={tabDropProjectPath === repo.path}
           onNewGroupForRepo={(repoPath) => {
@@ -273,6 +285,7 @@ export default function ProjectList({
               contributions={projectNavigationContributions}
               project={{ id: repo.path, name: repo.name, path: repo.path }}
               activeTabId={activeTabId}
+              moduleActivations={moduleActivations}
             />
           </div>
         )}

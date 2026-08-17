@@ -4,6 +4,7 @@ import type {
   GlobalNavigationContribution,
   ModuleActivationContext,
   ModuleId,
+  ProjectActionContribution,
 } from "@shipctl/module-api";
 import type { RepoInfo, RepoGroup } from "@shipctl/core/platform";
 import { useTerminalStore } from "@shipctl/core/terminal-host";
@@ -12,6 +13,7 @@ import {
   type AgentSessionItem,
 } from "@shipctl/core/terminal-host/views";
 import type {
+  ActivatedWorkspaceContribution,
   CanvasProjectNavigationSurface,
   CanvasSidebarSurface,
 } from "@shipctl/core/host";
@@ -48,6 +50,9 @@ export interface LegacySidebarProps {
   readonly globalNavigation: readonly GlobalNavigationContribution[];
   readonly sidebarContributions: readonly CanvasSidebarSurface[];
   readonly projectNavigationContributions: readonly CanvasProjectNavigationSurface[];
+  readonly projectActionContributions: readonly ActivatedWorkspaceContribution<
+    ProjectActionContribution
+  >[];
   readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
@@ -75,6 +80,7 @@ export default function LegacySidebar({
   globalNavigation,
   sidebarContributions,
   projectNavigationContributions,
+  projectActionContributions,
   moduleActivations,
 }: LegacySidebarProps) {
   // Projects always starts expanded on launch; collapsing is per-session only.
@@ -232,6 +238,7 @@ export default function LegacySidebar({
               onMoveToGroup={onMoveToGroup}
               tabDropProjectPath={tabDropProjectPath}
               projectNavigationContributions={projectNavigationContributions}
+              projectActionContributions={projectActionContributions}
               moduleActivations={moduleActivations}
             />
           )}
@@ -240,6 +247,7 @@ export default function LegacySidebar({
       <ModuleSidebarSurfaces
         contributions={sidebarContributions}
         onToggleGlobalSurface={onToggleGlobalSurface}
+        moduleActivations={moduleActivations}
       />
       <LegacySidebarFooter
         navigation={globalNavigation}

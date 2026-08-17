@@ -56,6 +56,7 @@ function DefaultSidebar({ sidebar, actions, ports }: CanvasSidebarRendererProps)
       globalNavigation={sidebar.globalNavigation}
       sidebarContributions={ports.surfaceCatalog.sidebar()}
       projectNavigationContributions={ports.surfaceCatalog.projectNavigation()}
+      projectActionContributions={ports.projectActionContributions}
       moduleActivations={ports.moduleActivations}
     />
   );

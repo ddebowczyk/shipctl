@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import type {
   ContributionId,
   ModuleActivationContext,
+  ModuleActivationId,
   ModuleId,
   ProjectActionSurfaceHost,
   ProjectActionSurfacePosition,
@@ -21,7 +22,11 @@ import type {
   CanvasProjectNavigationSurface,
   CanvasSidebarSurface,
 } from "./canvasSurfaceCatalog.ts";
-import { moduleSettingsContributions } from "./moduleComposition.ts";
+import { useAcceptedWorkspaceContributionRuntime } from "./AcceptedWorkspaceContributionRuntime.tsx";
+import {
+  activeWorkspaceContributionEntries,
+  currentModuleActivation,
+} from "./acceptedWorkspaceContributionEntries.ts";
 
 class ModuleSurfaceBoundary extends Component<
   { readonly children: ReactNode },
@@ -91,6 +96,7 @@ export function ModuleProjectLayoutSurfaces({
 export function ModuleProjectActionSurface({
   action,
   moduleId,
+  activationId,
   project,
   position,
   close,
@@ -99,6 +105,7 @@ export function ModuleProjectActionSurface({
 }: {
   readonly action: ProjectSurfaceAction;
   readonly moduleId: ModuleId;
+  readonly activationId: ModuleActivationId;
   readonly project: ProjectRef;
   readonly position: ProjectActionSurfacePosition;
   readonly close: () => void;
@@ -106,10 +113,10 @@ export function ModuleProjectActionSurface({
   readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   const Surface = useMemo(() => lazy(action.surface.load), [action]);
-  const activation = moduleActivations.get(moduleId);
-  if (!activation || activation.disposed) return null;
+  const activation = currentModuleActivation(moduleId, activationId, moduleActivations);
+  if (activation === undefined) return null;
   return createPortal(
-    <ModuleSurfaceBoundary key={`${action.id}:${position.x}:${position.y}`}>
+    <ModuleSurfaceBoundary key={`${activationId}:${action.id}:${position.x}:${position.y}`}>
       <Suspense fallback={null}>
         <Surface
           project={project}
@@ -129,12 +136,16 @@ function ProjectNavigationSurface({
   contribution,
   project,
   activeTabId,
+  moduleActivations,
 }: {
   readonly contribution: CanvasProjectNavigationSurface;
   readonly project: ProjectRef;
   readonly activeTabId: string | null;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
+  const activation = moduleActivations.get(contribution.moduleId);
+  if (!activation || activation.disposed) return null;
   const panel = contribution.panel;
   const instanceId = contributedPanelTabId(contribution.panelId);
   const active = activeTabId === instanceId;
@@ -163,10 +174,12 @@ export function ModuleProjectNavigationSurfaces({
   contributions,
   project,
   activeTabId,
+  moduleActivations,
 }: {
   readonly contributions: readonly CanvasProjectNavigationSurface[];
   readonly project: ProjectRef;
   readonly activeTabId: string | null;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   return contributions.map((contribution) => (
     <ProjectNavigationSurface
@@ -174,6 +187,7 @@ export function ModuleProjectNavigationSurfaces({
       contribution={contribution}
       project={project}
       activeTabId={activeTabId}
+      moduleActivations={moduleActivations}
     />
   ));
 }
@@ -181,11 +195,15 @@ export function ModuleProjectNavigationSurfaces({
 function SidebarSurface({
   contribution,
   onToggleGlobalSurface,
+  moduleActivations,
 }: {
   readonly contribution: CanvasSidebarSurface;
   readonly onToggleGlobalSurface: (surfaceId: ContributionId) => void;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
+  const activation = moduleActivations.get(contribution.moduleId);
+  if (!activation || activation.disposed) return null;
   return (
     <ModuleSurfaceBoundary>
       <Suspense fallback={null}>
@@ -201,15 +219,18 @@ function SidebarSurface({
 export function ModuleSidebarSurfaces({
   contributions,
   onToggleGlobalSurface,
+  moduleActivations,
 }: {
   readonly contributions: readonly CanvasSidebarSurface[];
   readonly onToggleGlobalSurface: (surfaceId: ContributionId) => void;
+  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   return contributions.map((contribution) => (
     <SidebarSurface
       key={contribution.id}
       contribution={contribution}
       onToggleGlobalSurface={onToggleGlobalSurface}
+      moduleActivations={moduleActivations}
     />
   ));
 }
@@ -238,11 +259,18 @@ export function ModuleSettingsSurfaces({
   readonly projectPaths: readonly string[];
   readonly slot?: SettingsSlot;
 }) {
-  return moduleSettingsContributions(undefined, slot).map((contribution) => (
-    <SettingsSurface
-      key={contribution.id}
-      contribution={contribution}
-      projectPaths={projectPaths}
-    />
-  ));
+  const { catalog, moduleActivations } = useAcceptedWorkspaceContributionRuntime();
+  return activeWorkspaceContributionEntries(catalog.settings(), moduleActivations)
+    .flatMap(({ contribution, owner }) => {
+      if ((contribution.slot ?? "projects.after") !== slot) {
+        return [];
+      }
+      return [
+        <SettingsSurface
+          key={`${owner.activationId}:${contribution.id}`}
+          contribution={contribution}
+          projectPaths={projectPaths}
+        />,
+      ];
+    });
 }

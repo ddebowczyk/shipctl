@@ -244,11 +244,13 @@ test("disabled modules are absent and loading errors retain a stable host code",
   );
 });
 
-test("catalog is host code and canvas renderers use catalog entries", async () => {
-  const [catalogSource, adapterSource, moduleSurfacesSource] = await Promise.all([
+test("catalog is host code and canvas renderers use accepted catalog entries", async () => {
+  const [catalogSource, adapterSource, moduleSurfacesSource, projectActionsSource, appShellSource] = await Promise.all([
     readFile("core/frontend/host/canvasSurfaceCatalog.ts", "utf8"),
     readFile("core/frontend/canvas/legacy/LegacyCanvas.tsx", "utf8"),
     readFile("core/frontend/host/ModuleSurfaces.tsx", "utf8"),
+    readFile("core/frontend/host/projectActions.ts", "utf8"),
+    readFile("core/frontend/shell/AppShell.tsx", "utf8"),
   ]);
 
   assert.doesNotMatch(catalogSource, /@tauri-apps\//);
@@ -256,8 +258,13 @@ test("catalog is host code and canvas renderers use catalog entries", async () =
   assert.match(adapterSource, /ports\.surfaceCatalog\.panel\(content\.panelId\)/);
   assert.match(adapterSource, /ports\.surfaceCatalog\.globalSurface\(surfaceId\)/);
   assert.match(adapterSource, /ports\.surfaceCatalog\.projectLayout/);
+  assert.match(adapterSource, /ports\.projectActionContributions/);
+  assert.match(appShellSource, /workspaceContributions\.projectActions\(\)/);
   assert.doesNotMatch(moduleSurfacesSource, /modulePanelContributions/);
   assert.doesNotMatch(moduleSurfacesSource, /moduleProjectNavigationContributions/);
   assert.doesNotMatch(moduleSurfacesSource, /moduleSidebarContributions/);
   assert.doesNotMatch(moduleSurfacesSource, /enabledProjectLayoutContributions/);
+  assert.doesNotMatch(moduleSurfacesSource, /moduleSettingsContributions/);
+  assert.match(moduleSurfacesSource, /useAcceptedWorkspaceContributionRuntime/);
+  assert.doesNotMatch(projectActionsSource, /enabledProjectActionContributions/);
 });

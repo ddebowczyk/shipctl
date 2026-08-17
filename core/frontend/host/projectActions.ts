@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer } from "react";
 import type {
   ModuleActivationContext,
+  ModuleActivationId,
   ModuleId,
   ModuleHostServices,
   ProjectActionContribution,
@@ -8,11 +9,14 @@ import type {
   ProjectRef,
 } from "@shipctl/module-api";
 
-import { enabledProjectActionContributions } from "./moduleComposition.ts";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";
+import type { ActivatedWorkspaceContribution } from "./workspaceContributionCatalog.ts";
+import { activeWorkspaceContributionEntries } from "./acceptedWorkspaceContributionEntries.ts";
 
 export interface HostedProjectActionGroup extends ProjectActionGroup {
   readonly moduleId: ModuleId;
+  /** Exact owner of action closures and any interactive surface they open. */
+  readonly activationId: ModuleActivationId;
 }
 
 export function resolveProjectActionGroups(
@@ -26,7 +30,11 @@ export function resolveProjectActionGroups(
       const activation = activations.get(contribution.moduleId);
       if (!activation || activation.disposed) return [];
       const group = contribution.getGroup(project, services, activation);
-      return group ? [{ ...group, moduleId: contribution.moduleId }] : [];
+      return group ? [{
+        ...group,
+        moduleId: contribution.moduleId,
+        activationId: activation.identity.activationId,
+      }] : [];
     } catch {
       return [];
     }
@@ -77,11 +85,15 @@ export function subscribeProjectActions(
 export function useModuleProjectActions(
   project: ProjectRef,
   activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
+  entries: readonly ActivatedWorkspaceContribution<ProjectActionContribution>[],
 ): {
   readonly groups: readonly HostedProjectActionGroup[];
   readonly refresh: () => Promise<void>;
 } {
-  const contributions = useMemo(() => enabledProjectActionContributions(), []);
+  const contributions = useMemo(
+    () => activeWorkspaceContributionEntries(entries, activations).map(({ contribution }) => contribution),
+    [activations, entries],
+  );
   const [, render] = useReducer((revision: number) => revision + 1, 0);
 
   useEffect(

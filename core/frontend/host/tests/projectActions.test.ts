@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import type {
   ModuleActivationContext,
+  ModuleActivationId,
   ModuleHostServices,
   ProjectActionContribution,
   ProjectRef,
@@ -39,7 +40,21 @@ after(async () => {
 });
 
 const project: ProjectRef = { id: "/fixture", name: "fixture", path: "/fixture" };
-const activation = { disposed: false } as ModuleActivationContext;
+function activationFor(
+  moduleId: string,
+  revision = "one",
+  disposed = false,
+): ModuleActivationContext {
+  return {
+    identity: {
+      moduleId,
+      activationId: `${moduleId}@1#${revision}` as ModuleActivationId,
+    },
+    disposed,
+  } as ModuleActivationContext;
+}
+
+const activation = activationFor("fixture");
 const activations = new Map([["fixture", activation]]);
 const services = {
   panels: {
@@ -137,8 +152,8 @@ test("refresh waits for every contribution without propagating failures", async 
 });
 
 test("project actions receive only their owning live activation", async () => {
-  const otherActivation = { disposed: false } as ModuleActivationContext;
-  const disposedActivation = { disposed: true } as ModuleActivationContext;
+  const otherActivation = activationFor("other");
+  const disposedActivation = activationFor("disposed", "one", true);
   const calls: Array<[string, ModuleActivationContext]> = [];
   const contributions: ProjectActionContribution[] = [
     {
@@ -207,6 +222,19 @@ test("project actions receive only their owning live activation", async () => {
     ["refresh", activation],
     ["subscribe", activation],
   ]);
+});
+
+test("project action groups retain the exact activation that created their closures", () => {
+  const groups = resolveProjectActionGroups(project, services, [{
+    id: "fixture.interactive",
+    moduleId: "fixture",
+    getGroup: () => ({
+      label: null,
+      actions: [{ id: "fixture.action", label: "Configure", surface: { load: async () => ({ default: () => null }) } }],
+    }),
+  }], activations);
+
+  assert.equal(groups[0]?.activationId, activation.identity.activationId);
 });
 
 test("subscriptions and cleanups isolate contribution failures", () => {

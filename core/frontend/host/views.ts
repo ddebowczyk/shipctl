@@ -1,5 +1,9 @@
 // The host's React surface, kept apart from ./index.ts so that node --test can
 // import the runtime without hitting JSX.
+export {
+  AcceptedWorkspaceContributionRuntimeProvider,
+  useAcceptedWorkspaceContributionRuntime,
+} from "./AcceptedWorkspaceContributionRuntime.tsx";
 export { default as PanelHost } from "./PanelHost.tsx";
 export { default as GlobalSurfaceHost } from "./GlobalSurfaceHost.tsx";
 export {

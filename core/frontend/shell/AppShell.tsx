@@ -100,6 +100,9 @@ import {
 import {
   matchesPanelShortcut,
 } from "../host/index.ts";
+import {
+  AcceptedWorkspaceContributionRuntimeProvider,
+} from "../host/views.ts";
 import { createCommandRegistry } from "./commandRegistry.ts";
 import { CanvasAdapterRuntimeProvider } from "./canvasAdapterRuntime.tsx";
 
@@ -225,10 +228,11 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     activeModules: [] as readonly ShipctlModule[],
     workspaceContributions: INITIAL_WORKSPACE_CONTRIBUTIONS,
   });
-  const { moduleActivations, activeModules } = moduleRuntime;
+  const { moduleActivations, activeModules, workspaceContributions } = moduleRuntime;
   const lastTabCycleAtRef = useRef(0);
 
-  const canvasSurfaceCatalog = moduleRuntime.workspaceContributions.canvasSurfaceCatalog;
+  const canvasSurfaceCatalog = workspaceContributions.canvasSurfaceCatalog;
+  const projectActionContributions = workspaceContributions.projectActions();
   const modulePanelContributions = useMemo(
     () => canvasSurfaceCatalog.panels().filter((panel) => panel.moduleId !== "core"),
     [canvasSurfaceCatalog],
@@ -1161,57 +1165,69 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   const canvasPorts = useMemo<CanvasPorts>(() => ({
     projectPaths,
     surfaceCatalog: canvasSurfaceCatalog,
+    projectActionContributions,
     terminalPresentationRegistry: activeTerminalPresentationRegistry,
     moduleHostServices: MODULE_HOST_SERVICES,
     moduleActivations,
-  }), [activeTerminalPresentationRegistry, canvasSurfaceCatalog, moduleActivations, projectPaths]);
+  }), [
+    activeTerminalPresentationRegistry,
+    canvasSurfaceCatalog,
+    moduleActivations,
+    projectActionContributions,
+    projectPaths,
+  ]);
   return (
     <CanvasAdapterRuntimeProvider adapterId={canvasAdapterId}>
-    <div className="app-shell">
-      <NoticeCenter />
-      <div
-        className="drag-region"
-        aria-hidden="true"
-        onMouseDown={(e) => {
-          if (e.buttons === 1) {
-            if (e.detail === 2) {
-              getCurrentWindow().toggleMaximize();
-            } else {
-              getCurrentWindow().startDragging();
-            }
-          }
-        }}
+      <AcceptedWorkspaceContributionRuntimeProvider
+        catalog={workspaceContributions}
+        moduleActivations={moduleActivations}
       >
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
-          <button
-            onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleSidebar(); }}
-            onMouseDown={(e) => e.stopPropagation()}
-            className={`p-1 rounded transition-opacity hover:opacity-70 ${sidebarVisible ? "opacity-40" : "opacity-15"}`}
-            title={sidebarVisible ? "Hide sidebar (Cmd+B)" : "Show sidebar (Cmd+B)"}
-            aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
+        <div className="app-shell">
+          <NoticeCenter />
+          <div
+            className="drag-region"
+            aria-hidden="true"
+            onMouseDown={(e) => {
+              if (e.buttons === 1) {
+                if (e.detail === 2) {
+                  getCurrentWindow().toggleMaximize();
+                } else {
+                  getCurrentWindow().startDragging();
+                }
+              }
+            }}
           >
-            <PanelLeft size={20} />
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleDiffPanel(); }}
-            onMouseDown={(e) => e.stopPropagation()}
-            className={`p-1 rounded transition-opacity hover:opacity-70 ${diffPanelVisible ? "opacity-40" : "opacity-15"}`}
-            title={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
-            aria-label={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
-          >
-            <PanelRight size={20} />
-          </button>
-        </div>
-      </div>
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
+              <button
+                onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleSidebar(); }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className={`p-1 rounded transition-opacity hover:opacity-70 ${sidebarVisible ? "opacity-40" : "opacity-15"}`}
+                title={sidebarVisible ? "Hide sidebar (Cmd+B)" : "Show sidebar (Cmd+B)"}
+                aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
+              >
+                <PanelLeft size={20} />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleDiffPanel(); }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className={`p-1 rounded transition-opacity hover:opacity-70 ${diffPanelVisible ? "opacity-40" : "opacity-15"}`}
+                title={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
+                aria-label={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
+              >
+                <PanelRight size={20} />
+              </button>
+            </div>
+          </div>
 
-      <CanvasHost
-        adapter={canvasAdapter}
-        model={canvasModel}
-        actions={canvasActions}
-        ports={canvasPorts}
-        workspace={workspaceCanvas}
-      />
-    </div>
+          <CanvasHost
+            adapter={canvasAdapter}
+            model={canvasModel}
+            actions={canvasActions}
+            ports={canvasPorts}
+            workspace={workspaceCanvas}
+          />
+        </div>
+      </AcceptedWorkspaceContributionRuntimeProvider>
     </CanvasAdapterRuntimeProvider>
   );
 }
