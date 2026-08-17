@@ -126,8 +126,10 @@ two identity systems.
   document and invoke the same workspace actions.
 - **SEM-G-005:** User layout mutations preserve valid document structure and
   can be reset to a deterministic default derived from the active catalog.
-- **SEM-G-006:** Every contribution registration is activation-owned and
+- **SEM-G-006:** Every live contribution registration is activation-owned and
   disappears after plugin removal without stale component or CSS references.
+  A recoverable missing workspace record can retain historical owner identity,
+  but that metadata cannot resolve a renderer, route, or service.
 - **SEM-G-007:** Built-in and installed plugins use the same runtime path; no
   static module list, native feature module, or direct Tauri plugin dependency
   remains.
@@ -326,9 +328,10 @@ and storage failure does not reject the accepted runtime family.
 
 ### PROP-G-CONTRIBUTION-CLEANUP-001
 
-- **Claim:** After every generated plugin removal, no accepted catalog, mounted
-  view, stylesheet, command route, menu item, navigation item, or component
-  cache references the removed activation.
+- **Claim:** After every generated plugin removal, no live accepted catalog,
+  mounted view, stylesheet, command route, menu item, navigation item, or
+  component cache resolves the removed activation. A recoverable missing
+  workspace record can retain historical owner identity only as inert metadata.
 - **Shape:** conservation.
 - **Evidence:** SEM-G-006.
 - **Domain:** plugins contributing every UI family with open and closed views,
@@ -340,7 +343,11 @@ and storage failure does not reject the accepted runtime family.
 - **Failure value:** a removed plugin's stale menu item invokes a new plugin
   with the same contribution ID.
 - **Tier:** pull request and browser integration.
-- **Initial status/test ID:** proposed / `architecture.contribution-cleanup.property`.
+- **Current status/test ID:** passing /
+  `architecture.contribution-cleanup.property`. It checks every current UI
+  contribution family plus route, subscription, stylesheet, and renderer-key
+  canaries. Unreachable browser module-cache bytes remain outside the host
+  contract.
 
 ### PROP-G-ABSENCE-001
 

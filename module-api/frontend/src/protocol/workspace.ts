@@ -117,6 +117,11 @@ export interface WorkspaceViewInstance {
   readonly instanceId: string;
   readonly viewTypeId: string;
   readonly ownerModuleId: string;
+  /**
+   * The owner that last supplied this persisted definition. A
+   * `missing-definition` record retains it only as recovery metadata; it does
+   * not authorize a renderer, route, or service lookup after removal.
+   */
   readonly ownerActivationId: ModuleActivationId;
   readonly resource: WorkspaceResourceReference;
   readonly label: string | null;

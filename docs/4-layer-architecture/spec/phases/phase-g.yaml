@@ -36,8 +36,10 @@ semantics:
   - id: SEM-G-006
     kind: MUST
     rule: >-
-      Every contribution is activation-owned and leaves no stale component or
-      stylesheet after removal.
+      Every live contribution is activation-owned and leaves no stale component
+      or stylesheet after removal. A recoverable missing workspace record may
+      retain historical owner identity but cannot resolve a renderer, route, or
+      service.
   - id: SEM-G-007
     kind: MUST
     rule: >-
@@ -281,8 +283,10 @@ properties:
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-CONTRIBUTION-CLEANUP-001
     claim: >-
-      After plugin removal, no catalog, view, stylesheet, route, menu,
-      navigation, or component cache references the removed activation.
+      After plugin removal, no live catalog, mounted view, stylesheet, route,
+      menu, navigation, or component cache resolves the removed activation.
+      A recoverable missing workspace record may retain historical owner
+      identity only as inert metadata.
     shapes: [conservation]
     evidence: [SEM-G-006]
     domain:
@@ -314,7 +318,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-ABSENCE-001
     claim: >-

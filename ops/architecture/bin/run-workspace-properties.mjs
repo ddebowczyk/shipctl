@@ -32,6 +32,7 @@ const seed = configuredSeed();
 const testFiles = [
   "ops/architecture/tests/workspaceCapability.test.mjs",
   "ops/architecture/tests/canvasAdapterParity.test.mjs",
+  "ops/architecture/tests/workspaceContributionCatalog.test.mjs",
 ];
 const testArguments = ["exec", "node", "--test", "--test-concurrency=1", ...testFiles];
 const replayCommand = [
@@ -99,6 +100,32 @@ const properties = [
     testId: "architecture.workspace-contribution-schema.property",
     classifications: {
       declaration: ["valid", "layman-node", "renderer-prop", "eager-view", "missing-identity"],
+    },
+  },
+  {
+    propertyId: "PROP-G-CONTRIBUTION-CLEANUP-001",
+    testId: "architecture.contribution-cleanup.property",
+    classifications: {
+      lifecycle: ["replacement", "failed-candidate", "removal", "re-add"],
+      family: [
+        "command",
+        "panel",
+        "global-surface",
+        "global-navigation",
+        "sidebar",
+        "project-navigation",
+        "project-layout",
+        "project-action",
+        "settings",
+      ],
+      observable: [
+        "workspace-view",
+        "style",
+        "command-route",
+        "menu",
+        "navigation",
+        "component-cache",
+      ],
     },
   },
 ];
