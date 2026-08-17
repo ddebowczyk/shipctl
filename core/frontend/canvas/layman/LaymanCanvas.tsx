@@ -31,6 +31,7 @@ import type { ContributionId, ProjectRef } from "@shipctl/module-api";
 import {
   createLaymanWorkspaceState,
   type LaymanCanvasPaneData,
+  workspaceStackIdFromLaymanWindowId,
 } from "./workspaceProjection.ts";
 import { laymanWorkspaceAction } from "./workspaceActions.ts";
 
@@ -67,6 +68,26 @@ const LAYMAN_CANVAS_INTERACTION: LaymanInteractionPolicy<LaymanCanvasPaneData> =
         .flatMap((window) => window.tabs)
         .find((candidate) => candidate.id === command.tabId);
       if (tab?.data.kind === "shipctl.workspace-view" && tab.data.closeable) {
+        return { kind: "allow" };
+      }
+    }
+    if (
+      command.type === "tab.move"
+      && command.target.kind === "window"
+      && command.placement === "center"
+      && workspaceStackIdFromLaymanWindowId(command.target.windowId) !== null
+    ) {
+      const targetWindowId = command.target.windowId;
+      const source = inspection.windows.find((window) => (
+        window.tabs.some((tab) => tab.id === command.tabId)
+      ));
+      const target = inspection.windows.find((window) => window.id === targetWindowId);
+      const sourceTab = source?.tabs.find((tab) => tab.id === command.tabId);
+      if (
+        source?.location === "tiled"
+        && target?.location === "tiled"
+        && sourceTab?.data.kind === "shipctl.workspace-view"
+      ) {
         return { kind: "allow" };
       }
     }
@@ -204,7 +225,8 @@ export function createLaymanCanvasState(): LaymanState<LaymanCanvasPaneData> {
  * Creates the controlled workspace used by this proof adapter.
  *
  * Host commands restore canonical semantic state. User commands may select a
- * tab or close a closeable semantic view; layout-edit commands remain denied
+ * tab, close a closeable semantic view, or move a tab into the centre of an
+ * existing tiled semantic stack. Other layout-edit commands remain denied
  * until matching semantic workspace commands are exposed.
  */
 export function createLaymanCanvasController(

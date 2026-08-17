@@ -128,6 +128,56 @@ properties:
     tiers: [pr]
     status: passing
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
+  - id: PROP-G-LAYMAN-MOVE-001
+    claim: >-
+      A tiled Layman centre-drop emits the exact semantic append move and
+      preserves the independently modeled source and target tab membership.
+    shapes: [differential]
+    evidence: [SEM-G-005]
+    domain:
+      generates: >-
+        Two-tiled-stack workspace documents, selected source tabs, available
+        and missing view placeholders, and populated target stacks.
+      excludes: [edge drops, root drops, floating stacks, resize, pixels]
+      strategy: >-
+        Project one valid document through Layman, dispatch its real user
+        centre-drop gate, and compare the action and tab membership with a
+        pure source-removal and target-append model.
+      classifications:
+        - source-retained
+        - source-collapsed
+        - target-append
+        - missing
+    preconditions:
+      - The source workspace document passes schema validation.
+      - Both tiled Layman window IDs derive from semantic stack IDs.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          Compare the emitted semantic move and Layman tab membership with a
+          pure source-removal and target-append model.
+        independence: >-
+          The model imports neither Layman nor workspace implementation code.
+      alternative:
+        kind: reference
+        description: >-
+          Apply the emitted command through the semantic workspace authority
+          and compare canonical stack membership after projection.
+        independence: >-
+          The authority is reached only through the public bridge command.
+    failure_value: >-
+      Dragging a terminal changes only renderer state or targets the wrong
+      semantic stack.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.layman-semantic-move.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-LAYOUT-001
     claim: >-
       Persistence and restore preserve semantic identity, topology, focus, and

@@ -95,6 +95,45 @@ function profile(workspaceId: string): UiWorkspaceDocument {
   });
 }
 
+function splitProfile(workspaceId: string): UiWorkspaceDocument {
+  return parseUiWorkspaceDocument({
+    schemaVersion: 1,
+    workspaceId,
+    profileId: "fixture.canvas",
+    instances: ["first", "second", "third"].map((instanceId) => ({
+      instanceId,
+      viewTypeId: `fixture.${instanceId}`,
+      ownerModuleId: "shipctl.fixture",
+      ownerActivationId: "shipctl.fixture@1#canvas",
+      resource: { kind: "global" },
+      label: instanceId,
+      stateRef: null,
+      availability: { kind: "available" },
+      lifecycle: "placed",
+    })),
+    root: {
+      kind: "split",
+      nodeId: "fixture.root",
+      axis: "horizontal",
+      firstShare: 0.5,
+      first: {
+        kind: "stack",
+        stackId: "fixture.left",
+        instanceIds: ["first", "second"],
+        selectedInstanceId: "first",
+      },
+      second: {
+        kind: "stack",
+        stackId: "fixture.right",
+        instanceIds: ["third"],
+        selectedInstanceId: "third",
+      },
+    },
+    floating: [],
+    maximizedStackId: null,
+  });
+}
+
 test("canvas bridge serializes renderer actions through current authority revisions", async () => {
   const workspaceId = "fixture.workspace";
   const authority = await WorkspaceAuthority.open({
@@ -164,6 +203,48 @@ test("canvas bridge opens semantic views without exposing an authority or render
     document?.instances.find((instance) => instance.instanceId === "fixture.global.instance")?.viewTypeId,
     "fixture.global",
   );
+
+  bridge.dispose();
+});
+
+test("canvas bridge moves semantic views through the authority", async () => {
+  const workspaceId = "fixture.workspace";
+  const authority = await WorkspaceAuthority.open({
+    workspaceId,
+    catalog: catalog(["fixture.first", "fixture.second", "fixture.third"]),
+    persistence: new InMemoryWorkspacePersistence(),
+    defaultProfile: ({ workspaceId: id }) => splitProfile(id),
+  });
+  const bridge = new WorkspaceCanvasBridge({ authority, originId: "fixture.canvas" });
+
+  const moved = await bridge.snapshot().execute({
+    kind: "move",
+    instanceId: "first",
+    targetStackId: "fixture.right",
+    position: "end",
+    relativeInstanceId: null,
+  });
+
+  assert.equal(moved.status, "applied");
+  assert.equal(moved.revision, 1);
+  assert.deepEqual(authority.inspect(true).document?.root, {
+    kind: "split",
+    nodeId: "fixture.root",
+    axis: "horizontal",
+    firstShare: 0.5,
+    first: {
+      kind: "stack",
+      stackId: "fixture.left",
+      instanceIds: ["second"],
+      selectedInstanceId: "second",
+    },
+    second: {
+      kind: "stack",
+      stackId: "fixture.right",
+      instanceIds: ["third", "first"],
+      selectedInstanceId: "first",
+    },
+  });
 
   bridge.dispose();
 });

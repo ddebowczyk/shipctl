@@ -7,10 +7,12 @@ import type { UiWorkspaceDocument, WorkspaceRevision } from "@shipctl/module-api
 
 type ProjectionModule = typeof import("../layman/workspaceProjection.ts");
 type LaymanCanvasModule = typeof import("../layman/LaymanCanvas.tsx");
+type WorkspaceActionsModule = typeof import("../layman/workspaceActions.ts");
 
 let vite: ViteDevServer;
 let createLaymanWorkspaceState: ProjectionModule["createLaymanWorkspaceState"];
 let createLaymanCanvasController: LaymanCanvasModule["createLaymanCanvasController"];
+let laymanWorkspaceAction: WorkspaceActionsModule["laymanWorkspaceAction"];
 
 before(async () => {
   vite = await createServer({
@@ -23,6 +25,9 @@ before(async () => {
   ({ createLaymanCanvasController } = await vite.ssrLoadModule(
     "/core/frontend/canvas/layman/LaymanCanvas.tsx",
   ) as LaymanCanvasModule);
+  ({ laymanWorkspaceAction } = await vite.ssrLoadModule(
+    "/core/frontend/canvas/layman/workspaceActions.ts",
+  ) as WorkspaceActionsModule);
 });
 
 after(async () => {
@@ -217,7 +222,7 @@ test("Layman projection preserves semantic stacks, tabs, split shares, and float
   });
 });
 
-test("Layman accepts only semantic tab selection and close actions", () => {
+test("Layman accepts only declared semantic tab actions", () => {
   const controller = createLaymanCanvasController(
     createLaymanWorkspaceState(tabInteractionProjection()),
   );
@@ -234,4 +239,67 @@ test("Layman accepts only semantic tab selection and close actions", () => {
     controller.dispatch({ type: "tab.remove", tabId: "right" }, { origin: "user" }).status,
     "applied",
   );
+});
+
+test("Layman maps a tiled semantic tab centre-drop to a workspace move", () => {
+  const controller = createLaymanCanvasController(
+    createLaymanWorkspaceState(fixtureProjection()),
+  );
+  const targetWindowId = "shipctl.workspace.stack:right-stack";
+
+  assert.equal(
+    controller.dispatch({
+      type: "tab.move",
+      tabId: "left",
+      target: { kind: "window", windowId: targetWindowId },
+      placement: "right",
+    }, { origin: "user" }).status,
+    "rejected",
+  );
+  assert.equal(
+    controller.dispatch({
+      type: "tab.move",
+      tabId: "left",
+      target: { kind: "window", windowId: "shipctl.workspace.floating:inspector" },
+      placement: "center",
+    }, { origin: "user" }).status,
+    "rejected",
+  );
+  assert.equal(
+    controller.dispatch({
+      type: "tab.move",
+      tabId: "left",
+      target: { kind: "root" },
+      placement: "center",
+    }, { origin: "user" }).status,
+    "rejected",
+  );
+
+  const moved = controller.dispatch({
+    type: "tab.move",
+    tabId: "left",
+    target: { kind: "window", windowId: targetWindowId },
+    placement: "center",
+  }, { origin: "user" });
+  assert.equal(moved.status, "applied");
+  assert.deepEqual(laymanWorkspaceAction(moved), {
+    kind: "move",
+    instanceId: "left",
+    targetStackId: "right-stack",
+    position: "end",
+    relativeInstanceId: null,
+  });
+  assert.deepEqual(
+    controller.inspect().windows.find((window) => window.id === targetWindowId)?.tabs.map((tab) => tab.id),
+    ["right", "left"],
+  );
+
+  const sameStack = controller.dispatch({
+    type: "tab.move",
+    tabId: "right",
+    target: { kind: "window", windowId: targetWindowId },
+    placement: "center",
+  }, { origin: "user" });
+  assert.equal(sameStack.status, "noop");
+  assert.equal(laymanWorkspaceAction(sameStack), null);
 });

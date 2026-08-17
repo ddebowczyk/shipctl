@@ -24,7 +24,14 @@ export type WorkspaceCanvasAction =
       readonly stateRef?: ModuleJsonValue | null;
     }
   | { readonly kind: "select"; readonly instanceId: string }
-  | { readonly kind: "close"; readonly instanceId: string };
+  | { readonly kind: "close"; readonly instanceId: string }
+  | {
+      readonly kind: "move";
+      readonly instanceId: string;
+      readonly targetStackId: string;
+      readonly position: "start" | "end" | "before" | "after";
+      readonly relativeInstanceId: string | null;
+    };
 
 /** A resolved, data-only view for one canvas projection. */
 export interface WorkspaceCanvasView {
@@ -172,6 +179,16 @@ export class WorkspaceCanvasBridge {
           return this.#authority.mutate({
             kind: "close",
             instanceId: action.instanceId,
+            expectedRevision,
+            originId: this.#originId,
+          });
+        case "move":
+          return this.#authority.mutate({
+            kind: "move",
+            instanceId: action.instanceId,
+            targetStackId: action.targetStackId,
+            position: action.position,
+            relativeInstanceId: action.relativeInstanceId,
             expectedRevision,
             originId: this.#originId,
           });

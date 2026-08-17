@@ -32,6 +32,13 @@ export const LAYMAN_WORKSPACE_STACK_PREFIX = "shipctl.workspace.stack:";
 export const LAYMAN_WORKSPACE_SPLIT_PREFIX = "shipctl.workspace.split:";
 export const LAYMAN_WORKSPACE_FLOATING_PREFIX = "shipctl.workspace.floating:";
 
+/** Recover a semantic stack identity from a tiled Layman window identity. */
+export function workspaceStackIdFromLaymanWindowId(windowId: string): string | null {
+  if (!windowId.startsWith(LAYMAN_WORKSPACE_STACK_PREFIX)) return null;
+  const stackId = windowId.slice(LAYMAN_WORKSPACE_STACK_PREFIX.length);
+  return stackId.length === 0 ? null : stackId;
+}
+
 function tabFor(
   projection: WorkspaceCanvasProjection,
   instanceId: string,

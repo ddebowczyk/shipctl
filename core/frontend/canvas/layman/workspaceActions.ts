@@ -2,7 +2,10 @@ import type { LaymanControllerTransition } from "react-layman";
 
 import type { WorkspaceCanvasAction } from "@shipctl/core/workspace";
 
-import type { LaymanCanvasPaneData } from "./workspaceProjection.ts";
+import {
+  workspaceStackIdFromLaymanWindowId,
+  type LaymanCanvasPaneData,
+} from "./workspaceProjection.ts";
 
 /**
  * Translate an accepted Layman user transition into a semantic workspace
@@ -21,6 +24,22 @@ export function laymanWorkspaceAction(
   }
   if (command?.type === "tab.remove") {
     return Object.freeze({ kind: "close", instanceId: command.tabId });
+  }
+  if (
+    command?.type === "tab.move"
+    && command.target.kind === "window"
+    && command.placement === "center"
+  ) {
+    const targetStackId = workspaceStackIdFromLaymanWindowId(command.target.windowId);
+    if (targetStackId !== null) {
+      return Object.freeze({
+        kind: "move",
+        instanceId: command.tabId,
+        targetStackId,
+        position: "end",
+        relativeInstanceId: null,
+      });
+    }
   }
   return null;
 }

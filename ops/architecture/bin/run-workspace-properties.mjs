@@ -69,6 +69,15 @@ const properties = [
     },
   },
   {
+    propertyId: "PROP-G-LAYMAN-MOVE-001",
+    testId: "architecture.layman-semantic-move.property",
+    classifications: {
+      topology: ["two-tiled-stacks"],
+      action: ["center-move", "source-retained", "source-collapsed", "target-append"],
+      availability: ["available", "missing"],
+    },
+  },
+  {
     propertyId: "PROP-G-LAYOUT-001",
     testId: "architecture.workspace-roundtrip.property",
     classifications: {

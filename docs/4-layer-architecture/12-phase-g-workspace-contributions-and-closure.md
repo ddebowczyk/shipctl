@@ -60,7 +60,8 @@ submitted.
 
 The first renderer bridge is delivered. `AppShell` gives the selected canvas a
 `WorkspaceCanvasBridge`: a renderer-neutral projection of the authority's
-current document plus serialized `open`, `select`, and `close` commands. The
+current document plus serialized `open`, `select`, `close`, and `move`
+commands. The
 accepted catalog always includes the host compatibility definition, so a new
 workspace has a valid root view even before optional module views are opened.
 
@@ -83,11 +84,17 @@ document; the old UI-store route is only a startup fallback before the
 workspace bridge exists. A Fast Check differential property proves the shared
 adapter subset against Layman's real command gate.
 
+Layman now accepts one structural user action with an exact semantic mapping:
+a workspace tab can be dropped into the centre of another existing tiled
+semantic stack. The adapter emits a `move` command that appends the instance to
+the target stack. The workspace authority remains responsible for canonical
+selection, document cleanup, persistence, and recovery after a failed save.
+
 This is not full renderer-parity closure. The legacy adapter deliberately
 rejects splits, floating stacks, and maximized stacks instead of flattening
-them. Semantic commands also do not yet cover drag, resize, split, move,
-floating-window, or maximize operations. Those layouts and interactions remain
-open under SEM-G-004 and SEM-G-005.
+them. Layman rejects edge drops that would create a split, drops into the root
+or a floating stack, floating-window movement, resize, and maximize operations.
+Those layouts and interactions remain open under SEM-G-004 and SEM-G-005.
 
 Panel migration aliases remain legacy tab-persistence kinds (for example,
 `git`) and are intentionally not admitted as semantic workspace aliases. A
@@ -167,10 +174,11 @@ serial semantic workspace reconciliation and durable CAS
 4. Replace the current one-window `LegacyCanvas` pane with projected semantic
    view instances, splits, tabs, floating windows, and focus operations as
    supported by the workspace document. **Started:** both adapters share a
-   single-stack projection and select/close mapping; the live legacy route
-   renders selected global and panel views and uses semantic close. Complete
-   the semantic tab strip, layout rendering, and command support before
-   removing the compatibility pane.
+   single-stack projection and select/close mapping; Layman also maps a tiled
+   centre-drop between existing stacks to the semantic move command. The live
+   legacy route renders selected global and panel views and uses semantic close.
+   Complete the semantic tab strip, layout rendering, and command support
+   before removing the compatibility pane.
 5. Keep the legacy canvas as a differential reference until the semantic
    projection is stable.
 6. Persist the semantic workspace document through a separate Tauri port.
@@ -235,6 +243,29 @@ and storage failure does not reject the accepted runtime family.
 - **Current status/test ID:** passing /
   `architecture.canvas-adapter-parity.property`. It covers the declared
   single-stack subset only; it is not evidence for split or floating parity.
+
+### PROP-G-LAYMAN-MOVE-001
+
+- **Claim:** A user center-drop from one tiled semantic stack into another
+  emits exactly the semantic append move for the dropped instance; the local
+  Layman tab membership matches the independent stack model.
+- **Shape:** differential.
+- **Evidence:** SEM-G-005.
+- **Domain:** generated two-tiled-stack documents, selected source tabs,
+  available and missing view placeholders, and target stacks with existing
+  tabs. Exclude edge drops, root drops, floating stacks, resizing, and pixels.
+- **Preconditions:** the workspace document passes schema validation and both
+  stack IDs are renderer-derived semantic IDs.
+- **Oracle:** compare the emitted action and Layman tab membership with a pure
+  source-removal and target-append model; the model does not import Layman or
+  workspace implementation code.
+- **Failure value:** dragging a terminal changes only the renderer tree, or
+  moves it into the wrong semantic stack.
+- **Tier:** pull request.
+- **Current status/test ID:** passing /
+  `architecture.layman-semantic-move.property`. This is intentionally limited
+  to existing tiled stacks; it is not evidence for split creation or floating
+  movement.
 
 ### PROP-G-LAYOUT-001
 
