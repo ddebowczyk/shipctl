@@ -357,7 +357,7 @@ export function parseWorkspacePersistedRecord(value: unknown): WorkspacePersiste
     || !hasIdentity(candidate.workspaceId)
     || !hasSafePositiveInteger(candidate.revision)
     || !hasIdentity(candidate.originId)
-    || !hasSafePositiveInteger(candidate.catalogRevision)
+    || !hasSafeNonNegativeInteger(candidate.catalogRevision)
   ) invalid("Workspace persisted record is invalid.");
   const document = parseUiWorkspaceDocument(candidate.document);
   if (document.workspaceId !== candidate.workspaceId) invalid("Workspace record and document identities differ.");

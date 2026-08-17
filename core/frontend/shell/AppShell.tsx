@@ -25,6 +25,12 @@ import {
   type CanvasPorts,
 } from "@shipctl/core/canvas";
 import { CanvasHost, type CanvasAdapterView } from "@shipctl/core/canvas/views";
+import {
+  CURRENT_CANVAS_WORKSPACE_ID,
+  InMemoryWorkspacePersistence,
+  WorkspaceAuthority,
+  createWorkspaceServiceProvider,
+} from "@shipctl/core/workspace";
 import { NoticeCenter } from "../shared/views.ts";
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useRepoStore } from "../projects/index.ts";
@@ -57,6 +63,7 @@ import {
   createSchedulerServiceProvider,
   createSemanticTerminalsServiceProvider,
   createTerminalSessionsServiceProvider,
+  createTauriWorkspacePersistencePort,
   reportModuleReconciliationFailure,
 } from "../platform/index.ts";
 import { useThemeStore } from "../appearance/index.ts";
@@ -76,6 +83,7 @@ import {
   notifyModulesProjectRemoved,
   notifyModulesProjectsChanged,
   panelIdForTab,
+  AcceptedWorkspaceCatalogController,
   LiveModuleSupervisor,
   publishFrontendRuntimeSnapshot,
   type ShipctlModule,
@@ -329,79 +337,123 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
 
   useEffect(() => {
     let disposed = false;
-    const supervisor = new LiveModuleSupervisor({
-      staticModules: ENABLED_MODULES,
-      services: MODULE_HOST_SERVICES,
-      createSemanticServices: (bindings, deactivateActivation) => new SemanticServiceRegistry([
-        ...SEMANTIC_SERVICE_PROVIDERS,
-        createMessagesServiceProvider({
-          clientsByActivation: bindings.clientsByActivation,
-          deactivateActivation,
-        }),
-        createSchedulerServiceProvider({
-          bindingsByActivation: bindings.schedulerBindingsByActivation,
-        }),
-        createTerminalSessionsServiceProvider({
-          bindingsByActivation: bindings.terminalBindingsByActivation,
-          runtime: ACTIVATION_TERMINAL_SESSIONS,
-          terminalHost: terminalHostAdapter,
-        }),
-        createSemanticTerminalsServiceProvider({
-          bindingsByActivation: bindings.terminalBindingsByActivation,
-          runtime: ACTIVATION_TERMINAL_SESSIONS,
-        }),
-      ]),
-      createWorkspaceContributions,
-      publish: (family) => {
+    let supervisor: LiveModuleSupervisor | undefined;
+    let workspaceController: AcceptedWorkspaceCatalogController | undefined;
+    void (async () => {
+      let workspaceAuthority: WorkspaceAuthority;
+      try {
+        workspaceAuthority = await WorkspaceAuthority.open({
+          workspaceId: CURRENT_CANVAS_WORKSPACE_ID,
+          catalog: INITIAL_WORKSPACE_CONTRIBUTIONS.workspaceCatalog(),
+          persistence: createTauriWorkspacePersistencePort(),
+          deferCatalogReconciliationUntilFirstAcceptedSnapshot: true,
+        });
+      } catch (error) {
         if (disposed) return;
-        const workspaceContributions = family.workspaceContributions;
-        if (workspaceContributions === undefined) {
-          pushNotice({
-            tone: "error",
-            title: "Workspace contributions were not published",
-            message: "The accepted runtime family has no canvas contribution catalog.",
-          });
-          return;
-        }
-        setModuleRuntime({
-          activeModules: family.modules,
-          moduleActivations: withCoreActivation(family.activationContextsByModule),
-          workspaceContributions,
-        });
-      },
-      reportApplied: async (family) => {
-        await publishFrontendRuntimeSnapshot(
-          {
-            registryRevision: family.registryRevision,
-            activationContextsByModule: family.activationContextsByModule,
-            artifactDescriptorsByModule: family.artifactDescriptorsByModule,
-            activationOutcomes: [...family.artifactDescriptorsByModule.keys()].map((moduleId) => ({
-              moduleId,
-              status: "active" as const,
-              phase: "active" as const,
-            })),
-          },
-          family.modules,
-        );
-      },
-      reportRejected: async (diagnostic) => {
-        await reportModuleReconciliationFailure({
-          schemaVersion: 1,
-          registryRevision: diagnostic.desiredRevision,
-          moduleId: diagnostic.moduleId,
-          activationId: diagnostic.activationId,
-          phase: diagnostic.stage,
-          code: diagnostic.code,
-          message: diagnostic.message,
-        });
         pushNotice({
           tone: "error",
-          title: `Runtime revision ${diagnostic.desiredRevision} was rejected`,
-          message: `${diagnostic.code}: ${diagnostic.message}`,
+          title: "Workspace state will not persist this run",
+          message: getErrorMessage(error),
         });
-      },
-    });
-    void supervisor.start().catch((error) => {
+        workspaceAuthority = await WorkspaceAuthority.open({
+          workspaceId: CURRENT_CANVAS_WORKSPACE_ID,
+          catalog: INITIAL_WORKSPACE_CONTRIBUTIONS.workspaceCatalog(),
+          persistence: new InMemoryWorkspacePersistence(),
+          deferCatalogReconciliationUntilFirstAcceptedSnapshot: true,
+        });
+      }
+      if (disposed) return;
+
+      workspaceController = new AcceptedWorkspaceCatalogController({
+        authority: workspaceAuthority,
+        onFailure: (failure) => {
+          if (disposed) return;
+          pushNotice({
+            tone: "error",
+            title: "Workspace catalog could not be synchronized",
+            message: `Revision ${failure.catalogRevision}: ${failure.message}`,
+          });
+        },
+      });
+      supervisor = new LiveModuleSupervisor({
+        staticModules: ENABLED_MODULES,
+        services: MODULE_HOST_SERVICES,
+        createSemanticServices: (bindings, deactivateActivation) => new SemanticServiceRegistry([
+          ...SEMANTIC_SERVICE_PROVIDERS,
+          createWorkspaceServiceProvider({ authority: workspaceAuthority }),
+          createMessagesServiceProvider({
+            clientsByActivation: bindings.clientsByActivation,
+            deactivateActivation,
+          }),
+          createSchedulerServiceProvider({
+            bindingsByActivation: bindings.schedulerBindingsByActivation,
+          }),
+          createTerminalSessionsServiceProvider({
+            bindingsByActivation: bindings.terminalBindingsByActivation,
+            runtime: ACTIVATION_TERMINAL_SESSIONS,
+            terminalHost: terminalHostAdapter,
+          }),
+          createSemanticTerminalsServiceProvider({
+            bindingsByActivation: bindings.terminalBindingsByActivation,
+            runtime: ACTIVATION_TERMINAL_SESSIONS,
+          }),
+        ]),
+        createWorkspaceContributions,
+        publish: (family) => {
+          if (disposed) return;
+          const workspaceContributions = family.workspaceContributions;
+          if (workspaceContributions === undefined) {
+            pushNotice({
+              tone: "error",
+              title: "Workspace contributions were not published",
+              message: "The accepted runtime family has no canvas contribution catalog.",
+            });
+            return;
+          }
+          setModuleRuntime({
+            activeModules: family.modules,
+            moduleActivations: withCoreActivation(family.activationContextsByModule),
+            workspaceContributions,
+          });
+          // This observer runs only after route/schedule reconciliation and
+          // semantic host-service publication have committed. Its failure is a
+          // workspace diagnostic, never a rejected runtime revision.
+          void workspaceController?.submit(workspaceContributions.workspaceCatalog());
+        },
+        reportApplied: async (family) => {
+          await publishFrontendRuntimeSnapshot(
+            {
+              registryRevision: family.registryRevision,
+              activationContextsByModule: family.activationContextsByModule,
+              artifactDescriptorsByModule: family.artifactDescriptorsByModule,
+              activationOutcomes: [...family.artifactDescriptorsByModule.keys()].map((moduleId) => ({
+                moduleId,
+                status: "active" as const,
+                phase: "active" as const,
+              })),
+            },
+            family.modules,
+          );
+        },
+        reportRejected: async (diagnostic) => {
+          await reportModuleReconciliationFailure({
+            schemaVersion: 1,
+            registryRevision: diagnostic.desiredRevision,
+            moduleId: diagnostic.moduleId,
+            activationId: diagnostic.activationId,
+            phase: diagnostic.stage,
+            code: diagnostic.code,
+            message: diagnostic.message,
+          });
+          pushNotice({
+            tone: "error",
+            title: `Runtime revision ${diagnostic.desiredRevision} was rejected`,
+            message: `${diagnostic.code}: ${diagnostic.message}`,
+          });
+        },
+      });
+      await supervisor.start();
+    })().catch((error) => {
       if (disposed) return;
       pushNotice({
         tone: "error",
@@ -412,7 +464,8 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
 
     return () => {
       disposed = true;
-      void supervisor.dispose();
+      workspaceController?.dispose();
+      void supervisor?.dispose();
     };
   }, []);
 

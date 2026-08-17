@@ -82,6 +82,12 @@ export interface WorkspaceAuthorityOptions {
   readonly catalog: WorkspaceCatalogSnapshot;
   readonly persistence: WorkspacePersistencePort;
   readonly defaultProfile?: WorkspaceProfileFactory;
+  /**
+   * Preserve a restored document until the host submits its first accepted
+   * runtime catalog. This is only for application bootstrap, where the
+   * workspace service must exist before dynamic module activation completes.
+   */
+  readonly deferCatalogReconciliationUntilFirstAcceptedSnapshot?: boolean;
 }
 
 export interface ReconcileWorkspaceCatalogInput {
@@ -607,6 +613,7 @@ export class WorkspaceAuthority {
   readonly #defaultProfile: WorkspaceProfileFactory;
   #catalog: WorkspaceCatalogSnapshot;
   #state: WorkspaceState;
+  #catalogRequiresAcceptedSnapshot: boolean;
   readonly #listeners = new Set<Listener>();
 
   private constructor(
@@ -619,6 +626,8 @@ export class WorkspaceAuthority {
     this.#defaultProfile = options.defaultProfile ?? createCurrentCanvasWorkspaceProfile;
     this.#catalog = catalog;
     this.#state = state;
+    this.#catalogRequiresAcceptedSnapshot =
+      options.deferCatalogReconciliationUntilFirstAcceptedSnapshot === true;
   }
 
   static async open(options: WorkspaceAuthorityOptions): Promise<WorkspaceAuthority> {
@@ -644,21 +653,23 @@ export class WorkspaceAuthority {
         catalogRevision: stored.catalogRevision,
         document: stored.document,
       });
-      const reconciliation = reconcileDocument(stored.document, catalog);
-      if (
-        stored.catalogRevision !== catalog.revision
-        || !workspaceDocumentEqual(stored.document, reconciliation.document)
-      ) {
-        await authority.#commit({
-          document: reconciliation.document,
-          catalogRevision: catalog.revision,
-          originId: "workspace.bootstrap-reconcile",
-          kind: "catalog-reconciled",
-          affectedInstances: reconciliation.document.instances.map((item) => item.instanceId),
-          affectedStacks: workspaceStacks(reconciliation.document).map((stack) => stack.stackId),
-          warnings: reconciliation.warnings,
-          catalog,
-        });
+      if (!authority.#catalogRequiresAcceptedSnapshot) {
+        const reconciliation = reconcileDocument(stored.document, catalog);
+        if (
+          stored.catalogRevision !== catalog.revision
+          || !workspaceDocumentEqual(stored.document, reconciliation.document)
+        ) {
+          await authority.#commit({
+            document: reconciliation.document,
+            catalogRevision: catalog.revision,
+            originId: "workspace.bootstrap-reconcile",
+            kind: "catalog-reconciled",
+            affectedInstances: reconciliation.document.instances.map((item) => item.instanceId),
+            affectedStacks: workspaceStacks(reconciliation.document).map((stack) => stack.stackId),
+            warnings: reconciliation.warnings,
+            catalog,
+          });
+        }
       }
       return authority;
     }
@@ -902,7 +913,16 @@ export class WorkspaceAuthority {
     ensureExpectedRevision(this.#state, expectedRevision);
     const reconciliation = reconcileDocument(this.#state.document, catalog);
     const catalogChanged = this.#state.catalogRevision !== catalog.revision;
-    if (!catalogChanged && workspaceDocumentEqual(this.#state.document, reconciliation.document)) {
+    const documentChanged = !workspaceDocumentEqual(this.#state.document, reconciliation.document);
+    if (!catalogChanged && !documentChanged && !this.#catalogRequiresAcceptedSnapshot) {
+      return result("no-change", this.#state.revision, [], [], reconciliation.warnings);
+    }
+    // A restored document may already have the exact accepted catalog
+    // revision. Bootstrap still has to install the matching catalog object,
+    // but a semantic no-op must not create a needless durable revision.
+    if (!catalogChanged && !documentChanged && this.#catalogRequiresAcceptedSnapshot) {
+      this.#catalog = catalog;
+      this.#catalogRequiresAcceptedSnapshot = false;
       return result("no-change", this.#state.revision, [], [], reconciliation.warnings);
     }
     const committed = await this.#commit({
@@ -971,7 +991,10 @@ export class WorkspaceAuthority {
       catalogRevision: saved.record.catalogRevision,
       document: saved.record.document,
     };
-    if (input.catalog) this.#catalog = input.catalog;
+    if (input.catalog) {
+      this.#catalog = input.catalog;
+      this.#catalogRequiresAcceptedSnapshot = false;
+    }
     const mutation = result(
       "applied",
       this.#state.revision,

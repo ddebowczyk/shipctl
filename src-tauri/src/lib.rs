@@ -39,9 +39,10 @@ use shipctl_core::skill_installation::SkillInstallationService;
 use shipctl_core::state::archive::StateArchiveService;
 use shipctl_core::state::providers::{
     LegacyStateSnapshotProvider, PluginDataSnapshotProvider, UiSnapshotProvider,
-    WorkspaceLayoutSnapshotProvider, WorkspaceSnapshotProvider,
+    WorkspaceDocumentSnapshotProvider, WorkspaceLayoutSnapshotProvider, WorkspaceSnapshotProvider,
 };
 use shipctl_core::state::ui::UiStateStore;
+use shipctl_core::state::workspace_document::WorkspaceDocumentStore;
 use shipctl_core::state::workspace_layout::WorkspaceLayoutStore;
 use shipctl_core::terminal_host::TerminalService;
 use shipctl_core::usage_sources::{UsageSnapshotProvider, UsageSourcesService};
@@ -134,6 +135,10 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         paths.workspace_layouts.clone(),
         durable_writes.clone(),
     );
+    let workspace_documents = WorkspaceDocumentStore::new_with_barrier(
+        paths.workspace_documents.clone(),
+        durable_writes.clone(),
+    );
     let plugin_data = PluginDataService::new_with_barrier(
         paths.plugin_data.clone(),
         workspace.clone(),
@@ -190,6 +195,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         .manage(credentials)
         .manage(ui_state)
         .manage(workspace_layouts)
+        .manage(workspace_documents)
         .manage(state_archive)
         .manage(module_control)
         .manage(shipctl_tauri_adapter::module_control::ModuleRegistryRevisionObservers::default())
@@ -300,6 +306,8 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
             shipctl_tauri_adapter::workspace::get_canvas_adapter,
             shipctl_tauri_adapter::state::load_workspace_layout,
             shipctl_tauri_adapter::state::save_workspace_layout,
+            shipctl_tauri_adapter::state::load_workspace_document,
+            shipctl_tauri_adapter::state::save_workspace_document,
             shipctl_tauri_adapter::projects::list_repos,
             shipctl_tauri_adapter::projects::register_repo,
             shipctl_tauri_adapter::projects::unregister_repo,
@@ -471,6 +479,9 @@ fn snapshot_providers(
         Arc::new(UiSnapshotProvider::new(paths.ui_state.clone())),
         Arc::new(WorkspaceLayoutSnapshotProvider::new(
             paths.workspace_layouts.clone(),
+        )),
+        Arc::new(WorkspaceDocumentSnapshotProvider::new(
+            paths.workspace_documents.clone(),
         )),
         Arc::new(PluginDataSnapshotProvider::new(paths.plugin_data.clone())),
         Arc::new(ModuleRegistrySnapshotProvider::new(

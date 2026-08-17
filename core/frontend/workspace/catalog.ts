@@ -13,6 +13,7 @@ import {
   cloneAndFreeze,
   hasIdentity,
   hasOnlyKeys,
+  hasSafeNonNegativeInteger,
   hasSafePositiveInteger,
   hasWorkspaceName,
   isPlainRecord,
@@ -171,7 +172,10 @@ export function parseWorkspaceCatalogSnapshot(value: unknown): WorkspaceCatalogS
   if (candidate.schemaVersion !== WORKSPACE_CATALOG_SCHEMA_VERSION) {
     invalid("Workspace catalog schema version is unsupported.");
   }
-  if (!hasSafePositiveInteger(candidate.revision) || !Array.isArray(candidate.definitions)) {
+  // Revision zero is the explicit host bootstrap catalog. It has no runtime
+  // artifact family yet, but lets the semantic workspace service exist before
+  // the first accepted runtime catalog is published.
+  if (!hasSafeNonNegativeInteger(candidate.revision) || !Array.isArray(candidate.definitions)) {
     invalid("Workspace catalog revision or definitions are invalid.");
   }
 

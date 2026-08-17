@@ -9,7 +9,10 @@ import { parseWorkspaceCatalogSnapshot } from "./catalog.ts";
 import { parseUiWorkspaceDocument } from "./document.ts";
 
 export const CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID = "shipctl.legacy-canvas";
-export const CURRENT_CANVAS_WORKSPACE_ID = "shipctl.canvas";
+// This semantic workspace is distinct from Layman's raw snapshot workspace
+// (`shipctl.canvas`). They persist different contracts and must never share a
+// durable record or revision stream.
+export const CURRENT_CANVAS_WORKSPACE_ID = "shipctl.workspace";
 export const CURRENT_CANVAS_WORKSPACE_PROFILE_ID = "shipctl.compatibility.v1";
 
 export interface WorkspaceProfileInput {

@@ -39,14 +39,27 @@ layout, commands, project actions, and settings are also admitted with typed,
 activation-owned records. They are not falsely represented as workspace view
 definitions: each needs its own semantic descriptor and renderer projection.
 
-This slice deliberately does not reconcile the catalog into
-`WorkspaceAuthority` or persist a semantic workspace document. That operation
-must commit with message routes and declared schedules as one transaction with
-rollback. The candidate compiler is pure and runs before the existing runtime
-publication; it does not reorder that publication or introduce a durable side
-effect. The next integration slice will add that transaction, then project the
-document through legacy and Layman adapters with renderer parity, activation
-cleanup, and plug-out proofs.
+The candidate compiler remains pure and runs before runtime publication. The
+native message-route and declared-schedule transaction remains the one atomic
+activation transaction. After that transaction commits, the host publishes its
+service family and an `AcceptedWorkspaceCatalogController` serially reconciles
+the semantic workspace from the accepted catalog. This one-way post-commit
+step is intentional: including workspace compare-and-save in the native route
+transaction would create a distributed commit across independent durable
+authorities. A workspace persistence failure produces a workspace diagnostic;
+it does not roll back routes, schedules, services, or the accepted family.
+
+Semantic workspace documents now use a separate
+`workspace-documents.json` store and Tauri load/save port. The store preserves
+an opaque JSON-object document envelope with compare-and-save. TypeScript
+continues to validate the document grammar. It does not share Layman's raw
+`workspace-layouts.json` snapshots, their workspace ID, or their revision
+stream. Bootstrap catalog revision zero is an explicit pre-runtime state; a
+restored document is held unchanged until the first actual accepted catalog is
+submitted.
+
+The next integration slice projects that document through legacy and Layman
+adapters with renderer parity, activation cleanup, and plug-out proofs.
 
 Panel migration aliases remain legacy tab-persistence kinds (for example,
 `git`) and are intentionally not admitted as semantic workspace aliases. A
@@ -96,21 +109,40 @@ instances are open, their semantic positions, focus, grouping, and persisted
 state. A canvas adapter translates those facts into renderer state and reports
 user layout actions back as semantic commands.
 
+Runtime ordering is deliberately:
+
+```text
+candidate activation and catalog compilation
+        |
+        v
+atomic native route + schedule commit
+        |
+        v
+host service-family publication
+        |
+        v
+serial semantic workspace reconciliation and durable CAS
+        |
+        +--> later legacy projection
+        +--> later Layman projection
+```
+
 ## Work
 
 1. Complete the view contribution contract from the dynamic-workspace plan.
 2. Move panel, global surface, navigation, project layout, settings, and command
    registries to one activation-owned catalog family while preserving distinct
    typed subregistries.
-3. Reconcile catalog revisions into the semantic workspace service.
+3. Reconcile catalog revisions into the semantic workspace service. **Delivered
+   for accepted runtime families; renderer projection remains.**
 4. Replace the current one-window `LegacyCanvas` pane with projected semantic
    view instances, splits, tabs, floating windows, and focus operations as
    supported by the workspace document.
 5. Keep the legacy canvas as a differential reference until the semantic
    projection is stable.
-6. Move Tauri layout transport behind `core/frontend/platform` and persist the
-   semantic workspace document. Keep Layman snapshot conversion private to the
-   Layman adapter while compatibility requires it.
+6. Persist the semantic workspace document through a separate Tauri port.
+   **Delivered.** Keep Layman snapshot conversion private to the Layman adapter
+   while compatibility requires it.
 7. Consume the completed immutable-artifact catalog as the only feature-module
    source for workspace definitions and instances.
 8. Keep compile-time feature membership empty and preserve the completed native
@@ -125,6 +157,11 @@ plugin subsets, retains a family across a registry-only revision, replaces
 activation identities, and removes selected plugins. It proves catalog
 admission and ownership cleanup only; it is not evidence for full mounted
 component or stylesheet cleanup, which remains `PROP-G-CONTRIBUTION-CLEANUP-001`.
+
+`acceptedWorkspaceCatalogController.test.ts` proves the post-commit path:
+accepted catalogs persist, stale submissions do not regress the local runtime
+stream, a matching restored catalog is not degraded by bootstrap revision zero,
+and storage failure does not reject the accepted runtime family.
 
 ## Property cards
 

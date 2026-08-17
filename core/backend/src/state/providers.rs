@@ -6,6 +6,7 @@ use shipctl_module_api::{
 };
 
 use crate::plugin_data::PluginDataService;
+use crate::state::workspace_document::WorkspaceDocumentStore;
 use crate::state::workspace_layout::WorkspaceLayoutStore;
 
 const LEGACY_SESSION_RECOVERY_ROOT: &str = "session-recovery";
@@ -115,11 +116,21 @@ pub struct WorkspaceLayoutSnapshotProvider {
     path: PathBuf,
 }
 
+pub struct WorkspaceDocumentSnapshotProvider {
+    path: PathBuf,
+}
+
 pub struct PluginDataSnapshotProvider {
     path: PathBuf,
 }
 
 impl WorkspaceLayoutSnapshotProvider {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl WorkspaceDocumentSnapshotProvider {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
@@ -147,6 +158,33 @@ impl SnapshotProvider for WorkspaceLayoutSnapshotProvider {
             return Err(format!("Unknown host.canvas_layout payload {entry_id}"));
         }
         WorkspaceLayoutStore::validate_serialized_document(payload)
+    }
+}
+
+impl SnapshotProvider for WorkspaceDocumentSnapshotProvider {
+    fn id(&self) -> &'static str {
+        "host.workspace_document"
+    }
+
+    fn schema_version(&self) -> u32 {
+        1
+    }
+
+    fn entries(&self) -> Vec<SnapshotEntryDeclaration> {
+        vec![portable_entry("persistence", "workspace-documents.json")]
+    }
+
+    fn capture(&self) -> Result<Vec<CapturedSnapshotEntry>, String> {
+        Ok(vec![optional_file("persistence", &self.path)?])
+    }
+
+    fn validate_payload(&self, entry_id: &str, payload: &[u8]) -> Result<(), String> {
+        if entry_id != "persistence" {
+            return Err(format!(
+                "Unknown host.workspace_document payload {entry_id}"
+            ));
+        }
+        WorkspaceDocumentStore::validate_serialized_document(payload)
     }
 }
 

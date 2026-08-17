@@ -22,3 +22,4 @@ export * from "./scheduler.ts";
 export * from "./terminalSessions.ts";
 export * from "./semanticTerminals.ts";
 export * from "./moduleControl.ts";
+export * from "./workspacePersistence.ts";

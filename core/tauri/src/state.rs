@@ -2,6 +2,9 @@ use serde_json::Value;
 use tauri::{Emitter, State};
 
 use shipctl_core::state::ui::{UiState, UiStateStore};
+use shipctl_core::state::workspace_document::{
+    WorkspaceDocumentRecord, WorkspaceDocumentSaveResult, WorkspaceDocumentStore,
+};
 use shipctl_core::state::workspace_layout::{
     WorkspaceLayoutRecord, WorkspaceLayoutSaveResult, WorkspaceLayoutStore,
     WORKSPACE_LAYOUT_CHANGED_EVENT,
@@ -62,4 +65,24 @@ pub fn save_workspace_layout(
     }
 
     Ok(result)
+}
+
+#[tauri::command]
+pub fn load_workspace_document(
+    workspace_id: String,
+    store: State<'_, WorkspaceDocumentStore>,
+) -> Result<Option<WorkspaceDocumentRecord>, String> {
+    store.load(&workspace_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn save_workspace_document(
+    workspace_id: String,
+    expected_revision: u64,
+    record: WorkspaceDocumentRecord,
+    store: State<'_, WorkspaceDocumentStore>,
+) -> Result<WorkspaceDocumentSaveResult, String> {
+    store
+        .save(workspace_id, expected_revision, record)
+        .map_err(|error| error.to_string())
 }

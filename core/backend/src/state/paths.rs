@@ -10,6 +10,7 @@ pub struct ShipctlPaths {
     pub old_projects: PathBuf,
     pub ui_state: PathBuf,
     pub workspace_layouts: PathBuf,
+    pub workspace_documents: PathBuf,
     pub plugin_data: PathBuf,
     pub assistant_sessions: PathBuf,
     pub usage_database: PathBuf,
@@ -37,6 +38,7 @@ impl ShipctlPaths {
             old_projects: state_root.join("projects"),
             ui_state: state_root.join("ui-state.json"),
             workspace_layouts: state_root.join("workspace-layouts.json"),
+            workspace_documents: state_root.join("workspace-documents.json"),
             plugin_data: state_root.join("plugin-data.json"),
             assistant_sessions: state_root.join("assistant-sessions.json"),
             usage_database: state_root.join("usage.sqlite3"),
@@ -65,6 +67,11 @@ impl ShipctlPaths {
                 owner: "host.canvas_layout",
                 classification: "instance_owned",
                 path: self.workspace_layouts.clone(),
+            },
+            DurableSource {
+                owner: "host.workspace_document",
+                classification: "instance_owned",
+                path: self.workspace_documents.clone(),
             },
             DurableSource {
                 owner: "host.plugin_data",
@@ -212,6 +219,33 @@ mod tests {
             source.owner == "host.canvas_layout"
                 && source.classification == "instance_owned"
                 && source.path == first.workspace_layouts
+        }));
+    }
+
+    #[test]
+    fn workspace_document_store_is_instance_local_and_registered_as_durable_configuration() {
+        let first = ShipctlPaths::new(
+            PathBuf::from("/profiles/first"),
+            PathBuf::from("/run/first"),
+        );
+        let second = ShipctlPaths::new(
+            PathBuf::from("/profiles/second"),
+            PathBuf::from("/run/second"),
+        );
+
+        assert_eq!(
+            first.workspace_documents,
+            first.state_root.join("workspace-documents.json")
+        );
+        assert_eq!(
+            second.workspace_documents,
+            second.state_root.join("workspace-documents.json")
+        );
+        assert_ne!(first.workspace_documents, second.workspace_documents);
+        assert!(first.durable_sources().iter().any(|source| {
+            source.owner == "host.workspace_document"
+                && source.classification == "instance_owned"
+                && source.path == first.workspace_documents
         }));
     }
 

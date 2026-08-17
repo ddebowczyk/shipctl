@@ -122,6 +122,11 @@ export type {
   LiveModuleFamily,
   LiveModuleSupervisorOptions,
 } from "./liveModuleSupervisor.ts";
+export { AcceptedWorkspaceCatalogController } from "./acceptedWorkspaceCatalogController.ts";
+export type {
+  AcceptedWorkspaceCatalogControllerOptions,
+  WorkspaceCatalogSynchronizationFailure,
+} from "./acceptedWorkspaceCatalogController.ts";
 export type {
   HostMessageDispatchResult,
   ModuleMessageBridgeBindings,
