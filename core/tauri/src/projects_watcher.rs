@@ -136,6 +136,14 @@ impl GitWatcher {
 
     pub fn watch(&self, path: &str) -> Result<(), String> {
         let path_buf = PathBuf::from(path);
+        if !is_git_worktree(&path_buf) {
+            log::debug!(
+                target: "shipctl::projects_watcher",
+                "Skipping Git watcher for non-Git project path: {}",
+                path_buf.display(),
+            );
+            return Ok(());
+        }
         let mut watched = self.watched_paths.lock().unwrap();
 
         if watched.contains(&path_buf) {
@@ -177,6 +185,13 @@ impl GitWatcher {
     }
 }
 
+/// Project entries can be plain workspace containers. Only a Git worktree
+/// needs status watching; watching a container recursively wastes native
+/// resources and cannot produce a Git status for that path.
+fn is_git_worktree(path: &Path) -> bool {
+    path.to_str().is_some_and(shipctl_core::git::is_git_repo)
+}
+
 /// Determine whether a filesystem event path should trigger a git refresh.
 fn should_watch_path(path: &Path) -> bool {
     let components: Vec<&str> = path
@@ -200,4 +215,31 @@ fn should_watch_path(path: &Path) -> bool {
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_git_worktree;
+    use std::process::Command;
+    use tempfile::tempdir;
+
+    #[test]
+    fn skips_a_non_git_project_container() {
+        let directory = tempdir().unwrap();
+
+        assert!(!is_git_worktree(directory.path()));
+    }
+
+    #[test]
+    fn watches_a_git_worktree() {
+        let directory = tempdir().unwrap();
+        let status = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(directory.path())
+            .status()
+            .unwrap();
+
+        assert!(status.success());
+        assert!(is_git_worktree(directory.path()));
+    }
 }
