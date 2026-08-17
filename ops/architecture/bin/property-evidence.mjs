@@ -86,6 +86,11 @@ function campaignEvidenceFile(file, kind) {
   return `${file.slice(0, -suffix.length)}.${kind}${suffix}`;
 }
 
+function replayCampaignCommand(command) {
+  if (/\bSHIPCTL_PROPERTY_CAMPAIGN=/.test(command)) return command;
+  return `SHIPCTL_PROPERTY_CAMPAIGN=replay ${command}`;
+}
+
 export function propertyEvidence({
   propertyId,
   testId,
@@ -110,7 +115,7 @@ export function propertyEvidence({
     kind,
     seed: String(seed),
     classifications,
-    replay_command: replayCommand,
+    replay_command: replayCampaignCommand(replayCommand),
   };
   if (shrinkPath !== undefined) campaign.shrink_path = shrinkPath;
   if (counterexamplePath !== undefined) campaign.counterexample_path = counterexamplePath;
