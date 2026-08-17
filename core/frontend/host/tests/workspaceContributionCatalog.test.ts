@@ -11,10 +11,13 @@ import type {
 import { createServer, type ViteDevServer } from "vite";
 
 type WorkspaceContributionCatalogModule = typeof import("../workspaceContributionCatalog.ts");
+type WorkspaceProfilesModule = typeof import("../../workspace/profiles.ts");
 
 let vite: ViteDevServer;
 let WorkspaceContributionCatalog: WorkspaceContributionCatalogModule["WorkspaceContributionCatalog"];
 let WorkspaceContributionCatalogError: WorkspaceContributionCatalogModule["WorkspaceContributionCatalogError"];
+let createCurrentCanvasWorkspaceCatalog: WorkspaceProfilesModule["createCurrentCanvasWorkspaceCatalog"];
+let CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID: WorkspaceProfilesModule["CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID"];
 let shippedViewModules: readonly ShipctlModule[];
 
 before(async () => {
@@ -27,6 +30,12 @@ before(async () => {
   ({ WorkspaceContributionCatalog, WorkspaceContributionCatalogError } = await vite.ssrLoadModule(
     "/core/frontend/host/workspaceContributionCatalog.ts",
   ) as WorkspaceContributionCatalogModule);
+  ({
+    createCurrentCanvasWorkspaceCatalog,
+    CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
+  } = await vite.ssrLoadModule(
+    "/core/frontend/workspace/profiles.ts",
+  ) as WorkspaceProfilesModule);
   const [
     assistants,
     commands,
@@ -349,6 +358,30 @@ test("catalog removal drops every removed owner record and retained revisions ke
   assert.equal(reduced.workspaceCatalog().definitions.some((item) => item.viewTypeId === "additional.panel"), false);
   assert.equal(reduced.inspect().contributions.some((item) => item.ownerModuleId === "shipctl.additional"), false);
   assert.equal(reduced.renderer("additional.panel"), undefined);
+});
+
+test("catalog admits the host compatibility definition without a module renderer", () => {
+  const compatibility = createCurrentCanvasWorkspaceCatalog();
+  const catalog = catalogFor().withHostWorkspaceDefinitions(compatibility.definitions);
+
+  assert.deepEqual(
+    catalog.workspaceCatalog().definitions.find(
+      (definition) => definition.viewTypeId === CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
+    ),
+    compatibility.definitions[0],
+  );
+  assert.equal(catalog.renderer(CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID), undefined);
+  assert.equal(
+    catalog.withRegistryRevision(8).workspaceCatalog().definitions.some(
+      (definition) => definition.viewTypeId === CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
+    ),
+    true,
+  );
+  assert.throws(
+    () => catalog.withHostWorkspaceDefinitions(compatibility.definitions),
+    (error) => error instanceof WorkspaceContributionCatalogError
+      && error.code === "duplicate-workspace-view",
+  );
 });
 
 test("catalog source remains independent from Tauri, Layman, and React", async () => {

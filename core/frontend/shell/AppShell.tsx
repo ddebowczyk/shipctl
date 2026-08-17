@@ -29,7 +29,10 @@ import {
   CURRENT_CANVAS_WORKSPACE_ID,
   InMemoryWorkspacePersistence,
   WorkspaceAuthority,
+  WorkspaceCanvasBridge,
+  createCurrentCanvasWorkspaceCatalog,
   createWorkspaceServiceProvider,
+  type WorkspaceCanvas,
 } from "@shipctl/core/workspace";
 import { NoticeCenter } from "../shared/views.ts";
 import { PanelLeft, PanelRight } from "lucide-react";
@@ -172,7 +175,7 @@ function createWorkspaceContributions(
       globalSurfaces: createBuiltinGlobalSurfaceContributions(BUILTIN_GLOBAL_SURFACE_LOADERS),
       globalNavigation: BUILTIN_GLOBAL_NAVIGATION,
     }],
-  });
+  }).withHostWorkspaceDefinitions(createCurrentCanvasWorkspaceCatalog().definitions);
 }
 
 const INITIAL_WORKSPACE_CONTRIBUTIONS = createWorkspaceContributions({
@@ -198,6 +201,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   const durableUiStateRef = useRef<UiState | null>(null);
   const [durableUiStateLoaded, setDurableUiStateLoaded] = useState(false);
   const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
+  const [workspaceCanvas, setWorkspaceCanvas] = useState<WorkspaceCanvas | undefined>();
   const [moduleRuntime, setModuleRuntime] = useState({
     moduleActivations: CORE_MODULE_ACTIVATIONS,
     activeModules: [] as readonly ShipctlModule[],
@@ -339,6 +343,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     let disposed = false;
     let supervisor: LiveModuleSupervisor | undefined;
     let workspaceController: AcceptedWorkspaceCatalogController | undefined;
+    let workspaceCanvasBridge: WorkspaceCanvasBridge | undefined;
     void (async () => {
       let workspaceAuthority: WorkspaceAuthority;
       try {
@@ -363,6 +368,22 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         });
       }
       if (disposed) return;
+
+      workspaceCanvasBridge = new WorkspaceCanvasBridge({
+        authority: workspaceAuthority,
+        onFailure: (_action, error) => {
+          if (disposed) return;
+          pushNotice({
+            tone: "error",
+            title: "Workspace change could not be saved",
+            message: getErrorMessage(error),
+          });
+        },
+      });
+      workspaceCanvasBridge.subscribe((canvas) => {
+        if (!disposed) setWorkspaceCanvas(canvas);
+      });
+      setWorkspaceCanvas(workspaceCanvasBridge.snapshot());
 
       workspaceController = new AcceptedWorkspaceCatalogController({
         authority: workspaceAuthority,
@@ -464,6 +485,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
 
     return () => {
       disposed = true;
+      workspaceCanvasBridge?.dispose();
       workspaceController?.dispose();
       void supervisor?.dispose();
     };
@@ -1098,6 +1120,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         model={canvasModel}
         actions={canvasActions}
         ports={canvasPorts}
+        workspace={workspaceCanvas}
       />
     </div>
     </CanvasAdapterRuntimeProvider>

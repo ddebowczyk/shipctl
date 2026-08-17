@@ -58,8 +58,24 @@ stream. Bootstrap catalog revision zero is an explicit pre-runtime state; a
 restored document is held unchanged until the first actual accepted catalog is
 submitted.
 
-The next integration slice projects that document through legacy and Layman
-adapters with renderer parity, activation cleanup, and plug-out proofs.
+The first renderer bridge is delivered. `AppShell` gives the selected canvas a
+`WorkspaceCanvasBridge`: a renderer-neutral projection of the authority's
+current document plus serialized `select` and `close` commands. The accepted
+catalog always includes the host compatibility definition, so a new workspace
+has a valid root view even before optional module views are opened.
+
+The selected Layman adapter now projects semantic stacks, split shares, tabs,
+floating windows, selected tabs, and recoverable missing views. It sends user
+tab selection and permitted close actions back through the bridge. It does not
+read or save `workspace-layouts.json`; the former raw Layman snapshot bridge is
+retained only as an inactive migration and rollback artifact. The semantic
+`workspace-documents.json` record remains the sole durable workspace state.
+
+The legacy canvas is still the compatibility content and differential
+reference. It does not yet project arbitrary semantic documents, and semantic
+commands do not yet cover drag, resize, split, move, floating-window, or
+maximize operations. Therefore SEM-G-004 and PROP-G-RENDERER-001 remain open;
+this slice is intentionally not renderer-parity closure.
 
 Panel migration aliases remain legacy tab-persistence kinds (for example,
 `git`) and are intentionally not admitted as semantic workspace aliases. A
@@ -134,15 +150,19 @@ serial semantic workspace reconciliation and durable CAS
    registries to one activation-owned catalog family while preserving distinct
    typed subregistries.
 3. Reconcile catalog revisions into the semantic workspace service. **Delivered
-   for accepted runtime families; renderer projection remains.**
+   for accepted runtime families. The first Layman semantic projection is also
+   delivered; legacy parity remains.**
 4. Replace the current one-window `LegacyCanvas` pane with projected semantic
    view instances, splits, tabs, floating windows, and focus operations as
-   supported by the workspace document.
+   supported by the workspace document. **Started:** Layman projects the
+   document and supports select/close; complete the semantic rendering and
+   command set before removing the compatibility pane.
 5. Keep the legacy canvas as a differential reference until the semantic
    projection is stable.
 6. Persist the semantic workspace document through a separate Tauri port.
-   **Delivered.** Keep Layman snapshot conversion private to the Layman adapter
-   while compatibility requires it.
+   **Delivered.** The selected Layman runtime no longer starts raw snapshot
+   persistence. Keep the old snapshot conversion private and inactive until a
+   tested migration or deletion decision removes it.
 7. Consume the completed immutable-artifact catalog as the only feature-module
    source for workspace definitions and instances.
 8. Keep compile-time feature membership empty and preserve the completed native

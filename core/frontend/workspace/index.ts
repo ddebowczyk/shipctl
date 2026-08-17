@@ -36,3 +36,14 @@ export {
 export type { WorkspaceProfileFactory, WorkspaceProfileInput } from "./profiles.ts";
 export { createWorkspaceServiceProvider } from "./service.ts";
 export type { WorkspaceServiceProviderOptions } from "./service.ts";
+export {
+  WorkspaceCanvasBridge,
+  createWorkspaceCanvasProjection,
+} from "./canvasBridge.ts";
+export type {
+  WorkspaceCanvas,
+  WorkspaceCanvasAction,
+  WorkspaceCanvasBridgeOptions,
+  WorkspaceCanvasProjection,
+  WorkspaceCanvasView,
+} from "./canvasBridge.ts";

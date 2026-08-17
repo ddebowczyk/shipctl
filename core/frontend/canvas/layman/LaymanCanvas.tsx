@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -12,6 +13,7 @@ import {
   createLaymanWindow,
   LaymanView,
   type LaymanComponents,
+  type LaymanControllerTransition,
   type LaymanController,
   type LaymanInteractionPolicy,
   type LaymanPaneProps,
@@ -21,6 +23,22 @@ import {
 
 import type { LegacyCanvasProps } from "../legacy/LegacyCanvas.tsx";
 import LegacyCanvas from "../legacy/LegacyCanvas.tsx";
+import { GlobalSurfaceHost, PanelHost } from "@shipctl/core/host/views";
+import {
+  CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
+  type WorkspaceCanvas,
+} from "@shipctl/core/workspace";
+import type { ContributionId, ProjectRef } from "@shipctl/module-api";
+import {
+  createLaymanWorkspaceState,
+  type LaymanCanvasPaneData,
+} from "./workspaceProjection.ts";
+
+export type {
+  LaymanCanvasPaneData,
+  LaymanLegacyCanvasPaneData,
+  LaymanWorkspaceViewPaneData,
+} from "./workspaceProjection.ts";
 
 export const LAYMAN_CANVAS_WINDOW_ID = "shipctl.canvas.window";
 export const LAYMAN_CANVAS_TAB_ID = "shipctl.canvas.tab";
@@ -29,15 +47,10 @@ export const LAYMAN_CANVAS_WORKSPACE_ID = "shipctl.canvas";
 /** Verified upstream revision for the approved GitHub source dependency. */
 export const LAYMAN_SOURCE_REVISION = "8d0c41a0a52830f3072771af674d63d80215384e";
 
-export interface LaymanCanvasPaneData {
-  readonly kind: "shipctl.legacy-canvas";
-}
-
 const LAYMAN_CANVAS_VIEW = {
   viewId: "shipctl.canvas",
   ariaLabel: "Shipctl canvas",
-  maxDepth: 0,
-  showTabs: false,
+  showTabs: true,
 } as const;
 
 const LAYMAN_CANVAS_VIEW_STYLE = {
@@ -46,31 +59,122 @@ const LAYMAN_CANVAS_VIEW_STYLE = {
 } as const;
 
 const LAYMAN_CANVAS_INTERACTION: LaymanInteractionPolicy<LaymanCanvasPaneData> = {
-  canExecute({ origin }) {
-    if (origin === "user") {
-      return {
-        kind: "deny",
-        reason: "The Shipctl canvas layout is not user configurable yet.",
-      };
+  canExecute({ command, inspection, origin }) {
+    if (origin !== "user") return { kind: "allow" };
+    if (command.type === "tab.select") return { kind: "allow" };
+    if (command.type === "tab.remove") {
+      const tab = inspection.windows
+        .flatMap((window) => window.tabs)
+        .find((candidate) => candidate.id === command.tabId);
+      if (tab?.data.kind === "shipctl.workspace-view" && tab.data.closeable) {
+        return { kind: "allow" };
+      }
     }
-
-    return { kind: "allow" };
+    return {
+      kind: "deny",
+      reason: "This workspace action is not available from the canvas yet.",
+    };
   },
 };
 
 const LegacyCanvasContext = createContext<LegacyCanvasProps | null>(null);
+const WorkspaceCanvasContext = createContext<WorkspaceCanvas | undefined>(undefined);
 
-function LaymanCanvasPane({ tab }: LaymanPaneProps<LaymanCanvasPaneData>) {
+function closeWorkspaceView(workspace: WorkspaceCanvas, instanceId: string): void {
+  void workspace.execute({ kind: "close", instanceId }).catch(() => undefined);
+}
+
+function projectFor(
+  legacyCanvasProps: LegacyCanvasProps,
+  projectId: string | null,
+): ProjectRef | null {
+  if (projectId === null) return null;
+  const repo = legacyCanvasProps.model.sidebar.repos.find((candidate) => candidate.path === projectId);
+  return {
+    id: projectId,
+    name: repo?.name ?? projectId.split("/").filter(Boolean).pop() ?? "Project",
+    path: projectId,
+    groupId: repo?.group ?? null,
+  };
+}
+
+function WorkspacePaneUnavailable({
+  viewTypeId,
+  close,
+}: {
+  readonly viewTypeId: string;
+  readonly close: (() => void) | undefined;
+}) {
+  return (
+    <div className="panel-host__unavailable" role="alert">
+      <strong>Workspace view unavailable</strong>
+      <span>{viewTypeId} is not available in the accepted runtime.</span>
+      {close && <button className="btn-ghost" onClick={close}>Close view</button>}
+    </div>
+  );
+}
+
+function LaymanCanvasPane({ tab, selected }: LaymanPaneProps<LaymanCanvasPaneData>) {
   const legacyCanvasProps = useContext(LegacyCanvasContext);
+  const workspace = useContext(WorkspaceCanvasContext);
 
   if (!legacyCanvasProps) {
     throw new Error("LaymanCanvasPane must be rendered inside LaymanCanvas.");
   }
-  if (tab.data.kind !== "shipctl.legacy-canvas") {
-    return null;
+  if (tab.data.kind === "shipctl.legacy-canvas") {
+    return <LegacyCanvas {...legacyCanvasProps} />;
+  }
+  const pane = tab.data;
+  if (pane.viewTypeId === CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID) {
+    return <LegacyCanvas {...legacyCanvasProps} />;
+  }
+  const close = workspace && pane.closeable
+    ? () => closeWorkspaceView(workspace, pane.instanceId)
+    : undefined;
+  if (pane.availability === "missing-definition") {
+    return <WorkspacePaneUnavailable viewTypeId={pane.viewTypeId} close={close} />;
+  }
+  const contributionId = pane.viewTypeId as ContributionId;
+  const globalSurface = legacyCanvasProps.ports.surfaceCatalog.globalSurface(contributionId);
+  if (globalSurface) {
+    return (
+      <GlobalSurfaceHost
+        contribution={globalSurface}
+        surfaceId={globalSurface.id}
+        close={close ?? (() => undefined)}
+        projectPaths={legacyCanvasProps.ports.projectPaths}
+        services={legacyCanvasProps.ports.moduleHostServices}
+        moduleActivations={legacyCanvasProps.ports.moduleActivations}
+      />
+    );
+  }
+  const panel = legacyCanvasProps.ports.surfaceCatalog.panel(contributionId);
+  if (panel) {
+    const view = workspace?.projection.views.find((candidate) => (
+      candidate.instance.instanceId === pane.instanceId
+    ));
+    const resource = view?.instance.resource;
+    const projectId = resource?.kind === "project"
+      ? resource.projectId
+      : resource?.kind === "panel" ? resource.projectId : null;
+    return (
+      <PanelHost
+        contribution={panel}
+        panelId={panel.id}
+        instanceId={pane.instanceId}
+        project={projectFor(legacyCanvasProps, projectId)}
+        visible={selected}
+        close={close ?? (() => undefined)}
+        // Workspace labels are semantic document data. A title command is not
+        // in this initial renderer action subset, so panes cannot alter it.
+        setTitle={() => undefined}
+        services={legacyCanvasProps.ports.moduleHostServices}
+        moduleActivations={legacyCanvasProps.ports.moduleActivations}
+      />
+    );
   }
 
-  return <LegacyCanvas {...legacyCanvasProps} />;
+  return <WorkspacePaneUnavailable viewTypeId={pane.viewTypeId} close={close} />;
 }
 
 function LaymanCanvasTab({ tab }: LaymanTabProps<LaymanCanvasPaneData>) {
@@ -99,12 +203,15 @@ export function createLaymanCanvasState(): LaymanState<LaymanCanvasPaneData> {
 /**
  * Creates the controlled workspace used by this proof adapter.
  *
- * Host commands remain available for test and future bootstrap wiring. User
- * commands are denied until Shipctl intentionally exposes layout controls.
+ * Host commands restore canonical semantic state. User commands may select a
+ * tab or close a closeable semantic view; layout-edit commands remain denied
+ * until matching semantic workspace commands are exposed.
  */
-export function createLaymanCanvasController(): LaymanController<LaymanCanvasPaneData> {
+export function createLaymanCanvasController(
+  state: LaymanState<LaymanCanvasPaneData> = createLaymanCanvasState(),
+): LaymanController<LaymanCanvasPaneData> {
   return createLaymanController({
-    state: createLaymanCanvasState(),
+    state,
     interaction: LAYMAN_CANVAS_INTERACTION,
   });
 }
@@ -146,17 +253,35 @@ export interface LaymanCanvasProps extends LegacyCanvasProps {
   readonly controller?: LaymanController<LaymanCanvasPaneData>;
 }
 
+function workspaceTransition(
+  transition: LaymanControllerTransition<LaymanCanvasPaneData>,
+  workspace: WorkspaceCanvas,
+): void {
+  if (transition.kind !== "command" || transition.status !== "applied" || transition.meta.origin !== "user") {
+    return;
+  }
+  const command = transition.command;
+  if (command?.type === "tab.select") {
+    void workspace.execute({ kind: "select", instanceId: command.tabId }).catch(() => undefined);
+  }
+  if (command?.type === "tab.remove") {
+    void workspace.execute({ kind: "close", instanceId: command.tabId }).catch(() => undefined);
+  }
+}
+
 /**
  * Experimental main-canvas adapter. It preserves the full legacy DOM inside
  * one Layman pane. A host runtime may inject a persistence-backed controller;
  * this renderer never reads host configuration or transport state.
  */
-export default function LaymanCanvas({ controller, ...legacyCanvasProps }: LaymanCanvasProps) {
+export default function LaymanCanvas({ controller, workspace, ...legacyCanvasProps }: LaymanCanvasProps) {
   const ownedController = useRef<LaymanController<LaymanCanvasPaneData> | null>(null);
   const setHost = useLaymanCanvasDimensions();
 
   if (!controller && !ownedController.current) {
-    ownedController.current = createLaymanCanvasController();
+    ownedController.current = createLaymanCanvasController(
+      workspace ? createLaymanWorkspaceState(workspace.projection) : createLaymanCanvasState(),
+    );
   }
 
   const resolvedController = controller ?? ownedController.current;
@@ -164,21 +289,33 @@ export default function LaymanCanvas({ controller, ...legacyCanvasProps }: Layma
     throw new Error("LaymanCanvas requires a controller.");
   }
 
+  useLayoutEffect(() => {
+    if (!workspace) return;
+    resolvedController.replaceState(createLaymanWorkspaceState(workspace.projection), { origin: "host" });
+  }, [resolvedController, workspace]);
+
+  useEffect(() => {
+    if (!workspace) return undefined;
+    return resolvedController.subscribe((transition) => workspaceTransition(transition, workspace));
+  }, [resolvedController, workspace]);
+
   return (
     <LegacyCanvasContext.Provider value={legacyCanvasProps}>
-      <div
-        ref={setHost}
-        className="canvas-layman"
-        style={{ position: "relative", height: "100%", minHeight: 0, minWidth: 0 }}
-        data-canvas-adapter="layman"
-      >
-        <LaymanView
-          controller={resolvedController}
-          config={LAYMAN_CANVAS_VIEW}
-          components={LAYMAN_CANVAS_COMPONENTS}
-          style={LAYMAN_CANVAS_VIEW_STYLE}
-        />
-      </div>
+      <WorkspaceCanvasContext.Provider value={workspace}>
+        <div
+          ref={setHost}
+          className="canvas-layman"
+          style={{ position: "relative", height: "100%", minHeight: 0, minWidth: 0 }}
+          data-canvas-adapter="layman"
+        >
+          <LaymanView
+            controller={resolvedController}
+            config={LAYMAN_CANVAS_VIEW}
+            components={LAYMAN_CANVAS_COMPONENTS}
+            style={LAYMAN_CANVAS_VIEW_STYLE}
+          />
+        </div>
+      </WorkspaceCanvasContext.Provider>
     </LegacyCanvasContext.Provider>
   );
 }

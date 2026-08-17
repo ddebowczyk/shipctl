@@ -607,4 +607,56 @@ export class WorkspaceContributionCatalog {
       renderers,
     });
   }
+
+  /**
+   * Add host-owned semantic definitions that have no module loader. The
+   * compatibility canvas is one such definition: it is a host renderer, not
+   * a feature contribution, but it must be admitted with every runtime
+   * catalog so the default workspace has a valid root view.
+   */
+  withHostWorkspaceDefinitions(
+    definitions: readonly WorkspaceViewDefinition[],
+  ): WorkspaceContributionCatalog {
+    const hostCatalog = parseWorkspaceCatalogSnapshot({
+      schemaVersion: WORKSPACE_CATALOG_SCHEMA_VERSION,
+      revision: this.#state.registryRevision,
+      definitions,
+    });
+    const definitionsById = new Map(
+      this.#state.workspaceCatalog.definitions.map((definition) => [definition.viewTypeId, definition]),
+    );
+    for (const definition of hostCatalog.definitions) {
+      if (definitionsById.has(definition.viewTypeId)) {
+        fail(
+          "duplicate-workspace-view",
+          `Workspace view ${definition.viewTypeId} appears more than once.`,
+        definition.viewTypeId as ContributionId,
+      );
+      }
+      definitionsById.set(definition.viewTypeId, definition);
+    }
+    const workspaceCatalog = parseWorkspaceCatalogSnapshot({
+      schemaVersion: WORKSPACE_CATALOG_SCHEMA_VERSION,
+      revision: this.#state.registryRevision,
+      definitions: [...definitionsById.values()].sort((left, right) => (
+        left.viewTypeId.localeCompare(right.viewTypeId)
+      )),
+    });
+    const canonicalDefinitions = new Map(
+      workspaceCatalog.definitions.map((definition) => [definition.viewTypeId, definition]),
+    );
+    const renderers = new Map<string, WorkspaceRendererEntry>();
+    for (const [viewTypeId, renderer] of this.#state.renderers) {
+      const definition = canonicalDefinitions.get(viewTypeId);
+      if (definition === undefined) {
+        fail("invalid-canvas-contribution", `Renderer ${viewTypeId} has no semantic definition.`);
+      }
+      renderers.set(viewTypeId, Object.freeze({ ...renderer, definition }) as WorkspaceRendererEntry);
+    }
+    return new WorkspaceContributionCatalog({
+      ...this.#state,
+      workspaceCatalog,
+      renderers,
+    });
+  }
 }

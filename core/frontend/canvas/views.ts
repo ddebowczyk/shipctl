@@ -19,6 +19,16 @@ export {
 export type { LaymanCanvasProps } from "./layman/LaymanCanvas.tsx";
 export type { LaymanCanvasPaneData } from "./layman/LaymanCanvas.tsx";
 export {
+  createLaymanWorkspaceState,
+  LAYMAN_WORKSPACE_FLOATING_PREFIX,
+  LAYMAN_WORKSPACE_SPLIT_PREFIX,
+  LAYMAN_WORKSPACE_STACK_PREFIX,
+} from "./layman/workspaceProjection.ts";
+export type {
+  LaymanLegacyCanvasPaneData,
+  LaymanWorkspaceViewPaneData,
+} from "./layman/workspaceProjection.ts";
+export {
   createLaymanWorkspaceBridge,
   serializeState,
 } from "./layman/workspaceBridge.ts";
