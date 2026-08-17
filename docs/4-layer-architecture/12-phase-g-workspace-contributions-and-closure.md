@@ -60,9 +60,9 @@ submitted.
 
 The first renderer bridge is delivered. `AppShell` gives the selected canvas a
 `WorkspaceCanvasBridge`: a renderer-neutral projection of the authority's
-current document plus serialized `select` and `close` commands. The accepted
-catalog always includes the host compatibility definition, so a new workspace
-has a valid root view even before optional module views are opened.
+current document plus serialized `open`, `select`, and `close` commands. The
+accepted catalog always includes the host compatibility definition, so a new
+workspace has a valid root view even before optional module views are opened.
 
 The selected Layman adapter now projects semantic stacks, split shares, tabs,
 floating windows, selected tabs, and recoverable missing views. It sends user
@@ -72,10 +72,22 @@ retained only as an inactive migration and rollback artifact. The semantic
 `workspace-documents.json` record remains the sole durable workspace state.
 
 The legacy canvas is still the compatibility content and differential
-reference. It does not yet project arbitrary semantic documents, and semantic
-commands do not yet cover drag, resize, split, move, floating-window, or
-maximize operations. Therefore SEM-G-004 and PROP-G-RENDERER-001 remain open;
-this slice is intentionally not renderer-parity closure.
+reference. Its data adapter now projects and maps the same representable
+semantic subset as Layman: one root tab stack, its order and selection,
+missing-view state, and permitted select and close commands. In the live legacy
+UI, the selected semantic global or panel view renders through the host ports
+and a permitted close is forwarded through the bridge. Its existing tab strip
+is not yet a semantic workspace tab strip, so live semantic selection remains
+open. `AppShell` opens and closes global surfaces by using the semantic
+document; the old UI-store route is only a startup fallback before the
+workspace bridge exists. A Fast Check differential property proves the shared
+adapter subset against Layman's real command gate.
+
+This is not full renderer-parity closure. The legacy adapter deliberately
+rejects splits, floating stacks, and maximized stacks instead of flattening
+them. Semantic commands also do not yet cover drag, resize, split, move,
+floating-window, or maximize operations. Those layouts and interactions remain
+open under SEM-G-004 and SEM-G-005.
 
 Panel migration aliases remain legacy tab-persistence kinds (for example,
 `git`) and are intentionally not admitted as semantic workspace aliases. A
@@ -150,13 +162,15 @@ serial semantic workspace reconciliation and durable CAS
    registries to one activation-owned catalog family while preserving distinct
    typed subregistries.
 3. Reconcile catalog revisions into the semantic workspace service. **Delivered
-   for accepted runtime families. The first Layman semantic projection is also
-   delivered; legacy parity remains.**
+   for accepted runtime families. The first Layman and legacy semantic
+   single-stack projections are also delivered; wider layout parity remains.**
 4. Replace the current one-window `LegacyCanvas` pane with projected semantic
    view instances, splits, tabs, floating windows, and focus operations as
-   supported by the workspace document. **Started:** Layman projects the
-   document and supports select/close; complete the semantic rendering and
-   command set before removing the compatibility pane.
+   supported by the workspace document. **Started:** both adapters share a
+   single-stack projection and select/close mapping; the live legacy route
+   renders selected global and panel views and uses semantic close. Complete
+   the semantic tab strip, layout rendering, and command support before
+   removing the compatibility pane.
 5. Keep the legacy canvas as a differential reference until the semantic
    projection is stable.
 6. Persist the semantic workspace document through a separate Tauri port.
@@ -205,20 +219,22 @@ and storage failure does not reject the accepted runtime family.
 ### PROP-G-RENDERER-001
 
 - **Claim:** For every generated semantic workspace document in the shared
-  subset, legacy and Layman adapters expose equivalent visible view identities,
-  active view, tab order, and semantic actions.
+  subset, legacy and Layman adapter projections expose equivalent view
+  identities, active view, tab order, and semantic actions.
 - **Shape:** differential.
 - **Evidence:** SEM-G-004.
-- **Domain:** documents representable by both adapters, generated focus and
-  navigation actions, and missing-view placeholders. Exclude Layman-only
-  floating geometry and pixel output.
+- **Domain:** one-root-stack documents representable by both adapters,
+  generated select and permitted-close actions, and missing-view placeholders.
+  Exclude splits, floating stacks, maximized stacks, and pixel output.
 - **Preconditions:** the workspace document passes schema validation.
 - **Oracle:** compare normalized renderer projections and captured semantic
   action logs from independent adapter harnesses.
 - **Failure value:** selecting a thin terminal in Layman routes focus back to a
   semantic terminal.
 - **Tier:** pull request and browser integration.
-- **Initial status/test ID:** proposed / `architecture.canvas-adapter-parity.property`.
+- **Current status/test ID:** passing /
+  `architecture.canvas-adapter-parity.property`. It covers the declared
+  single-stack subset only; it is not evidence for split or floating parity.
 
 ### PROP-G-LAYOUT-001
 

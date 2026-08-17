@@ -17,6 +17,8 @@ export interface CanvasSidebarRendererProps {
 export interface CanvasTabBarRendererProps {
   readonly tabBar: CanvasModel["tabBar"];
   readonly activeProjectPath: string | null;
+  /** True while the canvas is presenting a semantic view instead of a terminal tab. */
+  readonly globalSurfaceOpen: boolean;
   readonly actions: CanvasActions;
 }
 

@@ -7,9 +7,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type {
   ContributionId,
   TerminalHostDescriptor,
+  UiWorkspaceDocument,
+  WorkspaceMutationResult,
+  WorkspaceRevision,
 } from "@shipctl/module-api";
 import type { TerminalId, TerminalViewId } from "@shipctl/core/terminal-host";
 import type { TerminalTabData, UnifiedTab } from "@shipctl/core/platform";
+import type {
+  WorkspaceCanvas,
+  WorkspaceCanvasAction,
+  WorkspaceCanvasProjection,
+} from "@shipctl/core/workspace";
 import { createServer, type ViteDevServer } from "vite";
 
 import type {
@@ -215,6 +223,177 @@ test("a missing project never calls the trailing layout renderer", () => {
   })));
 
   assert.equal(requested.some((entry) => entry.startsWith("trailing:")), false);
+});
+
+test("legacy canvas renders an active semantic global view, closes it, and does not flatten a split", () => {
+  const alpha = terminalTab("terminal:alpha", "alpha");
+  const requested: string[] = [];
+  const executed: WorkspaceCanvasAction[] = [];
+  let close: (() => void) | undefined;
+  const document: UiWorkspaceDocument = {
+    schemaVersion: 1,
+    workspaceId: "fixture.workspace",
+    profileId: "fixture.profile",
+    instances: [
+      {
+        instanceId: "shipctl.canvas.compatibility",
+        viewTypeId: "shipctl.legacy-canvas",
+        ownerModuleId: "shipctl.host",
+        ownerActivationId: "shipctl.host@1#compatibility",
+        resource: { kind: "global" },
+        label: "Shipctl",
+        stateRef: null,
+        availability: { kind: "available" },
+        lifecycle: "placed",
+      },
+      {
+        instanceId: "fixture.global",
+        viewTypeId: "fixture.global-surface",
+        ownerModuleId: "shipctl.fixture",
+        ownerActivationId: "shipctl.fixture@1#canvas",
+        resource: { kind: "global" },
+        label: "Fixture surface",
+        stateRef: null,
+        availability: { kind: "available" },
+        lifecycle: "placed",
+      },
+    ],
+    root: {
+      kind: "stack",
+      stackId: "fixture.primary",
+      instanceIds: ["shipctl.canvas.compatibility", "fixture.global"],
+      selectedInstanceId: "fixture.global",
+    },
+    floating: [],
+    maximizedStackId: null,
+  };
+  const projection: WorkspaceCanvasProjection = {
+    workspaceId: document.workspaceId,
+    revision: 2 as WorkspaceRevision,
+    catalogRevision: 3,
+    document,
+    views: [
+      {
+        instance: document.instances[0]!,
+        definition: null,
+        title: "Shipctl",
+        closeable: false,
+        splitAllowed: false,
+      },
+      {
+        instance: document.instances[1]!,
+        definition: null,
+        title: "Fixture surface",
+        closeable: true,
+        splitAllowed: true,
+      },
+    ],
+  };
+  const workspace: WorkspaceCanvas = {
+    projection,
+    execute: async (action) => {
+      executed.push(action);
+      return {} as WorkspaceMutationResult;
+    },
+  };
+  const viewPorts: Partial<CanvasViewPorts> = {
+    Sidebar: ({ sidebar }) => {
+      requested.push(`sidebar:${sidebar.activeGlobalSurfaceId ?? "none"}`);
+      return createElement("aside");
+    },
+    TabBar: ({ globalSurfaceOpen }) => {
+      requested.push(`tab-bar:${String(globalSurfaceOpen)}`);
+      return createElement("nav");
+    },
+    GlobalSurface: ({ surfaceId, close: closeView }) => {
+      requested.push(`global:${surfaceId}`);
+      close = closeView;
+      return createElement("section", { "data-global": surfaceId });
+    },
+    Terminal: ({ slot }) => {
+      requested.push(`terminal:${slot.terminalId}:${String(slot.visible)}`);
+      return createElement("output");
+    },
+  };
+
+  renderToStaticMarkup(createElement(LegacyCanvas, {
+    model: createCanvasModel(input({
+      activeTabId: alpha.id,
+      tabs: [alpha],
+      activeTab: alpha,
+      terminalSlots: [terminalSlot(alpha)],
+    })),
+    actions,
+    ports: {
+      surfaceCatalog: {
+        globalSurface: (surfaceId: ContributionId) => (
+          surfaceId === "fixture.global-surface" ? { id: surfaceId } : undefined
+        ),
+        panel: () => undefined,
+      },
+    } as CanvasPorts,
+    viewPorts,
+    workspace,
+  }));
+
+  assert.deepEqual(requested, [
+    "sidebar:fixture.global-surface",
+    "tab-bar:true",
+    "global:fixture.global-surface",
+    "terminal:alpha:false",
+  ]);
+  close?.();
+  assert.deepEqual(executed, [{ kind: "close", instanceId: "fixture.global" }]);
+
+  const splitDocument: UiWorkspaceDocument = {
+    ...document,
+    root: {
+      kind: "split",
+      nodeId: "fixture.split",
+      axis: "horizontal",
+      firstShare: 0.5,
+      first: {
+        kind: "stack",
+        stackId: "fixture.left",
+        instanceIds: ["shipctl.canvas.compatibility"],
+        selectedInstanceId: "shipctl.canvas.compatibility",
+      },
+      second: {
+        kind: "stack",
+        stackId: "fixture.right",
+        instanceIds: ["fixture.global"],
+        selectedInstanceId: "fixture.global",
+      },
+    },
+  };
+  requested.length = 0;
+  const splitMarkup = renderToStaticMarkup(createElement(LegacyCanvas, {
+    model: createCanvasModel(input({
+      activeTabId: alpha.id,
+      tabs: [alpha],
+      activeTab: alpha,
+      terminalSlots: [terminalSlot(alpha)],
+    })),
+    actions,
+    ports: {
+      surfaceCatalog: {
+        globalSurface: () => undefined,
+        panel: () => undefined,
+      },
+    } as CanvasPorts,
+    viewPorts,
+    workspace: {
+      ...workspace,
+      projection: { ...projection, document: splitDocument },
+    },
+  }));
+
+  assert.match(splitMarkup, /Workspace layout unavailable/);
+  assert.deepEqual(requested, [
+    "sidebar:none",
+    "tab-bar:true",
+    "terminal:alpha:false",
+  ]);
 });
 
 test("the shell reaches the canvas host instead of concrete canvas renderers", async () => {

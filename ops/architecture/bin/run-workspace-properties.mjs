@@ -29,12 +29,15 @@ function configuredSeed() {
 }
 
 const seed = configuredSeed();
-const testFile = "ops/architecture/tests/workspaceCapability.test.mjs";
-const testArguments = ["exec", "node", "--test", "--test-concurrency=1", testFile];
+const testFiles = [
+  "ops/architecture/tests/workspaceCapability.test.mjs",
+  "ops/architecture/tests/canvasAdapterParity.test.mjs",
+];
+const testArguments = ["exec", "node", "--test", "--test-concurrency=1", ...testFiles];
 const replayCommand = [
   `SHIPCTL_PROPERTY_SEED=${seed}`,
   "pnpm exec node --test --test-concurrency=1",
-  testFile,
+  ...testFiles,
 ].join(" ");
 
 const { stdout, stderr } = await exec("pnpm", testArguments, {
@@ -54,6 +57,15 @@ const properties = [
     classifications: {
       catalog: ["added", "replaced", "missing", "restored"],
       layout: ["moved", "focused", "split"],
+    },
+  },
+  {
+    propertyId: "PROP-G-RENDERER-001",
+    testId: "architecture.canvas-adapter-parity.property",
+    classifications: {
+      topology: ["single-stack", "tabs"],
+      action: ["select", "close", "select-noop"],
+      availability: ["available", "missing"],
     },
   },
   {

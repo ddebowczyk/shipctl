@@ -13,7 +13,6 @@ import {
   createLaymanWindow,
   LaymanView,
   type LaymanComponents,
-  type LaymanControllerTransition,
   type LaymanController,
   type LaymanInteractionPolicy,
   type LaymanPaneProps,
@@ -33,6 +32,7 @@ import {
   createLaymanWorkspaceState,
   type LaymanCanvasPaneData,
 } from "./workspaceProjection.ts";
+import { laymanWorkspaceAction } from "./workspaceActions.ts";
 
 export type {
   LaymanCanvasPaneData,
@@ -254,19 +254,11 @@ export interface LaymanCanvasProps extends LegacyCanvasProps {
 }
 
 function workspaceTransition(
-  transition: LaymanControllerTransition<LaymanCanvasPaneData>,
+  transition: Parameters<typeof laymanWorkspaceAction>[0],
   workspace: WorkspaceCanvas,
 ): void {
-  if (transition.kind !== "command" || transition.status !== "applied" || transition.meta.origin !== "user") {
-    return;
-  }
-  const command = transition.command;
-  if (command?.type === "tab.select") {
-    void workspace.execute({ kind: "select", instanceId: command.tabId }).catch(() => undefined);
-  }
-  if (command?.type === "tab.remove") {
-    void workspace.execute({ kind: "close", instanceId: command.tabId }).catch(() => undefined);
-  }
+  const action = laymanWorkspaceAction(transition);
+  if (action) void workspace.execute(action).catch(() => undefined);
 }
 
 /**

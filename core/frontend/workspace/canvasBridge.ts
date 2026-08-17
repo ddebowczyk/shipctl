@@ -1,16 +1,28 @@
 import type {
+  ModuleJsonValue,
   UiWorkspaceDocument,
   WorkspaceInspection,
   WorkspaceMutationResult,
+  WorkspacePlacementIntent,
   WorkspaceRevision,
+  WorkspaceResourceReference,
   WorkspaceViewDefinition,
   WorkspaceViewInstance,
 } from "@shipctl/module-api";
 
 import { WorkspaceAuthority } from "./authority.ts";
 
-/** The small command subset that the canvas can issue in this renderer slice. */
+/** The semantic operations that a canvas adapter may issue in this slice. */
 export type WorkspaceCanvasAction =
+  | {
+      readonly kind: "open";
+      readonly instanceId: string;
+      readonly viewTypeId: string;
+      readonly resource: WorkspaceResourceReference;
+      readonly placement?: WorkspacePlacementIntent;
+      readonly label?: string | null;
+      readonly stateRef?: ModuleJsonValue | null;
+    }
   | { readonly kind: "select"; readonly instanceId: string }
   | { readonly kind: "close"; readonly instanceId: string };
 
@@ -136,19 +148,34 @@ export class WorkspaceCanvasBridge {
         throw new Error("Workspace canvas bridge is disposed.");
       }
       const expectedRevision = this.#authority.revision;
-      return action.kind === "select"
-        ? this.#authority.mutate({
+      switch (action.kind) {
+        case "open":
+          return this.#authority.mutate({
+            kind: "open",
+            instanceId: action.instanceId,
+            viewTypeId: action.viewTypeId,
+            resource: action.resource,
+            placement: action.placement ?? { kind: "default" },
+            label: action.label ?? null,
+            stateRef: action.stateRef ?? null,
+            expectedRevision,
+            originId: this.#originId,
+          });
+        case "select":
+          return this.#authority.mutate({
             kind: "select",
             instanceId: action.instanceId,
             expectedRevision,
             originId: this.#originId,
-          })
-        : this.#authority.mutate({
+          });
+        case "close":
+          return this.#authority.mutate({
             kind: "close",
             instanceId: action.instanceId,
             expectedRevision,
             originId: this.#originId,
           });
+      }
     });
     this.#tail = scheduled.then(() => undefined, () => undefined);
 

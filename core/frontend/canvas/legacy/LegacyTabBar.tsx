@@ -7,7 +7,6 @@ import {
   type TerminalDriverId,
 } from "@shipctl/module-api";
 import { useTerminalStore } from "@shipctl/core/terminal-host";
-import { useUIStore } from "@shipctl/core/shared";
 import { handleActionKey } from "@shipctl/core/shared";
 import {
   ContextMenu,
@@ -146,6 +145,7 @@ function TabIcon({ tab, panels }: { readonly tab: UnifiedTab; readonly panels: r
 
 export interface LegacyTabBarProps {
   readonly onClose: (tabId: string) => void;
+  readonly onSelectTab: (tabId: string) => void;
   readonly onNewTerminal: (driverId: TerminalDriverId) => void;
   readonly panels: readonly PanelContribution[];
   readonly onOpenPanel: (panel: PanelContribution) => void;
@@ -153,10 +153,12 @@ export interface LegacyTabBarProps {
   readonly onRenameTab: (tabId: string, label: string) => void | Promise<void>;
   readonly onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
   readonly onDragProjectChange: (projectPath: string | null) => void;
+  readonly globalSurfaceOpen: boolean;
 }
 
 export default function LegacyTabBar({
   onClose,
+  onSelectTab,
   onNewTerminal,
   panels,
   onOpenPanel,
@@ -164,6 +166,7 @@ export default function LegacyTabBar({
   onRenameTab,
   onMoveTab,
   onDragProjectChange,
+  globalSurfaceOpen,
 }: LegacyTabBarProps) {
   const activeProjectPath = useRepoStore((state) => state.activeRepoPath);
   const projectState = useTerminalStore(
@@ -182,7 +185,7 @@ export default function LegacyTabBar({
       : "var(--status-clean)";
   const tabs = projectState?.tabs ?? [];
   const activeTabId = projectState?.activeTabId ?? null;
-  const { setActiveTab, reorderTab } = useTerminalStore.getState();
+  const { reorderTab } = useTerminalStore.getState();
 
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [dragTabId, setDragTabId] = useState<string | null>(null);
@@ -272,16 +275,9 @@ export default function LegacyTabBar({
     window.addEventListener("pointercancel", onCancel);
   }, [activeProjectPath, computeDropIndex, getProjectPathAt, onDragProjectChange, onMoveTab, reorderTab, tabs]);
 
-  const anyGlobalSurface = useUIStore((state) => state.activeGlobalSurfaceId !== null);
-
   const handleSelectTab = (tabId: string) => {
     if (!activeProjectPath) return;
-    useUIStore.getState().closeGlobalSurface();
-    setActiveTab(activeProjectPath, tabId);
-    const tab = tabs.find((entry) => entry.id === tabId);
-    if (tab?.kind === "terminal") {
-      useTerminalStore.getState().clearTabBell(tab.terminalId);
-    }
+    onSelectTab(tabId);
   };
 
   const isRenameable = (tab: UnifiedTab) => tab.kind === "terminal";
@@ -323,7 +319,7 @@ export default function LegacyTabBar({
         aria-label="Workspace tabs"
       >
         {tabs.map((tab, index) => {
-          const isActive = tab.id === activeTabId && !anyGlobalSurface;
+          const isActive = tab.id === activeTabId && !globalSurfaceOpen;
           const isDragging = tab.id === dragTabId;
           const showDropBefore = dropIndex !== null && dragTabId && tab.id !== dragTabId && dropIndex === index;
           const showDropAfter = dropIndex !== null && dragTabId && tab.id !== dragTabId && dropIndex === index + 1 && index === tabs.length - 1;

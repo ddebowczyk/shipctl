@@ -237,7 +237,10 @@ export default function LegacySidebar({
           )}
         </div>
       </div>
-      <ModuleSidebarSurfaces contributions={sidebarContributions} />
+      <ModuleSidebarSurfaces
+        contributions={sidebarContributions}
+        onToggleGlobalSurface={onToggleGlobalSurface}
+      />
       <LegacySidebarFooter
         navigation={globalNavigation}
         activeSurfaceId={activeGlobalSurfaceId}

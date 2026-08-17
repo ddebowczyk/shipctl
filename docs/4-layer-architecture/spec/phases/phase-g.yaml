@@ -91,17 +91,19 @@ properties:
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-RENDERER-001
     claim: >-
-      Legacy and Layman adapters expose equal semantic view IDs, active view,
-      tab order, and actions for every shared-subset document.
+      Legacy and Layman adapter projections expose equal semantic view IDs,
+      active view, tab order, and actions for every shared-subset document.
     shapes: [differential]
     evidence: [SEM-G-004]
     domain:
       generates: >-
-        Shared documents, focus and navigation actions, and missing
-        placeholders.
-      excludes: [Layman-only floating geometry, pixel output]
-      strategy: Project one generated semantic document through both adapters.
-      classifications: [tabs, split, focus, navigation, missing]
+        One-root-stack shared documents, select and permitted-close actions,
+        and missing placeholders.
+      excludes: [splits, floating stacks, maximized stacks, pixel output]
+      strategy: >-
+        Project one schema-valid shared-stack document through both adapters
+        and dispatch the real Layman user command gate.
+      classifications: [single-stack, tabs, select, close, select-noop, missing]
     preconditions:
       - The source workspace document passes schema validation.
     oracle:
@@ -124,7 +126,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-LAYOUT-001
     claim: >-

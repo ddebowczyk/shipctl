@@ -37,6 +37,10 @@ export type { WorkspaceProfileFactory, WorkspaceProfileInput } from "./profiles.
 export { createWorkspaceServiceProvider } from "./service.ts";
 export type { WorkspaceServiceProviderOptions } from "./service.ts";
 export {
+  selectedWorkspaceInstanceIds,
+  workspaceGlobalInstanceId,
+} from "./selection.ts";
+export {
   WorkspaceCanvasBridge,
   createWorkspaceCanvasProjection,
 } from "./canvasBridge.ts";

@@ -2,6 +2,7 @@ import { Component, lazy, Suspense, useMemo } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type {
+  ContributionId,
   ModuleActivationContext,
   ModuleId,
   ProjectActionSurfaceHost,
@@ -14,7 +15,6 @@ import type {
 
 import { contributedPanelTabId } from "@shipctl/core/platform";
 import { useTerminalStore } from "@shipctl/core/terminal-host";
-import { useUIStore } from "@shipctl/core/shared";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";
 import type {
   CanvasProjectLayoutSurface,
@@ -180,15 +180,17 @@ export function ModuleProjectNavigationSurfaces({
 
 function SidebarSurface({
   contribution,
+  onToggleGlobalSurface,
 }: {
   readonly contribution: CanvasSidebarSurface;
+  readonly onToggleGlobalSurface: (surfaceId: ContributionId) => void;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
   return (
     <ModuleSurfaceBoundary>
       <Suspense fallback={null}>
         <Surface
-          open={() => useUIStore.getState().toggleGlobalSurface(contribution.surfaceId)}
+          open={() => onToggleGlobalSurface(contribution.surfaceId)}
           services={MODULE_HOST_SERVICES}
         />
       </Suspense>
@@ -198,11 +200,17 @@ function SidebarSurface({
 
 export function ModuleSidebarSurfaces({
   contributions,
+  onToggleGlobalSurface,
 }: {
   readonly contributions: readonly CanvasSidebarSurface[];
+  readonly onToggleGlobalSurface: (surfaceId: ContributionId) => void;
 }) {
   return contributions.map((contribution) => (
-    <SidebarSurface key={contribution.id} contribution={contribution} />
+    <SidebarSurface
+      key={contribution.id}
+      contribution={contribution}
+      onToggleGlobalSurface={onToggleGlobalSurface}
+    />
   ));
 }
 

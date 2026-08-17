@@ -135,6 +135,39 @@ test("canvas bridge serializes renderer actions through current authority revisi
   bridge.dispose();
 });
 
+test("canvas bridge opens semantic views without exposing an authority or renderer", async () => {
+  const workspaceId = "fixture.workspace";
+  const authority = await WorkspaceAuthority.open({
+    workspaceId,
+    catalog: catalog(["fixture.first", "fixture.second", "fixture.global"]),
+    persistence: new InMemoryWorkspacePersistence(),
+    defaultProfile: ({ workspaceId: id }) => profile(id),
+  });
+  const bridge = new WorkspaceCanvasBridge({ authority, originId: "fixture.canvas" });
+
+  const opened = await bridge.snapshot().execute({
+    kind: "open",
+    instanceId: "fixture.global.instance",
+    viewTypeId: "fixture.global",
+    resource: { kind: "global" },
+  });
+
+  assert.equal(opened.status, "applied");
+  const document = authority.inspect(true).document;
+  assert.deepEqual(document?.root, {
+    kind: "stack",
+    stackId: "fixture.primary",
+    instanceIds: ["first", "second", "fixture.global.instance"],
+    selectedInstanceId: "fixture.global.instance",
+  });
+  assert.equal(
+    document?.instances.find((instance) => instance.instanceId === "fixture.global.instance")?.viewTypeId,
+    "fixture.global",
+  );
+
+  bridge.dispose();
+});
+
 test("canvas bridge keeps removed definitions recoverable and closeable", async () => {
   const workspaceId = "fixture.workspace";
   const authority = await WorkspaceAuthority.open({
