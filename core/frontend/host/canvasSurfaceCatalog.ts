@@ -2,6 +2,9 @@ import type {
   ContributionId,
   GlobalNavigationContribution,
   GlobalSurfaceContribution,
+  ModuleActivationContext,
+  ModuleActivationId,
+  ModuleId,
   PanelContribution,
   ProjectLayoutContribution,
   ProjectLayoutSlot,
@@ -32,7 +35,10 @@ export class CanvasSurfaceCatalogError extends Error {
     | "missing-panel"
     | "missing-surface"
     | "module-owner-mismatch"
-    | "target-owner-mismatch";
+    | "target-owner-mismatch"
+    | "missing-activation"
+    | "disposed-activation"
+    | "activation-owner-mismatch";
   readonly contributionId: string;
 
   constructor(
@@ -67,39 +73,55 @@ export class CanvasSurfaceLoadError extends Error {
   }
 }
 
-export interface CanvasPanelSurface extends PanelContribution {
+/**
+ * Private renderer ownership. Accepted runtime catalogs always populate this;
+ * the optional form keeps the old static compiler usable during migration.
+ */
+interface CanvasActivationOwner {
+  readonly ownerActivationId?: ModuleActivationId;
+}
+
+export interface CanvasPanelSurface extends PanelContribution, CanvasActivationOwner {
   readonly surfaceKind: "panel";
 }
 
-export interface CanvasGlobalSurface extends GlobalSurfaceContribution {
+export interface CanvasGlobalSurface extends GlobalSurfaceContribution, CanvasActivationOwner {
   readonly surfaceKind: "global-surface";
 }
 
-export interface CanvasGlobalNavigationSurface extends GlobalNavigationContribution {
+export interface CanvasGlobalNavigationSurface
+  extends GlobalNavigationContribution, CanvasActivationOwner {
   readonly surfaceKind: "global-navigation";
   /** The current host places global visual navigation at the sidebar footer. */
   readonly slot: "sidebar.footer";
 }
 
-export interface CanvasSidebarSurface extends SidebarContribution {
+export interface CanvasSidebarSurface extends SidebarContribution, CanvasActivationOwner {
   readonly surfaceKind: "sidebar";
   readonly slot: "sidebar.footer";
   readonly target: CanvasGlobalSurface;
 }
 
-export interface CanvasProjectNavigationSurface extends ProjectNavigationContribution {
+export interface CanvasProjectNavigationSurface
+  extends ProjectNavigationContribution, CanvasActivationOwner {
   readonly surfaceKind: "project-navigation";
   readonly slot: "project.navigation";
   readonly panel: CanvasPanelSurface;
 }
 
-export interface CanvasProjectLayoutSurface extends ProjectLayoutContribution {
+export interface CanvasProjectLayoutSurface
+  extends ProjectLayoutContribution, CanvasActivationOwner {
   readonly surfaceKind: "project-layout";
 }
 
 export interface CanvasSurfaceCatalogInput {
   /** Build-installed feature modules. Omit one to make its surfaces unavailable. */
   readonly modules?: readonly ShipctlModule[];
+  /**
+   * Exact accepted activation owners for this renderer snapshot. When present,
+   * every source must resolve to one live, matching activation.
+   */
+  readonly activationContextsByModule?: ReadonlyMap<ModuleId, ModuleActivationContext>;
   /** Host-owned surfaces, such as Settings. These are not module implementations. */
   readonly builtinGlobalSurfaces?: readonly GlobalSurfaceContribution[];
   readonly builtinGlobalNavigation?: readonly GlobalNavigationContribution[];
@@ -107,7 +129,12 @@ export interface CanvasSurfaceCatalogInput {
 
 interface OwnedContribution {
   readonly id: ContributionId;
-  readonly moduleId: string;
+  readonly moduleId: ModuleId;
+}
+
+interface ActivationOwnedContribution<T extends OwnedContribution>
+  extends CanvasActivationOwner {
+  readonly contribution: T;
 }
 
 function compareContributions(
@@ -144,13 +171,57 @@ function assertOwner(
   }
 }
 
+function ownerActivationIdFor(
+  moduleId: ModuleId,
+  activationContextsByModule: ReadonlyMap<ModuleId, ModuleActivationContext> | undefined,
+): ModuleActivationId | undefined {
+  if (activationContextsByModule === undefined) return undefined;
+  const activation = activationContextsByModule.get(moduleId);
+  if (activation === undefined) {
+    throw new CanvasSurfaceCatalogError(
+      "missing-activation",
+      moduleId,
+      `Canvas source ${moduleId} has no accepted activation.`,
+    );
+  }
+  if (activation.disposed) {
+    throw new CanvasSurfaceCatalogError(
+      "disposed-activation",
+      moduleId,
+      `Canvas source ${moduleId} has an already disposed activation.`,
+    );
+  }
+  if (activation.identity.moduleId !== moduleId) {
+    throw new CanvasSurfaceCatalogError(
+      "activation-owner-mismatch",
+      moduleId,
+      `Canvas source ${moduleId} has an activation owned by ${activation.identity.moduleId}.`,
+    );
+  }
+  return activation.identity.activationId;
+}
+
 function contributionEntries<T extends OwnedContribution>(
   modules: readonly ShipctlModule[],
   select: (module: ShipctlModule) => readonly T[] | undefined,
-): readonly T[] {
+  activationContextsByModule: ReadonlyMap<ModuleId, ModuleActivationContext> | undefined,
+): readonly ActivationOwnedContribution<T>[] {
   return modules.flatMap((module) => (select(module) ?? []).map((contribution) => {
     assertOwner(module, contribution);
-    return contribution;
+    return Object.freeze({
+      contribution,
+      ownerActivationId: ownerActivationIdFor(module.id, activationContextsByModule),
+    });
+  }));
+}
+
+function externalContributionEntries<T extends OwnedContribution>(
+  contributions: readonly T[],
+  activationContextsByModule: ReadonlyMap<ModuleId, ModuleActivationContext> | undefined,
+): readonly ActivationOwnedContribution<T>[] {
+  return contributions.map((contribution) => Object.freeze({
+    contribution,
+    ownerActivationId: ownerActivationIdFor(contribution.moduleId, activationContextsByModule),
   }));
 }
 
@@ -168,28 +239,35 @@ function loadPort<T>(
   };
 }
 
-function panelSurface(contribution: PanelContribution): CanvasPanelSurface {
+function panelSurface(
+  { contribution, ownerActivationId }: ActivationOwnedContribution<PanelContribution>,
+): CanvasPanelSurface {
   return Object.freeze({
     ...contribution,
+    ownerActivationId,
     surfaceKind: "panel" as const,
     load: loadPort(contribution.load, "panel", contribution.id),
   });
 }
 
-function globalSurface(contribution: GlobalSurfaceContribution): CanvasGlobalSurface {
+function globalSurface(
+  { contribution, ownerActivationId }: ActivationOwnedContribution<GlobalSurfaceContribution>,
+): CanvasGlobalSurface {
   return Object.freeze({
     ...contribution,
+    ownerActivationId,
     surfaceKind: "global-surface" as const,
     load: loadPort(contribution.load, "global-surface", contribution.id),
   });
 }
 
 function sidebarSurface(
-  contribution: SidebarContribution,
+  { contribution, ownerActivationId }: ActivationOwnedContribution<SidebarContribution>,
   target: CanvasGlobalSurface,
 ): CanvasSidebarSurface {
   return Object.freeze({
     ...contribution,
+    ownerActivationId,
     surfaceKind: "sidebar" as const,
     slot: "sidebar.footer" as const,
     target,
@@ -198,11 +276,12 @@ function sidebarSurface(
 }
 
 function projectNavigationSurface(
-  contribution: ProjectNavigationContribution,
+  { contribution, ownerActivationId }: ActivationOwnedContribution<ProjectNavigationContribution>,
   panel: CanvasPanelSurface,
 ): CanvasProjectNavigationSurface {
   return Object.freeze({
     ...contribution,
+    ownerActivationId,
     surfaceKind: "project-navigation" as const,
     slot: "project.navigation" as const,
     panel,
@@ -211,31 +290,36 @@ function projectNavigationSurface(
 }
 
 function projectLayoutSurface(
-  contribution: ProjectLayoutContribution,
+  { contribution, ownerActivationId }: ActivationOwnedContribution<ProjectLayoutContribution>,
 ): CanvasProjectLayoutSurface {
   return Object.freeze({
     ...contribution,
+    ownerActivationId,
     surfaceKind: "project-layout" as const,
     load: loadPort(contribution.load, "project-layout", contribution.id),
   });
 }
 
 function globalNavigationSurface(
-  contribution: GlobalNavigationContribution,
+  { contribution, ownerActivationId }: ActivationOwnedContribution<GlobalNavigationContribution>,
 ): CanvasGlobalNavigationSurface {
   return Object.freeze({
     ...contribution,
+    ownerActivationId,
     surfaceKind: "global-navigation" as const,
     slot: "sidebar.footer" as const,
   });
 }
 
 function assertTargetOwner(
-  source: OwnedContribution,
-  target: OwnedContribution,
+  source: OwnedContribution & CanvasActivationOwner,
+  target: OwnedContribution & CanvasActivationOwner,
   targetKind: "panel" | "surface",
 ): void {
-  if (source.moduleId !== target.moduleId) {
+  if (
+    source.moduleId !== target.moduleId
+    || source.ownerActivationId !== target.ownerActivationId
+  ) {
     throw new CanvasSurfaceCatalogError(
       "target-owner-mismatch",
       source.id,
@@ -292,21 +376,27 @@ export class CanvasSurfaceCatalog {
 
   static create({
     modules = [],
+    activationContextsByModule,
     builtinGlobalSurfaces = [],
     builtinGlobalNavigation = [],
   }: CanvasSurfaceCatalogInput = {}): CanvasSurfaceCatalog {
     assertUniqueModuleIds(modules);
 
-    const panels = contributionEntries(modules, (module) => module.panels)
+    const panels = contributionEntries(modules, (module) => module.panels, activationContextsByModule)
       .map(panelSurface);
+    const globalSurfaceEntries = [
+      ...externalContributionEntries(builtinGlobalSurfaces, activationContextsByModule),
+      ...contributionEntries(modules, (module) => module.globalSurfaces, activationContextsByModule),
+    ];
     const globalSurfaces = [
-      ...builtinGlobalSurfaces.map(globalSurface),
-      ...contributionEntries(modules, (module) => module.globalSurfaces).map(globalSurface),
+      ...globalSurfaceEntries.map(globalSurface),
+    ];
+    const globalNavigationEntries = [
+      ...externalContributionEntries(builtinGlobalNavigation, activationContextsByModule),
+      ...contributionEntries(modules, (module) => module.globalNavigation, activationContextsByModule),
     ];
     const globalNavigation = [
-      ...builtinGlobalNavigation.map(globalNavigationSurface),
-      ...contributionEntries(modules, (module) => module.globalNavigation)
-        .map(globalNavigationSurface),
+      ...globalNavigationEntries.map(globalNavigationSurface),
     ];
 
     // Validate registry identities before resolving cross-reference targets.
@@ -325,33 +415,45 @@ export class CanvasSurfaceCatalog {
         (contribution) => [contribution.id, contribution as CanvasGlobalSurface],
       ),
     );
-    const sidebar = contributionEntries(modules, (module) => module.sidebar)
-      .map((contribution) => {
-        const target = surfaceById.get(contribution.surfaceId);
+    for (const navigation of globalNavigation) {
+      const target = surfaceById.get(navigation.surfaceId);
+      if (target !== undefined) assertTargetOwner(navigation, target, "surface");
+    }
+    const sidebar = contributionEntries(modules, (module) => module.sidebar, activationContextsByModule)
+      .map((entry) => {
+        const target = surfaceById.get(entry.contribution.surfaceId);
         if (!target) {
           throw new CanvasSurfaceCatalogError(
             "missing-surface",
-            contribution.id,
-            `Canvas sidebar contribution ${contribution.id} targets missing surface ${contribution.surfaceId}.`,
+            entry.contribution.id,
+            `Canvas sidebar contribution ${entry.contribution.id} targets missing surface ${entry.contribution.surfaceId}.`,
           );
         }
-        assertTargetOwner(contribution, target, "surface");
-        return sidebarSurface(contribution, target);
+        assertTargetOwner({ ...entry.contribution, ownerActivationId: entry.ownerActivationId }, target, "surface");
+        return sidebarSurface(entry, target);
       });
-    const projectNavigation = contributionEntries(modules, (module) => module.projectNavigation)
-      .map((contribution) => {
-        const panel = panelById.get(contribution.panelId);
+    const projectNavigation = contributionEntries(
+      modules,
+      (module) => module.projectNavigation,
+      activationContextsByModule,
+    )
+      .map((entry) => {
+        const panel = panelById.get(entry.contribution.panelId);
         if (!panel) {
           throw new CanvasSurfaceCatalogError(
             "missing-panel",
-            contribution.id,
-            `Canvas project navigation contribution ${contribution.id} targets missing panel ${contribution.panelId}.`,
+            entry.contribution.id,
+            `Canvas project navigation contribution ${entry.contribution.id} targets missing panel ${entry.contribution.panelId}.`,
           );
         }
-        assertTargetOwner(contribution, panel, "panel");
-        return projectNavigationSurface(contribution, panel);
+        assertTargetOwner({ ...entry.contribution, ownerActivationId: entry.ownerActivationId }, panel, "panel");
+        return projectNavigationSurface(entry, panel);
       });
-    const projectLayout = contributionEntries(modules, (module) => module.projectLayout)
+    const projectLayout = contributionEntries(
+      modules,
+      (module) => module.projectLayout,
+      activationContextsByModule,
+    )
       .map(projectLayoutSurface);
 
     return new CanvasSurfaceCatalog({

@@ -4,6 +4,8 @@ import test from "node:test";
 import type {
   CommandContribution,
   CommandInvocationContext,
+  ModuleActivationContext,
+  ModuleActivationId,
   ShipctlModule,
 } from "@shipctl/module-api";
 
@@ -24,6 +26,21 @@ function command(overrides: Partial<CommandContribution> = {}): CommandContribut
     label: "Run fixture",
     run: () => undefined,
     ...overrides,
+  };
+}
+
+function activation(moduleId: string, revision: string): ModuleActivationContext {
+  return {
+    identity: {
+      moduleId,
+      activationId: `${moduleId}@1#${revision}` as ModuleActivationId,
+    },
+    disposed: false,
+    services: {
+      has: () => false,
+      require: () => { throw new Error("fixture does not use services"); },
+    },
+    own: () => { throw new Error("fixture does not own resources"); },
   };
 }
 
@@ -56,6 +73,33 @@ test("registry keeps core and module ownership explicit", () => {
     (error: unknown) => error instanceof CommandRegistryError
       && error.code === "command.owner_mismatch",
   );
+});
+
+test("registry rejects stale accepted commands after activation replacement", () => {
+  const first = activation("shipctl.fixture", "one");
+  const replacement = activation("shipctl.fixture", "two");
+  const stale = {
+    contribution: command(),
+    owner: {
+      moduleId: "shipctl.fixture",
+      activationId: first.identity.activationId,
+    },
+  };
+
+  const absent = createCommandRegistry({
+    acceptedModuleCommands: [stale],
+    moduleActivations: new Map([["shipctl.fixture", replacement]]),
+  });
+  assert.deepEqual(absent.commands(), []);
+
+  const current = createCommandRegistry({
+    acceptedModuleCommands: [{
+      ...stale,
+      owner: { ...stale.owner, activationId: replacement.identity.activationId },
+    }],
+    moduleActivations: new Map([["shipctl.fixture", replacement]]),
+  });
+  assert.deepEqual(current.commands().map(({ id }) => id), ["fixture.run"]);
 });
 
 test("registry rejects malformed, duplicate, and incorrectly owned static commands", () => {

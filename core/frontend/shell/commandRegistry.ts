@@ -1,8 +1,14 @@
 import type {
   CommandContribution,
   CommandInvocationContext,
+  ModuleActivationContext,
+  ModuleId,
   ShipctlModule,
 } from "@shipctl/module-api";
+import {
+  activeWorkspaceContributionEntries,
+  type ActivatedWorkspaceContribution,
+} from "@shipctl/core/host";
 
 export type CommandRegistryErrorCode =
   | "command.invalid_id"
@@ -48,6 +54,14 @@ export interface CommandRegistry {
 
 export interface CommandRegistryInput {
   readonly coreCommands?: readonly CommandContribution[];
+  /**
+   * Commands from the accepted workspace contribution catalog. This is the
+   * live path; owner identity prevents a removed or replaced activation from
+   * retaining a native command route.
+   */
+  readonly acceptedModuleCommands?: readonly ActivatedWorkspaceContribution<CommandContribution>[];
+  readonly moduleActivations?: ReadonlyMap<ModuleId, ModuleActivationContext>;
+  /** Legacy static compiler input. The live shell does not use this path. */
   readonly modules?: readonly ShipctlModule[];
 }
 
@@ -90,15 +104,26 @@ function register(
 /** Compile commands from the core and the modules that activated at startup. */
 export function createCommandRegistry({
   coreCommands = [],
+  acceptedModuleCommands,
+  moduleActivations,
   modules = [],
 }: CommandRegistryInput = {}): CommandRegistry {
   const commandsById = new Map<string, CommandContribution>();
   for (const command of coreCommands) {
     register(commandsById, { ownerId: "core", command });
   }
-  for (const module of modules) {
-    for (const command of module.commands ?? []) {
-      register(commandsById, { ownerId: module.id, command });
+  if (acceptedModuleCommands !== undefined) {
+    for (const { contribution: command, owner } of activeWorkspaceContributionEntries(
+      acceptedModuleCommands,
+      moduleActivations ?? new Map(),
+    )) {
+      register(commandsById, { ownerId: owner.moduleId, command });
+    }
+  } else {
+    for (const module of modules) {
+      for (const command of module.commands ?? []) {
+        register(commandsById, { ownerId: module.id, command });
+      }
     }
   }
   const commands = Object.freeze([...commandsById.values()]);

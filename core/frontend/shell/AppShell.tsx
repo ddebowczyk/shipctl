@@ -942,8 +942,12 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   ]);
 
   const commandRegistry = useMemo(
-    () => createCommandRegistry({ coreCommands, modules: activeModules }),
-    [activeModules, coreCommands],
+    () => createCommandRegistry({
+      coreCommands,
+      acceptedModuleCommands: workspaceContributions.commands(),
+      moduleActivations,
+    }),
+    [coreCommands, moduleActivations, workspaceContributions],
   );
 
   const dispatchNativeCommand = useCallback((commandId: string) => {

@@ -25,6 +25,8 @@ import type {
 import { useAcceptedWorkspaceContributionRuntime } from "./AcceptedWorkspaceContributionRuntime.tsx";
 import {
   activeWorkspaceContributionEntries,
+  canvasSurfaceComponentKey,
+  currentCanvasSurfaceActivation,
   currentModuleActivation,
 } from "./acceptedWorkspaceContributionEntries.ts";
 
@@ -59,8 +61,8 @@ function ProjectLayoutSurface({
   readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
-  const activation = moduleActivations.get(contribution.moduleId);
-  if (!activation || activation.disposed) return null;
+  const activation = currentCanvasSurfaceActivation(contribution, moduleActivations);
+  if (activation === undefined) return null;
   return (
     <ModuleSurfaceBoundary>
       <Suspense fallback={null}>
@@ -85,7 +87,7 @@ export function ModuleProjectLayoutSurfaces({
 }) {
   return contributions.map((contribution) => (
     <ProjectLayoutSurface
-      key={contribution.id}
+      key={canvasSurfaceComponentKey(contribution)}
       contribution={contribution}
       project={project}
       moduleActivations={moduleActivations}
@@ -144,8 +146,8 @@ function ProjectNavigationSurface({
   readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
-  const activation = moduleActivations.get(contribution.moduleId);
-  if (!activation || activation.disposed) return null;
+  const activation = currentCanvasSurfaceActivation(contribution, moduleActivations);
+  if (activation === undefined) return null;
   const panel = contribution.panel;
   const instanceId = contributedPanelTabId(contribution.panelId);
   const active = activeTabId === instanceId;
@@ -183,7 +185,7 @@ export function ModuleProjectNavigationSurfaces({
 }) {
   return contributions.map((contribution) => (
     <ProjectNavigationSurface
-      key={contribution.id}
+      key={canvasSurfaceComponentKey(contribution)}
       contribution={contribution}
       project={project}
       activeTabId={activeTabId}
@@ -202,8 +204,8 @@ function SidebarSurface({
   readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
-  const activation = moduleActivations.get(contribution.moduleId);
-  if (!activation || activation.disposed) return null;
+  const activation = currentCanvasSurfaceActivation(contribution, moduleActivations);
+  if (activation === undefined) return null;
   return (
     <ModuleSurfaceBoundary>
       <Suspense fallback={null}>
@@ -227,7 +229,7 @@ export function ModuleSidebarSurfaces({
 }) {
   return contributions.map((contribution) => (
     <SidebarSurface
-      key={contribution.id}
+      key={canvasSurfaceComponentKey(contribution)}
       contribution={contribution}
       onToggleGlobalSurface={onToggleGlobalSurface}
       moduleActivations={moduleActivations}

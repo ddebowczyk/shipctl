@@ -4,12 +4,22 @@ import type {
   ContributionId,
   GlobalSurfaceContribution,
   ModuleActivationContext,
+  ModuleActivationId,
   ModuleHostServices,
   ModuleId,
 } from "@shipctl/module-api";
 
+import {
+  canvasSurfaceComponentKey,
+  currentCanvasSurfaceActivation,
+} from "./acceptedWorkspaceContributionEntries.ts";
+
+type ActivationOwnedGlobalSurfaceContribution = GlobalSurfaceContribution & {
+  readonly ownerActivationId?: ModuleActivationId;
+};
+
 interface GlobalSurfaceHostProps {
-  readonly contribution: GlobalSurfaceContribution | undefined;
+  readonly contribution: ActivationOwnedGlobalSurfaceContribution | undefined;
   readonly surfaceId: ContributionId;
   readonly close: () => void;
   readonly projectPaths: readonly string[];
@@ -93,7 +103,7 @@ export default function GlobalSurfaceHost({
     title: "Surface unavailable",
     description: `${contribution.id} could not be loaded.`,
   };
-  const activation = moduleActivations.get(contribution.moduleId);
+  const activation = currentCanvasSurfaceActivation(contribution, moduleActivations);
 
   if (!activation || activation.disposed) {
     return (
@@ -108,7 +118,7 @@ export default function GlobalSurfaceHost({
 
   return (
     <GlobalSurfaceBoundary
-      key={`${surfaceId}:${loadAttempt}`}
+      key={`${canvasSurfaceComponentKey(contribution)}:${loadAttempt}`}
       fallback={(error) => (
         <GlobalSurfaceUnavailable
           title={unavailable.title}

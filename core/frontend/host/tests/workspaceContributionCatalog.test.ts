@@ -20,6 +20,8 @@ let vite: ViteDevServer;
 let WorkspaceContributionCatalog: WorkspaceContributionCatalogModule["WorkspaceContributionCatalog"];
 let WorkspaceContributionCatalogError: WorkspaceContributionCatalogModule["WorkspaceContributionCatalogError"];
 let activeWorkspaceContributionEntries: AcceptedWorkspaceContributionEntriesModule["activeWorkspaceContributionEntries"];
+let canvasSurfaceComponentKey: AcceptedWorkspaceContributionEntriesModule["canvasSurfaceComponentKey"];
+let currentCanvasSurfaceActivation: AcceptedWorkspaceContributionEntriesModule["currentCanvasSurfaceActivation"];
 let createCurrentCanvasWorkspaceCatalog: WorkspaceProfilesModule["createCurrentCanvasWorkspaceCatalog"];
 let CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID: WorkspaceProfilesModule["CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID"];
 let shippedViewModules: readonly ShipctlModule[];
@@ -34,7 +36,11 @@ before(async () => {
   ({ WorkspaceContributionCatalog, WorkspaceContributionCatalogError } = await vite.ssrLoadModule(
     "/core/frontend/host/workspaceContributionCatalog.ts",
   ) as WorkspaceContributionCatalogModule);
-  ({ activeWorkspaceContributionEntries } = await vite.ssrLoadModule(
+  ({
+    activeWorkspaceContributionEntries,
+    canvasSurfaceComponentKey,
+    currentCanvasSurfaceActivation,
+  } = await vite.ssrLoadModule(
     "/core/frontend/host/acceptedWorkspaceContributionEntries.ts",
   ) as AcceptedWorkspaceContributionEntriesModule);
   ({
@@ -403,6 +409,21 @@ test("accepted entry selection rejects a stale activation after replacement or r
   );
   assert.deepEqual(
     activeWorkspaceContributionEntries(catalog.settings(), noStaleEntries), []);
+  const stalePanel = catalog.canvasSurfaceCatalog.panel("fixture.panel");
+  assert.ok(stalePanel);
+  assert.equal(currentCanvasSurfaceActivation(stalePanel, noStaleEntries), undefined);
+
+  const replacementCatalog = WorkspaceContributionCatalog.create({
+    registryRevision: 2,
+    modules: [fixtureModule],
+    activationContextsByModule: new Map([[fixtureModule.id, replacement]]),
+    hostContributions: hostContributions(coreActivation),
+  });
+  const replacementPanel = replacementCatalog.canvasSurfaceCatalog.panel("fixture.panel");
+  assert.ok(replacementPanel);
+  assert.equal(currentCanvasSurfaceActivation(replacementPanel, noStaleEntries), replacement);
+  assert.notEqual(canvasSurfaceComponentKey(stalePanel), canvasSurfaceComponentKey(replacementPanel));
+
   assert.deepEqual(
     activeWorkspaceContributionEntries(catalog.projectActions(), new Map([["core", coreActivation]])),
     [],

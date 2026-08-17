@@ -4,13 +4,23 @@ import type {
   ContributionId,
   ModuleHostServices,
   ModuleActivationContext,
+  ModuleActivationId,
   ModuleId,
   PanelContribution,
   ProjectRef,
 } from "@shipctl/module-api";
 
+import {
+  canvasSurfaceComponentKey,
+  currentCanvasSurfaceActivation,
+} from "./acceptedWorkspaceContributionEntries.ts";
+
+type ActivationOwnedPanelContribution = PanelContribution & {
+  readonly ownerActivationId?: ModuleActivationId;
+};
+
 interface PanelHostProps {
-  readonly contribution: PanelContribution | undefined;
+  readonly contribution: ActivationOwnedPanelContribution | undefined;
   readonly panelId: ContributionId;
   readonly instanceId: string;
   readonly project: ProjectRef | null;
@@ -105,7 +115,7 @@ export default function PanelHost({
     title: `${contribution.label} unavailable`,
     description: `${contribution.id} could not be loaded.`,
   };
-  const activation = moduleActivations.get(contribution.moduleId);
+  const activation = currentCanvasSurfaceActivation(contribution, moduleActivations);
 
   if (!activation || activation.disposed) {
     return (
@@ -120,7 +130,7 @@ export default function PanelHost({
 
   return (
     <PanelRenderBoundary
-      key={`${panelId}:${loadAttempt}`}
+      key={`${canvasSurfaceComponentKey(contribution)}:${loadAttempt}`}
       fallback={(error) => (
         <PanelUnavailable
           title={unavailable.title}

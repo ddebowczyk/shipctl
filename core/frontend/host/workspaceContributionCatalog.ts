@@ -444,6 +444,9 @@ export class WorkspaceContributionCatalog {
     try {
       canvasSurfaceCatalog = CanvasSurfaceCatalog.create({
         modules: sources.map(sourceModule),
+        activationContextsByModule: new Map(
+          sources.map((source) => [source.moduleId, source.activation]),
+        ),
       });
     } catch (error) {
       fail(

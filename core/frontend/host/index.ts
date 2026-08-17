@@ -41,6 +41,12 @@ export type {
   WorkspaceRendererEntry,
 } from "./workspaceContributionCatalog.ts";
 export {
+  activeWorkspaceContributionEntries,
+  canvasSurfaceComponentKey,
+  currentCanvasSurfaceActivation,
+  currentModuleActivation,
+} from "./acceptedWorkspaceContributionEntries.ts";
+export {
   BUILTIN_GLOBAL_NAVIGATION,
   createBuiltinGlobalSurfaceContributions,
 } from "./builtinGlobalSurfaceAdapters.ts";

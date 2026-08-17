@@ -43,3 +43,42 @@ export function activeWorkspaceContributionEntries<
     && currentModuleActivation(owner.moduleId, owner.activationId, activations) !== undefined
   ));
 }
+
+/**
+ * Select the current activation for a private renderer surface. Runtime-built
+ * canvas entries carry an exact owner ID; the no-ID branch is only for the
+ * legacy static compiler while it remains available outside the live path.
+ */
+export function currentCanvasSurfaceActivation(
+  surface: {
+    readonly moduleId: ModuleId;
+    readonly ownerActivationId?: ModuleActivationId;
+  },
+  activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
+): ModuleActivationContext | undefined {
+  if (surface.ownerActivationId !== undefined) {
+    return currentModuleActivation(surface.moduleId, surface.ownerActivationId, activations);
+  }
+  const activation = activations.get(surface.moduleId);
+  if (
+    activation === undefined
+    || activation.disposed
+    || activation.identity.moduleId !== surface.moduleId
+  ) {
+    return undefined;
+  }
+  return activation;
+}
+
+/**
+ * React identity for a lazily loaded host surface. A replacement may retain
+ * its contribution ID, but it must never retain the previous activation's
+ * component or error-boundary state.
+ */
+export function canvasSurfaceComponentKey(surface: {
+  readonly id: ContributionId;
+  readonly moduleId: ModuleId;
+  readonly ownerActivationId?: ModuleActivationId;
+}): string {
+  return `${surface.moduleId}:${surface.ownerActivationId ?? "legacy"}:${surface.id}`;
+}
