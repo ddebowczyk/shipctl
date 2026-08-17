@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url";
 import {
   assertSourceAbsent,
   frontendDisabled,
-  nativeDisabled,
   prepareSourceAbsent,
   plugout,
   readManifest,
@@ -54,8 +53,7 @@ test("profile runner can check only the source-absent contract without a copy", 
 
 test("public profile commands use manifest and composition contracts without builds", () => {
   plugout(repositoryRoot, "commands");
-  frontendDisabled(repositoryRoot, "commands");
-  nativeDisabled(repositoryRoot, "todos");
+  frontendDisabled(repositoryRoot, "usage");
 });
 
 function copy(root, relativePath) {

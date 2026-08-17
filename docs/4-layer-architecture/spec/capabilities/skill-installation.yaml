@@ -2,7 +2,7 @@
 $schema: ../schema/capability.v1.schema.yaml
 schema_version: capability/v1
 id: skill-installation
-version: 1.0.0
+version: 2.0.0
 title: Reviewed skill installation operations
 status: implementing
 layer: native-kernel
@@ -11,9 +11,10 @@ current_implementations:
   - module-api/frontend/src/protocol/skillInstallation.ts
   - module-api/frontend/src/testing/skillInstallation.ts
   - core/frontend/platform/skillInstallation.ts
+  - core/backend/src/skill_installation
+  - core/tauri/src/skill_installation.rs
+  - modules/skills/frontend/src/catalog.ts
   - modules/skills/frontend/src/skillInstallationClient.ts
-  - modules/skills/backend
-  - modules/skills/host
 target_owners:
   provider: core/backend/src/skill_installation
   tauri_adapter: core/tauri/src/skill_installation.rs
@@ -22,12 +23,13 @@ operations:
   - id: inspectSkills
     kind: request
     contract: >-
-      List skill descriptors inside approved roots without feature policy.
+      Inspect installation state for caller-supplied stable skill identities
+      inside one approved project without native catalog policy.
   - id: installSkill
     kind: request
     contract: >-
-      Install one validated source into one approved target with atomic
-      rollback.
+      Validate and install one caller-supplied Markdown source into one
+      approved project with atomic rollback.
   - id: removeSkill
     kind: request
     contract: Remove one authorized installed skill by stable identity.
@@ -38,8 +40,12 @@ required_grants:
 ownership:
   authority: >-
     The native kernel owns path scope and atomic installation mechanics.
-  resources: Installed files survive plugin replacement.
-  activation_scope: Grants identify source and destination roots and operations.
+  resources: >-
+    Installed files are project-owned durable resources and survive plugin
+    replacement or activation disposal.
+  activation_scope: >-
+    Grants identify the caller, approved project root, and operation. They do
+    not grant arbitrary filesystem access.
 depends_on: []
 property_ids:
   - PROP-B-ADAPTER-001
@@ -49,3 +55,4 @@ property_ids:
   - PROP-D-PARITY-001
   - PROP-D-AUTHORITY-001
   - PROP-D-OWNERSHIP-001
+  - PROP-D-CLOSURE-001

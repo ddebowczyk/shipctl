@@ -12,7 +12,7 @@ import fc from "fast-check";
 import {
   moduleTopLevelEffects,
   parseTypeScriptSource,
-} from "../../modularity/bin/check-module-boundaries.mjs";
+} from "../../modularity/lib/module-boundaries.mjs";
 
 const exec = promisify(execFile);
 const repositoryRoot = path.resolve(

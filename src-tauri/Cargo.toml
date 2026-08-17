@@ -19,15 +19,8 @@ name = "shipctl-ui"
 path = "src/main.rs"
 
 [features]
-default = ["todos-module", "ports-module", "skills-module", "git-module", "assistants-module", "usage-module", "semantic-terminal-module"]
+default = []
 fixture-module = ["dep:shipctl-module-fixture"]
-todos-module = ["dep:shipctl-module-todos", "dep:shipctl-module-todos-host"]
-ports-module = ["dep:shipctl-module-ports", "dep:shipctl-module-ports-host"]
-skills-module = ["dep:shipctl-module-skills", "dep:shipctl-module-skills-host"]
-git-module = ["dep:shipctl-module-git", "dep:shipctl-module-git-host"]
-assistants-module = ["dep:shipctl-module-assistants", "dep:shipctl-module-assistants-host"]
-usage-module = ["dep:shipctl-module-usage", "dep:shipctl-module-usage-host"]
-semantic-terminal-module = ["dep:shipctl-module-semantic-terminal", "dep:shipctl-module-semantic-terminal-host"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
@@ -37,6 +30,7 @@ serde_json = "1.0"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
+uuid = { version = "1", features = ["v5"] }
 tauri = { version = "2.11.5", features = ["macos-private-api", "protocol-asset"] }
 tauri-plugin-log = "2"
 dirs = "6.0"
@@ -47,20 +41,3 @@ shipctl-core = { path = "../core/backend" }
 shipctl-tauri-adapter = { path = "../core/tauri" }
 shipctl-module-api = { path = "../module-api/backend" }
 shipctl-module-fixture = { package = "tauri-plugin-shipctl-fixture", path = "../examples/module-fixture/backend", optional = true }
-shipctl-module-todos = { package = "tauri-plugin-shipctl-todos", path = "../modules/todos/backend", optional = true }
-shipctl-module-todos-host = { path = "../modules/todos/host", optional = true }
-# Direct optional module dependencies make their generated Tauri ACL manifests
-# visible to `tauri::generate_context!()`. Runtime installation is delegated to
-# the matching `modules/<name>/host` crate below.
-shipctl-module-ports = { package = "tauri-plugin-shipctl-ports", path = "../modules/ports/backend", optional = true }
-shipctl-module-skills = { package = "tauri-plugin-shipctl-skills", path = "../modules/skills/backend", optional = true }
-shipctl-module-git = { package = "tauri-plugin-shipctl-git", path = "../modules/git/backend", optional = true }
-shipctl-module-assistants = { package = "tauri-plugin-shipctl-assistants", path = "../modules/assistants/backend", optional = true }
-shipctl-module-usage = { package = "tauri-plugin-shipctl-usage", path = "../modules/usage/backend", optional = true }
-shipctl-module-semantic-terminal = { package = "tauri-plugin-shipctl-semantic-terminal", path = "../modules/semantic-terminal/backend", optional = true }
-shipctl-module-ports-host = { path = "../modules/ports/host", optional = true }
-shipctl-module-skills-host = { path = "../modules/skills/host", optional = true }
-shipctl-module-git-host = { path = "../modules/git/host", optional = true }
-shipctl-module-assistants-host = { path = "../modules/assistants/host", optional = true }
-shipctl-module-usage-host = { path = "../modules/usage/host", optional = true }
-shipctl-module-semantic-terminal-host = { path = "../modules/semantic-terminal/host", optional = true }

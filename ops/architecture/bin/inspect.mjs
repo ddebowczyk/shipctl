@@ -5,7 +5,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { inspectFrontendArchitecture } from "../../modularity/bin/check-module-boundaries.mjs";
+import { inspectFrontendArchitecture } from "../../modularity/lib/module-boundaries.mjs";
 import { inspectLegacyComposition } from "./composition-inventory.mjs";
 
 const exec = promisify(execFile);

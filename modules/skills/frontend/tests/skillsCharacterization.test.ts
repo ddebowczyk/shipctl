@@ -39,13 +39,13 @@ function catalog(installedName?: string): SkillInfo[] {
     {
       name: "shipctl-todos",
       title: "Project to-dos",
-      description: "Synthetic to-dos fixture",
+      description: "Teaches agents to keep TODO.md as a kanban board: move cards when starting or finishing work, add discovered work to the backlog, and reconcile the board before ending a session.",
       installed: installedName === "shipctl-todos",
     },
     {
       name: "orchestrate",
       title: "Orchestrate",
-      description: "Synthetic orchestrator fixture",
+      description: "Turns any agent into a planner/orchestrator that delegates implementation to a different agent CLI running headless (codex, claude, opencode), reviews each task, and finishes with a fresh-context audit.",
       installed: installedName === "orchestrate",
     },
   ];

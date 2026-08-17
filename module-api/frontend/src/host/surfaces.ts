@@ -5,6 +5,7 @@ import type { ModuleHostServices } from "./services";
 
 export interface GlobalSurfaceContributionProps {
   readonly close: () => void;
+  readonly projectPaths: readonly string[];
   readonly activation: ModuleActivationContext;
   readonly services: ModuleHostServices;
 }

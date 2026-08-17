@@ -60,9 +60,10 @@ at the native boundary before it can close PID-reuse risk.
 The Todos frontend now uses `shipctl.project-documents@1` through its exact
 module activation. The public API exposes bounded document discovery,
 project-relative text reads, content revisions, and compare-and-write. The
-trusted frontend adapter is the only code in this slice that knows the
-transitional Todos command names and request envelope. Todo parsing and
-mutation policy now lives in TypeScript.
+trusted frontend adapter is the only frontend code in this slice that knows
+the private request envelope. Phase B first delegated to transitional Todos
+command names; Phase D replaced them with the permanent private Project
+Documents adapter. Todo parsing and mutation policy lives in TypeScript.
 
 The native adapter authorizes registered projects, rejects non-normalized and
 escaping paths, rejects symbolic-link documents, bounds discovery with the
@@ -74,7 +75,7 @@ external editor; atomic publication and stale-at-check rejection are the
 characterized guarantees.
 
 The current host `ProjectRef.id` is still path-backed. The service does not
-return absolute paths, but Phase D must introduce an opaque native project
+return absolute paths, but Phase E admission must introduce an opaque native project
 identity before this capability is granted to third-party artifacts.
 
 ## Implemented capability slice: Git
@@ -90,16 +91,19 @@ in-memory provider runs file browsing, worktree creation, status refresh, and
 repository observation without Tauri. Generated properties cover DTO and
 stable-error mapping, input validation, cancellation before dispatch, exact
 activation and correlation attribution, scope filtering, event order, and
-lease disposal. Phase D still owns native provider extraction and opaque
-project authority.
+lease disposal. Phase D has now replaced the transitional plugin commands with
+the permanent Tauri-free Git provider and private adapter. Opaque project
+identity remains a Phase E admission concern; the built-in adapter currently
+authorizes exact registered paths.
 
 ## Implemented capability slice: Skill Installation
 
-The Skills frontend now uses `shipctl.skill-installation@1` through the exact
+The Skills frontend now uses `shipctl.skill-installation@2` through the exact
 activation supplied to project actions and lifecycle hooks. The public API
-exposes reviewed catalog inspection plus install and removal by stable skill
-identity. Only the trusted platform adapter knows the current Skills command
-names and path-backed project argument.
+accepts a plugin-owned catalog, inspects installation state, and installs or
+removes a caller-selected source by stable skill identity. Only the trusted
+platform adapter knows the private command names and path-backed project
+argument.
 
 The built-in catalog and install workflow run against a Tauri-free fake host.
 Generated properties cover catalog mapping, stable errors, request validation,
@@ -110,10 +114,12 @@ same-directory rename and rolls it back if its compatibility pointer cannot be
 published. Removal first moves every owned public path to a transaction-private
 name, so a staging failure restores the prior visible state.
 
-This remains a transitional native feature backend. Phase D must extract the
-reviewed install mechanics into the native kernel and replace path-backed
-project arguments with opaque authority before third-party artifacts receive
-the capability.
+Phase D moved the reviewed mechanics to the Tauri-free native provider and
+deleted the Skills Rust module, host adapter, Cargo feature, Tauri plugin, ACL
+projection, and old private command edge. The TypeScript plugin now owns the
+built-in catalog and Markdown sources. Phase E must still replace path-backed
+project arguments with opaque admitted identities before third-party artifacts
+receive this capability.
 
 ## Implemented capability slice: Credential Store for Assistants
 

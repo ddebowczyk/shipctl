@@ -9,16 +9,16 @@ use serde::{de::DeserializeOwned, Serialize};
 use shipctl_core::instance::{
     ControlError, TerminalControlEvent, TERMINAL_CONTROL_WRITE_MAX_BYTES,
 };
+use shipctl_core::semantic_terminal::input::TerminalInput;
+use shipctl_core::semantic_terminal::projection::{
+    ProjectedPoint, ProjectedRow, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
+};
+use shipctl_core::semantic_terminal::wire::{ProjectedRunRow, TerminalScreenSnapshot};
+use shipctl_core::semantic_terminal::SemanticDriverRequest;
 use shipctl_core::terminal_host::{
     TerminalAgentReportRequest, TerminalAgentReportSource, TerminalDescriptor, TerminalId,
     TerminalLifecycle,
 };
-use shipctl_module_semantic_terminal_core::input::TerminalInput;
-use shipctl_module_semantic_terminal_core::projection::{
-    ProjectedPoint, ProjectedRow, TerminalAnchor, TerminalAnchorId, TerminalHistoryWindow,
-};
-use shipctl_module_semantic_terminal_core::wire::{ProjectedRunRow, TerminalScreenSnapshot};
-use shipctl_module_semantic_terminal_core::SemanticDriverRequest;
 
 use crate::args::{
     TerminalAnchorArgs, TerminalAnchorIdArgs, TerminalAttachArgs, TerminalHistoryArgs,
@@ -791,18 +791,16 @@ mod tests {
         ));
         assert_eq!(
             semantic_input(&key).unwrap(),
-            TerminalInput::Key(
-                shipctl_module_semantic_terminal_core::input::TerminalKeyEvent {
-                    action: shipctl_module_semantic_terminal_core::input::TerminalKeyAction::Press,
-                    code: "ArrowUp".to_string(),
-                    text: None,
-                    mods: shipctl_module_semantic_terminal_core::input::TerminalModifiers {
-                        ctrl: true,
-                        ..Default::default()
-                    },
-                    composing: false,
-                }
-            )
+            TerminalInput::Key(shipctl_core::semantic_terminal::input::TerminalKeyEvent {
+                action: shipctl_core::semantic_terminal::input::TerminalKeyAction::Press,
+                code: "ArrowUp".to_string(),
+                text: None,
+                mods: shipctl_core::semantic_terminal::input::TerminalModifiers {
+                    ctrl: true,
+                    ..Default::default()
+                },
+                composing: false,
+            })
         );
 
         let paste = input_args(Some(r#"{"kind":"paste","text":"pasted"}"#));

@@ -39,7 +39,7 @@ guards. The canvas test guards this pin.
 
 An adapter owns placement and DOM layout. It may select where a panel, global
 surface, terminal slot, or trailing project layout appears. It may not start
-terminal registries, activate modules, load restart-bound modules, listen for
+terminal registries, activate modules, load runtime modules, listen for
 Tauri menu events, or call native Tauri APIs. `shell/AppShell.tsx` owns those
 operations and builds the model, actions, and ports.
 

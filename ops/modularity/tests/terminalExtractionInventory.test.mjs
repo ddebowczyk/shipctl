@@ -14,9 +14,9 @@ test("records terminal implementation dependencies at their extracted owners", a
   assert.ok(
     inventory.some(
       ({ target, file }) =>
-        target === "ghostty" && file === "modules/semantic-terminal/core/Cargo.toml",
+        target === "ghostty" && file === "core/backend/Cargo.toml",
     ),
-    "the inventory identifies Ghostty's semantic module dependency",
+    "the inventory identifies Ghostty's permanent core dependency",
   );
   assert.ok(
     inventory.some(

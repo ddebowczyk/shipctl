@@ -6,7 +6,6 @@ import {
   terminalPresentationRegistry,
 } from "../terminal-host/index.ts";
 import {
-  activateStaticPluginsObserved,
   createModuleActivationIdentity,
   SemanticServiceRegistry,
 } from "../runtime/index.ts";
@@ -51,13 +50,14 @@ import {
   createProjectDocumentsServiceProvider,
   createSkillInstallationServiceProvider,
   createCredentialStoreServiceProvider,
+  createAssistantLaunchServiceProvider,
   createUsageSourcesServiceProvider,
   createPluginDataServiceProvider,
   createMessagesServiceProvider,
   createSchedulerServiceProvider,
   createSemanticTerminalsServiceProvider,
   createTerminalSessionsServiceProvider,
-  observeUsageSourceMessageFrame,
+  reportModuleReconciliationFailure,
 } from "../platform/index.ts";
 import { useThemeStore } from "../appearance/index.ts";
 import { useEditorStore } from "../settings/index.ts";
@@ -75,11 +75,9 @@ import {
   notifyModulesProjectRemoved,
   notifyModulesProjectsChanged,
   panelIdForTab,
-  openModuleMessageBridge,
-  loadRestartBoundModules,
+  LiveModuleSupervisor,
   publishFrontendRuntimeSnapshot,
   type ShipctlModule,
-  type StartupModuleRuntimeSnapshot,
 } from "../host/index.ts";
 import {
   matchesPanelShortcut,
@@ -99,19 +97,13 @@ import type { TerminalId } from "@shipctl/core/terminal-host";
 // Stable empty arrays to avoid infinite re-render loops with zustand v5's
 // useSyncExternalStore — selectors must return the same reference for the same state.
 const EMPTY_TABS: UnifiedTab[] = [];
-const CANVAS_SURFACE_CATALOG = createEnabledCanvasSurfaceCatalog(
-  BUILTIN_GLOBAL_SURFACE_LOADERS,
-);
-const MODULE_PANEL_CONTRIBUTIONS = CANVAS_SURFACE_CATALOG.panels()
-  .filter((panel) => panel.moduleId !== "core");
-const GLOBAL_NAVIGATION = CANVAS_SURFACE_CATALOG.globalNavigation();
-const TERMINAL_PRESENTATION_REGISTRY = terminalPresentationRegistry(ENABLED_MODULES);
 const SEMANTIC_SERVICE_PROVIDERS = [
   createGitServiceProvider(),
   createProcessesServiceProvider(),
   createProjectDocumentsServiceProvider(),
   createSkillInstallationServiceProvider(),
   createCredentialStoreServiceProvider(),
+  createAssistantLaunchServiceProvider(),
   createUsageSourcesServiceProvider(),
   createPluginDataServiceProvider(),
 ];
@@ -165,8 +157,29 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   const durableUiStateRef = useRef<UiState | null>(null);
   const [durableUiStateLoaded, setDurableUiStateLoaded] = useState(false);
   const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
-  const [moduleActivations, setModuleActivations] = useState(CORE_MODULE_ACTIVATIONS);
+  const [moduleRuntime, setModuleRuntime] = useState({
+    moduleActivations: CORE_MODULE_ACTIVATIONS,
+    activeModules: ENABLED_MODULES as readonly ShipctlModule[],
+  });
+  const { moduleActivations, activeModules } = moduleRuntime;
   const lastTabCycleAtRef = useRef(0);
+
+  const canvasSurfaceCatalog = useMemo(
+    () => createEnabledCanvasSurfaceCatalog(BUILTIN_GLOBAL_SURFACE_LOADERS, activeModules),
+    [activeModules],
+  );
+  const modulePanelContributions = useMemo(
+    () => canvasSurfaceCatalog.panels().filter((panel) => panel.moduleId !== "core"),
+    [canvasSurfaceCatalog],
+  );
+  const globalNavigation = useMemo(
+    () => canvasSurfaceCatalog.globalNavigation(),
+    [canvasSurfaceCatalog],
+  );
+  const activeTerminalPresentationRegistry = useMemo(
+    () => terminalPresentationRegistry(activeModules),
+    [activeModules],
+  );
 
   const handleSelectRepo = useCallback(
     async (repoPath: string) => {
@@ -177,7 +190,12 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         await openRepo(repoPath);
         initialProjectAttemptedRef.current = true;
         durableUiStateRef.current = await setLastRepoPath(repoPath);
-        await notifyModulesProjectOpened(repoPath, MODULE_HOST_SERVICES, moduleActivations);
+        await notifyModulesProjectOpened(
+          repoPath,
+          MODULE_HOST_SERVICES,
+          moduleActivations,
+          activeModules,
+        );
         return true;
       } catch (error) {
         pushNotice({
@@ -188,7 +206,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         return false;
       }
     },
-    [activeRepoPath, moduleActivations, openRepo, pushNotice],
+    [activeModules, activeRepoPath, moduleActivations, openRepo, pushNotice],
   );
 
   const {
@@ -248,7 +266,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     () => repos.map((r) => r.path),
     [repos],
   );
-  useProjectWatcher(projectPaths, moduleActivations);
+  useProjectWatcher(projectPaths, moduleActivations, activeModules);
   // Collect only PTY-backed tabs for terminal presentation (panel tabs have no terminal)
   const allTerminalTabs = useMemo(() => {
     const all: Array<{ tab: TerminalTabData; projectPath: string }> = [];
@@ -280,153 +298,69 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
 
   useEffect(() => {
     let disposed = false;
-    let deactivate: (() => Promise<void>) | null = null;
-    let closeBridge: (() => Promise<void>) | null = null;
-
-    void (async () => {
-      const restartBound = await loadRestartBoundModules();
-      const startupResults = new Map<string, StartupModuleRuntimeSnapshot>();
-      for (const failure of restartBound.failures) {
-        startupResults.set(failure.moduleId, {
-          moduleId: failure.moduleId,
-          status: "failed",
-          phase: failure.phase,
-        });
-        pushNotice({
-          tone: "error",
-          title: `Module ${failure.moduleId} did not start`,
-          message: `${failure.code}: ${failure.message}`,
-        });
-      }
-      const modules: readonly ShipctlModule[] = [
-        ...ENABLED_MODULES,
-        ...restartBound.modules,
-      ];
-      let opened: Awaited<ReturnType<typeof openModuleMessageBridge>>;
-      try {
-        opened = await openModuleMessageBridge(
-          modules,
-          undefined,
-          undefined,
-          observeUsageSourceMessageFrame,
-        );
-      } catch (error) {
-        if (disposed) return;
-        const modulesWithoutMessages = modules.filter(
-          (module) => !("messages" in module)
-            && (module.scheduledTasks?.length ?? 0) === 0
-            && (module.requiredGrants?.length ?? 0) === 0,
-        );
-        const activation = await activateStaticPluginsObserved(
-          MODULE_HOST_SERVICES,
-          modulesWithoutMessages,
-          new Map(),
-          SEMANTIC_SERVICES,
-        );
-        deactivate = activation.deactivate;
-        setModuleActivations(withCoreActivation(activation.activationContextsByModule));
-        const activeModules = modulesWithoutMessages.filter(
-          (module) => activation.activeModuleIds.has(module.id),
-        );
-        for (const descriptor of restartBound.catalog.modules) {
-          if (!startupResults.has(descriptor.moduleId)) {
-            startupResults.set(descriptor.moduleId, {
-              moduleId: descriptor.moduleId,
-              status: "failed",
-              phase: "bridge",
-            });
-          }
-        }
-        await publishFrontendRuntimeSnapshot(
-          activeModules,
-          restartBound.catalog.modules.map(({ moduleId }) =>
-            startupResults.get(moduleId) ?? {
-              moduleId,
-              status: "failed",
-              phase: "bridge",
-            }),
-        );
-        if (import.meta.env.DEV) {
-          console.error("Module message bridge initialization failed:", error);
-        }
-        return;
-      }
-      if (disposed) {
-        await opened.bridge.close();
-        return;
-      }
-      closeBridge = () => opened.bridge.close();
-      const runtimeSemanticServices = new SemanticServiceRegistry([
+    const supervisor = new LiveModuleSupervisor({
+      staticModules: ENABLED_MODULES,
+      services: MODULE_HOST_SERVICES,
+      createSemanticServices: (bindings, deactivateActivation) => new SemanticServiceRegistry([
         ...SEMANTIC_SERVICE_PROVIDERS,
         createMessagesServiceProvider({
-          clientsByActivation: opened.clientsByActivation,
-          deactivateActivation: (activationId) => {
-            opened.bridge.deactivateActivation(activationId);
-          },
+          clientsByActivation: bindings.clientsByActivation,
+          deactivateActivation,
         }),
         createSchedulerServiceProvider({
-          bindingsByActivation: opened.schedulerBindingsByActivation,
+          bindingsByActivation: bindings.schedulerBindingsByActivation,
         }),
         createTerminalSessionsServiceProvider({
-          bindingsByActivation: opened.terminalBindingsByActivation,
+          bindingsByActivation: bindings.terminalBindingsByActivation,
           runtime: ACTIVATION_TERMINAL_SESSIONS,
           terminalHost: terminalHostAdapter,
         }),
         createSemanticTerminalsServiceProvider({
-          bindingsByActivation: opened.terminalBindingsByActivation,
+          bindingsByActivation: bindings.terminalBindingsByActivation,
           runtime: ACTIVATION_TERMINAL_SESSIONS,
         }),
-      ]);
-      const activation = await activateStaticPluginsObserved(
-        MODULE_HOST_SERVICES,
-        modules,
-        opened.activationIdsByModule,
-        runtimeSemanticServices,
-      );
-      deactivate = activation.deactivate;
-      setModuleActivations(withCoreActivation(activation.activationContextsByModule));
-      const activeModules = modules.filter(
-        (module) => activation.activeModuleIds.has(module.id),
-      );
-      const activationFailures = new Set(
-        activation.failures.map(({ moduleId }) => moduleId),
-      );
-      for (const descriptor of restartBound.catalog.modules) {
-        if (startupResults.has(descriptor.moduleId)) continue;
-        const active = activation.activeModuleIds.has(descriptor.moduleId)
-          && !activationFailures.has(descriptor.moduleId);
-        startupResults.set(descriptor.moduleId, {
-          moduleId: descriptor.moduleId,
-          status: active ? "active" : "failed",
-          phase: active ? "active" : "activation",
+      ]),
+      publish: (family) => {
+        if (disposed) return;
+        setModuleRuntime({
+          activeModules: family.modules,
+          moduleActivations: withCoreActivation(family.activationContextsByModule),
         });
-      }
-      await publishFrontendRuntimeSnapshot(
-        activeModules,
-        restartBound.catalog.modules.map(({ moduleId }) =>
-          startupResults.get(moduleId) ?? {
-            moduleId,
-            status: "failed",
-            phase: "activation",
-          }),
-      );
-    })().catch(async (error) => {
+      },
+      reportApplied: async (family) => {
+        await publishFrontendRuntimeSnapshot(
+          {
+            registryRevision: family.registryRevision,
+            activationContextsByModule: family.activationContextsByModule,
+            artifactDescriptorsByModule: family.artifactDescriptorsByModule,
+            activationOutcomes: [...family.artifactDescriptorsByModule.keys()].map((moduleId) => ({
+              moduleId,
+              status: "active" as const,
+              phase: "active" as const,
+            })),
+          },
+          family.modules,
+        );
+      },
+      reportRejected: async (diagnostic) => {
+        await reportModuleReconciliationFailure({
+          schemaVersion: 1,
+          registryRevision: diagnostic.desiredRevision,
+          moduleId: diagnostic.moduleId,
+          activationId: diagnostic.activationId,
+          phase: diagnostic.stage,
+          code: diagnostic.code,
+          message: diagnostic.message,
+        });
+        pushNotice({
+          tone: "error",
+          title: `Runtime revision ${diagnostic.desiredRevision} was rejected`,
+          message: `${diagnostic.code}: ${diagnostic.message}`,
+        });
+      },
+    });
+    void supervisor.start().catch((error) => {
       if (disposed) return;
-      await deactivate?.();
-      const modulesWithoutMessages = (ENABLED_MODULES as readonly ShipctlModule[]).filter(
-        (module) => !("messages" in module)
-          && (module.scheduledTasks?.length ?? 0) === 0
-          && (module.requiredGrants?.length ?? 0) === 0,
-      );
-      const fallback = await activateStaticPluginsObserved(
-        MODULE_HOST_SERVICES,
-        modulesWithoutMessages,
-        new Map(),
-        SEMANTIC_SERVICES,
-      );
-      deactivate = fallback.deactivate;
-      setModuleActivations(withCoreActivation(fallback.activationContextsByModule));
-      void publishFrontendRuntimeSnapshot(modulesWithoutMessages);
       pushNotice({
         tone: "error",
         title: "Runtime modules could not be inspected",
@@ -436,10 +370,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
 
     return () => {
       disposed = true;
-      void (async () => {
-        await deactivate?.();
-        await closeBridge?.();
-      })();
+      void supervisor.dispose();
     };
   }, []);
 
@@ -448,8 +379,9 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
       repos.map((repo) => repo.path),
       MODULE_HOST_SERVICES,
       moduleActivations,
+      activeModules,
     );
-  }, [repos, moduleActivations]);
+  }, [activeModules, repos, moduleActivations]);
 
   useEffect(() => {
     fetchRepos();
@@ -543,6 +475,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
           canonicalPath,
           MODULE_HOST_SERVICES,
           moduleActivations,
+          activeModules,
         );
       } catch (error) {
         pushNotice({
@@ -552,7 +485,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         });
       }
     },
-    [addRepo, moduleActivations, pushNotice],
+    [activeModules, addRepo, moduleActivations, pushNotice],
   );
 
   const handleRemoveProject = useCallback(
@@ -567,7 +500,12 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         await closeProjectTerminals(repoPath);
         await removeRepo(repoPath);
         useTerminalStore.getState().removeProject(repoPath);
-        await notifyModulesProjectRemoved(repoPath, MODULE_HOST_SERVICES, moduleActivations);
+        await notifyModulesProjectRemoved(
+          repoPath,
+          MODULE_HOST_SERVICES,
+          moduleActivations,
+          activeModules,
+        );
       } catch (error) {
         pushNotice({
           tone: "error",
@@ -576,7 +514,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         });
       }
     },
-    [closeProjectTerminals, moduleActivations, pushNotice, removeRepo],
+    [activeModules, closeProjectTerminals, moduleActivations, pushNotice, removeRepo],
   );
 
   const handleRenameGroup = useCallback(
@@ -670,7 +608,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   }, [activeRepoPath, closeTab]);
 
   const handleNewModuleSession = useCallback(() => {
-    const launcher = MODULE_PANEL_CONTRIBUTIONS
+    const launcher = modulePanelContributions
       .filter((panel) => panel.newSession)
       .sort((left, right) => (left.newSession?.order ?? 0) - (right.newSession?.order ?? 0))[0];
     if (!launcher) {
@@ -684,7 +622,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     if (!activeRepoPath) return;
     useTerminalStore.getState().addContributedPanelTab(activeRepoPath, launcher.id, launcher.label);
     useUIStore.getState().closeGlobalSurface();
-  }, [activeRepoPath, pushNotice]);
+  }, [activeRepoPath, modulePanelContributions, pushNotice]);
 
   const handleOpenPanel = useCallback((panel: PanelContribution) => {
     if (!activeRepoPath) return;
@@ -728,12 +666,12 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   }, [pushNotice]);
 
   const handleOpenPanelById = useCallback((panelId: ContributionId) => {
-    const panel = CANVAS_SURFACE_CATALOG.panel(panelId);
+    const panel = canvasSurfaceCatalog.panel(panelId);
     if (!panel) {
       throw new Error(`Panel ${panelId} is unavailable in this build`);
     }
     handleOpenPanel(panel);
-  }, [handleOpenPanel]);
+  }, [canvasSurfaceCatalog, handleOpenPanel]);
 
   const coreCommands = useMemo<readonly CommandContribution[]>(() => [
     {
@@ -796,8 +734,8 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   ]);
 
   const commandRegistry = useMemo(
-    () => createCommandRegistry({ coreCommands, modules: ENABLED_MODULES }),
-    [coreCommands],
+    () => createCommandRegistry({ coreCommands, modules: activeModules }),
+    [activeModules, coreCommands],
   );
 
   const dispatchNativeCommand = useCallback((commandId: string) => {
@@ -877,7 +815,11 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         );
         if (confirmed) {
           try {
-            await notifyModulesBeforeShutdown(MODULE_HOST_SERVICES);
+            await notifyModulesBeforeShutdown(
+              MODULE_HOST_SERVICES,
+              moduleActivations,
+              activeModules,
+            );
             await shutdownAndQuit();
           } catch (error) {
             pushNotice({
@@ -892,7 +834,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
       }
     });
     return () => { unlisten.then((f) => f()); };
-  }, [pushNotice]);
+  }, [activeModules, moduleActivations, pushNotice]);
 
   // The native menu emits stable command IDs. The registry owns their static
   // dispatch, so this listener stays a transport edge instead of a command switch.
@@ -913,7 +855,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         cycleTabs(event.shiftKey ? -1 : 1);
         return;
       }
-      const panel = MODULE_PANEL_CONTRIBUTIONS.find((contribution) =>
+      const panel = modulePanelContributions.find((contribution) =>
         contribution.shortcut && matchesPanelShortcut(event, contribution.shortcut));
       if (!panel) return;
       event.preventDefault();
@@ -923,7 +865,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [cycleTabs, handleOpenPanel]);
+  }, [cycleTabs, handleOpenPanel, modulePanelContributions]);
 
   const activePanelId = activeTab ? panelIdForTab(activeTab) : null;
   const activePanelProject = useMemo(() => activeRepoPath ? {
@@ -943,8 +885,8 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     activeGlobalSurfaceId,
     activePanelId,
     activeProject: activePanelProject,
-    panels: MODULE_PANEL_CONTRIBUTIONS,
-    globalNavigation: GLOBAL_NAVIGATION,
+    panels: modulePanelContributions,
+    globalNavigation,
     terminalSlots: allTerminalTabs.map(({ tab, projectPath }) => ({
       tab,
       projectPath,
@@ -961,6 +903,8 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     allTerminalTabs,
     diffPanelVisible,
     groups,
+    globalNavigation,
+    modulePanelContributions,
     repos,
     sidebarVisible,
     tabDropProjectPath,
@@ -1009,11 +953,12 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     handleSelectSidebarTab,
   ]);
   const canvasPorts = useMemo<CanvasPorts>(() => ({
-    surfaceCatalog: CANVAS_SURFACE_CATALOG,
-    terminalPresentationRegistry: TERMINAL_PRESENTATION_REGISTRY,
+    projectPaths,
+    surfaceCatalog: canvasSurfaceCatalog,
+    terminalPresentationRegistry: activeTerminalPresentationRegistry,
     moduleHostServices: MODULE_HOST_SERVICES,
     moduleActivations,
-  }), [moduleActivations]);
+  }), [activeTerminalPresentationRegistry, canvasSurfaceCatalog, moduleActivations, projectPaths]);
   return (
     <CanvasAdapterRuntimeProvider adapterId={canvasAdapterId}>
     <div className="app-shell">

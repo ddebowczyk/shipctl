@@ -13,6 +13,8 @@ export interface ShipctlPluginDefinition {
   readonly role: ShipctlPluginRole;
   readonly requires?: readonly SemanticServiceReference<unknown>[];
   readonly provides?: readonly AnySemanticServiceProvider[];
+  /** Stable background responsibilities which activation must register by ID. */
+  readonly backgroundEffects?: readonly string[];
 }
 
 /** Pure declaration helper. Importing a plugin never activates it. */
@@ -48,8 +50,31 @@ export interface PluginContributionInspection {
   readonly id: string;
 }
 
+export interface PluginContributionDeclaration {
+  readonly family: PluginContributionFamily;
+  readonly id: string;
+  readonly schemaVersion: number;
+}
+
+/** Closed application declaration carried by artifact manifest schema v2. */
+export interface PluginArtifactDeclarations {
+  readonly schemaVersion: 1;
+  readonly role: ShipctlPluginRole;
+  readonly requiredServices: readonly {
+    readonly id: string;
+    readonly version: number;
+  }[];
+  readonly providedServices: readonly {
+    readonly id: string;
+    readonly version: number;
+  }[];
+  readonly backgroundEffects: readonly string[];
+  readonly contributions: readonly PluginContributionDeclaration[];
+}
+
 export type PluginEffectKind =
   | "activation"
+  | "background"
   | "contribution"
   | "owned-lease"
   | "scheduled-task"

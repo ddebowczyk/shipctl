@@ -16,6 +16,14 @@ export function skillId(value: string): SkillId {
 
 export interface InspectSkillsInput {
   readonly projectId: string;
+  readonly catalog: readonly SkillDescriptor[];
+}
+
+/** Plugin-owned catalog metadata. Native providers must not define it. */
+export interface SkillDescriptor {
+  readonly skillId: SkillId;
+  readonly title: string;
+  readonly description: string;
 }
 
 export interface SkillInspection {
@@ -25,7 +33,14 @@ export interface SkillInspection {
   readonly installed: boolean;
 }
 
-export interface SkillMutationInput extends InspectSkillsInput {
+/** Caller-selected source for one reviewed installation operation. */
+export interface InstallSkillInput {
+  readonly projectId: string;
+  readonly skill: SkillDescriptor & { readonly markdown: string };
+}
+
+export interface RemoveSkillInput {
+  readonly projectId: string;
   readonly skillId: SkillId;
 }
 
@@ -51,12 +66,12 @@ export interface SkillInstallationService {
     SkillInstallationErrorCode
   >;
   readonly installSkill: SemanticRequestOperation<
-    SkillMutationInput,
+    InstallSkillInput,
     SkillMutationReceipt,
     SkillInstallationErrorCode
   >;
   readonly removeSkill: SemanticRequestOperation<
-    SkillMutationInput,
+    RemoveSkillInput,
     SkillMutationReceipt,
     SkillInstallationErrorCode
   >;
@@ -64,5 +79,5 @@ export interface SkillInstallationService {
 
 export const skillInstallationService = defineSemanticService<SkillInstallationService>(
   "shipctl.skill-installation",
-  1,
+  2,
 );

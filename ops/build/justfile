@@ -1,4 +1,5 @@
 app:
+    node bin/prepare-bundled-modules.mjs
     node ../modularity/bin/check-module-boundaries.mjs ../..
     pnpm --dir ../.. exec tsc
     pnpm --dir ../.. exec vite build

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import type { ModulePanelProps } from "@shipctl/module-api";
 import type { CodingAssistant, SessionMode } from "./types";
 import { ASSISTANT_INSTALL_URLS, CODING_ASSISTANTS } from "./catalog";
-import { checkCommandExists, getModelsForProvider } from "./client";
+import { assistantLaunchClientFor } from "./assistantLaunchClient";
 import { usePiConfigStore } from "./piConfigStore";
 import { HandMetal, ChevronDown, Check, Info, X } from "lucide-react";
 import { assistantLogoSrc, getAssistantLogoClass } from "./branding";
@@ -39,6 +39,7 @@ export default function SessionLauncher({ project, close, activation, services }
   const [piKeyInputs, setPiKeyInputs] = useState({ provider: "", key: "" });
   const [piInfoOpen, setPiInfoOpen] = useState(false);
   const piCredentials = useMemo(() => piCredentialClientFor(activation), [activation]);
+  const assistantClient = useMemo(() => assistantLaunchClientFor(activation), [activation]);
 
   // Check which assistants are installed
   useEffect(() => {
@@ -47,13 +48,13 @@ export default function SessionLauncher({ project, close, activation, services }
       const results: Record<string, boolean> = {};
       await Promise.all(
         CODING_ASSISTANTS.map(async (a) => {
-          results[a.id] = await checkCommandExists(a.command).catch(() => false);
+          results[a.id] = await assistantClient.checkCommandExists(a.command).catch(() => false);
         }),
       );
       if (!cancelled) setAvailable(results);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [assistantClient]);
 
   // Close install popover on outside click
   useEffect(() => {
@@ -113,16 +114,16 @@ export default function SessionLauncher({ project, close, activation, services }
     setSelectedPiProvider(null);
     setModelPickerOpen(false);
     setAvailableModels([]);
-    if (assistant.id === "pi" && !piHasLoaded) void loadPiConfig();
+    if (assistant.id === "pi" && !piHasLoaded) void loadPiConfig(assistantClient);
     if (!supportsModelSelection(assistant.id)) {
       setModelFetchStatus("idle");
       return;
     }
     setModelFetchStatus("loading");
-    getModelsForProvider(assistant.id)
+    assistantClient.getModelsForProvider(assistant.id)
       .then((models) => {
         if (modelRequestRef.current !== requestId) return;
-        setAvailableModels(models);
+        setAvailableModels([...models]);
         setModelFetchStatus("loaded");
       })
       .catch((error) => {
@@ -146,7 +147,7 @@ export default function SessionLauncher({ project, close, activation, services }
     setSelectedPiProvider(next);
     setSelectedModel(null);
     try {
-      await updatePiSettings({ defaultProvider: next, defaultModel: null });
+      await updatePiSettings({ defaultProvider: next, defaultModel: null }, assistantClient);
     } catch {
       setSelectedPiProvider(previous);
     }
@@ -158,7 +159,10 @@ export default function SessionLauncher({ project, close, activation, services }
     const providerId = provider.trim();
     try {
       await setPiApiKey(providerId, key.trim(), piCredentials);
-      await updatePiSettings({ defaultProvider: providerId, defaultModel: null });
+      await updatePiSettings(
+        { defaultProvider: providerId, defaultModel: null },
+        assistantClient,
+      );
       setPiKeyInputs({ provider: "", key: "" });
       setSelectedPiProvider(providerId);
     } catch {
@@ -171,7 +175,10 @@ export default function SessionLauncher({ project, close, activation, services }
       await removePiApiKey(provider, piCredentials);
       const nextDefault = selectedPiProvider === provider ? null : selectedPiProvider;
       if (piConfig.settings.defaultProvider === provider) {
-        await updatePiSettings({ defaultProvider: null, defaultModel: null });
+        await updatePiSettings(
+          { defaultProvider: null, defaultModel: null },
+          assistantClient,
+        );
       }
       setSelectedPiProvider(nextDefault);
     } catch {
@@ -189,6 +196,7 @@ export default function SessionLauncher({ project, close, activation, services }
       mode,
       selectedModel ?? undefined,
       services,
+      assistantClient,
     );
     if (started) close();
     else setLaunching(false);

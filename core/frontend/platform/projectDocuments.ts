@@ -7,6 +7,8 @@ import {
   type ProjectDocumentsErrorCode,
   type ProjectDocumentsService,
   type ReadProjectDocumentInput,
+  type ModuleActivationIdentity,
+  type SemanticCorrelationId,
   type SemanticServiceError,
   type SemanticServiceProvider,
   type SemanticServiceProviderContext,
@@ -19,9 +21,12 @@ import {
   type PrivateSemanticRequestTransport,
 } from "./semanticServiceAdapter.ts";
 
-const DISCOVER_DOCUMENTS_COMMAND = "plugin:shipctl-todos|discover_project_documents";
-const READ_DOCUMENT_COMMAND = "plugin:shipctl-todos|read_project_document";
-const WRITE_DOCUMENT_COMMAND = "plugin:shipctl-todos|write_project_document";
+const DISCOVER_DOCUMENTS_COMMAND = "discover_project_documents";
+const READ_DOCUMENT_COMMAND = "read_project_document";
+const WRITE_DOCUMENT_COMMAND = "write_project_document";
+const RELEASE_ACTIVATION_COMMAND = "release_project_documents_activation";
+
+type EmptyInput = Readonly<Record<never, never>>;
 
 interface RawProjectDocument {
   readonly projectId: string;
@@ -35,7 +40,7 @@ interface NativeProjectDocumentsError {
   readonly message?: unknown;
 }
 
-export interface LegacyProjectDocumentsTransport {
+export interface NativeProjectDocumentsTransport {
   discover(
     request: PrivateSemanticRequestEnvelope<DiscoverProjectDocumentsInput>,
   ): Promise<readonly RawProjectDocument[]>;
@@ -45,16 +50,21 @@ export interface LegacyProjectDocumentsTransport {
   write(
     request: PrivateSemanticRequestEnvelope<WriteProjectDocumentInput>,
   ): Promise<RawProjectDocument>;
+  releaseActivation(
+    request: PrivateSemanticRequestEnvelope<EmptyInput>,
+  ): Promise<boolean>;
 }
 
 export interface ProjectDocumentsServiceProviderOptions {
-  readonly transport?: LegacyProjectDocumentsTransport;
+  readonly transport?: NativeProjectDocumentsTransport;
+  readonly createCorrelationId?: () => SemanticCorrelationId;
 }
 
-const TAURI_TRANSPORT: LegacyProjectDocumentsTransport = {
-  discover: ({ input }) => invoke(DISCOVER_DOCUMENTS_COMMAND, { request: input }),
-  read: ({ input }) => invoke(READ_DOCUMENT_COMMAND, { request: input }),
-  write: ({ input }) => invoke(WRITE_DOCUMENT_COMMAND, { request: input }),
+const TAURI_TRANSPORT: NativeProjectDocumentsTransport = {
+  discover: (request) => invoke(DISCOVER_DOCUMENTS_COMMAND, { request }),
+  read: (request) => invoke(READ_DOCUMENT_COMMAND, { request }),
+  write: (request) => invoke(WRITE_DOCUMENT_COMMAND, { request }),
+  releaseActivation: (request) => invoke(RELEASE_ACTIVATION_COMMAND, { request }),
 };
 
 const POLICY = {
@@ -83,6 +93,7 @@ const ERROR_CODES = new Set<ProjectDocumentsErrorCode>([
   "project-documents.conflict",
   "project-documents.too-large",
   "project-documents.invalid-content",
+  "project-documents.invalid-request",
   "project-documents.cancelled",
   "project-documents.activation-disposed",
 ]);
@@ -137,25 +148,47 @@ function document(raw: RawProjectDocument): ProjectDocument {
 function request<Input, Output>(
   context: SemanticServiceProviderContext,
   transport: PrivateSemanticRequestTransport<Input, Output, ProjectDocumentsErrorCode>,
+  createCorrelationId?: () => SemanticCorrelationId,
 ) {
   return createSemanticRequestAdapter({
     activation: context.activation,
     active: () => context.active,
     policy: POLICY,
     transport,
+    correlationId: createCorrelationId,
     transportError,
     cancelledError: CANCELLED,
     disposedError: DISPOSED,
   });
 }
 
+function correlationId(): SemanticCorrelationId {
+  return crypto.randomUUID() as SemanticCorrelationId;
+}
+
+function releaseEnvelope(
+  activation: ModuleActivationIdentity,
+  createCorrelationId: () => SemanticCorrelationId,
+): PrivateSemanticRequestEnvelope<EmptyInput> {
+  return {
+    activation,
+    correlationId: createCorrelationId(),
+    input: {},
+  };
+}
+
 export function createProjectDocumentsServiceProvider(
   options: ProjectDocumentsServiceProviderOptions = {},
 ): SemanticServiceProvider<ProjectDocumentsService> {
   const transport = options.transport ?? TAURI_TRANSPORT;
+  const createCorrelationId = options.createCorrelationId ?? correlationId;
   return {
     service: projectDocumentsService,
     bind(context) {
+      context.own(() => transport.releaseActivation(
+        releaseEnvelope(context.activation, createCorrelationId),
+      ).then(() => undefined));
+
       return Object.freeze({
         discoverDocuments: request<
           DiscoverProjectDocumentsInput,
@@ -179,21 +212,21 @@ export function createProjectDocumentsServiceProvider(
             const raw = await transport.discover(envelope);
             return { ok: true, value: raw.map(document) };
           },
-        }),
+        }, createCorrelationId),
         readDocument: request<ReadProjectDocumentInput, ProjectDocument>(context, {
           async request(envelope) {
             const invalid = invalidInput(envelope.input);
             if (invalid) return { ok: false, error: invalid };
             return { ok: true, value: document(await transport.read(envelope)) };
           },
-        }),
+        }, createCorrelationId),
         writeDocument: request<WriteProjectDocumentInput, ProjectDocument>(context, {
           async request(envelope) {
             const invalid = invalidInput(envelope.input);
             if (invalid) return { ok: false, error: invalid };
             return { ok: true, value: document(await transport.write(envelope)) };
           },
-        }),
+        }, createCorrelationId),
       });
     },
   };

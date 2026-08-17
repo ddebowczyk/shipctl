@@ -5,45 +5,9 @@ frontend:
   package: "@shipctl/module-assistants"
   path: modules/assistants/frontend
   composition_symbol: assistantsModule
-backend:
-  crate: tauri-plugin-shipctl-assistants
-  path: modules/assistants/backend
-  cargo_feature: assistants-module
-  dependency_alias: shipctl-module-assistants
-  install: >-
-    shipctl_module_assistants_host::install(
-      builder,
-      terminals.clone(),
-      paths.assistant_sessions.clone(),
-      durable_writes.clone()
-    )
-  host:
-    crate: shipctl-module-assistants-host
-    path: modules/assistants/host
-    dependency_alias: shipctl-module-assistants-host
-tauri:
-  capability_identifier: assistants
-  permissions:
-    - shipctl-assistants:allow-spawn-assistant-session
-    - shipctl-assistants:allow-resume-assistant-session
-    - shipctl-assistants:allow-prepare-assistant-session
-    - shipctl-assistants:allow-confirm-assistant-session-capture
-    - shipctl-assistants:allow-try-capture-codex-assistant-session
-    - shipctl-assistants:allow-fail-assistant-session-capture
-    - shipctl-assistants:allow-update-assistant-session-placement
-    - shipctl-assistants:allow-update-assistant-session-label
-    - shipctl-assistants:allow-discard-assistant-session
-    - shipctl-assistants:allow-rearm-assistant-session
-    - shipctl-assistants:allow-list-restorable-assistant-sessions
-    - shipctl-assistants:allow-take-assistant-session-startup-warning
-    - shipctl-assistants:allow-begin-assistant-session-preserving-shutdown
-    - shipctl-assistants:allow-get-models-for-provider
-    - shipctl-assistants:allow-get-pi-config
-    - shipctl-assistants:allow-save-pi-settings
-    - shipctl-assistants:allow-has-pi-api-key
-    - shipctl-assistants:allow-save-pi-api-key
-    - shipctl-assistants:allow-delete-pi-api-key
-profile: ops/modularity/profiles/assistants-disabled/tauri.conf.json
+  delivery: runtime-artifact
+  artifact: modules/assistants/artifact
+profile: null
 tests:
   frontend: modules/assistants/frontend/tests
-  backend: cargo test -p tauri-plugin-shipctl-assistants -- --test-threads=1
+  backend: null

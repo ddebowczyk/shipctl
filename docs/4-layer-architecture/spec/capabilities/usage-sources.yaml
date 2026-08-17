@@ -4,15 +4,17 @@ schema_version: capability/v1
 id: usage-sources
 version: 1.0.0
 title: Approved usage source access
-status: implementing
+status: implemented
 layer: native-kernel
 consumers: [usage]
 current_implementations:
   - module-api/frontend/src/protocol/usageSources.ts
   - module-api/frontend/src/testing/usageSources.ts
   - core/frontend/platform/usageSources.ts
+  - core/backend/src/usage_sources
+  - core/tauri/src/usage_sources.rs
   - modules/usage/frontend/src/usageSourcesClient.ts
-  - modules/usage/backend
+  - modules/usage/frontend/src/usageProjection.ts
 target_owners:
   provider: core/backend/src/usage_sources
   tauri_adapter: core/tauri/src/usage_sources.rs
@@ -22,8 +24,8 @@ operations:
     kind: request
     contract: >-
       Read approved provider source records without exposing native source or
-      credential authority. The legacy overview projection is temporary until
-      Phase D moves aggregation policy to TypeScript.
+      credential authority. Pricing, aliases, aggregation, and presentation
+      remain TypeScript module policy.
   - id: refreshSources
     kind: request
     contract: Request refresh of an explicit set of approved provider sources.
@@ -47,3 +49,5 @@ property_ids:
   - PROP-B-FAKE-001
   - PROP-D-PARITY-001
   - PROP-D-AUTHORITY-001
+  - PROP-D-OWNERSHIP-001
+  - PROP-D-CLOSURE-001

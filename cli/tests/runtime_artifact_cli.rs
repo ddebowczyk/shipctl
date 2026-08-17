@@ -19,7 +19,7 @@ use shipctl_core::module_control::artifact::{
     CapabilityScope, CapabilityStreamDefinition, CapabilitySurfaceBinding,
     CapabilityTopicDefinition, RuntimeArtifactArchive, RuntimeArtifactManifest,
     RuntimeUiContribution, ARTIFACT_CONTRACT_SCHEMA_VERSION, ARTIFACT_INTEGRITY_PATH,
-    ARTIFACT_MANIFEST_PATH, CAPABILITY_CONTRACT_SCHEMA_VERSION,
+    ARTIFACT_MANIFEST_PATH, CAPABILITY_CONTRACT_SCHEMA_VERSION, PLUGIN_API_VERSION,
 };
 use uuid::Uuid;
 
@@ -38,7 +38,7 @@ fn compiled_cli_admits_disabled_runtime_artifacts_and_rejects_unsafe_candidates(
     let state_root = root.join("state");
     let runtime_sentinel = root.join("runtime-must-not-exist");
     fs::create_dir_all(&archive_root).unwrap();
-    let compatible_api_range = format!("^{}", shipctl_cli::APP_VERSION);
+    let compatible_api_range = format!("^{PLUGIN_API_VERSION}");
 
     let artifact_a = fixture_archive(
         A_MODULE,
@@ -50,10 +50,29 @@ fn compiled_cli_admits_disabled_runtime_artifacts_and_rejects_unsafe_candidates(
         &[],
         &[],
     );
+    let staging_a = root.join("staging-a");
+    write_staging_directory(&staging_a, &artifact_a);
     let a_path = archive_root.join("a.shipctl-module");
     let a_repacked_path = archive_root.join("a-repacked.shipctl-module");
-    write_archive(&a_path, &artifact_a);
-    write_archive(&a_repacked_path, &artifact_a);
+    let pack_a = assert_success_json(
+        &run_pack(&staging_a, &a_path, &runtime_sentinel),
+        "modules.pack",
+        "module.artifact.packed",
+    );
+    let repack_a = assert_success_json(
+        &run_pack(&staging_a, &a_repacked_path, &runtime_sentinel),
+        "modules.pack",
+        "module.artifact.packed",
+    );
+    assert_disabled_artifact(&pack_a, A_MODULE);
+    assert_eq!(
+        pack_a["data"]["archiveDigestSha256"],
+        repack_a["data"]["archiveDigestSha256"]
+    );
+    assert_eq!(
+        pack_a["data"]["archiveSizeBytes"],
+        repack_a["data"]["archiveSizeBytes"]
+    );
     assert_eq!(
         fs::read(&a_path).unwrap(),
         fs::read(&a_repacked_path).unwrap()
@@ -133,8 +152,14 @@ fn compiled_cli_admits_disabled_runtime_artifacts_and_rejects_unsafe_candidates(
         true
     );
     assert_eq!(
-        module_a["data"]["artifacts"][0]["canonical"]["manifest"]["uiContributions"][0]["entry"],
-        "chunks/fixture-panel.mjs"
+        module_a["data"]["artifacts"][0]["canonical"]["manifest"]["application"]["contributions"]
+            [0]["id"],
+        format!("{A_MODULE}.panel")
+    );
+    assert_eq!(
+        module_a["data"]["artifacts"][0]["canonical"]["manifest"]["application"]["contributions"]
+            [1]["id"],
+        format!("{A_MODULE}.messages")
     );
     assert_eq!(
         module_a["data"]["artifacts"][0]["canonical"]["manifest"]["styles"][0],
@@ -546,10 +571,21 @@ fn fixture_archive(
         "runtimeKind": "frontend_esm",
         "entry": "module.mjs",
         "styles": ["styles/fixture.css"],
-        "assets": ["assets/fixture.svg"],
+        "assets": ["assets/fixture.svg", "chunks/fixture-panel.mjs"],
         "messages": messages,
         "capabilities": capabilities,
-        "uiContributions": [ui_contribution],
+        "application": {
+            "schemaVersion": 1,
+            "role": "compound",
+            "requiredServices": [],
+            "providedServices": [],
+            "backgroundEffects": [],
+            "contributions": [
+                {"family": "panel", "id": ui_contribution.id, "schemaVersion": 1},
+                {"family": "message-graph", "id": format!("{module_id}.messages"), "schemaVersion": 1}
+            ]
+        },
+        "uiContributions": [],
         "requestedGrants": requested_grants,
         "nativeAdapters": native_adapters,
         "configurationSchema": {"type": "object"},
@@ -680,6 +716,18 @@ fn write_archive(path: &Path, archive: &RuntimeArtifactArchive) {
     fs::write(path, builder.into_inner().unwrap()).unwrap();
 }
 
+fn write_staging_directory(directory: &Path, archive: &RuntimeArtifactArchive) {
+    fs::create_dir_all(directory).unwrap();
+    for (path, contents) in archive.files() {
+        if path == ARTIFACT_INTEGRITY_PATH {
+            continue;
+        }
+        let target = directory.join(path);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(target, contents).unwrap();
+    }
+}
+
 fn assert_rejected_without_publication(
     archive_root: &Path,
     state_root: &Path,
@@ -730,6 +778,22 @@ fn run_offline(
         .unwrap()
 }
 
+fn run_pack(source: &Path, output: &Path, runtime_sentinel: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_shipctl"))
+        .args([
+            "modules",
+            "pack",
+            source.to_str().unwrap(),
+            "--to",
+            output.to_str().unwrap(),
+            "--output",
+            "json",
+        ])
+        .env("SHIPCTL_RUNTIME_DIR", runtime_sentinel)
+        .output()
+        .unwrap()
+}
+
 fn assert_success_json(output: &Output, operation: &str, code: &str) -> Value {
     assert_json(output, operation, code, "success")
 }
@@ -737,9 +801,10 @@ fn assert_success_json(output: &Output, operation: &str, code: &str) -> Value {
 fn assert_json(output: &Output, operation: &str, code: &str, status: &str) -> Value {
     assert!(
         output.status.success(),
-        "shipctl exited {:?}: {}",
+        "shipctl exited {:?}: stderr={} stdout={}",
         output.status.code(),
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout),
     );
     assert!(
         output.stderr.is_empty(),

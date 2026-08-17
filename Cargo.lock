@@ -4514,6 +4514,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4541,13 +4547,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 
 [[package]]
-name = "shipctl-architecture-proptest-replay"
-version = "0.0.0"
-dependencies = [
- "proptest",
-]
-
-[[package]]
 name = "shipctl-cli"
 version = "0.0.0"
 dependencies = [
@@ -4560,7 +4559,6 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "shipctl-core",
- "shipctl-module-semantic-terminal-core",
  "tar",
  "tempfile",
  "time",
@@ -4584,8 +4582,11 @@ dependencies = [
  "interprocess",
  "jsonschema",
  "libc",
+ "libghostty-vt",
  "log",
+ "notify",
  "portable-pty",
+ "proptest",
  "rusqlite",
  "semver",
  "serde",
@@ -4609,88 +4610,6 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "shipctl-module-assistants-host"
-version = "0.0.0"
-dependencies = [
- "shipctl-core",
- "shipctl-module-api",
- "tauri",
- "tauri-plugin-shipctl-assistants",
-]
-
-[[package]]
-name = "shipctl-module-git-host"
-version = "0.0.0"
-dependencies = [
- "shipctl-core",
- "tauri",
- "tauri-plugin-shipctl-git",
-]
-
-[[package]]
-name = "shipctl-module-ports-host"
-version = "0.0.0"
-dependencies = [
- "shipctl-core",
- "tauri",
- "tauri-plugin-shipctl-ports",
-]
-
-[[package]]
-name = "shipctl-module-semantic-terminal-core"
-version = "0.0.0"
-dependencies = [
- "libghostty-vt",
- "portable-pty",
- "serde",
- "serde_json",
- "shipctl-module-api",
-]
-
-[[package]]
-name = "shipctl-module-semantic-terminal-host"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "shipctl-core",
- "shipctl-module-api",
- "shipctl-module-semantic-terminal-core",
- "tauri",
- "tauri-plugin-shipctl-semantic-terminal",
-]
-
-[[package]]
-name = "shipctl-module-skills-host"
-version = "0.0.0"
-dependencies = [
- "shipctl-core",
- "tauri",
- "tauri-plugin-shipctl-skills",
-]
-
-[[package]]
-name = "shipctl-module-todos-host"
-version = "0.0.0"
-dependencies = [
- "shipctl-core",
- "tauri",
- "tauri-plugin-shipctl-todos",
-]
-
-[[package]]
-name = "shipctl-module-usage-host"
-version = "0.0.0"
-dependencies = [
- "serde_json",
- "shipctl-core",
- "shipctl-module-api",
- "shipctl-tauri-adapter",
- "tauri",
- "tauri-plugin-shipctl-usage",
 ]
 
 [[package]]
@@ -4734,27 +4653,14 @@ dependencies = [
  "serde_json",
  "shipctl-core",
  "shipctl-module-api",
- "shipctl-module-assistants-host",
- "shipctl-module-git-host",
- "shipctl-module-ports-host",
- "shipctl-module-semantic-terminal-host",
- "shipctl-module-skills-host",
- "shipctl-module-todos-host",
- "shipctl-module-usage-host",
  "shipctl-tauri-adapter",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tauri-plugin-notification",
- "tauri-plugin-shipctl-assistants",
  "tauri-plugin-shipctl-fixture",
- "tauri-plugin-shipctl-git",
- "tauri-plugin-shipctl-ports",
- "tauri-plugin-shipctl-semantic-terminal",
- "tauri-plugin-shipctl-skills",
- "tauri-plugin-shipctl-todos",
- "tauri-plugin-shipctl-usage",
+ "uuid",
 ]
 
 [[package]]
@@ -5350,84 +5256,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-plugin-shipctl-assistants"
-version = "0.0.0"
-dependencies = [
- "dirs",
- "serde",
- "serde_json",
- "shipctl-module-api",
- "tauri",
- "tauri-plugin",
- "uuid",
-]
-
-[[package]]
 name = "tauri-plugin-shipctl-fixture"
 version = "0.0.0"
 dependencies = [
- "shipctl-module-api",
- "tauri",
- "tauri-plugin",
-]
-
-[[package]]
-name = "tauri-plugin-shipctl-git"
-version = "0.0.0"
-dependencies = [
- "serde",
- "tauri",
- "tauri-plugin",
-]
-
-[[package]]
-name = "tauri-plugin-shipctl-ports"
-version = "0.0.0"
-dependencies = [
- "serde",
- "tauri",
- "tauri-plugin",
-]
-
-[[package]]
-name = "tauri-plugin-shipctl-semantic-terminal"
-version = "0.0.0"
-dependencies = [
- "serde_json",
- "shipctl-module-semantic-terminal-core",
- "tauri",
- "tauri-plugin",
-]
-
-[[package]]
-name = "tauri-plugin-shipctl-skills"
-version = "0.0.0"
-dependencies = [
- "serde",
- "tauri",
- "tauri-plugin",
-]
-
-[[package]]
-name = "tauri-plugin-shipctl-todos"
-version = "0.0.0"
-dependencies = [
- "serde",
- "sha2",
- "shipctl-module-api",
- "tauri",
- "tauri-plugin",
- "tempfile",
-]
-
-[[package]]
-name = "tauri-plugin-shipctl-usage"
-version = "0.0.0"
-dependencies = [
- "dirs",
- "rusqlite",
- "serde",
- "serde_json",
  "shipctl-module-api",
  "tauri",
  "tauri-plugin",
@@ -6105,6 +5936,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

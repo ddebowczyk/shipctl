@@ -3,11 +3,152 @@ import { RefreshCcw, Skull, ExternalLink, Folder } from "lucide-react";
 import {
   processesService,
   type GlobalSurfaceContributionProps,
+  type ListeningProcessInspection,
   type ProcessesService,
   type ProcessInspectionId,
 } from "@shipctl/module-api";
 
 import type { PortInfo } from "./types";
+
+export const PROJECT_ROOT_MARKERS = [
+  "package.json",
+  "Cargo.toml",
+  "go.mod",
+  "pyproject.toml",
+  "Gemfile",
+  "pom.xml",
+  "build.gradle",
+] as const;
+
+export const FRAMEWORK_FILE_NAMES = [
+  "vite.config.ts",
+  "vite.config.js",
+  "next.config.js",
+  "next.config.mjs",
+  "angular.json",
+  "Cargo.toml",
+  "go.mod",
+  "manage.py",
+  "Gemfile",
+] as const;
+
+export function isDevelopmentProcess(processName: string): boolean {
+  const name = processName.toLowerCase();
+  return ![
+    "spotify",
+    "raycast",
+    "tableplus",
+    "postman",
+    "linear",
+    "controlce",
+    "rapportd",
+    "superhuma",
+    "setappage",
+    "slack",
+    "discord",
+    "firefox",
+    "chrome",
+    "google",
+    "safari",
+    "figma",
+    "notion",
+    "zoom",
+    "teams",
+    "iterm2",
+    "warp",
+    "arc",
+    "loginwindow",
+    "windowserver",
+    "systemuise",
+    "kernel_tas",
+    "launchd",
+    "mdworker",
+    "mds_store",
+    "cfprefsd",
+    "coreaudio",
+    "corebrigh",
+    "airportd",
+    "bluetoothd",
+    "sharingd",
+    "usernoted",
+    "notificat",
+    "cloudd",
+  ].some((application) => name.startsWith(application));
+}
+
+export function matchProject(
+  workingDirectory: string,
+  projectPaths: readonly string[],
+): string {
+  if (!workingDirectory) return "";
+  return projectPaths
+    .filter((projectPath) => workingDirectory.startsWith(projectPath))
+    .sort((left, right) => right.length - left.length)[0]
+    ?.split("/")
+    .filter(Boolean)
+    .pop() ?? "";
+}
+
+export function detectFramework(inspection: ListeningProcessInspection): string {
+  const command = inspection.commandLine.toLowerCase();
+  for (const [needle, framework] of [
+    ["next", "Next.js"],
+    ["vite", "Vite"],
+    ["nuxt", "Nuxt"],
+    ["webpack", "Webpack"],
+    ["remix", "Remix"],
+    ["astro", "Astro"],
+    ["gatsby", "Gatsby"],
+    ["flask", "Flask"],
+    ["uvicorn", "FastAPI"],
+    ["rails", "Rails"],
+    ["storybook", "Storybook"],
+  ] as const) {
+    if (command.includes(needle)) return framework;
+  }
+  if (command.includes("angular") || command.includes("ng serve")) return "Angular";
+  if (command.includes("django") || command.includes("manage.py")) return "Django";
+  if (command.includes("cargo") || command.includes("rustc")) return "Rust";
+
+  const name = inspection.name.toLowerCase();
+  if (name === "node") return "Node.js";
+  if (name.startsWith("python")) return "Python";
+  if (name.startsWith("ruby")) return "Ruby";
+  if (name.startsWith("java")) return "Java";
+  if (name === "go") return "Go";
+  if (name.includes("postgres") || name === "postmaster") return "PostgreSQL";
+  if (name.includes("redis")) return "Redis";
+  if (name.includes("mongod")) return "MongoDB";
+  if (name.includes("mysqld")) return "MySQL";
+  if (name.includes("docker") || name.startsWith("com.docke")) return "Docker";
+  if (name.includes("nginx")) return "nginx";
+
+  const files = new Set(inspection.observedProjectFiles);
+  for (const [candidates, framework] of [
+    [["vite.config.ts", "vite.config.js"], "Vite"],
+    [["next.config.js", "next.config.mjs"], "Next.js"],
+    [["angular.json"], "Angular"],
+    [["Cargo.toml"], "Rust"],
+    [["go.mod"], "Go"],
+    [["manage.py"], "Django"],
+    [["Gemfile"], "Ruby"],
+  ] as const) {
+    if (candidates.some((candidate) => files.has(candidate))) return framework;
+  }
+  return "";
+}
+
+export function projectPortInspection(
+  inspection: ListeningProcessInspection,
+  projectPaths: readonly string[],
+): PortInfo | null {
+  if (!isDevelopmentProcess(inspection.name)) return null;
+  return {
+    ...inspection,
+    projectName: matchProject(inspection.workingDirectory, projectPaths),
+    framework: detectFramework(inspection),
+  };
+}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -48,11 +189,20 @@ export type PortScanResult =
 
 export async function scanPorts(
   processes: ProcessesService,
+  projectPaths: readonly string[] = [],
 ): Promise<PortScanResult> {
   try {
-    const outcome = await processes.inspectListeningPorts.execute({});
+    const outcome = await processes.inspectListeningPorts.execute({
+      projectRootMarkers: PROJECT_ROOT_MARKERS,
+      observedProjectFileNames: FRAMEWORK_FILE_NAMES,
+    });
     return outcome.result.ok
-      ? { status: "ready", ports: outcome.result.value }
+      ? {
+          status: "ready",
+          ports: outcome.result.value
+            .map((inspection) => projectPortInspection(inspection, projectPaths))
+            .filter((inspection): inspection is PortInfo => inspection !== null),
+        }
       : { status: "error", message: outcome.result.error.message };
   } catch (error) {
     return { status: "error", message: getErrorMessage(error) };
@@ -106,7 +256,11 @@ export async function stopPort(
   }
 }
 
-export default function PortsPanel({ activation, services }: GlobalSurfaceContributionProps) {
+export default function PortsPanel({
+  activation,
+  projectPaths,
+  services,
+}: GlobalSurfaceContributionProps) {
   const processes = activation.services.require(processesService);
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -116,7 +270,7 @@ export default function PortsPanel({ activation, services }: GlobalSurfaceContri
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const result = await scanPorts(processes);
+    const result = await scanPorts(processes, projectPaths);
     if (result.status === "ready") {
       setPorts([...result.ports]);
     } else {
@@ -124,7 +278,7 @@ export default function PortsPanel({ activation, services }: GlobalSurfaceContri
       if (import.meta.env.DEV) console.error("Port scan failed:", result.message);
     }
     setLoading(false);
-  }, [processes]);
+  }, [processes, projectPaths]);
 
   // Load once when panel mounts
   useEffect(() => {

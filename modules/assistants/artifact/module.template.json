@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "id": "shipctl.assistants",
+  "name": "Assistants",
+  "version": "0.0.0",
+  "apiRange": "^1.0.0",
+  "runtimeKind": "frontend_esm",
+  "entry": "dist/plugin.mjs",
+  "styles": [],
+  "assets": [],
+  "messages": {
+    "schemaVersion": 1,
+    "provides": [],
+    "handles": [],
+    "publishes": [],
+    "subscribes": [],
+    "ports": []
+  },
+  "capabilities": {
+    "schemaVersion": 1,
+    "definitions": [],
+    "providers": [],
+    "consumers": []
+  },
+  "application": {
+    "schemaVersion": 1,
+    "role": "compound",
+    "requiredServices": [
+      {
+        "id": "shipctl.assistant-launch",
+        "version": 1
+      },
+      {
+        "id": "shipctl.credential-store",
+        "version": 1
+      },
+      {
+        "id": "shipctl.processes",
+        "version": 1
+      },
+      {
+        "id": "shipctl.terminal-sessions",
+        "version": 1
+      }
+    ],
+    "providedServices": [],
+    "backgroundEffects": [],
+    "contributions": [
+      {
+        "family": "panel",
+        "id": "assistants.launcher",
+        "schemaVersion": 1
+      }
+    ]
+  },
+  "uiContributions": [],
+  "requestedGrants": [
+    "assistant.launch",
+    "assistant.session-record",
+    "credential.inspect",
+    "credential.write",
+    "terminal.start",
+    "terminal.attach"
+  ],
+  "nativeAdapters": [],
+  "secretReferences": [],
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "supportedScopes": [
+    "instance",
+    "workspace"
+  ],
+  "lifecycle": "live",
+  "sourceProvenance": {
+    "builder": "ops/architecture/bin/build-plugin-artifact.mjs",
+    "module": "assistants"
+  }
+}

@@ -11,9 +11,10 @@ current_implementations:
   - module-api/frontend/src/protocol/git.ts
   - module-api/frontend/src/testing/git.ts
   - core/frontend/platform/git.ts
+  - core/backend/src/git
+  - core/tauri/src/git.rs
+  - core/tauri/src/projects_watcher.rs
   - modules/git/frontend/src/gitClient.ts
-  - modules/git/backend
-  - modules/git/host
 target_owners:
   provider: core/backend/src/git
   tauri_adapter: core/tauri/src/git.rs
@@ -36,9 +37,14 @@ required_grants:
   - git.write
   - git.observe
 ownership:
-  authority: The native kernel owns scoped Git execution and watcher resources.
-  resources: Watchers are activation leases; repository state is external.
-  activation_scope: Repository roots must be inside the granted project scope.
+  authority: >-
+    The native kernel owns scoped Git execution and the host-wide project
+    watcher.
+  resources: >-
+    Git subscriptions are activation leases; repository state and the project
+    watcher are host-owned.
+  activation_scope: >-
+    Repository roots must match a registered project path exactly.
 depends_on: []
 property_ids:
   - PROP-B-ADAPTER-001

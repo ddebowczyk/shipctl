@@ -236,6 +236,7 @@ function assertManifestContract(root, manifest) {
   const sameStrings = (left, right) => JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
   const compact = (value) => value.replace(/\s+/g, "").replaceAll(",)", ")");
   const frontend = manifest.frontend;
+  const runtimeArtifact = frontend.delivery === "runtime-artifact";
   const fixtureProfile = manifest.profile && !manifest.profile.includes("-disabled/");
   const frontendPackagePath = path.join(frontend.path, "package.json");
 
@@ -243,8 +244,22 @@ function assertManifestContract(root, manifest) {
   if (readJson(root, frontendPackagePath).name !== frontend.package) {
     fail(`${frontendPackagePath} name does not match ${frontend.package}`);
   }
-  if (!fixtureProfile && readJson(root, "package.json").dependencies?.[frontend.package] !== "workspace:*") {
+  const rootDependency = readJson(root, "package.json").dependencies?.[frontend.package];
+  if (!fixtureProfile && !runtimeArtifact && rootDependency !== "workspace:*") {
     fail(`package.json must depend on ${frontend.package} as workspace:*`);
+  }
+  if (!fixtureProfile && runtimeArtifact && rootDependency !== undefined) {
+    fail(`package.json must not statically depend on runtime artifact ${frontend.package}`);
+  }
+  if (runtimeArtifact) {
+    if (frontend.composition_symbol) {
+      fail("runtime artifact must not declare a static composition symbol");
+    }
+    for (const relativePath of ["module.template.json", "src/index.ts"]) {
+      if (!exists(path.join(frontend.artifact ?? "", relativePath))) {
+        fail(`${frontend.artifact}/${relativePath} does not exist`);
+      }
+    }
   }
   if (frontend.composition_symbol) {
     const compositionPath = fixtureProfile

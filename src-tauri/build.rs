@@ -1,6 +1,13 @@
 use std::path::Path;
 
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(shipctl_bundled_modules)");
+    let bundled_modules = Path::new("generated/bundled_modules.rs");
+    println!("cargo:rerun-if-changed={}", bundled_modules.display());
+    if bundled_modules.is_file() {
+        println!("cargo:rustc-cfg=shipctl_bundled_modules");
+    }
+
     println!("cargo:rerun-if-env-changed=SHIPCTL_BUILD_ID");
     let build_id = std::env::var("SHIPCTL_BUILD_ID")
         .ok()

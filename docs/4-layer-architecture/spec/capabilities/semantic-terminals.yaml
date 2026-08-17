@@ -8,9 +8,8 @@ status: implementing
 layer: native-kernel
 consumers: [semantic-terminal]
 current_implementations:
-  - modules/semantic-terminal/core
-  - modules/semantic-terminal/backend
-  - modules/semantic-terminal/host
+  - core/backend/src/semantic_terminal
+  - core/tauri/src/semantic_terminal.rs
   - module-api/frontend/src/protocol/semanticTerminals.ts
   - module-api/frontend/src/testing/semanticTerminals.ts
   - core/frontend/platform/semanticTerminals.ts
@@ -18,7 +17,7 @@ current_implementations:
 target_owners:
   provider: core/backend/src/semantic_terminal
   tauri_adapter: core/tauri/src/semantic_terminal.rs
-  typescript_client: core/frontend/platform/semanticTerminal
+  typescript_client: core/frontend/platform/semanticTerminals.ts
 operations:
   - id: attachScreen
     kind: stream
@@ -51,4 +50,5 @@ property_ids:
   - PROP-D-PARITY-001
   - PROP-D-AUTHORITY-001
   - PROP-D-OWNERSHIP-001
+  - PROP-D-CLOSURE-001
   - PROP-F-CONTINUITY-001

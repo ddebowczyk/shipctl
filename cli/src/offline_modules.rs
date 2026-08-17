@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use shipctl_core::instance::{
     resolve_state_root, resolve_state_root_read_only, ControlError, RootSource,
 };
+use shipctl_core::module_control::artifact::PLUGIN_API_VERSION;
 use shipctl_core::module_control::codes::{
     INVALID_OFFLINE_RESPONSE, MODULE_ABSENT, REGISTRY_DIAGNOSTICS_FAILED, REGISTRY_HEALTHY,
     REGISTRY_INVENTORY_ABSENT, REGISTRY_STATE_ROOT_INVALID, RUNTIME_OFFLINE,
@@ -17,8 +18,9 @@ use shipctl_core::module_control::registry::{
     RegistrySnapshot, StaticModuleRecord,
 };
 use shipctl_core::module_control::repository::{
-    ArtifactRepository, OfflineArtifactAddReport, OfflineArtifactPreflightReport,
-    OfflineCapabilityInspection, OfflineDisabledModuleInspection, ARTIFACT_REPOSITORY_MISSING,
+    pack_artifact_directory, ArtifactRepository, OfflineArtifactAddReport,
+    OfflineArtifactPackReport, OfflineArtifactPreflightReport, OfflineCapabilityInspection,
+    OfflineDisabledModuleInspection, ARTIFACT_REPOSITORY_MISSING,
 };
 use shipctl_core::module_control::{
     parse_contract_json, DesiredModuleState, Diagnostic, DiagnosticSeverity, ModuleContract,
@@ -310,6 +312,11 @@ pub fn preflight(
         .map_err(|error| error.into_control_error())
 }
 
+/// Seal and validate a staging directory without consulting runtime or state.
+pub fn pack(source: &Path, output: &Path) -> Result<OfflineArtifactPackReport, ControlError> {
+    pack_artifact_directory(source, output).map_err(|error| error.into_control_error())
+}
+
 /// Publish a validated archive and register it disabled through the sole
 /// artifact repository write path.
 pub fn add(
@@ -321,8 +328,8 @@ pub fn add(
         .map_err(|error| error.into_control_error())
 }
 
-/// Change only durable desired state. The running process, if any, is never
-/// discovered or contacted; the caller must restart it explicitly.
+/// Change only durable desired state. The running process, if any, observes
+/// the committed registry revision without direct CLI contact.
 pub fn set_enabled(
     state_root: Option<&Path>,
     module_id: &str,
@@ -350,7 +357,7 @@ pub fn set_enabled(
             schema_version: MODULE_CONTROL_SCHEMA_VERSION,
             state_root,
             registry_revision: snapshot.registry_revision,
-            restart_required: true,
+            restart_required: false,
             desired: current,
             operation: no_op_operation(module_id, enabled, snapshot.registry_revision),
         });
@@ -390,7 +397,7 @@ pub fn set_enabled(
         schema_version: MODULE_CONTROL_SCHEMA_VERSION,
         state_root,
         registry_revision: operation.target_registry_revision,
-        restart_required: true,
+        restart_required: false,
         desired,
         operation,
     })
@@ -469,7 +476,7 @@ fn writable_artifact_repository(
 fn artifact_repository(state_root: PathBuf) -> ArtifactRepository {
     ArtifactRepository::for_offline(
         ShipctlPaths::new(state_root, PathBuf::new()),
-        crate::APP_VERSION,
+        PLUGIN_API_VERSION,
     )
 }
 

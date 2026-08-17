@@ -35,6 +35,8 @@ export interface OpenModuleMessageBridge {
   readonly terminalBindingsByActivation: ReadonlyMap<string, TerminalSessionsTransportBinding>;
 }
 
+export type ModuleMessageBridgeBindings = Omit<OpenModuleMessageBridge, "bridge">;
+
 function failure(code: string, message: string): MessageBridgeFailure {
   return { code, message };
 }
@@ -119,27 +121,24 @@ export class MessageBusBridge {
     );
     this.#bridgeId = receipt.bridgeId;
     this.#minimumRouteGeneration = receipt.snapshot.routeGeneration;
-    return {
-      bridge: this,
-      clientsByActivation: this.#messageClients(receipt.bridgeId, this.#activations),
-      activationIdsByModule: new Map(
-        this.#activations.map(({ moduleId, activationId }) => [moduleId, activationId]),
-      ),
-      schedulerBindingsByActivation: new Map(
-        this.#activations.map(({ moduleId, activationId }) => [activationId, {
-          moduleId,
-          activationId,
-          bridgeId: receipt.bridgeId,
-        }]),
-      ),
-      terminalBindingsByActivation: new Map(
-        this.#activations.map(({ moduleId, activationId, grants }) => [activationId, {
-          moduleId,
-          activationId,
-          grants,
-        }]),
-      ),
-    };
+    return { bridge: this, ...this.#bindings(receipt.bridgeId, this.#activations) };
+  }
+
+  /**
+   * Create activation-scoped adapters for a private candidate. Native routes
+   * do not change until `reconcile` accepts the same activation set.
+   */
+  bindingsFor(
+    activations: readonly ModuleMessageActivation[],
+  ): ModuleMessageBridgeBindings {
+    const bridgeId = this.#bridgeId;
+    if (bridgeId === null || this.#closed) {
+      throw new Error("Runtime message bridge is not open");
+    }
+    return this.#bindings(
+      bridgeId,
+      activations.map(prepareModuleMessageActivation),
+    );
   }
 
   async reconcile(
@@ -162,6 +161,32 @@ export class MessageBusBridge {
     );
     this.#minimumRouteGeneration = receipt.snapshot.routeGeneration;
     return this.#messageClients(bridgeId, prepared);
+  }
+
+  #bindings(
+    bridgeId: string,
+    activations: readonly PreparedModuleMessageActivation[],
+  ): ModuleMessageBridgeBindings {
+    return {
+      clientsByActivation: this.#messageClients(bridgeId, activations),
+      activationIdsByModule: new Map(
+        activations.map(({ moduleId, activationId }) => [moduleId, activationId]),
+      ),
+      schedulerBindingsByActivation: new Map(
+        activations.map(({ moduleId, activationId }) => [activationId, {
+          moduleId,
+          activationId,
+          bridgeId,
+        }]),
+      ),
+      terminalBindingsByActivation: new Map(
+        activations.map(({ moduleId, activationId, grants }) => [activationId, {
+          moduleId,
+          activationId,
+          grants,
+        }]),
+      ),
+    };
   }
 
   #messageClients(

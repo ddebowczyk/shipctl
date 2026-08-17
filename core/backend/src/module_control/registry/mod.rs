@@ -3,7 +3,7 @@ mod diagnostics;
 mod inventory;
 mod snapshot;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -43,7 +43,7 @@ use catalog::{
 };
 use inventory::load_static_inventory;
 
-const REGISTRY_SCHEMA_VERSION: i64 = 2;
+const REGISTRY_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug)]
 pub struct RegistryError {
@@ -52,7 +52,7 @@ pub struct RegistryError {
 }
 
 impl RegistryError {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub(super) fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -81,6 +81,29 @@ pub struct RegisteredArtifact {
     pub sources: Vec<ModuleSource>,
 }
 
+/// Last complete dynamic artifact graph accepted by the frontend runtime.
+/// This record does not advance desired-state revision history.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAcceptanceRecord {
+    pub schema_version: u32,
+    pub registry_revision: u64,
+    pub artifacts: Vec<ModuleIdentity>,
+}
+
+/// Durable evidence for one desired revision that failed reconciliation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReconciliationFailureRecord {
+    pub schema_version: u32,
+    pub registry_revision: u64,
+    pub module_id: Option<String>,
+    pub activation_id: Option<String>,
+    pub phase: String,
+    pub code: String,
+    pub message: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RegistryMutation {
     pub request_id: Uuid,
@@ -101,6 +124,10 @@ pub struct RegistrySnapshot {
     pub desired: Vec<DesiredModuleState>,
     pub operations: Vec<ModuleOperation>,
     pub observations: Vec<ObservedModuleState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_acceptance: Option<RuntimeAcceptanceRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reconciliation_failures: Vec<ReconciliationFailureRecord>,
     /// Validated runtime artifact metadata. Entries are catalog declarations
     /// only; Phase 3 never makes their ports or providers callable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -235,6 +262,68 @@ impl ModuleRegistry {
         self.commit_inner(mutation, false)
     }
 
+    pub fn record_runtime_acceptance(
+        &mut self,
+        record: &RuntimeAcceptanceRecord,
+    ) -> Result<(), RegistryError> {
+        self.require_writable()?;
+        validate_runtime_acceptance(&self.connection, record)?;
+        let registry_revision = sql_integer(record.registry_revision, "applied registry revision")?;
+        let record_json = serde_json::to_string(record).map_err(|error| {
+            RegistryError::new(
+                REGISTRY_CONTRACT_INVALID,
+                format!("Cannot serialize runtime acceptance: {error}"),
+            )
+        })?;
+        self.connection
+            .execute(
+                "INSERT INTO runtime_acceptance(singleton, registry_revision, acceptance_json)
+                 VALUES (1, ?1, ?2)
+                 ON CONFLICT(singleton) DO UPDATE SET
+                    registry_revision = excluded.registry_revision,
+                    acceptance_json = excluded.acceptance_json",
+                params![registry_revision, record_json],
+            )
+            .map(|_| ())
+            .map_err(transaction_error)
+    }
+
+    pub fn record_reconciliation_failure(
+        &mut self,
+        record: &ReconciliationFailureRecord,
+    ) -> Result<(), RegistryError> {
+        self.require_writable()?;
+        validate_reconciliation_failure(&self.connection, record)?;
+        let registry_revision = sql_integer(record.registry_revision, "failed registry revision")?;
+        let record_json = serde_json::to_string(record).map_err(|error| {
+            RegistryError::new(
+                REGISTRY_CONTRACT_INVALID,
+                format!("Cannot serialize reconciliation failure: {error}"),
+            )
+        })?;
+        self.connection
+            .execute(
+                "INSERT INTO reconciliation_failures(registry_revision, failure_json)
+                 VALUES (?1, ?2)
+                 ON CONFLICT(registry_revision) DO UPDATE SET
+                    failure_json = excluded.failure_json",
+                params![registry_revision, record_json],
+            )
+            .map(|_| ())
+            .map_err(transaction_error)
+    }
+
+    fn require_writable(&self) -> Result<(), RegistryError> {
+        if self.access == Access::Writable {
+            Ok(())
+        } else {
+            Err(RegistryError::new(
+                REGISTRY_TRANSACTION_FAILED,
+                "Cannot mutate a read-only registry",
+            ))
+        }
+    }
+
     fn commit_inner(
         &mut self,
         mutation: &RegistryMutation,
@@ -267,6 +356,13 @@ impl ModuleRegistry {
         }
         if let Some(desired) = &mutation.desired {
             store_desired(&transaction, desired)?;
+        } else if mutation.kind == ModuleOperationKind::Remove {
+            transaction
+                .execute(
+                    "DELETE FROM desired_state WHERE module_id = ?1",
+                    params![mutation.module_id],
+                )
+                .map_err(transaction_error)?;
         }
         for observation in &mutation.observations {
             store_observation(&transaction, observation)?;
@@ -327,6 +423,8 @@ impl ModuleRegistry {
             "SELECT state_json FROM observations ORDER BY instance_id, module_id, observation_key",
             REGISTRY_CONTRACT_INVALID,
         )?;
+        let runtime_acceptance = load_runtime_acceptance(&self.connection)?;
+        let reconciliation_failures = load_reconciliation_failures(&self.connection)?;
         let (static_build_provenance, static_inventory) = load_static_inventory(&self.connection)?;
         let runtime_artifacts = load_runtime_artifact_catalog(&self.connection, &artifacts)?;
         let capability_catalog = load_capability_catalog(&self.connection)?;
@@ -342,6 +440,8 @@ impl ModuleRegistry {
             desired,
             operations,
             observations,
+            runtime_acceptance,
+            reconciliation_failures,
             runtime_artifacts,
             capability_catalog,
             static_build_provenance,
@@ -466,12 +566,20 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), RegistryError> {
                 )
                 .map_err(migration_error)?;
             migrate_v1_to_v2(&transaction)?;
+            migrate_v2_to_v3(&transaction)?;
             transaction
                 .pragma_update(None, "user_version", REGISTRY_SCHEMA_VERSION)
                 .map_err(migration_error)?;
         }
         1 => {
             migrate_v1_to_v2(&transaction)?;
+            migrate_v2_to_v3(&transaction)?;
+            transaction
+                .pragma_update(None, "user_version", REGISTRY_SCHEMA_VERSION)
+                .map_err(migration_error)?;
+        }
+        2 => {
+            migrate_v2_to_v3(&transaction)?;
             transaction
                 .pragma_update(None, "user_version", REGISTRY_SCHEMA_VERSION)
                 .map_err(migration_error)?;
@@ -487,6 +595,25 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), RegistryError> {
         }
     }
     transaction.commit().map_err(migration_error)
+}
+
+fn migrate_v2_to_v3(transaction: &Transaction<'_>) -> Result<(), RegistryError> {
+    transaction
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS runtime_acceptance(
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                registry_revision INTEGER NOT NULL CHECK(registry_revision >= 0),
+                acceptance_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS reconciliation_failures(
+                registry_revision INTEGER PRIMARY KEY CHECK(registry_revision >= 0),
+                failure_json TEXT NOT NULL
+            );
+            ",
+        )
+        .map_err(migration_error)
 }
 
 fn enable_foreign_keys(connection: &Connection) -> Result<(), RegistryError> {
@@ -602,12 +729,30 @@ fn validate_mutation(
     if mutation.module_id.trim().is_empty()
         || (mutation.artifacts.is_empty()
             && mutation.desired.is_none()
-            && mutation.observations.is_empty())
+            && mutation.observations.is_empty()
+            && mutation.kind != ModuleOperationKind::Remove)
     {
         return Err(RegistryError::new(
             REGISTRY_CONTRACT_INVALID,
             "A registry mutation requires a module id and at least one state change",
         ));
+    }
+    if mutation.kind == ModuleOperationKind::Remove && mutation.desired.is_none() {
+        let exists = transaction
+            .query_row(
+                "SELECT 1 FROM desired_state WHERE module_id = ?1",
+                params![mutation.module_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(transaction_error)?
+            .is_some();
+        if !exists {
+            return Err(RegistryError::new(
+                REGISTRY_CONTRACT_INVALID,
+                "A remove mutation requires explicit desired state",
+            ));
+        }
     }
     for artifact in &mutation.artifacts {
         validate_contract(&artifact.identity)?;
@@ -657,6 +802,156 @@ fn validate_mutation(
         }
     }
     Ok(())
+}
+
+fn validate_runtime_acceptance(
+    connection: &Connection,
+    record: &RuntimeAcceptanceRecord,
+) -> Result<(), RegistryError> {
+    if record.schema_version != MODULE_CONTROL_SCHEMA_VERSION {
+        return Err(RegistryError::new(
+            REGISTRY_CONTRACT_INVALID,
+            "Runtime acceptance schema version is unsupported",
+        ));
+    }
+    let current_revision = read_revision(connection)?;
+    if record.registry_revision > current_revision {
+        return Err(RegistryError::new(
+            REGISTRY_REVISION_DISCONTINUOUS,
+            "Runtime acceptance is ahead of durable desired state",
+        ));
+    }
+    let previous_revision = connection
+        .query_row(
+            "SELECT registry_revision FROM runtime_acceptance WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(transaction_error)?
+        .map(|value| value as u64);
+    if previous_revision.is_some_and(|previous| previous > record.registry_revision) {
+        return Err(RegistryError::new(
+            REGISTRY_REVISION_DISCONTINUOUS,
+            "Runtime acceptance cannot move backwards",
+        ));
+    }
+    let mut module_ids = BTreeSet::new();
+    for artifact in &record.artifacts {
+        validate_contract(artifact)?;
+        if !module_ids.insert(artifact.id.clone()) {
+            return Err(RegistryError::new(
+                REGISTRY_CONTRACT_INVALID,
+                format!("Runtime acceptance repeats module {}", artifact.id),
+            ));
+        }
+        let stored: Option<String> = connection
+            .query_row(
+                "SELECT identity_json FROM artifacts WHERE module_id = ?1 AND content_digest = ?2",
+                params![artifact.id, artifact.content_digest],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(transaction_error)?;
+        let matches = stored
+            .as_deref()
+            .map(|json| parse_stored_contract::<ModuleIdentity>(json, REGISTRY_CONTRACT_INVALID))
+            .transpose()?
+            .as_ref()
+            == Some(artifact);
+        if !matches {
+            return Err(RegistryError::new(
+                REGISTRY_ARTIFACT_REFERENCE_MISSING,
+                format!(
+                    "Runtime acceptance references unknown artifact {}@{}",
+                    artifact.id, artifact.content_digest
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_reconciliation_failure(
+    connection: &Connection,
+    record: &ReconciliationFailureRecord,
+) -> Result<(), RegistryError> {
+    if record.schema_version != MODULE_CONTROL_SCHEMA_VERSION
+        || !matches!(
+            record.phase.as_str(),
+            "observe" | "prepare" | "validate" | "publish" | "dispose"
+        )
+        || record.code.trim().is_empty()
+        || record.message.trim().is_empty()
+        || record
+            .module_id
+            .as_ref()
+            .is_some_and(|id| id.trim().is_empty())
+        || record
+            .activation_id
+            .as_ref()
+            .is_some_and(|id| id.trim().is_empty())
+    {
+        return Err(RegistryError::new(
+            REGISTRY_CONTRACT_INVALID,
+            "Reconciliation failure record is invalid",
+        ));
+    }
+    if record.registry_revision > read_revision(connection)? {
+        return Err(RegistryError::new(
+            REGISTRY_REVISION_DISCONTINUOUS,
+            "Reconciliation failure is ahead of durable desired state",
+        ));
+    }
+    Ok(())
+}
+
+fn load_runtime_acceptance(
+    connection: &Connection,
+) -> Result<Option<RuntimeAcceptanceRecord>, RegistryError> {
+    let json = connection
+        .query_row(
+            "SELECT acceptance_json FROM runtime_acceptance WHERE singleton = 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(transaction_error)?;
+    json.map(|json| {
+        let record: RuntimeAcceptanceRecord = serde_json::from_str(&json).map_err(|error| {
+            RegistryError::new(
+                REGISTRY_CONTRACT_INVALID,
+                format!("Cannot parse runtime acceptance: {error}"),
+            )
+        })?;
+        validate_runtime_acceptance(connection, &record)?;
+        Ok(record)
+    })
+    .transpose()
+}
+
+fn load_reconciliation_failures(
+    connection: &Connection,
+) -> Result<Vec<ReconciliationFailureRecord>, RegistryError> {
+    let mut statement = connection
+        .prepare("SELECT failure_json FROM reconciliation_failures ORDER BY registry_revision")
+        .map_err(transaction_error)?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(transaction_error)?;
+    let mut records = Vec::new();
+    for json in rows {
+        let json = json.map_err(transaction_error)?;
+        let record: ReconciliationFailureRecord = serde_json::from_str(&json).map_err(|error| {
+            RegistryError::new(
+                REGISTRY_CONTRACT_INVALID,
+                format!("Cannot parse reconciliation failure: {error}"),
+            )
+        })?;
+        validate_reconciliation_failure(connection, &record)?;
+        records.push(record);
+    }
+    Ok(records)
 }
 
 fn insert_immutable_artifact(

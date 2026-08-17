@@ -15,6 +15,7 @@ import PanelHost from "../../../../core/frontend/host/PanelHost";
 import { createEnabledPanelRegistry } from "../../../../core/frontend/host/moduleComposition";
 import { MODULE_HOST_SERVICES } from "../../../../core/frontend/host/moduleHostServices";
 import { createGitServiceProvider } from "../../../../core/frontend/platform/git";
+import { createSkillInstallationServiceProvider } from "../../../../core/frontend/platform/skillInstallation";
 import {
   createModuleActivationIdentity,
   SemanticServiceRegistry,
@@ -36,7 +37,7 @@ mockIPC(
         return true;
       case "plugin:shipctl-assistants|get_models_for_provider":
         return ["smoke-model"];
-      case "plugin:shipctl-git|git_status":
+      case "git_inspect_status":
         return {
           is_git_repo: true,
           branch: "smoke/panel-host",
@@ -48,7 +49,7 @@ mockIPC(
           behind: 0,
           worktree_parent: null,
         };
-      case "plugin:shipctl-git|git_changed_files":
+      case "git_list_changed_files":
         return [
           {
             path: "core/frontend/shell/AppShell.tsx",
@@ -57,23 +58,26 @@ mockIPC(
             old_path: null,
           },
         ];
-      case "plugin:shipctl-git|git_list_files":
+      case "git_list_files":
         return ["README.md", "core/frontend/shell/AppShell.tsx", "core/frontend/host/PanelHost.tsx"];
-      case "plugin:shipctl-git|git_file_contents":
+      case "git_read_file":
         return "Panel host smoke fixture";
-      case "plugin:shipctl-git|git_file_diff":
+      case "git_read_file_diff":
         return "@@ -1 +1 @@\n-old\n+new";
-      case "plugin:shipctl-todos|read_todos":
-        return [];
-      case "plugin:shipctl-skills|list_skills":
+      case "release_git_activation":
+        return true;
+      case "inspect_skill_installations":
         return [
           {
-            name: "shipctl-todos",
-            title: "Shipctl to-dos",
-            description: "Smoke fixture",
+            skillId: "shipctl-todos",
             installed: true,
           },
+          { skillId: "orchestrate", installed: false },
         ];
+      case "install_skill_source":
+      case "remove_skill_installation":
+      case "release_skill_installation_activation":
+        return null;
       case "plugin:shipctl-assistants|get_pi_config":
         return {
           settings: {
@@ -94,7 +98,10 @@ useRepoStore.setState({
   activeRepoPath: PROJECT_PATH,
   activeConfig: { name: PROJECT.name, commands: [] },
 });
-const semanticServices = new SemanticServiceRegistry([createGitServiceProvider()]);
+const semanticServices = new SemanticServiceRegistry([
+  createGitServiceProvider(),
+  createSkillInstallationServiceProvider(),
+]);
 const gitActivation = semanticServices.activate(
   createModuleActivationIdentity(gitModule.id, gitModule.version),
 );

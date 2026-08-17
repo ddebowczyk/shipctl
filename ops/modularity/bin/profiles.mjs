@@ -19,13 +19,15 @@ export function expectedProfiles(root) {
     if (!existsSync(manifestFile)) continue;
     const manifest = readManifest(root, entry.name);
     if (!manifest.profile?.includes("-disabled/")) continue;
+    const capabilityIdentifier = manifest.tauri?.capability_identifier;
     const config = {
       app: {
         security: {
           capabilities: capabilities.filter(
             (capability) =>
+              capabilityIdentifier === undefined ||
               typeof capability !== "object" ||
-              capability.identifier !== manifest.tauri.capability_identifier,
+              capability.identifier !== capabilityIdentifier,
           ),
         },
       },

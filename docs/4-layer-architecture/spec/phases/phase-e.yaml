@@ -3,7 +3,7 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-e
 title: Immutable TypeScript application artifacts
-status: specified
+status: implementing
 source: docs/4-layer-architecture/10-phase-e-immutable-plugin-artifacts.md
 depends_on: [phase-a, phase-b, phase-c]
 semantics:
@@ -80,13 +80,13 @@ properties:
     failure_value: >-
       Packaging changes asset bytes or loses a schema under a valid digest.
     runner:
-      language: typescript
-      library: fast-check
+      language: rust
+      library: proptest
       test_id: architecture.artifact-roundtrip.property
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-TAMPER-001
     claim: >-
@@ -115,7 +115,8 @@ properties:
           Mutate every indexed field and require native preflight rejection.
         independence: >-
           Expected rejection follows mutation location, not parser output.
-    failure_value: A changed plugin.js runs under the admitted code digest.
+    failure_value: >-
+      A changed dist/plugin.mjs runs under the admitted code digest.
     runner:
       language: rust
       library: proptest
@@ -123,7 +124,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-EXTERNALS-001
     claim: >-
@@ -163,7 +164,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-MANIFEST-RUNTIME-001
     claim: >-
@@ -201,7 +202,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-BUILTIN-PARITY-001
     claim: >-
@@ -235,7 +236,406 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-PORTS-PARITY-001
+    claim: >-
+      Ports through built-in artifact and static reference paths produce equal
+      navigation, scans, filtering, termination results, and service traces.
+    shapes: [differential]
+    evidence: [SEM-E-007]
+    domain:
+      generates: >-
+        Listening processes, project paths, development and filtered process
+        names, process commands, and inspection or termination denials.
+      excludes: [pixel rendering, real process termination]
+      strategy: Run each case against isolated fake process-service hosts.
+      classifications:
+        - scan-success
+        - filtered-process
+        - inspect-denied
+        - terminate-denied
+    preconditions:
+      - Both paths receive equivalent in-memory process services.
+    oracle:
+      primary:
+        kind: reference
+        description: Compare normalized catalogs, results, and service traces.
+        independence: The isolated hosts do not share plugin or service state.
+      alternative:
+        kind: invariant
+        description: >-
+          Assert admitted service and contribution declarations, passive load,
+          and empty ledgers after repeated disposal.
+        independence: The retained manifest exists before artifact loading.
+    failure_value: >-
+      The artifact filters a listener or terminates an inspection differently
+      from the source module.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.ports-artifact-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-TODOS-PARITY-001
+    claim: >-
+      Todos through built-in artifact and static reference paths produce equal
+      contributions, project lifecycle requests, service traces, and disposal.
+    shapes: [differential]
+    evidence: [SEM-E-007]
+    domain:
+      generates: >-
+        Enabled and disabled settings, project sets, discovered TODO documents,
+        and permitted or denied document discovery.
+      excludes: [pixel rendering, native filesystem access]
+      strategy: Run each case against isolated fake project-document hosts.
+      classifications:
+        - enabled
+        - disabled
+        - discovery-success
+        - discovery-denied
+    preconditions:
+      - Both paths receive equivalent in-memory project-document services.
+    oracle:
+      primary:
+        kind: reference
+        description: Compare normalized catalogs and attributed request traces.
+        independence: The isolated hosts do not share plugin or document state.
+      alternative:
+        kind: invariant
+        description: >-
+          Assert admitted service and contribution declarations, passive
+          style loading, a single executable, and empty ledgers after repeated
+          disposal.
+        independence: The retained manifest exists before artifact loading.
+    failure_value: >-
+      The artifact discovers TODO documents or publishes contributions
+      differently from the source module.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.todos-artifact-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-GIT-PARITY-001
+    claim: >-
+      Git through built-in artifact and static reference paths produces equal
+      contributions, refresh requests, facts, worktree expansion, and disposal.
+    shapes: [differential]
+    evidence: [SEM-E-007]
+    domain:
+      generates: >-
+        Repository identities, branches, clean and dirty status, worktree
+        settings, expansion requests, and permitted or denied status reads.
+      excludes: [pixel rendering, native Git execution]
+      strategy: Run each case against isolated fake Git service hosts.
+      classifications:
+        - clean
+        - dirty
+        - refresh-success
+        - refresh-denied
+        - related-worktree
+    preconditions:
+      - Both paths receive equivalent in-memory Git services.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare normalized catalogs, project facts, related paths, and
+          attributed request traces.
+        independence: >-
+          The isolated hosts do not share plugin or repository state.
+      alternative:
+        kind: invariant
+        description: >-
+          Assert admitted service and contribution declarations, passive
+          style loading, a single executable, and empty ledgers after repeated
+          disposal.
+        independence: The retained manifest exists before artifact loading.
+    failure_value: >-
+      The artifact refreshes repository state or expands related worktrees
+      differently from the source module.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.git-artifact-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-SKILLS-PARITY-001
+    claim: >-
+      Skills through built-in artifact and static reference paths produces
+      equal contributions, project lifecycle requests, catalog projections,
+      install and remove behavior, notices, service traces, and disposal.
+    shapes: [differential]
+    evidence: [SEM-E-007, SEM-E-009]
+    domain:
+      generates: >-
+        Project identities, installed states, refreshes, provider and action
+        calls, and permitted or denied inspection, installation, and removal.
+      excludes: [native filesystem access]
+      strategy: Run each case against isolated fake Skill Installation hosts.
+      classifications: [inspect, install, remove, denied, notice]
+    preconditions:
+      - Both paths receive equivalent in-memory Skill Installation services.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare normalized catalogs, snapshots, actions, notices, and
+          attributed service traces.
+        independence: The isolated hosts do not share plugin or provider state.
+      alternative:
+        kind: invariant
+        description: >-
+          Assert the exact service and contribution declarations, no React or
+          presentation files, a single executable, and empty ledgers after
+          repeated disposal.
+        independence: The retained manifest exists before artifact loading.
+    failure_value: >-
+      The artifact installs a different skill source or retains project state
+      after disposal.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.skills-artifact-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-THIN-TERMINAL-PARITY-001
+    claim: >-
+      Thin Terminal through built-in artifact and static reference paths
+      produces equal presentation identity, required grants, service binding,
+      React wrapper props, focus helpers, raw-byte helpers, and disposal.
+    shapes: [differential]
+    evidence: [SEM-E-007, SEM-E-009]
+    domain:
+      generates: >-
+        Terminal identities, visible and hidden states, activation identities,
+        key and paste bytes, resize dimensions, output occurrences, and exits.
+      excludes: [pixel rendering, native PTY execution]
+      strategy: >-
+        Compare source and admitted artifact declarations and wrapper output;
+        compose both with the deterministic Terminal Sessions fake and the
+        existing focus, byte, input, resize, exit, and teardown properties.
+      classifications: [focus, key-input, paste, resize, exit, teardown]
+    preconditions:
+      - Both paths receive the same host React and Terminal Sessions service.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare normalized terminal presentation catalogs, React wrapper
+          props, required grants, and activation-owned stylesheet lifecycle.
+        independence: >-
+          The retained manifest and source module are loaded by separate paths.
+      alternative:
+        kind: invariant
+        description: >-
+          Assert one executable, one admitted stylesheet, passive import, exact
+          service and grant declarations, and empty ledgers after disposal.
+        independence: >-
+          Native admission and the Cordis runtime enforce separate boundaries.
+    failure_value: >-
+      The artifact loses the thin-terminal presentation, changes its authority,
+      or retains its xterm stylesheet after disposal.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.thin-terminal-artifact-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-SEMANTIC-TERMINAL-PARITY-001
+    claim: >-
+      Semantic Terminal through built-in artifact and static reference paths
+      produces equal presentation identity, required grants, service binding,
+      React wrapper props, attachment behavior, and disposal.
+    shapes: [differential]
+    evidence: [SEM-E-007, SEM-E-009]
+    domain:
+      generates: >-
+        Terminal identities, visible and hidden states, activation identities,
+        input text, resize dimensions, screen revisions, history, anchors,
+        selections, paste decisions, and attachment teardown.
+      excludes: [pixel rendering, native PTY execution]
+      strategy: >-
+        Compare source and admitted artifact declarations and wrapper output;
+        compose both with the deterministic Terminal Sessions and Semantic
+        Terminals fakes and the existing interaction properties.
+      classifications:
+        - attach
+        - flow-control
+        - history
+        - selection
+        - paste
+        - teardown
+    preconditions:
+      - >-
+        Both paths receive the same host React, Terminal Sessions, and Semantic
+        Terminals services.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare normalized terminal presentation catalogs, React wrapper
+          props, required grants, and activation-owned stylesheet lifecycle.
+        independence: >-
+          The retained manifest and source module are loaded by separate paths.
+      alternative:
+        kind: invariant
+        description: >-
+          Assert one executable, one admitted stylesheet, passive import, exact
+          service and grant declarations, and empty ledgers after disposal.
+        independence: >-
+          Native admission and the Cordis runtime enforce separate boundaries.
+    failure_value: >-
+      The artifact loses semantic attachment authority, changes the presentation
+      contract, or retains its stylesheet after disposal.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.semantic-terminal-artifact-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-ASSISTANTS-PARITY-001
+    claim: >-
+      Assistants through built-in artifact and static reference paths produces
+      equal panel identity, grants, semantic service access, restore and
+      shutdown behavior, activation subscriptions, and disposal.
+    shapes: [differential]
+    evidence: [SEM-E-007, SEM-E-009]
+    domain:
+      generates: >-
+        Provider identities, command availability, model catalogs, credential
+        status, and activation identities.
+      excludes:
+        - pixel rendering
+        - native process launch
+        - native credential access
+      strategy: >-
+        Compare source and admitted artifact declarations; compose both with
+        deterministic Assistant Launch, Credential Store, Processes, and
+        Terminal Sessions fakes; exercise restore, shutdown, service use, panel
+        loading, activation subscription, and repeated disposal.
+      classifications:
+        - command-inspection
+        - model-catalog
+        - credential-status
+        - session-inspection
+        - restore
+        - shutdown
+        - teardown
+    preconditions:
+      - >-
+        Both paths receive equivalent isolated semantic services and host
+        terminal lifecycle ports.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare normalized module catalogs, service results and traces,
+          restore notices, panel exports, runtime ledgers, and host lifecycle
+          traces.
+        independence: >-
+          The retained source module and admitted artifact are loaded by
+          separate Vite and native artifact paths.
+      alternative:
+        kind: invariant
+        description: >-
+          Assert one executable, no styles or loose assets, exact service and
+          grant declarations, passive import, and empty ledgers after repeated
+          disposal.
+        independence: >-
+          Native admission and the Cordis runtime enforce separate boundaries.
+    failure_value: >-
+      The artifact changes assistant authority, loses the launcher panel,
+      bypasses a semantic service, or retains a terminal subscription.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.assistants-artifact-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-E-STATIC-IMPORT]
+  - id: PROP-E-USAGE-PARITY-001
+    claim: >-
+      Usage through built-in artifact and static reference paths produces equal
+      settings access, source ingestion and observation, directed refresh,
+      scheduled work, presentation catalogs, activation ledgers, and disposal.
+    shapes: [differential]
+    evidence: [SEM-E-007, SEM-E-009]
+    domain:
+      generates: >-
+        Usage providers, visibility settings, budget modes, monthly budgets,
+        preserved settings extensions, and activation identities.
+      excludes:
+        - pixel rendering
+        - native provider subprocess execution
+        - native credential access
+      strategy: >-
+        Compare source and admitted artifact declarations; compose both with
+        deterministic Usage Sources, Plugin Data, Messages, and Scheduler
+        fakes; exercise startup ingestion, the directed refresh channel,
+        source-change observation, presentation loading, and repeated disposal.
+      classifications:
+        - settings-load
+        - source-ingestion
+        - refresh-message
+        - source-observation
+        - schedule-registration
+        - presentation-load
+        - teardown
+    preconditions:
+      - >-
+        Both paths receive equivalent isolated semantic services and the same
+        admitted activation identity.
+    oracle:
+      primary:
+        kind: reference
+        description: >-
+          Compare normalized module catalogs, semantic-service traces, message
+          receipts, presentation exports, and active runtime ledgers.
+        independence: >-
+          The retained source module and admitted artifact are loaded by
+          separate Vite and native artifact paths.
+      alternative:
+        kind: invariant
+        description: >-
+          Assert one executable, one stylesheet, no loose assets, exact service
+          and grant declarations, characterized alias policy, and empty ledgers
+          after repeated disposal.
+        independence: >-
+          Native admission, the Cordis runtime, and the existing Usage
+          characterization suite enforce separate boundaries.
+    failure_value: >-
+      The artifact changes ingestion or refresh behavior, loses a Usage view,
+      bypasses the semantic service wall, or retains an observer or schedule.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.usage-artifact-parity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-COMPATIBILITY-001
     claim: >-
@@ -274,13 +674,13 @@ properties:
     failure_value: >-
       A newer terminal stream contract activates on an older unsafe host.
     runner:
-      language: typescript
-      library: fast-check
+      language: rust
+      library: proptest
       test_id: architecture.artifact-compatibility.property
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-HEADLESS-001
     claim: >-
@@ -318,11 +718,11 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-E-STATIC-IMPORT]
 deliverables:
   - A closed manifest and digest-qualified immutable artifact format.
-  - One no-React service artifact and the commands compound artifact.
+  - One no-React service artifact plus Commands and Ports built-in artifacts.
   - One loader and lifecycle contract for built-in and installed plugins.
 deletion_gates:
   - id: DELETE-E-STATIC-IMPORT

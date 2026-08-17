@@ -2,14 +2,14 @@
 $schema: ../schema/module-disposition.v1.schema.yaml
 schema_version: module-disposition/v1
 id: thin-terminal
-status: planned
+status: migrating
 source_manifest: modules/thin-terminal/module.yaml
 current:
   frontend: modules/thin-terminal/frontend
   backend_crates: []
   host_crates: []
   direct_tauri: false
-  static_activation: true
+  static_activation: false
 target:
   roles: [presentation]
   responsibilities:
@@ -22,14 +22,19 @@ phases: [phase-b, phase-c, phase-e, phase-f, phase-g]
 prerequisites:
   - Characterize focus, resize, paste, key input, and teardown behavior.
 compatibility_paths:
-  - Wrap the current composition export as a built-in Cordis artifact.
-  - Preserve terminal session identity when the view activation changes.
+  - >-
+    Phase E packages Thin Terminal as an immutable built-in artifact. The host
+    admits and activates it through the same runtime path as installed plugins.
+  - >-
+    The artifact requires Terminal Sessions directly. Workspace is a target
+    capability whose public service arrives in Phase G; the current host-owned
+    presentation contract supplies terminal identity and visibility.
+  - >-
+    Phase F live reconciliation already preserves the host-owned terminal
+    session while the presentation activation changes.
 deletion_gates:
   - id: DELETE-E-STATIC-IMPORT
-    proof_ids: [PROP-E-ARTIFACT-001, PROP-E-BUILTIN-PARITY-001]
+    proof_ids: [PROP-E-ARTIFACT-001, PROP-E-THIN-TERMINAL-PARITY-001]
     targets:
-      - modules/thin-terminal/frontend/src/index.ts
-  - id: DELETE-F-RESTART-LIFECYCLE
-    proof_ids: [PROP-F-CONTINUITY-001, PROP-F-RESTART-001]
-    targets:
-      - modules/thin-terminal/frontend/src/activation.ts
+      - core/frontend/host/enabledModules.ts
+      - package.json

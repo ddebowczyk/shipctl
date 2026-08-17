@@ -1,10 +1,29 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
+
+function hashCommand(hash, command, args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let bytes = 0;
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      bytes += chunk.length;
+      hash.update(chunk);
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve(bytes);
+      else reject(new Error(`${command} exited with ${code}: ${stderr.trim()}`));
+    });
+  });
+}
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -22,16 +41,21 @@ export function normalizeCounterexample(value) {
 }
 
 export async function repositoryIdentity(repositoryRoot) {
-  const [{ stdout: revision }, { stdout: status }, { stdout: diff }] = await Promise.all([
-    exec("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot }),
-    exec("git", ["status", "--porcelain=v1", "-z"], { cwd: repositoryRoot, encoding: "buffer" }),
-    exec("git", ["diff", "--binary", "HEAD"], { cwd: repositoryRoot, encoding: "buffer" }),
-  ]);
-  const digest = createHash("sha256").update(status).update(diff).digest("hex");
+  const { stdout: revision } = await exec("git", ["rev-parse", "HEAD"], {
+    cwd: repositoryRoot,
+  });
+  const hash = createHash("sha256");
+  const statusBytes = await hashCommand(
+    hash,
+    "git",
+    ["status", "--porcelain=v1", "-z"],
+    repositoryRoot,
+  );
+  await hashCommand(hash, "git", ["diff", "--binary", "HEAD"], repositoryRoot);
   return {
     revision: String(revision).trim(),
-    dirty: status.length > 0,
-    diff_digest: digest,
+    dirty: statusBytes > 0,
+    diff_digest: hash.digest("hex"),
   };
 }
 

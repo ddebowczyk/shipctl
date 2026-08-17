@@ -4,6 +4,7 @@ import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import type {
+  ModuleActivationContext,
   ModuleHostServices,
   ModuleManagedTerminalSessionLaunchRequest,
   ModuleTerminalSessionLaunchRequest,
@@ -12,6 +13,7 @@ import type {
 import { createServer, type ViteDevServer } from "vite";
 
 type AssistantsModule = typeof import("../src/index.ts");
+type AssistantLaunchClient = import("../src/assistantLaunchClient.ts").AssistantLaunchClient;
 
 let vite: ViteDevServer;
 let assistants: AssistantsModule;
@@ -122,17 +124,17 @@ test("module identity and launcher migration metadata remain stable", () => {
   assert.equal(assistants.assistantsModule.panels[0].newSession.label, "Agent");
 });
 
-test("provider discovery and Pi settings remain on the transitional Assistants commands", () => {
+test("provider discovery and Pi settings use activation-scoped semantic services", () => {
   const client = readFileSync(
-    fileURLToPath(new URL("../src/client.ts", import.meta.url)),
+    fileURLToPath(new URL("../src/assistantLaunchClient.ts", import.meta.url)),
     "utf8",
   );
-  assert.match(client, /assistantCommand\("get_models_for_provider"\)/);
-  assert.match(client, /assistantCommand\("get_pi_config"\)/);
-  assert.match(client, /assistantCommand\("save_pi_settings"\)/);
-  assert.doesNotMatch(client, /save_pi_api_key|delete_pi_api_key/);
-  assert.doesNotMatch(client, /invoke\("get_models_for_provider"/);
-  assert.doesNotMatch(client, /invoke\("(?:get|save|delete)_pi_/);
+  assert.match(client, /activation\.services\.require\(assistantLaunchService\)/);
+  assert.match(client, /activation\.services\.require\(processesService\)/);
+  assert.match(client, /service\.inspectModels/);
+  assert.match(client, /service\.inspectProviderConfiguration/);
+  assert.match(client, /service\.saveProviderConfiguration/);
+  assert.doesNotMatch(client, /@tauri-apps|invoke|plugin:shipctl-assistants/);
 
   const credentials = readFileSync(
     fileURLToPath(new URL("../src/credentialStoreClient.ts", import.meta.url)),
@@ -163,7 +165,14 @@ test("the provider catalogue preserves commands and exact launch flags", () => {
 test("non-restorable providers launch through the generic terminal port", async () => {
   const fixture = fixtureServices();
   assert.equal(
-    await assistants.launchAssistant("/repo", "antigravity", "yolo", "gemini-3", fixture.services),
+    await assistants.launchAssistant(
+      "/repo",
+      "antigravity",
+      "yolo",
+      "gemini-3",
+      fixture.services,
+      {} as AssistantLaunchClient,
+    ),
     true,
   );
   const request = fixture.calls.find(([kind]) => kind === "launch")?.[1] as ModuleTerminalSessionLaunchRequest;
@@ -192,7 +201,14 @@ test("non-restorable providers launch through the generic terminal port", async 
 test("Claude and Codex launch only through the managed terminal seam", async () => {
   const fixture = fixtureServices();
   assert.equal(
-    await assistants.launchAssistant("/repo", "claude", "standard", "sonnet", fixture.services),
+    await assistants.launchAssistant(
+      "/repo",
+      "claude",
+      "standard",
+      "sonnet",
+      fixture.services,
+      {} as AssistantLaunchClient,
+    ),
     true,
   );
   assert.equal(fixture.calls.some(([kind]) => kind === "launch"), false);
@@ -213,7 +229,21 @@ test("Claude and Codex launch only through the managed terminal seam", async () 
 
 test("module activation owns and releases its terminal lifecycle subscription", async () => {
   const fixture = fixtureServices();
+  const semanticServices = {
+    has: () => true,
+    require: () => ({}),
+    optional: () => undefined,
+  };
   const activation = assistants.assistantsModule.activate?.({
+    activation: {
+      identity: {
+        moduleId: "shipctl.assistants",
+        activationId: "assistants-test",
+      },
+      services: semanticServices,
+      disposed: false,
+      own: () => ({}) as never,
+    } as ModuleActivationContext,
     panels: fixture.services.panels,
     services: fixture.services,
   });

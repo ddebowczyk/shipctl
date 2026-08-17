@@ -67,6 +67,7 @@ function transportWith(overrides = {}) {
     discover: async () => [],
     read: async () => { throw new Error("unexpected read"); },
     write: async () => { throw new Error("unexpected write"); },
+    releaseActivation: async () => true,
     ...overrides,
   };
 }
@@ -121,6 +122,7 @@ test("architecture.service-adapter.service.property", async () => {
       "project-documents.not-found",
       "project-documents.conflict",
       "project-documents.too-large",
+      "project-documents.invalid-request",
     ),
     fc.string(),
     async (code, message) => {
@@ -201,6 +203,49 @@ test("architecture.service-request.service.property", async () => {
       assert.equal(dispatches.length, 1);
     },
   ));
+});
+
+test("architecture.project-documents-release.service.property", async () => {
+  await fc.assert(fc.asyncProperty(
+    projectIdArbitrary,
+    async (projectId) => {
+      const releases = [];
+      let nextCorrelation = 0;
+      const registry = new SemanticServiceRegistry([
+        createProjectDocumentsServiceProvider({
+          transport: transportWith({
+            read: async (request) => ({
+              ...request.input,
+              contents: "",
+              revision: "revision",
+            }),
+            releaseActivation: async (request) => {
+              releases.push(request);
+              return true;
+            },
+          }),
+          createCorrelationId: () => `correlation-${nextCorrelation += 1}`,
+        }),
+      ]);
+      const identity = createTestActivationIdentity("shipctl.todos");
+      const activation = registry.activate(identity);
+      const service = activation.context.services.require(projectDocumentsService);
+      const read = await service.readDocument.execute({
+        projectId,
+        relativePath: "TODO.md",
+      });
+      assert.equal(read.result.ok, true);
+
+      await activation.dispose();
+      assert.deepEqual(releases, [{
+        activation: identity,
+        correlationId: "correlation-2",
+        input: {},
+      }]);
+      await activation.dispose();
+      assert.equal(releases.length, 1);
+    },
+  ), propertyParameters());
 });
 
 test("architecture.project-documents-service-fake.property", async () => {

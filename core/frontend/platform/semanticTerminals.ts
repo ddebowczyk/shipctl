@@ -52,20 +52,21 @@ import {
 } from "./semanticTerminalWire.ts";
 
 const COMMANDS = {
-  snapshot: "plugin:shipctl-semantic-terminal|get_semantic_terminal_snapshot",
-  attach: "plugin:shipctl-semantic-terminal|attach_semantic_terminal",
-  creditScreen: "plugin:shipctl-semantic-terminal|credit_semantic_terminal_screen",
-  detach: "plugin:shipctl-semantic-terminal|detach_semantic_terminal",
-  resize: "plugin:shipctl-semantic-terminal|resize_semantic_terminal",
-  input: "plugin:shipctl-semantic-terminal|input_semantic_terminal",
-  history: "plugin:shipctl-semantic-terminal|history_semantic_terminal",
-  anchor: "plugin:shipctl-semantic-terminal|anchor_semantic_terminal",
-  resolveAnchor: "plugin:shipctl-semantic-terminal|resolve_semantic_terminal_anchor",
-  releaseAnchor: "plugin:shipctl-semantic-terminal|release_semantic_terminal_anchor",
-  select: "plugin:shipctl-semantic-terminal|select_semantic_terminal",
-  pasteSafety: "plugin:shipctl-semantic-terminal|is_semantic_terminal_paste_safe",
-  publicationStats: "plugin:shipctl-semantic-terminal|get_semantic_terminal_publication_stats",
-  appMemory: "plugin:shipctl-semantic-terminal|get_semantic_terminal_app_memory",
+  snapshot: "get_semantic_terminal_snapshot",
+  attach: "attach_semantic_terminal",
+  creditScreen: "credit_semantic_terminal_screen",
+  detach: "detach_semantic_terminal",
+  resize: "resize_semantic_terminal",
+  input: "input_semantic_terminal",
+  history: "history_semantic_terminal",
+  anchor: "anchor_semantic_terminal",
+  resolveAnchor: "resolve_semantic_terminal_anchor",
+  releaseAnchor: "release_semantic_terminal_anchor",
+  select: "select_semantic_terminal",
+  pasteSafety: "is_semantic_terminal_paste_safe",
+  publicationStats: "get_semantic_terminal_publication_stats",
+  appMemory: "get_semantic_terminal_app_memory",
+  releaseActivation: "release_semantic_terminal_activation",
 } as const;
 
 export interface SemanticTerminalsTransportBinding {
@@ -74,35 +75,60 @@ export interface SemanticTerminalsTransportBinding {
   readonly grants: ReadonlySet<string>;
 }
 
+type NativeAttachSemanticTerminalInput = Pick<
+  AttachSemanticTerminalScreenInput,
+  "terminalId" | "claimsResize"
+>;
+interface CreditSemanticTerminalScreenInput {
+  readonly attachmentId: string;
+  readonly committedSequence: number;
+}
+interface DetachSemanticTerminalInput {
+  readonly attachmentId: string;
+}
+
 /** Private native transport. Modules receive only SemanticTerminalsService. */
 export interface SemanticTerminalsNativeTransport {
-  snapshot(terminalId: string): Promise<unknown>;
+  snapshot(
+    request: PrivateSemanticRequestEnvelope<InspectSemanticTerminalSnapshotInput>,
+  ): Promise<unknown>;
   attach(
-    terminalId: string,
-    claimsResize: boolean,
+    request: PrivateSemanticRequestEnvelope<NativeAttachSemanticTerminalInput>,
     deliver: (raw: unknown) => void,
   ): Promise<unknown>;
-  creditScreen(attachmentId: string, committedSequence: number): Promise<void>;
-  detach(attachmentId: string): Promise<void>;
-  resize(
-    terminalId: string,
-    attachmentId: string,
-    columns: number,
-    rows: number,
+  creditScreen(
+    request: PrivateSemanticRequestEnvelope<CreditSemanticTerminalScreenInput>,
   ): Promise<void>;
-  input(terminalId: string, input: InputSemanticTerminalInput["input"]): Promise<unknown>;
-  history(terminalId: string, startRow: number, rows: number): Promise<unknown>;
-  anchor(
-    terminalId: string,
-    space: CreateSemanticTerminalAnchorInput["space"],
-    at: CreateSemanticTerminalAnchorInput["at"],
+  detach(
+    request: PrivateSemanticRequestEnvelope<DetachSemanticTerminalInput>,
+  ): Promise<void>;
+  resize(request: PrivateSemanticRequestEnvelope<ResizeSemanticTerminalInput>): Promise<void>;
+  input(request: PrivateSemanticRequestEnvelope<InputSemanticTerminalInput>): Promise<unknown>;
+  history(
+    request: PrivateSemanticRequestEnvelope<ReadSemanticTerminalHistoryInput>,
   ): Promise<unknown>;
-  resolveAnchor(terminalId: string, anchorId: number): Promise<unknown>;
-  releaseAnchor(terminalId: string, anchorId: number): Promise<unknown>;
-  select(terminalId: string, request: SelectSemanticTerminalInput["request"]): Promise<unknown>;
-  inspectPaste(text: string): Promise<unknown>;
-  publicationStats(terminalId: string): Promise<unknown>;
-  appMemory(): Promise<unknown>;
+  anchor(
+    request: PrivateSemanticRequestEnvelope<CreateSemanticTerminalAnchorInput>,
+  ): Promise<unknown>;
+  resolveAnchor(
+    request: PrivateSemanticRequestEnvelope<ResolveSemanticTerminalAnchorInput>,
+  ): Promise<unknown>;
+  releaseAnchor(
+    request: PrivateSemanticRequestEnvelope<ReleaseSemanticTerminalAnchorInput>,
+  ): Promise<unknown>;
+  select(request: PrivateSemanticRequestEnvelope<SelectSemanticTerminalInput>): Promise<unknown>;
+  inspectPaste(
+    request: PrivateSemanticRequestEnvelope<InspectSemanticTerminalPasteInput>,
+  ): Promise<unknown>;
+  publicationStats(
+    request: PrivateSemanticRequestEnvelope<InspectSemanticTerminalPublicationInput>,
+  ): Promise<unknown>;
+  appMemory(
+    request: PrivateSemanticRequestEnvelope<Readonly<Record<never, never>>>,
+  ): Promise<unknown>;
+  releaseActivation(
+    request: PrivateSemanticRequestEnvelope<Readonly<Record<never, never>>>,
+  ): Promise<unknown>;
 }
 
 export interface SemanticTerminalsServiceProviderOptions {
@@ -117,29 +143,25 @@ export interface SemanticTerminalsServiceProviderOptions {
 }
 
 const TAURI_SEMANTIC_TERMINALS_TRANSPORT: SemanticTerminalsNativeTransport = {
-  snapshot: (terminalId) => invoke(COMMANDS.snapshot, { terminalId }),
-  async attach(terminalId, claimsResize, deliver) {
+  snapshot: (request) => invoke(COMMANDS.snapshot, { request }),
+  async attach(request, deliver) {
     const channel = new Channel<unknown>();
     channel.onmessage = deliver;
-    return invoke(COMMANDS.attach, { terminalId, claimsResize, onEvent: channel });
+    return invoke(COMMANDS.attach, { request, onEvent: channel });
   },
-  creditScreen: (attachmentId, committedSequence) =>
-    invoke(COMMANDS.creditScreen, { attachmentId, committedSequence }),
-  detach: (attachmentId) => invoke(COMMANDS.detach, { attachmentId }),
-  resize: (terminalId, attachmentId, columns, rows) =>
-    invoke(COMMANDS.resize, { terminalId, attachmentId, columns, rows }),
-  input: (terminalId, input) => invoke(COMMANDS.input, { terminalId, input }),
-  history: (terminalId, startRow, rows) =>
-    invoke(COMMANDS.history, { terminalId, startRow, rows }),
-  anchor: (terminalId, space, at) => invoke(COMMANDS.anchor, { terminalId, space, at }),
-  resolveAnchor: (terminalId, anchorId) =>
-    invoke(COMMANDS.resolveAnchor, { terminalId, anchor: anchorId }),
-  releaseAnchor: (terminalId, anchorId) =>
-    invoke(COMMANDS.releaseAnchor, { terminalId, anchor: anchorId }),
-  select: (terminalId, request) => invoke(COMMANDS.select, { terminalId, request }),
-  inspectPaste: (text) => invoke(COMMANDS.pasteSafety, { text }),
-  publicationStats: (terminalId) => invoke(COMMANDS.publicationStats, { terminalId }),
-  appMemory: () => invoke(COMMANDS.appMemory),
+  creditScreen: (request) => invoke(COMMANDS.creditScreen, { request }),
+  detach: (request) => invoke(COMMANDS.detach, { request }),
+  resize: (request) => invoke(COMMANDS.resize, { request }),
+  input: (request) => invoke(COMMANDS.input, { request }),
+  history: (request) => invoke(COMMANDS.history, { request }),
+  anchor: (request) => invoke(COMMANDS.anchor, { request }),
+  resolveAnchor: (request) => invoke(COMMANDS.resolveAnchor, { request }),
+  releaseAnchor: (request) => invoke(COMMANDS.releaseAnchor, { request }),
+  select: (request) => invoke(COMMANDS.select, { request }),
+  inspectPaste: (request) => invoke(COMMANDS.pasteSafety, { request }),
+  publicationStats: (request) => invoke(COMMANDS.publicationStats, { request }),
+  appMemory: (request) => invoke(COMMANDS.appMemory, { request }),
+  releaseActivation: (request) => invoke(COMMANDS.releaseActivation, { request }),
 };
 
 const POLICY = {
@@ -182,6 +204,19 @@ function errorMessage(error: unknown): string {
 
 function transportError(error: unknown): SemanticServiceError<SemanticTerminalsErrorCode> {
   if (error instanceof SemanticTerminalsFailure) return failure(error.code, error.message);
+  if (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && "message" in error
+    && typeof error.code === "string"
+    && typeof error.message === "string"
+    && Object.values(SEMANTIC_TERMINALS_ERROR_CODES).includes(
+      error.code as SemanticTerminalsErrorCode,
+    )
+  ) {
+    return failure(error.code as SemanticTerminalsErrorCode, error.message);
+  }
   const message = errorMessage(error);
   if (/not found|unavailable|exited|closing|shutting down/i.test(message)) {
     return failure(
@@ -255,7 +290,10 @@ function request<Input, Output>(
   grant: SemanticTerminalGrant,
   createCorrelationId: () => SemanticCorrelationId,
   observeRequest: SemanticTerminalsServiceProviderOptions["observeRequest"],
-  execute: (input: Input) => Output | Promise<Output>,
+  execute: (
+    input: Input,
+    envelope: PrivateSemanticRequestEnvelope<Input>,
+  ) => Output | Promise<Output>,
 ): SemanticRequestOperation<Input, Output, SemanticTerminalsErrorCode> {
   return createSemanticRequestAdapter({
     activation: {
@@ -272,10 +310,25 @@ function request<Input, Output>(
       async request(envelope): Promise<SemanticResult<Output, SemanticTerminalsErrorCode>> {
         observeRequest?.(operation, envelope);
         requireGrant(binding, grant);
-        return { ok: true, value: await execute(envelope.input) };
+        return { ok: true, value: await execute(envelope.input, envelope) };
       },
     },
   });
+}
+
+function transportEnvelope<Input>(
+  binding: SemanticTerminalsTransportBinding,
+  createCorrelationId: () => SemanticCorrelationId,
+  input: Input,
+): PrivateSemanticRequestEnvelope<Input> {
+  return {
+    activation: {
+      moduleId: binding.moduleId,
+      activationId: binding.activationId as never,
+    },
+    correlationId: createCorrelationId(),
+    input,
+  };
 }
 
 class SemanticScreenAttachment implements SemanticTerminalScreenAttachment {
@@ -286,6 +339,7 @@ class SemanticScreenAttachment implements SemanticTerminalScreenAttachment {
   readonly snapshot;
   readonly #native: NativeSemanticTerminalAttachment;
   readonly #transport: SemanticTerminalsNativeTransport;
+  readonly #createCorrelationId: () => SemanticCorrelationId;
   readonly #listener: (
     delivery: SemanticStreamDelivery<SemanticTerminalScreenFrame>,
   ) => void | Promise<void>;
@@ -311,6 +365,7 @@ class SemanticScreenAttachment implements SemanticTerminalScreenAttachment {
     native: NativeSemanticTerminalAttachment,
     request: AttachSemanticTerminalScreenInput,
     transport: SemanticTerminalsNativeTransport,
+    createCorrelationId: () => SemanticCorrelationId,
     listener: (
       delivery: SemanticStreamDelivery<SemanticTerminalScreenFrame>,
     ) => void | Promise<void>,
@@ -326,6 +381,7 @@ class SemanticScreenAttachment implements SemanticTerminalScreenAttachment {
     this.snapshot = Object.freeze({ revision: native.revision, state: native.snapshot });
     this.#native = native;
     this.#transport = transport;
+    this.#createCorrelationId = createCorrelationId;
     this.#listener = listener;
     this.#remove = remove;
     this.#requestedAfterSequence = request.afterSequence;
@@ -426,7 +482,9 @@ class SemanticScreenAttachment implements SemanticTerminalScreenAttachment {
     this.#beforeActivate.length = 0;
     this.#effects.length = 0;
     try {
-      await this.#transport.detach(this.#native.attachmentId);
+      await this.#transport.detach(this.#envelope({
+        attachmentId: this.#native.attachmentId,
+      }));
     } catch {
       // Native detachment is idempotent from the public lease's point of view.
     }
@@ -501,7 +559,10 @@ class SemanticScreenAttachment implements SemanticTerminalScreenAttachment {
     const committedSequence = this.#committedRawSequence;
     this.#committedRawSequence = null;
     this.#awaitingScreen = true;
-    void this.#transport.creditScreen(this.#native.attachmentId, committedSequence).catch((error) => {
+    void this.#transport.creditScreen(this.#envelope({
+      attachmentId: this.#native.attachmentId,
+      committedSequence,
+    })).catch((error) => {
       if (this.disposed) return;
       this.#awaitingScreen = false;
       void this.#disconnect(`semantic-terminal-credit-failed: ${errorMessage(error)}`, true);
@@ -528,9 +589,17 @@ class SemanticScreenAttachment implements SemanticTerminalScreenAttachment {
     });
     await this.#owned?.dispose();
   }
+
+  #envelope<Input>(input: Input): PrivateSemanticRequestEnvelope<Input> {
+    return {
+      activation: this.activation,
+      correlationId: this.#createCorrelationId(),
+      input,
+    };
+  }
 }
 
-/** Trusted activation adapter over the current semantic-terminal Tauri plugin. */
+/** Trusted activation adapter over the private semantic-terminal transport. */
 export function createSemanticTerminalsServiceProvider(
   options: SemanticTerminalsServiceProviderOptions,
 ): SemanticServiceProvider<SemanticTerminalsService> {
@@ -569,23 +638,33 @@ export function createSemanticTerminalsServiceProvider(
           );
         }
       };
+      context.own(async () => {
+        try {
+          await transport.releaseActivation(
+            transportEnvelope(binding, createCorrelationId, {}),
+          );
+        } catch {
+          // The activation is locally disposed even if native cleanup reports
+          // an already-released lease.
+        }
+      });
 
       return Object.freeze({
         snapshot: request<InspectSemanticTerminalSnapshotInput, ReturnType<typeof decodeSemanticTerminalScreenState>>(
           "snapshot", binding, active, SEMANTIC_TERMINAL_GRANTS.inspect,
-          createCorrelationId, options.observeRequest, async ({ terminalId }) => {
+          createCorrelationId, options.observeRequest, async ({ terminalId }, envelope) => {
             ownTerminal(terminalId);
-            return decodeSemanticTerminalScreenState(await transport.snapshot(terminalId));
+            return decodeSemanticTerminalScreenState(await transport.snapshot(envelope));
           }),
         input: request<InputSemanticTerminalInput, { readonly encodedBytes: number }>(
           "input", binding, active, SEMANTIC_TERMINAL_GRANTS.input,
-          createCorrelationId, options.observeRequest, async ({ terminalId, input }) => {
+          createCorrelationId, options.observeRequest, async ({ terminalId }, envelope) => {
             ownAttachedTerminal(terminalId);
-            return { encodedBytes: decodeEncodedByteCount(await transport.input(terminalId, input)) };
+            return { encodedBytes: decodeEncodedByteCount(await transport.input(envelope)) };
           }),
         resize: request<ResizeSemanticTerminalInput, Readonly<Record<never, never>>>(
           "resize", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input) => {
+          createCorrelationId, options.observeRequest, async (input, envelope) => {
             ownTerminal(input.terminalId);
             const owner = attachments.get(input.attachmentId);
             if (!owner || owner.terminalId !== input.terminalId || !owner.claimsResize) {
@@ -596,76 +675,77 @@ export function createSemanticTerminalsServiceProvider(
             }
             const columns = validNativeCount(input.columns, "columns", false, 65_535);
             const rows = validNativeCount(input.rows, "rows", false, 65_535);
-            await transport.resize(
-              input.terminalId,
-              input.attachmentId,
-              columns,
-              rows,
-            );
+            await transport.resize({
+              ...envelope,
+              input: { ...input, columns, rows },
+            });
             return {};
           }),
         history: request<ReadSemanticTerminalHistoryInput, ReturnType<typeof decodeSemanticTerminalHistory>>(
           "history", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input) => {
+          createCorrelationId, options.observeRequest, async (input, envelope) => {
             ownTerminal(input.terminalId);
             const startRow = validNativeCount(input.startRow, "startRow", true, 4_294_967_295);
             const rows = validNativeCount(input.rows, "rows", true, 4_294_967_295);
             return decodeSemanticTerminalHistory(
-              await transport.history(input.terminalId, startRow, rows),
+              await transport.history({
+                ...envelope,
+                input: { ...input, startRow, rows },
+              }),
             );
           }),
         createAnchor: request<CreateSemanticTerminalAnchorInput, ReturnType<typeof decodeSemanticTerminalAnchor>>(
           "create-anchor", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input) => {
+          createCorrelationId, options.observeRequest, async (input, envelope) => {
             ownTerminal(input.terminalId);
             return decodeSemanticTerminalAnchor(
-              await transport.anchor(input.terminalId, input.space, input.at),
+              await transport.anchor(envelope),
             );
           }),
         resolveAnchor: request<ResolveSemanticTerminalAnchorInput, ReturnType<typeof decodeResolvedSemanticTerminalAnchor>>(
           "resolve-anchor", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input) => {
+          createCorrelationId, options.observeRequest, async (input, envelope) => {
             ownTerminal(input.terminalId);
             return decodeResolvedSemanticTerminalAnchor(
-              await transport.resolveAnchor(input.terminalId, input.anchorId),
+              await transport.resolveAnchor(envelope),
             );
           }),
         releaseAnchor: request<ReleaseSemanticTerminalAnchorInput, { readonly released: boolean }>(
           "release-anchor", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input) => {
+          createCorrelationId, options.observeRequest, async (input, envelope) => {
             ownTerminal(input.terminalId);
             return {
               released: decodeBoolean(
-                await transport.releaseAnchor(input.terminalId, input.anchorId),
+                await transport.releaseAnchor(envelope),
                 "released",
               ),
             };
           }),
         select: request<SelectSemanticTerminalInput, ReturnType<typeof decodeSemanticTerminalSelection>>(
           "select", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input) => {
+          createCorrelationId, options.observeRequest, async (input, envelope) => {
             ownTerminal(input.terminalId);
             return decodeSemanticTerminalSelection(
-              await transport.select(input.terminalId, input.request),
+              await transport.select(envelope),
             );
           }),
         inspectPaste: request<InspectSemanticTerminalPasteInput, { readonly safe: boolean }>(
           "inspect-paste", binding, active, SEMANTIC_TERMINAL_GRANTS.input,
-          createCorrelationId, options.observeRequest, async ({ text }) => ({
-            safe: decodeBoolean(await transport.inspectPaste(text), "pasteSafety"),
+          createCorrelationId, options.observeRequest, async (_input, envelope) => ({
+            safe: decodeBoolean(await transport.inspectPaste(envelope), "pasteSafety"),
           })),
         publicationStats: request<InspectSemanticTerminalPublicationInput, ReturnType<typeof decodeSemanticTerminalPublicationStats>>(
           "publication-stats", binding, active, SEMANTIC_TERMINAL_GRANTS.inspect,
-          createCorrelationId, options.observeRequest, async ({ terminalId }) => {
+          createCorrelationId, options.observeRequest, async ({ terminalId }, envelope) => {
             ownTerminal(terminalId);
             return decodeSemanticTerminalPublicationStats(
-              await transport.publicationStats(terminalId),
+              await transport.publicationStats(envelope),
             );
           }),
         appMemory: request<Readonly<Record<never, never>>, ReturnType<typeof decodeAppMemory>>(
           "app-memory", binding, active, SEMANTIC_TERMINAL_GRANTS.inspect,
-          createCorrelationId, options.observeRequest, async () =>
-            decodeAppMemory(await transport.appMemory())),
+          createCorrelationId, options.observeRequest, async (_input, envelope) =>
+            decodeAppMemory(await transport.appMemory(envelope))),
         screens: Object.freeze({
           async attach(
             streamRequest: AttachSemanticTerminalScreenInput,
@@ -697,18 +777,20 @@ export function createSemanticTerminalsServiceProvider(
                 else bufferedFailure = error;
               }
             };
+            const attachEnvelope = transportEnvelope(binding, createCorrelationId, {
+              terminalId: streamRequest.terminalId,
+              claimsResize: streamRequest.claimsResize,
+            });
             const native = decodeNativeSemanticTerminalAttachment(
-              await transport.attach(
-                streamRequest.terminalId,
-                streamRequest.claimsResize,
-                deliver,
-              ),
+              await transport.attach(attachEnvelope, deliver),
             );
             if (
               streamRequest.afterSequence !== null
               && streamRequest.afterSequence > native.revision
             ) {
-              await transport.detach(native.attachmentId).catch(() => undefined);
+              await transport.detach(transportEnvelope(binding, createCorrelationId, {
+                attachmentId: native.attachmentId,
+              })).catch(() => undefined);
               throw new SemanticTerminalsFailure(
                 SEMANTIC_TERMINALS_ERROR_CODES.invalidRequest,
                 "Replay revision is ahead of the semantic snapshot",
@@ -719,6 +801,7 @@ export function createSemanticTerminalsServiceProvider(
               native,
               streamRequest,
               transport,
+              createCorrelationId,
               listener,
               () => { attachments.delete(native.attachmentId); },
             );

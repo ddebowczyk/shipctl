@@ -4,24 +4,9 @@ id: skills
 frontend:
   package: "@shipctl/module-skills"
   path: modules/skills/frontend
-  composition_symbol: skillsModule
-backend:
-  crate: tauri-plugin-shipctl-skills
-  path: modules/skills/backend
-  cargo_feature: skills-module
-  dependency_alias: shipctl-module-skills
-  install: "shipctl_module_skills_host::install(builder, workspace.clone())"
-  host:
-    crate: shipctl-module-skills-host
-    path: modules/skills/host
-    dependency_alias: shipctl-module-skills-host
-tauri:
-  capability_identifier: skills
-  permissions:
-    - shipctl-skills:allow-list-skills
-    - shipctl-skills:allow-setup-skill
-    - shipctl-skills:allow-remove-skill
-profile: ops/modularity/profiles/skills-disabled/tauri.conf.json
+  delivery: runtime-artifact
+  artifact: modules/skills/artifact
+profile: null
 tests:
   frontend: modules/skills/frontend/tests
-  backend: cargo test --manifest-path modules/skills/backend/Cargo.toml
+  backend: null

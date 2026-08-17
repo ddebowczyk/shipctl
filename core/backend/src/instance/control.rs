@@ -1729,9 +1729,16 @@ impl InstanceDirectory {
         module_id: String,
         kind: ModuleOperationKind,
         target_registry_revision: u64,
+        artifact_content_digest: Option<String>,
     ) -> Result<ModuleOperation, ControlError> {
-        self.transition_module_stream(selector, module_id, kind, target_registry_revision)
-            .and_then(expect_module_operation_result)
+        self.transition_module_stream(
+            selector,
+            module_id,
+            kind,
+            target_registry_revision,
+            artifact_content_digest,
+        )
+        .and_then(expect_module_operation_result)
     }
 
     pub fn transition_module_stream(
@@ -1740,6 +1747,7 @@ impl InstanceDirectory {
         module_id: String,
         kind: ModuleOperationKind,
         target_registry_revision: u64,
+        artifact_content_digest: Option<String>,
     ) -> Result<ControlStream, ControlError> {
         let (instances, _) = self.scan();
         let descriptor = select_instance(instances, selector)?;
@@ -1750,6 +1758,7 @@ impl InstanceDirectory {
                     module_id,
                     kind,
                     target_registry_revision,
+                    artifact_content_digest,
                 },
             },
         )

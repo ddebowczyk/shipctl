@@ -1,6 +1,14 @@
-export type SessionMode = "standard" | "yolo";
+import type {
+  AssistantIdentityState,
+  AssistantProviderSettings,
+  AssistantRecoveryRecord,
+  AssistantSessionMode,
+  ModuleJsonValue,
+} from "@shipctl/module-api";
+
+export type SessionMode = AssistantSessionMode;
 export type RestorableAssistantProvider = "claude" | "codex";
-export type AssistantCaptureState = "pending" | "ready" | "failed";
+export type AssistantCaptureState = AssistantIdentityState;
 
 export interface CodingAssistant {
   readonly id: string;
@@ -12,26 +20,9 @@ export interface CodingAssistant {
   readonly modelFlag: string;
 }
 
-export interface AssistantSessionRecord extends Readonly<Record<string, ModuleJsonValue>> {
-  readonly recordId: string;
-  readonly provider: RestorableAssistantProvider;
-  readonly providerSessionId: string | null;
-  readonly launchRepoPath: string;
-  readonly placementProjectPath: string;
-  readonly label: string;
-  readonly sessionMode: SessionMode;
-  readonly model: string | null;
-  readonly captureState: AssistantCaptureState;
-  readonly restoreOnNextLaunch: boolean;
-  readonly startedAt: number;
-  readonly updatedAt: number;
-}
+export type AssistantSessionRecord = AssistantRecoveryRecord;
 
-export interface PiSettings {
-  readonly defaultProvider: string | null;
-  readonly defaultModel: string | null;
-  readonly defaultThinkingLevel: string | null;
-}
+export type PiSettings = AssistantProviderSettings;
 
 export interface PiConfig {
   readonly settings: PiSettings;
@@ -44,4 +35,3 @@ export interface AssistantOwnerMetadata extends Readonly<Record<string, ModuleJs
   readonly record: AssistantSessionRecord | null;
   readonly restoring: boolean;
 }
-import type { ModuleJsonValue } from "@shipctl/module-api";

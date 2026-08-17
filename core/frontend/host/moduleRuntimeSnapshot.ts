@@ -1,49 +1,39 @@
-import { invoke } from "@tauri-apps/api/core";
-import type { ShipctlModule } from "@shipctl/module-api";
+import type {
+  ModuleActivationContext,
+  ModuleId,
+  ShipctlModule,
+} from "@shipctl/module-api";
+
+import {
+  publishModuleRuntimeSnapshot,
+  type FrontendContributionSnapshot,
+  type FrontendModuleRuntimeSnapshot,
+  type FrontendRuntimeSnapshot,
+  type RuntimeModuleActivationPhase,
+  type RuntimeModuleActivationSnapshot,
+  type RuntimeModuleDescriptor,
+  type RuntimeSnapshotReceipt,
+} from "../platform/moduleControl.ts";
 
 import { ENABLED_MODULES } from "./enabledModules.ts";
 
 export const MODULE_CONTROL_SCHEMA_VERSION = 1;
 
-export interface FrontendContributionSnapshot {
-  readonly id: string;
-  readonly kind: string;
-}
-
-export interface FrontendModuleRuntimeSnapshot {
-  readonly moduleId: string;
-  readonly contributions: readonly FrontendContributionSnapshot[];
-}
-
-export type StartupModulePhase =
-  | "descriptor"
-  | "resolve"
-  | "import"
-  | "validate"
-  | "bridge"
-  | "activation"
-  | "active";
-
-export interface StartupModuleRuntimeSnapshot {
-  readonly moduleId: string;
-  readonly status: "active" | "failed";
-  readonly phase: StartupModulePhase;
-}
-
-export interface FrontendRuntimeSnapshot {
-  readonly schemaVersion: number;
-  readonly modules: readonly FrontendModuleRuntimeSnapshot[];
-  readonly startupModules: readonly StartupModuleRuntimeSnapshot[];
-}
-
-export interface RuntimeSnapshotReceipt {
-  readonly schemaVersion: number;
-  readonly instanceId: string;
+export interface FrontendRuntimeSnapshotOptions {
   readonly registryRevision: number;
-  readonly publishedAtUnixMs: number;
-  readonly moduleCount: number;
-  readonly contributionCount: number;
+  readonly activationContextsByModule?: ReadonlyMap<ModuleId, ModuleActivationContext>;
+  readonly artifactDescriptorsByModule?: ReadonlyMap<string, RuntimeModuleDescriptor>;
+  readonly activationOutcomes?: readonly RuntimeModuleActivationSnapshot[];
 }
+
+export type {
+  FrontendContributionSnapshot,
+  FrontendModuleRuntimeSnapshot,
+  FrontendRuntimeSnapshot,
+  RuntimeModuleActivationPhase,
+  RuntimeModuleActivationSnapshot,
+  RuntimeSnapshotReceipt,
+};
 
 interface OwnedContribution {
   readonly id: string;
@@ -76,51 +66,74 @@ function messageContributions(module: ShipctlModule): FrontendContributionSnapsh
   ];
 }
 
+function terminalPresentationContributions(
+  module: ShipctlModule,
+): FrontendContributionSnapshot[] {
+  return (module.terminalPresentations ?? []).map((contribution) => {
+    if (contribution.moduleId !== module.id) {
+      throw new Error(
+        `Terminal presentation ${contribution.driverId} belongs to ${contribution.moduleId}, not ${module.id}`,
+      );
+    }
+    return { id: contribution.driverId, kind: "terminal_presentation" };
+  });
+}
+
 export function buildFrontendRuntimeSnapshot(
+  options: FrontendRuntimeSnapshotOptions,
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
-  startupModules: readonly StartupModuleRuntimeSnapshot[] = [],
 ): FrontendRuntimeSnapshot {
   return {
     schemaVersion: MODULE_CONTROL_SCHEMA_VERSION,
-    modules: modules.map((module) => ({
-      moduleId: module.id,
-      contributions: [
-        ...owned(module, "panel", module.panels),
-        ...owned(module, "global_surface", module.globalSurfaces),
-        ...owned(module, "global_navigation", module.globalNavigation),
-        ...owned(module, "sidebar", module.sidebar),
-        ...owned(module, "project_navigation", module.projectNavigation),
-        ...owned(module, "project_layout", module.projectLayout),
-        ...owned(module, "project_action", module.projectActions),
-        ...owned(
-          module,
-          "project_facts_provider",
-          module.projectFactsProvider ? [module.projectFactsProvider] : [],
-        ),
-        ...owned(
-          module,
-          "project_import",
-          module.projectImport ? [module.projectImport] : [],
-        ),
-        ...owned(module, "settings", module.settings),
-        ...owned(
-          module,
-          "skills_provider",
-          module.skillsProvider ? [module.skillsProvider] : [],
-        ),
-        ...owned(module, "scheduled_task", module.scheduledTasks),
-        ...messageContributions(module),
-      ],
-    })),
-    startupModules,
+    registryRevision: options.registryRevision,
+    modules: modules.map((module) => {
+      const descriptor = options.artifactDescriptorsByModule?.get(module.id);
+      const activation = options.activationContextsByModule?.get(module.id);
+      return {
+        moduleId: module.id,
+        ...(descriptor === undefined
+          ? {}
+          : { artifactContentDigest: descriptor.contentDigest }),
+        ...(activation === undefined
+          ? {}
+          : { activationId: activation.identity.activationId }),
+        contributions: [
+          ...owned(module, "panel", module.panels),
+          ...owned(module, "global_surface", module.globalSurfaces),
+          ...owned(module, "global_navigation", module.globalNavigation),
+          ...owned(module, "sidebar", module.sidebar),
+          ...owned(module, "project_navigation", module.projectNavigation),
+          ...owned(module, "project_layout", module.projectLayout),
+          ...owned(module, "project_action", module.projectActions),
+          ...owned(
+            module,
+            "project_facts_provider",
+            module.projectFactsProvider ? [module.projectFactsProvider] : [],
+          ),
+          ...owned(
+            module,
+            "project_import",
+            module.projectImport ? [module.projectImport] : [],
+          ),
+          ...owned(module, "settings", module.settings),
+          ...owned(
+            module,
+            "skills_provider",
+            module.skillsProvider ? [module.skillsProvider] : [],
+          ),
+          ...owned(module, "scheduled_task", module.scheduledTasks),
+          ...terminalPresentationContributions(module),
+          ...messageContributions(module),
+        ],
+      };
+    }),
+    activationOutcomes: options.activationOutcomes ?? [],
   };
 }
 
 export function publishFrontendRuntimeSnapshot(
+  options: FrontendRuntimeSnapshotOptions,
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
-  startupModules: readonly StartupModuleRuntimeSnapshot[] = [],
 ): Promise<RuntimeSnapshotReceipt> {
-  return invoke("publish_module_runtime_snapshot", {
-    snapshot: buildFrontendRuntimeSnapshot(modules, startupModules),
-  });
+  return publishModuleRuntimeSnapshot(buildFrontendRuntimeSnapshot(options, modules));
 }

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "id": "shipctl.thin-terminal",
+  "name": "Thin Terminal",
+  "version": "0.0.0",
+  "apiRange": "^1.0.0",
+  "runtimeKind": "frontend_esm",
+  "entry": "dist/plugin.mjs",
+  "styles": [],
+  "assets": [],
+  "messages": {
+    "schemaVersion": 1,
+    "provides": [],
+    "handles": [],
+    "publishes": [],
+    "subscribes": [],
+    "ports": []
+  },
+  "capabilities": {
+    "schemaVersion": 1,
+    "definitions": [],
+    "providers": [],
+    "consumers": []
+  },
+  "application": {
+    "schemaVersion": 1,
+    "role": "presentation",
+    "requiredServices": [
+      {
+        "id": "shipctl.terminal-sessions",
+        "version": 1
+      }
+    ],
+    "providedServices": [],
+    "backgroundEffects": [],
+    "contributions": [
+      {
+        "family": "terminal-presentation",
+        "id": "thin-terminal",
+        "schemaVersion": 1
+      }
+    ]
+  },
+  "uiContributions": [],
+  "requestedGrants": [
+    "terminal.attach",
+    "terminal.input",
+    "terminal.resize"
+  ],
+  "nativeAdapters": [],
+  "secretReferences": [],
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "supportedScopes": [
+    "instance",
+    "workspace"
+  ],
+  "lifecycle": "live",
+  "sourceProvenance": {
+    "builder": "ops/architecture/bin/build-plugin-artifact.mjs",
+    "module": "thin-terminal"
+  }
+}

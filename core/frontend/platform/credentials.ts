@@ -10,6 +10,7 @@ import {
   type InspectCredentialInput,
   type ModuleActivationIdentity,
   type SaveCredentialInput,
+  type SemanticCorrelationId,
   type SemanticServiceError,
   type SemanticServiceProvider,
   type SemanticServiceProviderContext,
@@ -22,9 +23,10 @@ import {
 } from "./semanticServiceAdapter.ts";
 
 const COMMANDS = {
-  hasPiApiKey: "plugin:shipctl-assistants|has_pi_api_key",
-  savePiApiKey: "plugin:shipctl-assistants|save_pi_api_key",
-  deletePiApiKey: "plugin:shipctl-assistants|delete_pi_api_key",
+  inspect: "inspect_credential",
+  save: "save_credential",
+  delete: "delete_credential",
+  release: "release_credential_store_activation",
 } as const;
 
 const PI_API_KEY_PREFIX = "pi.api-key:";
@@ -39,6 +41,9 @@ export interface CredentialStoreTransport {
   deleteCredential(
     request: PrivateSemanticRequestEnvelope<DeleteCredentialInput>,
   ): Promise<void>;
+  releaseActivation(
+    request: PrivateSemanticRequestEnvelope<Readonly<Record<never, never>>>,
+  ): Promise<boolean>;
 }
 
 export interface CredentialAuthorizationRequest {
@@ -52,6 +57,7 @@ export type CredentialAuthorizer = (request: CredentialAuthorizationRequest) => 
 export interface CredentialStoreServiceProviderOptions {
   readonly transport?: CredentialStoreTransport;
   readonly authorize?: CredentialAuthorizer;
+  readonly createCorrelationId?: () => SemanticCorrelationId;
 }
 
 function piProvider(id: CredentialId): string | null {
@@ -61,19 +67,12 @@ function piProvider(id: CredentialId): string | null {
 }
 
 const TAURI_TRANSPORT: CredentialStoreTransport = {
-  hasCredential: ({ input }) => invoke(COMMANDS.hasPiApiKey, {
-    provider: piProvider(input.credentialId),
-  }),
-  saveCredential: ({ input }) => invoke(COMMANDS.savePiApiKey, {
-    provider: piProvider(input.credentialId),
-    apiKey: input.secret,
-  }),
-  deleteCredential: ({ input }) => invoke(COMMANDS.deletePiApiKey, {
-    provider: piProvider(input.credentialId),
-  }),
+  hasCredential: (request) => invoke(COMMANDS.inspect, { request }),
+  saveCredential: (request) => invoke(COMMANDS.save, { request }),
+  deleteCredential: (request) => invoke(COMMANDS.delete, { request }),
+  releaseActivation: (request) => invoke(COMMANDS.release, { request }),
 };
 
-/** Transitional code grant table. Phase D moves this check to native admission. */
 const DEFAULT_AUTHORIZE: CredentialAuthorizer = ({ activation, grant, credentialId }) => (
   activation.moduleId === "shipctl.assistants"
   && (grant === "credential.inspect" || grant === "credential.write")
@@ -97,9 +96,33 @@ const DISPOSED_ERROR = {
   retryable: false,
 } as const;
 
+function correlationId(): SemanticCorrelationId {
+  return crypto.randomUUID() as SemanticCorrelationId;
+}
+
 function transportError(
   error: unknown,
 ): SemanticServiceError<CredentialStoreErrorCode> {
+  if (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && typeof error.code === "string"
+    && [
+      "credential-store.transport-failed",
+      "credential-store.denied",
+      "credential-store.invalid-request",
+      "credential-store.unavailable",
+      "credential-store.cancelled",
+      "credential-store.activation-disposed",
+    ].includes(error.code)
+  ) {
+    return {
+      code: error.code as CredentialStoreErrorCode,
+      message: "Credential-store request failed",
+      retryable: "retryable" in error && error.retryable === true,
+    };
+  }
   const normalized = (error instanceof Error ? error.message : String(error)).toLowerCase();
   const code: CredentialStoreErrorCode = normalized.includes("permission")
     || normalized.includes("denied")
@@ -159,9 +182,15 @@ export function createCredentialStoreServiceProvider(
 ): SemanticServiceProvider<CredentialStoreService> {
   const transport = options.transport ?? TAURI_TRANSPORT;
   const authorize = options.authorize ?? DEFAULT_AUTHORIZE;
+  const createCorrelationId = options.createCorrelationId ?? correlationId;
   return {
     service: credentialStoreService,
     bind(context) {
+      context.own(() => transport.releaseActivation({
+        activation: context.activation,
+        correlationId: createCorrelationId(),
+        input: {},
+      }).then(() => undefined));
       return Object.freeze({
         hasCredential: request<InspectCredentialInput, CredentialStatus>(context, {
           async request(envelope) {

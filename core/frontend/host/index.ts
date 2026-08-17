@@ -65,9 +65,10 @@ export type {
   FrontendContributionSnapshot,
   FrontendModuleRuntimeSnapshot,
   FrontendRuntimeSnapshot,
+  FrontendRuntimeSnapshotOptions,
+  RuntimeModuleActivationPhase,
+  RuntimeModuleActivationSnapshot,
   RuntimeSnapshotReceipt,
-  StartupModulePhase,
-  StartupModuleRuntimeSnapshot,
 } from "./moduleRuntimeSnapshot.ts";
 export {
   createEnabledGlobalSurfaceRegistry,
@@ -102,8 +103,14 @@ export {
   moduleMessageGrants,
   openModuleMessageBridge,
 } from "./messageBusBridge.ts";
+export { LiveModuleSupervisor } from "./liveModuleSupervisor.ts";
+export type {
+  LiveModuleFamily,
+  LiveModuleSupervisorOptions,
+} from "./liveModuleSupervisor.ts";
 export type {
   HostMessageDispatchResult,
+  ModuleMessageBridgeBindings,
   OpenModuleMessageBridge,
 } from "./messageBusBridge.ts";
 export {
@@ -129,15 +136,20 @@ export type {
   ModuleArtifactLoadPhase,
 } from "./moduleArtifactLoader.ts";
 export {
-  getStartupModuleCatalog,
-  loadRestartBoundModules,
-} from "./restartBoundModules.ts";
+  collectPluginArtifactDeclarations,
+  parsePluginArtifactDeclarations,
+  samePluginArtifactDeclarations,
+} from "./pluginArtifactDeclarations.ts";
+export {
+  getRuntimeModuleLoadCatalog,
+  loadRuntimeModules,
+} from "./runtimeModuleLoader.ts";
 export type {
-  RestartBoundModuleFailure,
-  RestartBoundModules,
-  StartupModuleCatalog,
-  StartupModuleDescriptor,
-} from "./restartBoundModules.ts";
+  LoadedRuntimeModules,
+  RuntimeModuleLoadCatalog,
+  RuntimeModuleLoadDescriptor,
+  RuntimeModuleLoadFailure,
+} from "./runtimeModuleLoader.ts";
 export type {
   HydratedPanelReference,
   HydratePanelReferenceOptions,

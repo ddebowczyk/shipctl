@@ -5,13 +5,10 @@ members = [
     "core/backend",
     "core/tauri",
     "module-api/backend",
-    "modules/*/backend",
-    "modules/*/core",
-    "modules/*/host",
-    "ops/architecture/fixtures/proptest-replay",
     "examples/module-fixture/backend",
     "examples/rapid-terminal-probe",
 ]
+exclude = ["ops/architecture/fixtures/proptest-replay"]
 resolver = "2"
 
 [workspace.package]

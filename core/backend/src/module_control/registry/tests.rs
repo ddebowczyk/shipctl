@@ -243,6 +243,14 @@ fn runtime_artifact(
         "assets": ["assets/fixture.txt"],
         "messages": messages,
         "capabilities": capabilities,
+        "application": {
+            "schemaVersion": 1,
+            "role": "headless",
+            "requiredServices": [],
+            "providedServices": [],
+            "backgroundEffects": [],
+            "contributions": []
+        },
         "uiContributions": [],
         "requestedGrants": [],
         "nativeAdapters": [],
@@ -390,7 +398,7 @@ fn create_v1_registry(path: &std::path::Path, artifact: &ModuleIdentity) {
 }
 
 #[test]
-fn v1_registry_migrates_additively_to_runtime_catalog_v2() {
+fn v1_registry_migrates_additively_to_runtime_catalog_and_recovery_v3() {
     let temporary = TempDir::new().unwrap();
     let paths = test_paths(&temporary);
     std::fs::create_dir_all(&paths.state_root).unwrap();
@@ -420,13 +428,53 @@ fn v1_registry_migrates_additively_to_runtime_catalog_v2() {
              WHERE type = 'table' AND name IN (
                 'runtime_artifact_catalog', 'capability_definitions',
                 'artifact_capability_bindings', 'artifact_install_requests',
-                'pending_artifact_installs'
+                'pending_artifact_installs', 'runtime_acceptance',
+                'reconciliation_failures'
              )",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(catalog_tables, 5);
+    assert_eq!(catalog_tables, 7);
+}
+
+#[test]
+fn runtime_acceptance_and_failures_survive_reopen_without_advancing_desired_revision() {
+    let temporary = TempDir::new().unwrap();
+    let paths = test_paths(&temporary);
+    let identity = artifact("fixture.recovery", 'a');
+    let instance_id = Uuid::new_v4();
+    let mut registry = ModuleRegistry::open_writable(&paths).unwrap();
+    registry
+        .commit(&mutation(instance_id, Uuid::new_v4(), &identity, true, 1))
+        .unwrap();
+    let desired_revision = registry.revision().unwrap();
+    let acceptance = RuntimeAcceptanceRecord {
+        schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+        registry_revision: desired_revision,
+        artifacts: vec![identity],
+    };
+    let failure = ReconciliationFailureRecord {
+        schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+        registry_revision: desired_revision,
+        module_id: Some("fixture.recovery".to_string()),
+        activation_id: Some("fixture.recovery@1.0.0#accepted".to_string()),
+        phase: "validate".to_string(),
+        code: "module.runtime.fixture_rejected".to_string(),
+        message: "Fixture rejected".to_string(),
+    };
+    registry.record_runtime_acceptance(&acceptance).unwrap();
+    registry.record_reconciliation_failure(&failure).unwrap();
+    assert_eq!(registry.revision().unwrap(), desired_revision);
+    drop(registry);
+
+    let snapshot = ModuleRegistry::open_read_only(&paths)
+        .unwrap()
+        .snapshot()
+        .unwrap();
+    assert_eq!(snapshot.registry_revision, desired_revision);
+    assert_eq!(snapshot.runtime_acceptance, Some(acceptance));
+    assert_eq!(snapshot.reconciliation_failures, vec![failure]);
 }
 
 #[test]

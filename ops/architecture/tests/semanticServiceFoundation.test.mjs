@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import fc from "fast-check";
 import { createServer } from "vite";
 
-import { checkModuleBoundaries } from "../../modularity/bin/check-module-boundaries.mjs";
+import { checkModuleBoundaries } from "../../modularity/lib/module-boundaries.mjs";
 
 let vite;
 let defineSemanticService;

@@ -4,33 +4,8 @@ id: usage
 frontend:
   package: "@shipctl/module-usage"
   path: modules/usage/frontend
-  composition_symbol: usageModule
-backend:
-  crate: tauri-plugin-shipctl-usage
-  path: modules/usage/backend
-  cargo_feature: usage-module
-  dependency_alias: shipctl-module-usage
-  install: >-
-    shipctl_module_usage_host::install(
-      builder,
-      workspace.clone(),
-      message_bridges.clone(),
-      paths.usage_database.clone(),
-      durable_writes.clone()
-    )
-  host:
-    crate: shipctl-module-usage-host
-    path: modules/usage/host
-    dependency_alias: shipctl-module-usage-host
-tauri:
-  capability_identifier: usage
-  permissions:
-    - shipctl-usage:allow-get-all-usage-snapshots
-    - shipctl-usage:allow-get-usage-snapshot
-    - shipctl-usage:allow-get-usage-details
-    - shipctl-usage:allow-get-usage-overview
-    - shipctl-usage:allow-get-project-alias-review-queue
-    - shipctl-usage:allow-refresh-usage-data
+  delivery: runtime-artifact
+  artifact: modules/usage/artifact
 messages:
   provides:
     - id: usage.ingest-completed
@@ -70,7 +45,7 @@ messages:
         version: 1
       required_grant: message.subscribe.usage.ingest-completed
   ports: []
-profile: ops/modularity/profiles/usage-disabled/tauri.conf.json
+profile: null
 tests:
   frontend: modules/usage/frontend/tests
-  backend: 'CARGO_TARGET_DIR="$PWD/target/usage-characterization" cargo test -p tauri-plugin-shipctl-usage -- --test-threads=1'
+  backend: null

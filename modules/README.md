@@ -1,13 +1,18 @@
 # Modules
 
-`modules/` contains features that can be removed from a build. A normal module
-owns a public frontend package under `frontend/` and, when native behavior is
-needed, a feature-gated Tauri plugin under `backend/`. When native model or
-driver logic must also serve the CLI, it belongs in a Tauri-free `core/` crate;
-the backend plugin depends on that crate, never the reverse. If the plugin
-needs a host-owned service, its typed adapter belongs in `host/`; it exports
-the module installation function and is the only code that sees both module and
-host.
+`modules/` contains removable TypeScript features. A migrated module owns a
+public frontend package under `frontend/`, has no Rust crate, and imports no
+Tauri API. When it needs native authority, it uses a public semantic service;
+the permanent provider belongs to `core/backend/` and its private framework
+adapter belongs to `core/tauri/`.
+
+Some modules still have feature-gated Rust under `backend/` and a typed host
+adapter under `host/`. These directories are migration sources, not the target
+pattern. Ports, Todos, Git, Skills, and Semantic Terminal already use the
+frontend-only shape. Commands, Ports, Todos, Git, Skills, and Thin Terminal also
+declare `frontend.delivery: runtime-artifact`; the build embeds their immutable
+output, and the host activates it through the same loader used for installed
+plugins.
 
 Two repository locations are intentionally different from removable features:
 
@@ -20,7 +25,8 @@ Two repository locations are intentionally different from removable features:
 - `commands/` is frontend-only because it contributes saved-command UI and
   launches through host terminal services; it owns no native capability.
 
-Modules import host services only through `@shipctl/module-api` or
-`shipctl-module-api`. Host composition imports module `host` entrypoints only.
-The Tauri shell retains the direct optional backend dependency required for ACL
-manifest discovery, but it does not implement module behavior or adapters.
+Frontend modules import host services only through `@shipctl/module-api`.
+Transitional native modules can import the Rust compatibility API and expose a
+host entrypoint. The Tauri shell retains direct optional dependencies only for
+those remaining plugin ACL manifests; it does not implement module behavior or
+adapters.

@@ -30,6 +30,10 @@ import {
   SemanticServiceRegistry,
   type SemanticActivationController,
 } from "../semanticServiceRuntime.ts";
+import {
+  createActivationHostServiceGate,
+  type ActivationHostServiceGate,
+} from "../activationHostServices.ts";
 
 const SEMANTIC_REGISTRY_SERVICE = "shipctl.runtime.semantic-services";
 
@@ -121,10 +125,25 @@ interface ActivePlugin {
     readonly version: number;
   }[];
   readonly fiber: CordisFiber;
+  readonly hostServices: ActivationHostServiceGate | null;
 }
 
 export interface PluginActivationFailure {
   readonly moduleId: string;
+  /** A redacted, stable reason that is safe to persist in runtime diagnostics. */
+  readonly message: string;
+}
+
+/**
+ * An activation error whose text was produced by the host runtime rather than
+ * arbitrary plugin code. It may therefore be shown in inspection and notice
+ * records. Generic plugin exceptions remain private to development logs.
+ */
+class PublicPluginActivationFailure extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PublicPluginActivationFailure";
+  }
 }
 
 export interface ObservedStaticPluginActivation {
@@ -132,6 +151,7 @@ export interface ObservedStaticPluginActivation {
   readonly activationContextsByModule: ReadonlyMap<ModuleId, ModuleActivationContext>;
   readonly failures: readonly PluginActivationFailure[];
   inspect(): PluginRuntimeInspection;
+  publishHostServices(): void;
   deactivate(): Promise<void>;
 }
 
@@ -139,6 +159,8 @@ export interface CordisStaticPluginRuntimeOptions {
   readonly services: ModuleHostServices;
   readonly semanticServices?: SemanticServiceRegistry;
   readonly activationIdsByModule?: ReadonlyMap<string, string>;
+  /** Gate host mutations until the supervisor publishes the complete graph. */
+  readonly gateHostServices?: boolean;
 }
 
 /**
@@ -150,10 +172,12 @@ export class CordisStaticPluginRuntime {
   readonly #services: ModuleHostServices;
   readonly #semanticServices: SemanticServiceRegistry;
   readonly #activationIdsByModule: ReadonlyMap<string, string>;
+  readonly #gateHostServices: boolean;
   readonly #states = new Map<string, PluginActivationInspection>();
   readonly #active = new Map<string, ActivePlugin>();
   readonly #contributionOwners = new Map<string, string>();
   readonly #activationOrder: string[] = [];
+  readonly #failureMessages = new Map<string, string>();
   #leaseSequence = 0;
   #disposed = false;
 
@@ -161,6 +185,7 @@ export class CordisStaticPluginRuntime {
     this.#services = options.services;
     this.#semanticServices = options.semanticServices ?? new SemanticServiceRegistry();
     this.#activationIdsByModule = options.activationIdsByModule ?? new Map();
+    this.#gateHostServices = options.gateHostServices ?? false;
     this.#root.provide(SEMANTIC_REGISTRY_SERVICE, this.#semanticServices);
   }
 
@@ -171,7 +196,12 @@ export class CordisStaticPluginRuntime {
     const failures: PluginActivationFailure[] = [];
     for (const definition of definitions) {
       const active = await this.activate(definition);
-      if (!active) failures.push({ moduleId: definition.module.id });
+      if (!active) {
+        failures.push({
+          moduleId: definition.module.id,
+          message: this.#failureMessages.get(definition.module.id) ?? "Plugin activation failed",
+        });
+      }
     }
     return {
       activeModuleIds: new Set(this.#active.keys()),
@@ -180,6 +210,11 @@ export class CordisStaticPluginRuntime {
       ),
       failures,
       inspect: () => this.inspect(),
+      publishHostServices: () => {
+        for (const moduleId of this.#activationOrder) {
+          this.#active.get(moduleId)?.hostServices?.accept();
+        }
+      },
       deactivate: () => this.dispose(),
     };
   }
@@ -194,14 +229,20 @@ export class CordisStaticPluginRuntime {
   }
 
   async deactivate(moduleId: string): Promise<void> {
-    await this.#active.get(moduleId)?.fiber.dispose();
+    const active = this.#active.get(moduleId);
+    active?.hostServices?.beginDisposal();
+    try {
+      await active?.fiber.dispose();
+    } finally {
+      active?.hostServices?.dispose();
+    }
   }
 
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
     for (const moduleId of [...this.#activationOrder].reverse()) {
-      await this.#active.get(moduleId)?.fiber.dispose();
+      await this.deactivate(moduleId);
     }
     await this.#root.fiber.dispose();
   }
@@ -209,7 +250,10 @@ export class CordisStaticPluginRuntime {
   async activate(definition: ShipctlPluginDefinition): Promise<boolean> {
     if (this.#disposed) throw new Error("The Shipctl plugin runtime is disposed");
     const { module } = definition;
-    if (this.#active.has(module.id)) return false;
+    if (this.#active.has(module.id)) {
+      this.#failureMessages.set(module.id, "Plugin activation is already active");
+      return false;
+    }
     const configuredActivationId = this.#activationIdsByModule.get(module.id);
     const identity: ModuleActivationIdentity = configuredActivationId === undefined
       ? createModuleActivationIdentity(module.id, module.version)
@@ -217,11 +261,19 @@ export class CordisStaticPluginRuntime {
           moduleId: module.id,
           activationId: configuredActivationId as ModuleActivationId,
         };
+    const hostServices = this.#gateHostServices
+      ? createActivationHostServiceGate(this.#services)
+      : null;
     const candidateContributions = contributionRecords(definition, identity);
     const candidateContributionKeys = new Set<string>();
     for (const contribution of candidateContributions) {
       const key = `${contribution.family}:${contribution.id}`;
       if (candidateContributionKeys.has(key) || this.#contributionOwners.has(key)) {
+        hostServices?.dispose();
+        this.#failureMessages.set(
+          module.id,
+          `Duplicate plugin contribution: ${contribution.family}:${contribution.id}`,
+        );
         this.#states.set(module.id, {
           moduleId: module.id,
           activationId: identity.activationId,
@@ -270,10 +322,31 @@ export class CordisStaticPluginRuntime {
         `shipctl.activation(${identity.activationId})`,
       );
 
-      const own = (cleanup: () => void | Promise<void>) => {
+      const registeredBackgroundEffects = new Set<string>();
+      const ownCleanup = (cleanup: () => void | Promise<void>) => {
         const leaseId = `lease-${++this.#leaseSequence}`;
         recordEffect("owned-lease", leaseId);
         return semanticActivation.context.own(cleanup);
+      };
+      const own = (
+        cleanup: () => void | Promise<void>,
+        backgroundEffectId?: string,
+      ) => {
+        if (backgroundEffectId === undefined) {
+          if (definition.backgroundEffects !== undefined) {
+            throw new Error("Artifact background effects must register with their declared stable ID");
+          }
+        } else {
+          if (!definition.backgroundEffects?.includes(backgroundEffectId)) {
+            throw new Error(`Undeclared background effect: ${backgroundEffectId}`);
+          }
+          if (registeredBackgroundEffects.has(backgroundEffectId)) {
+            throw new Error(`Duplicate background effect: ${backgroundEffectId}`);
+          }
+          registeredBackgroundEffects.add(backgroundEffectId);
+          recordEffect("background", backgroundEffectId);
+        }
+        return ownCleanup(cleanup);
       };
       const access: SemanticServiceAccess = {
         has: (reference) => stagedServiceInstances.has(semanticServiceKey(reference))
@@ -332,11 +405,11 @@ export class CordisStaticPluginRuntime {
 
       const deactivation = module.activate?.({
         activation,
-        panels: this.#services.panels,
-        services: scopedHostServices(this.#services),
+        panels: hostServices?.services.panels ?? this.#services.panels,
+        services: scopedHostServices(hostServices?.services ?? this.#services),
       });
       if (deactivation) {
-        own(() => deactivation.deactivate());
+        ownCleanup(() => deactivation.deactivate());
       }
 
       for (const task of module.scheduledTasks ?? []) {
@@ -351,9 +424,20 @@ export class CordisStaticPluginRuntime {
           ...task.schedule,
         });
         if (!outcome.result.ok) {
-          throw new Error(`Scheduled task ${task.id} was rejected: ${outcome.result.error.code}`);
+          throw new PublicPluginActivationFailure(
+            `Scheduled task ${task.id} was rejected: ${outcome.result.error.code}`,
+          );
         }
         recordEffect("scheduled-task", task.id);
+      }
+
+      if (definition.backgroundEffects !== undefined) {
+        const missing = definition.backgroundEffects.filter(
+          (id) => !registeredBackgroundEffects.has(id),
+        );
+        if (missing.length > 0) {
+          throw new Error(`Missing declared background effects: ${missing.join(", ")}`);
+        }
       }
 
       // Publication is the commit point. Activation work above may inspect a
@@ -377,6 +461,7 @@ export class CordisStaticPluginRuntime {
         effects: stagedEffects,
         services: stagedServices,
         fiber: fiber!,
+        hostServices,
       };
       this.#active.set(module.id, active);
       this.#activationOrder.push(module.id);
@@ -387,6 +472,7 @@ export class CordisStaticPluginRuntime {
         status: "active",
       });
       return async () => {
+        hostServices?.beginDisposal();
         this.#active.delete(module.id);
         for (const contribution of candidateContributions) {
           const key = `${contribution.family}:${contribution.id}`;
@@ -403,6 +489,7 @@ export class CordisStaticPluginRuntime {
           status: "disposed",
         });
         stagedServiceKeys.clear();
+        hostServices?.dispose();
       };
       },
     };
@@ -410,10 +497,13 @@ export class CordisStaticPluginRuntime {
     try {
       fiber = this.#root.plugin(cordisPlugin);
       await fiber;
+      this.#failureMessages.delete(module.id);
       return true;
     } catch (error) {
+      hostServices?.beginDisposal();
       await fiber?.dispose();
       await candidate.semanticActivation?.dispose();
+      hostServices?.dispose();
       this.#active.delete(module.id);
       this.#states.set(module.id, {
         moduleId: module.id,
@@ -421,6 +511,12 @@ export class CordisStaticPluginRuntime {
         role: definition.role,
         status: "failed",
       });
+      this.#failureMessages.set(
+        module.id,
+        error instanceof PublicPluginActivationFailure
+          ? error.message
+          : "Plugin activation failed",
+      );
       if (import.meta.env.DEV) console.error(`Plugin ${module.id} activation failed:`, error);
       return false;
     }
@@ -439,4 +535,20 @@ export async function activateStaticPluginsObserved(
     activationIdsByModule,
   });
   return runtime.activateAll(modules.map(adaptShipctlModule));
+}
+
+export async function activatePluginDefinitionsObserved(
+  services: ModuleHostServices,
+  definitions: readonly ShipctlPluginDefinition[],
+  activationIdsByModule: ReadonlyMap<string, string> = new Map(),
+  semanticServices: SemanticServiceRegistry = new SemanticServiceRegistry(),
+  gateHostServices = false,
+): Promise<ObservedStaticPluginActivation> {
+  const runtime = new CordisStaticPluginRuntime({
+    services,
+    semanticServices,
+    activationIdsByModule,
+    gateHostServices,
+  });
+  return runtime.activateAll(definitions);
 }

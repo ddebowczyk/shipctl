@@ -33,6 +33,9 @@ credential-store *args:
 usage-sources *args:
     node bin/run-usage-sources-properties.mjs {{args}}
 
+assistant-launch *args:
+    node bin/run-assistant-launch-properties.mjs {{args}}
+
 plugin-data *args:
     node bin/run-plugin-data-properties.mjs {{args}}
 
@@ -48,10 +51,37 @@ terminal-sessions *args:
 semantic-terminals *args:
     node bin/run-semantic-terminals-properties.mjs {{args}}
 
+ports-extraction *args:
+    node bin/run-ports-extraction-properties.mjs {{args}}
+
+todos-extraction *args:
+    node bin/run-todos-extraction-properties.mjs {{args}}
+
+git-extraction *args:
+    node bin/run-git-extraction-properties.mjs {{args}}
+
+skills-extraction *args:
+    node bin/run-skills-extraction-properties.mjs {{args}}
+
+semantic-terminal-extraction *args:
+    node bin/run-semantic-terminal-extraction-properties.mjs {{args}}
+
+assistants-extraction *args:
+    node bin/run-assistants-extraction-properties.mjs {{args}}
+
 cordis *args:
     node bin/run-cordis-properties.mjs {{args}}
+
+live-reconciliation *args:
+    node bin/run-live-reconciliation-properties.mjs {{args}}
+
+live-reconciliation-package *args:
+    node bin/run-live-reconciliation-package-proof.mjs {{args}}
 
 cordis-runtime *args:
     node bin/build-cordis-runtime.mjs {{args}}
 
-all: validate boundaries baseline cordis-runtime test
+plugin-artifacts *args:
+    node bin/run-plugin-artifact-properties.mjs {{args}}
+
+all: validate boundaries baseline cordis-runtime test plugin-artifacts

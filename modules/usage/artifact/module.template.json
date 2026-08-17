@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 2,
+  "id": "shipctl.usage",
+  "name": "Usage",
+  "version": "0.0.0",
+  "apiRange": "^1.0.0",
+  "runtimeKind": "frontend_esm",
+  "entry": "dist/plugin.mjs",
+  "styles": [],
+  "assets": [],
+  "messages": {
+    "schemaVersion": 1,
+    "provides": [
+      {
+        "message": {
+          "id": "usage.ingest-completed",
+          "version": 1
+        },
+        "schema": {
+          "draft": "https://json-schema.org/draft/2020-12/schema",
+          "root": "messages/ingest-completed.schema.json",
+          "resources": {
+            "messages/ingest-completed.schema.json": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "$id": "shipctl-artifact:///messages/ingest-completed.schema.json",
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "maxEncodedBytes": 2,
+          "redactedFields": [],
+          "compatibleVersions": [1]
+        }
+      },
+      {
+        "message": {
+          "id": "usage.refresh-request",
+          "version": 1
+        },
+        "schema": {
+          "draft": "https://json-schema.org/draft/2020-12/schema",
+          "root": "messages/refresh-request.schema.json",
+          "resources": {
+            "messages/refresh-request.schema.json": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "$id": "shipctl-artifact:///messages/refresh-request.schema.json",
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "maxEncodedBytes": 2,
+          "redactedFields": [],
+          "compatibleVersions": [1]
+        }
+      }
+    ],
+    "handles": [
+      {
+        "endpoint": {
+          "id": "usage.refresh-request",
+          "message": {
+            "id": "usage.refresh-request",
+            "version": 1
+          }
+        },
+        "capacity": 1,
+        "requiredGrant": "message.send.usage.refresh-request",
+        "schedulerAllowed": true
+      }
+    ],
+    "publishes": [
+      {
+        "endpoint": {
+          "id": "usage.ingest-completed",
+          "message": {
+            "id": "usage.ingest-completed",
+            "version": 1
+          }
+        },
+        "capacity": 1,
+        "requiredGrant": "message.publish.usage.ingest-completed",
+        "schedulerAllowed": false
+      }
+    ],
+    "subscribes": [
+      {
+        "id": "usage.ingest-completed",
+        "message": {
+          "id": "usage.ingest-completed",
+          "version": 1
+        }
+      }
+    ],
+    "ports": []
+  },
+  "capabilities": {
+    "schemaVersion": 1,
+    "definitions": [],
+    "providers": [],
+    "consumers": []
+  },
+  "application": {
+    "schemaVersion": 1,
+    "role": "compound",
+    "requiredServices": [
+      {
+        "id": "shipctl.usage-sources",
+        "version": 2
+      },
+      {
+        "id": "shipctl.plugin-data",
+        "version": 1
+      },
+      {
+        "id": "shipctl.messages",
+        "version": 1
+      },
+      {
+        "id": "shipctl.scheduler",
+        "version": 1
+      }
+    ],
+    "providedServices": [],
+    "backgroundEffects": [],
+    "contributions": [
+      {
+        "family": "global-surface",
+        "id": "core.usage",
+        "schemaVersion": 1
+      },
+      {
+        "family": "global-navigation",
+        "id": "usage.global-navigation",
+        "schemaVersion": 1
+      },
+      {
+        "family": "sidebar",
+        "id": "usage.sidebar",
+        "schemaVersion": 1
+      },
+      {
+        "family": "settings",
+        "id": "usage.settings",
+        "schemaVersion": 1
+      },
+      {
+        "family": "scheduled-task",
+        "id": "usage.periodic-refresh",
+        "schemaVersion": 1
+      },
+      {
+        "family": "message-graph",
+        "id": "shipctl.usage.messages",
+        "schemaVersion": 1
+      }
+    ]
+  },
+  "uiContributions": [],
+  "requestedGrants": [
+    "usage-source.read",
+    "usage-source.refresh",
+    "usage-source.observe",
+    "plugin-data.read",
+    "plugin-data.write",
+    "message.send.usage.refresh-request",
+    "message.publish.usage.ingest-completed",
+    "message.subscribe.usage.ingest-completed",
+    "schedule.register"
+  ],
+  "nativeAdapters": [],
+  "secretReferences": [],
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "supportedScopes": [
+    "instance",
+    "workspace"
+  ],
+  "lifecycle": "live",
+  "sourceProvenance": {
+    "builder": "ops/architecture/bin/build-plugin-artifact.mjs",
+    "module": "usage"
+  }
+}

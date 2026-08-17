@@ -124,6 +124,7 @@ export interface CanvasActions {
 
 /** Host-owned rendering dependencies. Feature modules are reached through these ports. */
 export interface CanvasPorts {
+  readonly projectPaths: readonly string[];
   readonly surfaceCatalog: CanvasSurfaceCatalog;
   readonly terminalPresentationRegistry: TerminalPresentationRegistry;
   readonly moduleHostServices: ModuleHostServices;

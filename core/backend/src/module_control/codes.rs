@@ -20,8 +20,10 @@ pub const SNAPSHOT_AVAILABLE: &str = "module.runtime.snapshot.available";
 pub const MODULE_UNOBSERVED: &str = "module.runtime.module.unobserved";
 pub const MODULE_ACTIVE: &str = "module.runtime.module.active";
 pub const MODULE_STARTUP_FAILED: &str = "module.runtime.startup.failed";
+pub const RECONCILIATION_FAILED: &str = "module.runtime.reconciliation_failed";
 pub const REVISION_LAG: &str = "module.runtime.revision.lag";
 pub const REVISION_INVALID: &str = "module.runtime.revision.invalid";
+pub const REVISION_OBSERVER_UNAVAILABLE: &str = "module.runtime.revision_observer_unavailable";
 pub const SNAPSHOT_INVALID: &str = "module.runtime.snapshot.invalid";
 pub const BUILD_PROVENANCE: &str = "module.runtime.build.provenance";
 pub const RUNTIME_OFFLINE: &str = "module.runtime.offline_unavailable";
@@ -60,6 +62,7 @@ pub const OPERATION_INSPECTED: &str = "module.operation.inspected";
 /// Offline runtime-artifact outcomes. These report admission metadata only;
 /// none imply a loaded module, callable capability, or active route.
 pub const ARTIFACT_PREFLIGHTED: &str = "module.artifact.preflighted";
+pub const ARTIFACT_PACKED: &str = "module.artifact.packed";
 pub const ARTIFACT_ADDED: &str = "module.artifact.added";
 pub const ARTIFACT_DISABLED_INSPECTED: &str = "module.artifact.disabled_inspected";
 pub const CAPABILITY_INSPECTED: &str = "module.capability.inspected";
@@ -90,8 +93,10 @@ mod tests {
             super::MODULE_UNOBSERVED,
             super::MODULE_ACTIVE,
             super::MODULE_STARTUP_FAILED,
+            super::RECONCILIATION_FAILED,
             super::REVISION_LAG,
             super::REVISION_INVALID,
+            super::REVISION_OBSERVER_UNAVAILABLE,
             super::SNAPSHOT_INVALID,
             super::BUILD_PROVENANCE,
             super::RUNTIME_OFFLINE,
@@ -123,6 +128,7 @@ mod tests {
             super::OPERATION_ACCEPTED,
             super::OPERATION_INSPECTED,
             super::ARTIFACT_PREFLIGHTED,
+            super::ARTIFACT_PACKED,
             super::ARTIFACT_ADDED,
             super::ARTIFACT_DISABLED_INSPECTED,
             super::CAPABILITY_INSPECTED,

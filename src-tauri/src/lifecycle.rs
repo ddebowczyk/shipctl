@@ -12,7 +12,6 @@ use shipctl_core::message_bus::{
     diagnose_message_runtime, MessageModuleInspection, MessageRuntimeInspection,
 };
 use shipctl_core::module_control::agent::AgentCapabilityService;
-use shipctl_core::module_control::codes::MUTATION_UNAVAILABLE;
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::scheduler::{SchedulerControlError, SchedulerService};
 use shipctl_core::state::archive::{StateArchiveInspection, StateArchiveService};
@@ -108,10 +107,25 @@ impl ControlHandler for TauriControlHandler {
             ModuleCommand::Diagnose { module_id } => Ok(ControlStream::result(
                 ControlResponseResult::ModuleDiagnostics(service.diagnose_module(&module_id)?),
             )),
-            ModuleCommand::Lifecycle { .. } => Err(ControlError::new(
-                MUTATION_UNAVAILABLE,
-                "Runtime module mutation is disabled until the reconciler is installed",
-            )),
+            ModuleCommand::Lifecycle {
+                module_id,
+                kind,
+                target_registry_revision,
+                artifact_content_digest,
+            } => {
+                let operation = service.transition_module(
+                    &module_id,
+                    kind,
+                    target_registry_revision,
+                    artifact_content_digest.as_deref(),
+                )?;
+                Ok(ControlStream {
+                    result: ControlResponseResult::ModuleOperation(operation.clone()),
+                    events: vec![
+                        shipctl_core::instance::ControlEventPayload::ModuleOperation(operation),
+                    ],
+                })
+            }
         }
     }
 

@@ -4,41 +4,9 @@ id: semantic-terminal
 frontend:
   package: "@shipctl/module-semantic-terminal"
   path: modules/semantic-terminal/frontend
-  composition_symbol: semanticTerminalModule
-backend:
-  crate: tauri-plugin-shipctl-semantic-terminal
-  path: modules/semantic-terminal/backend
-  cargo_feature: semantic-terminal-module
-  dependency_alias: shipctl-module-semantic-terminal
-  install: >-
-    shipctl_module_semantic_terminal_host::install(
-      builder,
-      terminals.clone()
-    )
-  host:
-    crate: shipctl-module-semantic-terminal-host
-    path: modules/semantic-terminal/host
-    dependency_alias: shipctl-module-semantic-terminal-host
-tauri:
-  capability_identifier: semantic-terminal
-  permissions:
-    - shipctl-semantic-terminal:allow-get-semantic-terminal-snapshot
-    - shipctl-semantic-terminal:allow-attach-semantic-terminal
-    - shipctl-semantic-terminal:allow-credit-semantic-terminal-screen
-    - shipctl-semantic-terminal:allow-detach-semantic-terminal
-    - shipctl-semantic-terminal:allow-resize-semantic-terminal
-    - shipctl-semantic-terminal:allow-input-semantic-terminal
-    - shipctl-semantic-terminal:allow-history-semantic-terminal
-    - shipctl-semantic-terminal:allow-anchor-semantic-terminal
-    - shipctl-semantic-terminal:allow-resolve-semantic-terminal-anchor
-    - shipctl-semantic-terminal:allow-release-semantic-terminal-anchor
-    - shipctl-semantic-terminal:allow-select-semantic-terminal
-    - shipctl-semantic-terminal:allow-is-semantic-terminal-paste-safe
-    - shipctl-semantic-terminal:allow-get-semantic-terminal-publication-stats
-    - shipctl-semantic-terminal:allow-get-semantic-terminal-app-memory
-profile: ops/modularity/profiles/semantic-terminal-disabled/tauri.conf.json
+  delivery: runtime-artifact
+  artifact: modules/semantic-terminal/artifact
+profile: null
 tests:
   frontend: modules/semantic-terminal/frontend/tests
-  backend: >-
-    cargo test --manifest-path modules/semantic-terminal/core/Cargo.toml &&
-    cargo test --manifest-path modules/semantic-terminal/backend/Cargo.toml
+  backend: null

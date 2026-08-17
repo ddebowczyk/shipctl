@@ -13,18 +13,25 @@ service and activation contracts, a trusted lifecycle registry, a Tauri-free
 test host, request/event/stream test controls, and an import ratchet now exist.
 Capability migrations are in progress. An exact ledger contains the existing
 non-platform Tauri imports; any new non-platform Tauri import fails the boundary
-check. Ports, Todos, Git, and Skills now consume activation-scoped semantic
-services through trusted platform adapters. Their direct Tauri clients and
-dependencies are gone. Usage now consumes the semantic Usage Sources service;
-its direct Tauri client and dependency are gone. Assistant Pi credential writes
-also use the semantic Credential Store service; other Assistant operations
-remain on the legacy client. Usage settings and Commands saved commands now use
+check. Ports, Todos, Git, Skills, Semantic Terminal, Usage, and Assistants have
+completed native provider extraction: their Rust module crates, Cargo features,
+plugin registrations, and ACL projections are deleted, while their TypeScript
+feature modules use permanent native core providers through private adapters.
+Skills supplies its
+catalog and Markdown from TypeScript to a generic native installation
+capability. Semantic Terminal keeps its parser and activation-scoped native
+authority in Tauri-free core while its TypeScript module owns presentation and
+interaction policy. Their direct module Tauri clients and dependencies are
+gone. Usage consumes the semantic Usage Sources service; its direct Tauri
+client and dependency are gone. Assistant launch, recovery, configuration, and
+credential operations use the Assistant Launch and Credential Store services.
+Usage settings and Commands saved commands now use
 the Plugin Data service. The native Usage host reads its owned settings through
 the same durable store. The former broad global and project data host ports are
 deleted. Typed Messages now resolves through `shipctl.messages@1`; the optional
 parallel `ModuleHost.messages` path is deleted, and activation disposal removes
 frontend handlers immediately. The legacy-import ledger has fallen from 24
-entries to 17. Scheduler is now exposed as `shipctl.scheduler@1`: Usage declares
+entries to 16. Scheduler is now exposed as `shipctl.scheduler@1`: Usage declares
 a typed cron target, while the native host owns clocks, persistence, target
 preflight, delivery observations, cancellation, and activation cleanup. The
 old browser interval scheduler is deleted.
@@ -33,10 +40,37 @@ semantic terminal presentations receive this service through their exact
 module activation instead of receiving the trusted raw-terminal host port.
 The thin presentation uses activation-owned byte attachments, explicit stream
 credit and acknowledgement, attachment-owned input and resize, and ordered
-key and paste requests. The semantic presentation remains on its separate
-screen protocol until the dependent semantic-terminal capability slice moves
-that protocol; its direct Tauri client is not part of the raw PTY session
-contract.
+key and paste requests. The semantic presentation uses its separate public
+screen protocol through an attributed private adapter. Its direct module Tauri
+client is deleted; the raw PTY session contract remains separate.
+The immutable artifact foundation is also implemented. Native admission checks
+closed manifests, complete content digests, compatibility, and runtime
+declarations before activation. The frontend loader supplies host singleton
+identities and activates admitted code through the same Cordis lifecycle used
+by built-ins. `commands`, `ports`, `todos`, `git`, `skills`, `thin-terminal`,
+`semantic-terminal`, `assistants`, and `usage` are cut over: the app seeds their
+artifacts, loads them
+by digest, and has no static host import or root package dependency for these
+modules. Skills remains DOM-free and declares only the public Skill
+Installation service; its project state is a render cache, not a durable Plugin
+Data record. Thin Terminal supplies the first artifact-owned stylesheet and
+declares only Terminal Sessions plus its three attachment grants. Semantic
+Terminal declares Terminal Sessions, Semantic Terminals, its six grants, and
+one terminal presentation. Neither terminal has a static host import.
+Assistants declares Assistant Launch, Credential Store, Processes, and Terminal
+Sessions, its six grants, and one compound launcher panel. It has no static host
+import or root package dependency.
+Usage declares Usage Sources, Plugin Data, Messages, and Scheduler, its exact
+nine grants, and six compound contributions. Its stylesheet, global surface,
+navigation, sidebar, settings view, schedule, and message graph are owned by the
+artifact. It has no static host import or root package dependency. No feature
+module remains in the compile-time frontend profile.
+Phase F live reconciliation is complete. Installed artifact revisions now
+drive private Cordis candidates, atomic publication, last-good recovery,
+structured operation inspection, and ordered disposal without a webview
+restart. A packaged proof preserves running Thin and Semantic terminals across
+live enable and remove, then confirms cold-start parity from the durable removal
+tombstone. Phase G workspace closure remains.
 
 The source architecture decision is the ignored working note at
 `docs/plans/terget-4-layered-architecture.md`. This tracked document set is

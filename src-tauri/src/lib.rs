@@ -15,6 +15,9 @@ use std::sync::Arc;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
+use shipctl_core::assistant_launch::{AssistantLaunchService, AssistantSnapshotProvider};
+use shipctl_core::credentials::CredentialStoreService;
+use shipctl_core::git::GitService;
 use shipctl_core::instance::{
     ControlServer, InstanceContext, InstanceLaunchOptions, InstanceLeases,
 };
@@ -26,9 +29,13 @@ use shipctl_core::message_bus::RuntimeMessageBus;
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::module_control::registry::ModuleRegistrySnapshotProvider;
 use shipctl_core::plugin_data::PluginDataService;
+use shipctl_core::processes::ProcessesService;
+use shipctl_core::project_documents::ProjectDocumentsService;
 use shipctl_core::scheduler::{
     purge_stale_lease_sources, SchedulerLeaseService, SchedulerService, SchedulerSnapshotProvider,
 };
+use shipctl_core::semantic_terminal::SemanticTerminalService;
+use shipctl_core::skill_installation::SkillInstallationService;
 use shipctl_core::state::archive::StateArchiveService;
 use shipctl_core::state::providers::{
     LegacyStateSnapshotProvider, PluginDataSnapshotProvider, UiSnapshotProvider,
@@ -37,6 +44,7 @@ use shipctl_core::state::providers::{
 use shipctl_core::state::ui::UiStateStore;
 use shipctl_core::state::workspace_layout::WorkspaceLayoutStore;
 use shipctl_core::terminal_host::TerminalService;
+use shipctl_core::usage_sources::{UsageSnapshotProvider, UsageSourcesService};
 use shipctl_core::workspace::manager::WorkspaceManager;
 use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
 use shipctl_tauri_adapter::{GitWatcher, MessageBusBridgeService};
@@ -50,7 +58,6 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     let _ = fix_path_env::fix();
 
     let load_state = options.load_state.clone();
-    let reconcile_external_sources = load_state.is_none();
     let context = InstanceContext::resolve(options, build_info::APP_VERSION)?;
     // Every instance writes to one shared log, so each record has to name the
     // instance that produced it or a second UI is unreadable.
@@ -89,6 +96,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     }
 
     modules::inventory::seed_current_build(&paths)?;
+    modules::seed_bundled_artifacts(&paths, context.instance_id, durable_writes.clone())?;
     let module_control = ModuleControlService::initialize(paths.clone(), context.instance_id)
         .map_err(|error| error.to_string())?;
 
@@ -102,8 +110,9 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         let mut settings = workspace.load_terminal_settings().unwrap_or_default();
         shipctl_core::workspace::config::normalize_terminal_settings(&mut settings);
         let mut drivers = shipctl_module_api::TerminalDriverRegistry::default();
-        #[cfg(feature = "semantic-terminal-module")]
-        shipctl_module_semantic_terminal_host::register_native_driver(&mut drivers);
+        drivers
+            .register(shipctl_core::semantic_terminal::native_factory())
+            .expect("the semantic terminal driver registers once");
         drivers
             .register_browser_driver(shipctl_module_api::TerminalDriverDescriptor {
                 id: shipctl_module_api::TerminalDriverId::new("thin-terminal")
@@ -119,6 +128,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
             drivers,
         )
     };
+    let semantic_terminals = SemanticTerminalService::terminal_host(terminals.clone());
     let ui_state = UiStateStore::new_with_barrier(paths.ui_state.clone(), durable_writes.clone());
     let workspace_layouts = WorkspaceLayoutStore::new_with_barrier(
         paths.workspace_layouts.clone(),
@@ -129,6 +139,22 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         workspace.clone(),
         durable_writes.clone(),
     );
+    let processes = ProcessesService::system();
+    let git = GitService::workspace(workspace.clone());
+    let project_documents = ProjectDocumentsService::workspace(workspace.clone());
+    let skill_installation = SkillInstallationService::workspace(workspace.clone());
+    let usage_sources = UsageSourcesService::open_at(&paths.usage_database, durable_writes.clone())
+        .unwrap_or_else(|error| {
+            eprintln!("Usage source database failed to open ({error}), using in-memory fallback");
+            UsageSourcesService::open_in_memory(durable_writes.clone())
+        });
+    let assistant_launch = AssistantLaunchService::new(
+        terminals.clone(),
+        paths.assistant_sessions.clone(),
+        durable_writes.clone(),
+        build_info::APP_VERSION.to_string(),
+    );
+    let credentials = CredentialStoreService::new();
     let message_bus = RuntimeMessageBus::new(context.clone());
     let agent_capabilities = shipctl_core::module_control::agent::AgentCapabilityService::new(
         module_control.clone(),
@@ -150,202 +176,275 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     let scheduler_startup = scheduler.clone();
     let control_context = context.clone();
     let control_leases = leases.clone();
-    let app = modules::install(
-        builder,
-        terminals.clone(),
-        workspace.clone(),
-        plugin_data.clone(),
-        paths.clone(),
-        durable_writes,
-        message_bridges.clone(),
-    )
-    .manage(terminals)
-    .manage(workspace)
-    .manage(plugin_data)
-    .manage(ui_state)
-    .manage(workspace_layouts)
-    .manage(state_archive)
-    .manage(module_control)
-    .manage(agent_capabilities)
-    .manage(message_bus)
-    .manage(message_bridges)
-    .manage(scheduler)
-    .manage(scheduler_leases)
-    .manage(paths)
-    .manage(context)
-    .setup(move |app| {
-        // The static config intentionally grants no filesystem location. This
-        // per-instance scope is the sole directory the asset protocol may
-        // serve, so runtime module artifacts can change without widening the
-        // webview's access to the rest of the state profile.
-        app.state::<tauri::scope::Scopes>()
-            .allow_directory(&module_artifact_root, true)?;
+    let app = modules::install(builder)
+        .manage(terminals)
+        .manage(semantic_terminals)
+        .manage(workspace)
+        .manage(plugin_data)
+        .manage(processes)
+        .manage(git)
+        .manage(project_documents)
+        .manage(skill_installation)
+        .manage(usage_sources)
+        .manage(assistant_launch)
+        .manage(credentials)
+        .manage(ui_state)
+        .manage(workspace_layouts)
+        .manage(state_archive)
+        .manage(module_control)
+        .manage(shipctl_tauri_adapter::module_control::ModuleRegistryRevisionObservers::default())
+        .manage(agent_capabilities)
+        .manage(message_bus)
+        .manage(message_bridges)
+        .manage(scheduler)
+        .manage(scheduler_leases)
+        .manage(paths)
+        .manage(context)
+        .setup(move |app| {
+            // The static config intentionally grants no filesystem location. This
+            // per-instance scope is the sole directory the asset protocol may
+            // serve, so runtime module artifacts can change without widening the
+            // webview's access to the rest of the state profile.
+            app.state::<tauri::scope::Scopes>()
+                .allow_directory(&module_artifact_root, true)?;
 
-        // The frontend opens its bridge after setup. The scheduler retains its
-        // initial candidate until that first route publication so it never
-        // accepts schedules against generation zero.
-        tauri::async_runtime::spawn(async move {
-            scheduler_startup.start_initial_route_refresh();
-        });
+            // The frontend opens its bridge after setup. The scheduler retains its
+            // initial candidate until that first route publication so it never
+            // accepts schedules against generation zero.
+            tauri::async_runtime::spawn(async move {
+                scheduler_startup.start_initial_route_refresh();
+            });
 
-        // Run migration from old project-based config
-        let workspace = app.state::<WorkspaceManager>();
-        if let Err(e) = workspace.migrate() {
-            eprintln!("Migration warning: {e}");
-        }
-        if let Err(e) = workspace.backfill_global_config_defaults() {
-            eprintln!("Config backfill warning: {e}");
-        }
-
-        // Start file system watcher for git status updates
-        app.manage(GitWatcher::new(app.handle().clone()));
-
-        // Release builds need the same file-backed diagnostics as development
-        // builds. Logging is best-effort so an unavailable log directory can
-        // never become another startup failure.
-        //
-        // There is deliberately no stdout target. This is a desktop
-        // application: its diagnostics belong in a file that `shipctl logs`
-        // can query, not on the terminal of whatever happened to start it.
-        //
-        // Records are JSON Lines so the file is directly usable with `jq`,
-        // with no parsing step and no CLI in the way.
-        let log_directory = app_log_dir(&app.config().identifier);
-        refuse_incompatible_logs(log_directory.as_deref())?;
-        if let Err(error) = app.handle().plugin(
-            tauri_plugin_log::Builder::default()
-                .level(configured_log_level())
-                .format(move |callback, message, record| {
-                    let line = LogRecord::new(
-                        now_timestamp(),
-                        record.level().into(),
-                        record.target(),
-                        Some(logging_instance.as_str()),
-                        &message.to_string(),
-                    )
-                    .to_line()
-                    .unwrap_or_default();
-                    callback.finish(format_args!("{line}"))
-                })
-                .targets([
-                    log_target(log_directory.as_deref(), LOG_FILE_STEM)
-                        .filter(|metadata| !is_notice_log_target(metadata.target())),
-                    log_target(log_directory.as_deref(), NOTICE_LOG_FILE_STEM)
-                        .filter(|metadata| is_notice_log_target(metadata.target())),
-                ])
-                .build(),
-        ) {
-            eprintln!("Logging warning: {error}");
-        }
-        log::info!(
-            target: "shipctl::startup",
-            "Shipctl UI starting: version={}, build_id={}",
-            build_info::APP_VERSION,
-            build_info::BUILD_ID,
-        );
-
-        menu::setup(app.handle())?;
-
-        let control = ControlServer::start(
-            control_context.clone(),
-            control_leases.clone(),
-            Arc::new(lifecycle::TauriControlHandler::new(app.handle().clone())),
-        )
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-        app.manage(control);
-        modules::start_background_tasks(app.handle(), reconcile_external_sources);
-        Ok(())
-    })
-    .on_window_event(|window, event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
-            let terminals = window.state::<TerminalService>();
-            if terminals.is_shutting_down() {
-                return;
+            // Run migration from old project-based config
+            let workspace = app.state::<WorkspaceManager>();
+            if let Err(e) = workspace.migrate() {
+                eprintln!("Migration warning: {e}");
             }
-            let count = terminals.active_count();
-            // Never let a window-close bypass the confirmation dialog.
-            // With no PTYs it is still easy to lose the active workspace
-            // by accidentally pressing Cmd+Q or the red window button.
-            api.prevent_close();
-            let _ = window.emit("quit-requested", count);
-        }
-    })
-    .invoke_handler(tauri::generate_handler![
-        shipctl_tauri_adapter::workspace::get_canvas_adapter,
-        shipctl_tauri_adapter::state::load_workspace_layout,
-        shipctl_tauri_adapter::state::save_workspace_layout,
-        shipctl_tauri_adapter::projects::list_repos,
-        shipctl_tauri_adapter::projects::register_repo,
-        shipctl_tauri_adapter::projects::unregister_repo,
-        shipctl_tauri_adapter::projects::load_workspace,
-        shipctl_tauri_adapter::projects::save_workspace,
-        shipctl_tauri_adapter::projects::list_groups,
-        shipctl_tauri_adapter::projects::create_group,
-        shipctl_tauri_adapter::projects::rename_group,
-        shipctl_tauri_adapter::projects::delete_group,
-        shipctl_tauri_adapter::projects::move_repo_to_group,
-        shipctl_tauri_adapter::projects::watch_repo,
-        shipctl_tauri_adapter::projects::unwatch_repo,
-        shipctl_tauri_adapter::settings::get_editor_settings,
-        shipctl_tauri_adapter::settings::save_editor_settings,
-        shipctl_tauri_adapter::settings::get_project_settings,
-        shipctl_tauri_adapter::settings::save_project_settings,
-        shipctl_tauri_adapter::settings::get_keybinding_settings,
-        shipctl_tauri_adapter::settings::save_keybinding_settings,
-        shipctl_tauri_adapter::settings::get_sidebar_settings,
-        shipctl_tauri_adapter::settings::open_in_editor,
-        shipctl_tauri_adapter::terminal_host::get_terminal_settings,
-        shipctl_tauri_adapter::terminal_host::save_terminal_settings,
-        shipctl_tauri_adapter::terminal_host::get_memory_stats,
-        shipctl_tauri_adapter::terminal_host::spawn_terminal,
-        shipctl_tauri_adapter::terminal_host::list_terminals,
-        shipctl_tauri_adapter::terminal_host::get_terminal,
-        shipctl_tauri_adapter::terminal_host::get_terminal_publication_stats,
-        shipctl_tauri_adapter::terminal_host::attach_raw_terminal,
-        shipctl_tauri_adapter::terminal_host::detach_terminal,
-        shipctl_tauri_adapter::terminal_host::subscribe_terminal_registry,
-        shipctl_tauri_adapter::terminal_host::unsubscribe_terminal_registry,
-        shipctl_tauri_adapter::terminal_host::write_terminal,
-        shipctl_tauri_adapter::terminal_host::resize_terminal,
-        shipctl_tauri_adapter::terminal_host::close_terminal,
-        shipctl_tauri_adapter::terminal_host::update_terminal_color_theme,
-        shipctl_tauri_adapter::terminal_host::update_terminal_metadata,
-        shipctl_tauri_adapter::appearance::list_monospace_families,
-        shipctl_tauri_adapter::appearance::load_font_family,
-        shipctl_tauri_adapter::platform::get_username,
-        shipctl_tauri_adapter::platform::get_home_directory,
-        shipctl_tauri_adapter::platform::get_default_shell,
-        shipctl_tauri_adapter::platform::get_computer_name,
-        shipctl_tauri_adapter::platform::check_command_exists,
-        shipctl_tauri_adapter::platform::reveal_in_finder,
-        shipctl_tauri_adapter::platform::open_url,
-        shipctl_tauri_adapter::plugin_data::read_plugin_data_record,
-        shipctl_tauri_adapter::plugin_data::write_plugin_data_record,
-        shipctl_tauri_adapter::plugin_data::migrate_plugin_data_records,
-        shipctl_tauri_adapter::instance::inspect_instance,
-        shipctl_tauri_adapter::state::get_ui_state,
-        shipctl_tauri_adapter::state::set_last_repo_path,
-        shipctl_tauri_adapter::state::save_appearance_state,
-        shipctl_tauri_adapter::module_control::publish_module_runtime_snapshot,
-        shipctl_tauri_adapter::module_control::list_startup_modules,
-        shipctl_tauri_adapter::message_bus::open_runtime_message_bridge,
-        shipctl_tauri_adapter::message_bus::reconcile_runtime_message_bridge,
-        shipctl_tauri_adapter::message_bus::close_runtime_message_bridge,
-        shipctl_tauri_adapter::message_bus::send_runtime_message,
-        shipctl_tauri_adapter::message_bus::publish_runtime_message,
-        shipctl_tauri_adapter::message_bus::request_runtime_message,
-        shipctl_tauri_adapter::message_bus::reply_runtime_message,
-        shipctl_tauri_adapter::message_bus::report_runtime_message_failure,
-        shipctl_tauri_adapter::message_bus::inspect_runtime_messages,
-        shipctl_tauri_adapter::scheduler::register_semantic_schedule,
-        shipctl_tauri_adapter::scheduler::inspect_semantic_schedules,
-        shipctl_tauri_adapter::scheduler::cancel_semantic_schedule,
-        shipctl_tauri_adapter::scheduler::observe_semantic_schedule_deliveries,
-        shipctl_tauri_adapter::scheduler::stop_semantic_schedule_observer,
-        lifecycle::shutdown_and_quit,
-    ])
-    .build(tauri::generate_context!())
-    .map_err(|error| format!("error while building Tauri application: {error}"))?;
+            if let Err(e) = workspace.backfill_global_config_defaults() {
+                eprintln!("Config backfill warning: {e}");
+            }
+
+            // Start file system watcher for git status updates
+            app.manage(GitWatcher::new(app.handle().clone()));
+
+            // Release builds need the same file-backed diagnostics as development
+            // builds. Logging is best-effort so an unavailable log directory can
+            // never become another startup failure.
+            //
+            // There is deliberately no stdout target. This is a desktop
+            // application: its diagnostics belong in a file that `shipctl logs`
+            // can query, not on the terminal of whatever happened to start it.
+            //
+            // Records are JSON Lines so the file is directly usable with `jq`,
+            // with no parsing step and no CLI in the way.
+            let log_directory = app_log_dir(&app.config().identifier);
+            refuse_incompatible_logs(log_directory.as_deref())?;
+            if let Err(error) = app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(configured_log_level())
+                    .format(move |callback, message, record| {
+                        let line = LogRecord::new(
+                            now_timestamp(),
+                            record.level().into(),
+                            record.target(),
+                            Some(logging_instance.as_str()),
+                            &message.to_string(),
+                        )
+                        .to_line()
+                        .unwrap_or_default();
+                        callback.finish(format_args!("{line}"))
+                    })
+                    .targets([
+                        log_target(log_directory.as_deref(), LOG_FILE_STEM)
+                            .filter(|metadata| !is_notice_log_target(metadata.target())),
+                        log_target(log_directory.as_deref(), NOTICE_LOG_FILE_STEM)
+                            .filter(|metadata| is_notice_log_target(metadata.target())),
+                    ])
+                    .build(),
+            ) {
+                eprintln!("Logging warning: {error}");
+            }
+            log::info!(
+                target: "shipctl::startup",
+                "Shipctl UI starting: version={}, build_id={}",
+                build_info::APP_VERSION,
+                build_info::BUILD_ID,
+            );
+
+            menu::setup(app.handle())?;
+
+            let control = ControlServer::start(
+                control_context.clone(),
+                control_leases.clone(),
+                Arc::new(lifecycle::TauriControlHandler::new(app.handle().clone())),
+            )
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            app.manage(control);
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let terminals = window.state::<TerminalService>();
+                if terminals.is_shutting_down() {
+                    return;
+                }
+                let count = terminals.active_count();
+                // Never let a window-close bypass the confirmation dialog.
+                // With no PTYs it is still easy to lose the active workspace
+                // by accidentally pressing Cmd+Q or the red window button.
+                api.prevent_close();
+                let _ = window.emit("quit-requested", count);
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            shipctl_tauri_adapter::workspace::get_canvas_adapter,
+            shipctl_tauri_adapter::state::load_workspace_layout,
+            shipctl_tauri_adapter::state::save_workspace_layout,
+            shipctl_tauri_adapter::projects::list_repos,
+            shipctl_tauri_adapter::projects::register_repo,
+            shipctl_tauri_adapter::projects::unregister_repo,
+            shipctl_tauri_adapter::projects::load_workspace,
+            shipctl_tauri_adapter::projects::save_workspace,
+            shipctl_tauri_adapter::projects::list_groups,
+            shipctl_tauri_adapter::projects::create_group,
+            shipctl_tauri_adapter::projects::rename_group,
+            shipctl_tauri_adapter::projects::delete_group,
+            shipctl_tauri_adapter::projects::move_repo_to_group,
+            shipctl_tauri_adapter::projects::watch_repo,
+            shipctl_tauri_adapter::projects::unwatch_repo,
+            shipctl_tauri_adapter::settings::get_editor_settings,
+            shipctl_tauri_adapter::settings::save_editor_settings,
+            shipctl_tauri_adapter::settings::get_project_settings,
+            shipctl_tauri_adapter::settings::save_project_settings,
+            shipctl_tauri_adapter::settings::get_keybinding_settings,
+            shipctl_tauri_adapter::settings::save_keybinding_settings,
+            shipctl_tauri_adapter::settings::get_sidebar_settings,
+            shipctl_tauri_adapter::settings::open_in_editor,
+            shipctl_tauri_adapter::terminal_host::get_terminal_settings,
+            shipctl_tauri_adapter::terminal_host::save_terminal_settings,
+            shipctl_tauri_adapter::terminal_host::get_memory_stats,
+            shipctl_tauri_adapter::terminal_host::spawn_terminal,
+            shipctl_tauri_adapter::terminal_host::list_terminals,
+            shipctl_tauri_adapter::terminal_host::get_terminal,
+            shipctl_tauri_adapter::terminal_host::get_terminal_publication_stats,
+            shipctl_tauri_adapter::terminal_host::attach_raw_terminal,
+            shipctl_tauri_adapter::terminal_host::detach_terminal,
+            shipctl_tauri_adapter::terminal_host::subscribe_terminal_registry,
+            shipctl_tauri_adapter::terminal_host::unsubscribe_terminal_registry,
+            shipctl_tauri_adapter::terminal_host::write_terminal,
+            shipctl_tauri_adapter::terminal_host::resize_terminal,
+            shipctl_tauri_adapter::terminal_host::close_terminal,
+            shipctl_tauri_adapter::terminal_host::update_terminal_color_theme,
+            shipctl_tauri_adapter::terminal_host::update_terminal_metadata,
+            shipctl_tauri_adapter::appearance::list_monospace_families,
+            shipctl_tauri_adapter::appearance::load_font_family,
+            shipctl_tauri_adapter::platform::get_username,
+            shipctl_tauri_adapter::platform::get_home_directory,
+            shipctl_tauri_adapter::platform::get_default_shell,
+            shipctl_tauri_adapter::platform::get_computer_name,
+            shipctl_tauri_adapter::platform::check_command_exists,
+            shipctl_tauri_adapter::platform::reveal_in_finder,
+            shipctl_tauri_adapter::platform::open_url,
+            shipctl_tauri_adapter::plugin_data::read_plugin_data_record,
+            shipctl_tauri_adapter::plugin_data::write_plugin_data_record,
+            shipctl_tauri_adapter::plugin_data::migrate_plugin_data_records,
+            shipctl_tauri_adapter::processes::inspect_listening_processes,
+            shipctl_tauri_adapter::processes::terminate_inspected_process,
+            shipctl_tauri_adapter::processes::inspect_process_command,
+            shipctl_tauri_adapter::processes::release_process_inspections,
+            shipctl_tauri_adapter::git::git_is_repository,
+            shipctl_tauri_adapter::git::git_initialize_repository,
+            shipctl_tauri_adapter::git::git_current_branch,
+            shipctl_tauri_adapter::git::git_list_branches,
+            shipctl_tauri_adapter::git::git_push_branch,
+            shipctl_tauri_adapter::git::git_list_worktrees,
+            shipctl_tauri_adapter::git::git_create_worktree,
+            shipctl_tauri_adapter::git::git_inspect_status,
+            shipctl_tauri_adapter::git::git_list_changed_files,
+            shipctl_tauri_adapter::git::git_read_file_diff,
+            shipctl_tauri_adapter::git::git_read_file,
+            shipctl_tauri_adapter::git::git_list_files,
+            shipctl_tauri_adapter::git::git_stage_file,
+            shipctl_tauri_adapter::git::git_stage_all,
+            shipctl_tauri_adapter::git::git_commit,
+            shipctl_tauri_adapter::git::git_unstage_file,
+            shipctl_tauri_adapter::git::git_unstage_all,
+            shipctl_tauri_adapter::git::git_switch_branch,
+            shipctl_tauri_adapter::git::git_create_branch,
+            shipctl_tauri_adapter::git::git_diff_stats,
+            shipctl_tauri_adapter::git::release_git_activation,
+            shipctl_tauri_adapter::project_documents::discover_project_documents,
+            shipctl_tauri_adapter::project_documents::read_project_document,
+            shipctl_tauri_adapter::project_documents::write_project_document,
+            shipctl_tauri_adapter::project_documents::release_project_documents_activation,
+            shipctl_tauri_adapter::skill_installation::inspect_skill_installations,
+            shipctl_tauri_adapter::skill_installation::install_skill_source,
+            shipctl_tauri_adapter::skill_installation::remove_skill_installation,
+            shipctl_tauri_adapter::skill_installation::release_skill_installation_activation,
+            shipctl_tauri_adapter::usage_sources::inspect_usage_sources,
+            shipctl_tauri_adapter::usage_sources::refresh_usage_sources,
+            shipctl_tauri_adapter::usage_sources::release_usage_sources_activation,
+            shipctl_tauri_adapter::assistant_launch::start_assistant_session,
+            shipctl_tauri_adapter::assistant_launch::resume_assistant_session,
+            shipctl_tauri_adapter::assistant_launch::refresh_assistant_session_identity,
+            shipctl_tauri_adapter::assistant_launch::mark_assistant_session_identity_failed,
+            shipctl_tauri_adapter::assistant_launch::record_assistant_session_placement,
+            shipctl_tauri_adapter::assistant_launch::record_assistant_session_label,
+            shipctl_tauri_adapter::assistant_launch::discard_assistant_session,
+            shipctl_tauri_adapter::assistant_launch::rearm_assistant_session,
+            shipctl_tauri_adapter::assistant_launch::inspect_restorable_assistant_sessions,
+            shipctl_tauri_adapter::assistant_launch::take_assistant_session_startup_warning,
+            shipctl_tauri_adapter::assistant_launch::prepare_assistant_sessions_for_shutdown,
+            shipctl_tauri_adapter::assistant_launch::inspect_assistant_models,
+            shipctl_tauri_adapter::assistant_launch::inspect_assistant_provider_configuration,
+            shipctl_tauri_adapter::assistant_launch::save_assistant_provider_configuration,
+            shipctl_tauri_adapter::assistant_launch::release_assistant_launch_activation,
+            shipctl_tauri_adapter::credentials::inspect_credential,
+            shipctl_tauri_adapter::credentials::save_credential,
+            shipctl_tauri_adapter::credentials::delete_credential,
+            shipctl_tauri_adapter::credentials::release_credential_store_activation,
+            shipctl_tauri_adapter::semantic_terminal::get_semantic_terminal_snapshot,
+            shipctl_tauri_adapter::semantic_terminal::attach_semantic_terminal,
+            shipctl_tauri_adapter::semantic_terminal::credit_semantic_terminal_screen,
+            shipctl_tauri_adapter::semantic_terminal::detach_semantic_terminal,
+            shipctl_tauri_adapter::semantic_terminal::resize_semantic_terminal,
+            shipctl_tauri_adapter::semantic_terminal::input_semantic_terminal,
+            shipctl_tauri_adapter::semantic_terminal::history_semantic_terminal,
+            shipctl_tauri_adapter::semantic_terminal::anchor_semantic_terminal,
+            shipctl_tauri_adapter::semantic_terminal::resolve_semantic_terminal_anchor,
+            shipctl_tauri_adapter::semantic_terminal::release_semantic_terminal_anchor,
+            shipctl_tauri_adapter::semantic_terminal::select_semantic_terminal,
+            shipctl_tauri_adapter::semantic_terminal::is_semantic_terminal_paste_safe,
+            shipctl_tauri_adapter::semantic_terminal::get_semantic_terminal_publication_stats,
+            shipctl_tauri_adapter::semantic_terminal::get_semantic_terminal_app_memory,
+            shipctl_tauri_adapter::semantic_terminal::release_semantic_terminal_activation,
+            shipctl_tauri_adapter::instance::inspect_instance,
+            shipctl_tauri_adapter::state::get_ui_state,
+            shipctl_tauri_adapter::state::set_last_repo_path,
+            shipctl_tauri_adapter::state::save_appearance_state,
+            shipctl_tauri_adapter::module_control::publish_module_runtime_snapshot,
+            shipctl_tauri_adapter::module_control::list_runtime_modules,
+            shipctl_tauri_adapter::module_control::observe_module_registry_revisions,
+            shipctl_tauri_adapter::module_control::stop_module_registry_revision_observer,
+            shipctl_tauri_adapter::module_control::report_module_reconciliation_failure,
+            shipctl_tauri_adapter::message_bus::open_runtime_message_bridge,
+            shipctl_tauri_adapter::message_bus::reconcile_runtime_message_bridge,
+            shipctl_tauri_adapter::message_bus::close_runtime_message_bridge,
+            shipctl_tauri_adapter::message_bus::send_runtime_message,
+            shipctl_tauri_adapter::message_bus::publish_runtime_message,
+            shipctl_tauri_adapter::message_bus::request_runtime_message,
+            shipctl_tauri_adapter::message_bus::reply_runtime_message,
+            shipctl_tauri_adapter::message_bus::report_runtime_message_failure,
+            shipctl_tauri_adapter::message_bus::inspect_runtime_messages,
+            shipctl_tauri_adapter::scheduler::register_semantic_schedule,
+            shipctl_tauri_adapter::scheduler::inspect_semantic_schedules,
+            shipctl_tauri_adapter::scheduler::cancel_semantic_schedule,
+            shipctl_tauri_adapter::scheduler::observe_semantic_schedule_deliveries,
+            shipctl_tauri_adapter::scheduler::stop_semantic_schedule_observer,
+            lifecycle::shutdown_and_quit,
+        ])
+        .build(tauri::generate_context!())
+        .map_err(|error| format!("error while building Tauri application: {error}"))?;
 
     app.run(|app_handle, event| {
         if let RunEvent::ExitRequested { api, .. } = &event {
@@ -366,7 +465,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
 fn snapshot_providers(
     paths: &shipctl_core::state::paths::ShipctlPaths,
 ) -> Vec<Arc<dyn SnapshotProvider>> {
-    let mut providers: Vec<Arc<dyn SnapshotProvider>> = vec![
+    let providers: Vec<Arc<dyn SnapshotProvider>> = vec![
         Arc::new(WorkspaceSnapshotProvider::new(paths.global_config.clone())),
         Arc::new(LegacyStateSnapshotProvider),
         Arc::new(UiSnapshotProvider::new(paths.ui_state.clone())),
@@ -383,8 +482,11 @@ fn snapshot_providers(
             ),
         ),
         Arc::new(SchedulerSnapshotProvider::new(paths.schedule_root.clone())),
+        Arc::new(UsageSnapshotProvider::new(paths.usage_database.clone())),
+        Arc::new(AssistantSnapshotProvider::new(
+            paths.assistant_sessions.clone(),
+        )),
     ];
-    modules::extend_snapshot_providers(paths, &mut providers);
     providers
 }
 

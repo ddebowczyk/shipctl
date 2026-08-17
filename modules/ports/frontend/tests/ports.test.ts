@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
 
 import type {
+  ListeningProcessInspection,
   ProcessesService,
   ProcessInspectionId,
 } from "@shipctl/module-api";
@@ -22,16 +23,22 @@ let createTestActivationIdentity: typeof import("@shipctl/module-api/testing")["
 let SemanticServiceTestHost: typeof import("@shipctl/module-api/testing")["SemanticServiceTestHost"];
 let processesService: typeof import("@shipctl/module-api")["processesService"];
 
-const fixturePort: PortInfo = {
+const fixtureInspection: ListeningProcessInspection = {
   inspectionId: "inspection-1" as ProcessInspectionId,
   port: 5173,
   processId: 4242,
   name: "node",
   workingDirectory: "/work/alpha",
-  projectName: "alpha",
-  framework: "Vite",
+  commandLine: "vite dev",
+  observedProjectFiles: ["vite.config.ts"],
   uptime: "01:02",
   memoryKilobytes: 2048,
+};
+
+const fixturePort: PortInfo = {
+  ...fixtureInspection,
+  projectName: "alpha",
+  framework: "Vite",
 };
 
 function fakeProcesses(options: Parameters<typeof createFakeProcessesServiceProvider>[0] = {}) {
@@ -81,7 +88,10 @@ test("Ports owns a global surface and navigation contribution", () => {
 
 test("scan preserves occupied results and represents no listeners as an empty success", async () => {
   assert.deepEqual(
-    await portsPanel.scanPorts(fakeProcesses({ inspections: () => [fixturePort] })),
+    await portsPanel.scanPorts(
+      fakeProcesses({ inspections: () => [fixtureInspection] }),
+      ["/work/alpha"],
+    ),
     { status: "ready", ports: [fixturePort] },
   );
   assert.deepEqual(
@@ -102,18 +112,50 @@ test("scan failures become bounded UI error state", async () => {
   );
 });
 
+test("Ports owns filtering, project matching, and framework policy", () => {
+  assert.equal(portsPanel.isDevelopmentProcess("Google Chrome Helper"), false);
+  assert.equal(portsPanel.isDevelopmentProcess("node"), true);
+  assert.equal(
+    portsPanel.matchProject("/work/alpha/apps/web", ["/work", "/work/alpha"]),
+    "alpha",
+  );
+  assert.equal(portsPanel.detectFramework(fixtureInspection), "Vite");
+  assert.equal(
+    portsPanel.detectFramework({
+      ...fixtureInspection,
+      name: "custom",
+      commandLine: "serve",
+      observedProjectFiles: ["Cargo.toml"],
+    }),
+    "Rust",
+  );
+  assert.equal(
+    portsPanel.projectPortInspection(
+      { ...fixtureInspection, name: "Slack Helper" },
+      ["/work/alpha"],
+    ),
+    null,
+  );
+});
+
 test("stop reports success and failure without interpreting process state", async () => {
-  const successProcesses = fakeProcesses({ inspections: () => [fixturePort] });
-  await portsPanel.scanPorts(successProcesses);
+  const successProcesses = fakeProcesses({ inspections: () => [fixtureInspection] });
+  await successProcesses.inspectListeningPorts.execute({
+    projectRootMarkers: [],
+    observedProjectFileNames: [],
+  });
   const success = await portsPanel.stopPort(fixturePort, successProcesses);
   assert.equal(success.status, "stopped");
   assert.equal(success.notice.title, "Process killed");
 
   const deniedProcesses = fakeProcesses({
-    inspections: () => [fixturePort],
+    inspections: () => [fixtureInspection],
     deniedOperations: ["terminate-inspected-process"],
   });
-  await portsPanel.scanPorts(deniedProcesses);
+  await deniedProcesses.inspectListeningPorts.execute({
+    projectRootMarkers: [],
+    observedProjectFileNames: [],
+  });
   const failure = await portsPanel.stopPort(fixturePort, deniedProcesses);
   assert.deepEqual(failure, {
     status: "error",

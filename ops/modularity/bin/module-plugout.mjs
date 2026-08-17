@@ -5,12 +5,7 @@ import {
 import path from "node:path";
 
 export const NATIVE_MODULE_FEATURES = Object.freeze([
-  "todos-module",
-  "ports-module",
-  "skills-module",
-  "git-module",
   "assistants-module",
-  "usage-module",
 ]);
 
 export function removeNativeModuleFeatureFromScripts(packageJson, featureName) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
-import type { ShipctlModule } from "@shipctl/module-api";
+import { terminalDriverId, type ShipctlModule } from "@shipctl/module-api";
 import { createServer, type ViteDevServer } from "vite";
 
 type RuntimeSnapshotModule = typeof import("../moduleRuntimeSnapshot.ts");
@@ -38,24 +38,31 @@ const module: ShipctlModule = {
     schedule: { kind: "startup" },
     run: () => undefined,
   }],
+  terminalPresentations: [{
+    moduleId: "shipctl.fixture",
+    driverId: terminalDriverId("fixture-terminal"),
+    Presentation: () => null,
+  }],
 };
 
 test("host snapshot contains only module identity and declared contribution facts", () => {
-  assert.deepEqual(buildFrontendRuntimeSnapshot([module]), {
+  assert.deepEqual(buildFrontendRuntimeSnapshot({ registryRevision: 7 }, [module]), {
     schemaVersion: 1,
+    registryRevision: 7,
     modules: [{
       moduleId: "shipctl.fixture",
       contributions: [
         { id: "fixture.panel", kind: "panel" },
         { id: "fixture.refresh", kind: "scheduled_task" },
+        { id: "fixture-terminal", kind: "terminal_presentation" },
       ],
     }],
-    startupModules: [],
+    activationOutcomes: [],
   });
 });
 
 test("default snapshot reports the actual compiled frontend profile", () => {
-  const snapshot = buildFrontendRuntimeSnapshot();
+  const snapshot = buildFrontendRuntimeSnapshot({ registryRevision: 0 });
   assert(snapshot.modules.length > 0);
   assert(snapshot.modules.every((entry) => entry.moduleId.startsWith("shipctl.")));
   assert(snapshot.modules.some((entry) => entry.contributions.length > 0));
@@ -80,18 +87,40 @@ test("host snapshot exposes declarative message contributions", () => {
       }],
     },
   };
-  assert.deepEqual(buildFrontendRuntimeSnapshot([withMessages]).modules[0]?.contributions, [
-    { id: "fixture.directed", kind: "message_handler" },
-    { id: "fixture.events", kind: "message_subscription" },
-  ]);
+  assert.deepEqual(
+    buildFrontendRuntimeSnapshot({ registryRevision: 0 }, [withMessages]).modules[0]?.contributions,
+    [
+      { id: "fixture.directed", kind: "message_handler" },
+      { id: "fixture.events", kind: "message_subscription" },
+    ],
+  );
 });
 
 test("host snapshot rejects a contribution claiming another module owner", () => {
   assert.throws(
-    () => buildFrontendRuntimeSnapshot([{
-      ...module,
-      panels: [{ ...module.panels![0], moduleId: "shipctl.other" }],
-    }]),
+    () => buildFrontendRuntimeSnapshot(
+      { registryRevision: 0 },
+      [{
+        ...module,
+        panels: [{ ...module.panels![0], moduleId: "shipctl.other" }],
+      }],
+    ),
+    /belongs to shipctl\.other, not shipctl\.fixture/,
+  );
+});
+
+test("host snapshot rejects a terminal presentation claiming another module owner", () => {
+  assert.throws(
+    () => buildFrontendRuntimeSnapshot(
+      { registryRevision: 0 },
+      [{
+        ...module,
+        terminalPresentations: [{
+          ...module.terminalPresentations![0],
+          moduleId: "shipctl.other",
+        }],
+      }],
+    ),
     /belongs to shipctl\.other, not shipctl\.fixture/,
   );
 });

@@ -12,6 +12,7 @@ interface GlobalSurfaceHostProps {
   readonly contribution: GlobalSurfaceContribution | undefined;
   readonly surfaceId: ContributionId;
   readonly close: () => void;
+  readonly projectPaths: readonly string[];
   readonly services: ModuleHostServices;
   readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
@@ -66,6 +67,7 @@ export default function GlobalSurfaceHost({
   contribution,
   surfaceId,
   close,
+  projectPaths,
   services,
   moduleActivations,
 }: GlobalSurfaceHostProps) {
@@ -117,7 +119,12 @@ export default function GlobalSurfaceHost({
       )}
     >
       <Suspense fallback={<div className="terminal-empty">Loading surface…</div>}>
-        <Surface close={close} activation={activation} services={services} />
+        <Surface
+          close={close}
+          projectPaths={projectPaths}
+          activation={activation}
+          services={services}
+        />
       </Suspense>
     </GlobalSurfaceBoundary>
   );

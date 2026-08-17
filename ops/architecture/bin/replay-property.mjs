@@ -45,8 +45,8 @@ async function replayProptest(evidence) {
   const { stdout } = await exec("cargo", [
     "run",
     "--quiet",
-    "-p",
-    "shipctl-architecture-proptest-replay",
+    "--manifest-path",
+    "ops/architecture/fixtures/proptest-replay/Cargo.toml",
     "--",
     "--seed",
     evidence.campaign.seed,

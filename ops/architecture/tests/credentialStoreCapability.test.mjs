@@ -87,6 +87,7 @@ test("architecture.service-adapter.credential-store.property", async () => {
           hasCredential: async () => false,
           saveCredential: async (request) => { savedRequest = request; },
           deleteCredential: async () => undefined,
+          releaseActivation: async () => true,
         },
       });
       const outcome = await service.saveCredential.execute({ credentialId: id, secret });
@@ -112,6 +113,7 @@ test("architecture.service-adapter.credential-store.property", async () => {
           hasCredential: async () => false,
           saveCredential: async () => { throw new Error(`${failure}: ${secret}`); },
           deleteCredential: async () => undefined,
+          releaseActivation: async () => true,
         },
       });
       const outcome = await service.saveCredential.execute({
@@ -148,6 +150,7 @@ test("architecture.service-request.credential-store.property", async () => {
         hasCredential: async (request) => { dispatches.push(["has", request]); return false; },
         saveCredential: async (request) => { dispatches.push(["save", request]); },
         deleteCredential: async (request) => { dispatches.push(["delete", request]); },
+        releaseActivation: async () => true,
       };
       const { activation, identity, service } = productionService({
         transport,
@@ -202,6 +205,7 @@ test("architecture.service-request.credential-store.property", async () => {
         hasCredential: async () => { dispatches += 1; return false; },
         saveCredential: async () => { dispatches += 1; },
         deleteCredential: async () => { dispatches += 1; },
+        releaseActivation: async () => true,
       },
     });
     const foreignScope = await service.saveCredential.execute({
@@ -226,6 +230,7 @@ test("architecture.service-request.credential-store.property", async () => {
           hasCredential: async () => { dispatches += 1; return false; },
           saveCredential: async () => { dispatches += 1; },
           deleteCredential: async () => { dispatches += 1; },
+          releaseActivation: async () => true,
         },
       });
       const denied = await service.hasCredential.execute({

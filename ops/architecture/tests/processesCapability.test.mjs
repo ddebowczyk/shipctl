@@ -13,6 +13,16 @@ let processesService;
 let SemanticServiceRegistry;
 let SemanticServiceTestHost;
 
+function propertyParameters() {
+  const configured = process.env.SHIPCTL_PROPERTY_SEED;
+  if (configured === undefined) return {};
+  const seed = Number(configured);
+  if (!Number.isSafeInteger(seed)) {
+    throw new Error("SHIPCTL_PROPERTY_SEED must be a safe integer");
+  }
+  return { seed };
+}
+
 before(async () => {
   vite = await createServer({
     configFile: false,
@@ -40,27 +50,34 @@ after(async () => {
   await vite?.close();
 });
 
-const rawPortArbitrary = fc.record({
+const inspectionIdArbitrary = fc.uuid();
+const inspectionArbitrary = fc.record({
+  inspectionId: inspectionIdArbitrary,
   port: fc.integer({ min: 0, max: 65_535 }),
-  pid: fc.integer({ min: 0, max: 4_294_967_295 }),
-  process: fc.string(),
-  cwd: fc.string(),
-  project: fc.string(),
-  framework: fc.string(),
+  processId: fc.integer({ min: 0, max: 4_294_967_295 }),
+  name: fc.string(),
+  workingDirectory: fc.string(),
+  commandLine: fc.string(),
+  observedProjectFiles: fc.uniqueArray(fc.string(), { maxLength: 12 }),
   uptime: fc.string(),
-  memoryKb: fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }),
+  memoryKilobytes: fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }),
 });
 
-const rawPortsArbitrary = fc.uniqueArray(rawPortArbitrary, {
-  selector: ({ port }) => port,
+const inspectionsArbitrary = fc.uniqueArray(inspectionArbitrary, {
+  selector: ({ inspectionId }) => inspectionId,
 });
 
-function productionService(transport, prefix = "inspection") {
-  let nextInspection = 0;
+const scanInput = {
+  projectRootMarkers: ["package.json", "Cargo.toml"],
+  observedProjectFileNames: ["vite.config.ts", "Cargo.toml"],
+};
+
+function productionService(transport) {
+  let correlationSequence = 0;
   const registry = new SemanticServiceRegistry([
     createProcessesServiceProvider({
       transport,
-      createInspectionId: () => `${prefix}-${nextInspection++}`,
+      createCorrelationId: () => `correlation-${correlationSequence++}`,
     }),
   ]);
   const identity = createTestActivationIdentity("shipctl.ports");
@@ -72,155 +89,119 @@ function productionService(transport, prefix = "inspection") {
   };
 }
 
-function expectedInspection(raw, inspectionId) {
+function transport(overrides = {}) {
   return {
-    inspectionId,
-    port: raw.port,
-    processId: raw.pid,
-    name: raw.process,
-    workingDirectory: raw.cwd,
-    projectName: raw.project,
-    framework: raw.framework,
-    uptime: raw.uptime,
-    memoryKilobytes: raw.memoryKb,
+    inspectListeningProcesses: async () => [],
+    terminateInspectedProcess: async (request) => ({
+      inspectionId: request.input.inspectionId,
+    }),
+    inspectCommand: async (request) => ({
+      command: request.input.command.trim(),
+      available: false,
+    }),
+    releaseProcessInspections: async () => 0,
+    ...overrides,
   };
 }
 
-test("architecture.service-adapter.service.property", async () => {
-  await fc.assert(fc.asyncProperty(rawPortsArbitrary, async (rawPorts) => {
+test("architecture.service-adapter.processes.property", async () => {
+  await fc.assert(fc.asyncProperty(inspectionsArbitrary, async (inspections) => {
     const requests = [];
-    const transport = {
-      listListeningPorts: async (request) => {
+    const candidate = transport({
+      inspectListeningProcesses: async (request) => {
         requests.push(request);
-        return rawPorts;
+        return inspections;
       },
-      terminateProcess: async () => undefined,
-      inspectCommand: async () => false,
-    };
-    const { activation, identity, service } = productionService(transport);
-    const outcome = await service.inspectListeningPorts.execute({});
-    assert.equal(outcome.result.ok, true);
-    assert.deepEqual(
-      outcome.result.value,
-      rawPorts.map((raw, index) => expectedInspection(raw, `inspection-${index}`)),
-    );
+    });
+    const { activation, identity, service } = productionService(candidate);
+    const outcome = await service.inspectListeningPorts.execute(scanInput);
+    assert.deepEqual(outcome.result, { ok: true, value: inspections });
     assert.deepEqual(requests, [{
       activation: identity,
       correlationId: outcome.correlationId,
-      input: {},
+      input: scanInput,
     }]);
     await activation.dispose();
-  }));
+  }), propertyParameters());
 
   await fc.assert(fc.asyncProperty(
+    fc.constantFrom("processes.denied", "processes.stale-inspection"),
     fc.string({ minLength: 1 }),
-    fc.boolean(),
-    async (detail, denied) => {
-      const message = denied ? `permission denied: ${detail}` : `scan failed: ${detail}`;
-      const { activation, service } = productionService({
-        listListeningPorts: async () => { throw new Error(message); },
-        terminateProcess: async () => undefined,
-        inspectCommand: async () => false,
+    async (code, message) => {
+      const candidate = transport({
+        inspectListeningProcesses: async () => {
+          throw { code, message, retryable: false };
+        },
       });
-      const outcome = await service.inspectListeningPorts.execute({});
+      const { activation, service } = productionService(candidate);
+      const outcome = await service.inspectListeningPorts.execute(scanInput);
       assert.deepEqual(outcome.result, {
         ok: false,
-        error: {
-          code: denied ? "processes.denied" : "processes.transport-failed",
-          message,
-          retryable: false,
-        },
+        error: { code, message, retryable: false },
       });
       await activation.dispose();
     },
-  ));
+  ), propertyParameters());
 });
 
-test("architecture.service-request.service.property", async () => {
+test("architecture.service-request.processes.property", async () => {
   await fc.assert(fc.asyncProperty(
-    rawPortArbitrary,
-    rawPortArbitrary,
+    inspectionIdArbitrary,
     fc.boolean(),
-    fc.boolean(),
-    fc.string(),
-    async (firstRaw, secondRaw, denied, cancelled, unknownSuffix) => {
-      const scans = [[firstRaw], [secondRaw]];
+    async (inspectionId, cancelled) => {
       const terminations = [];
-      const transport = {
-        listListeningPorts: async () => scans.shift() ?? [],
-        terminateProcess: async (processId, request) => {
-          terminations.push({ processId, request });
-          if (denied) throw new Error("operation not permitted");
+      const releases = [];
+      const candidate = transport({
+        terminateInspectedProcess: async (request) => {
+          terminations.push(request);
+          return { inspectionId: request.input.inspectionId };
         },
-        inspectCommand: async () => false,
-      };
-      const { activation, identity, service } = productionService(transport);
-      const firstScan = await service.inspectListeningPorts.execute({});
-      const secondScan = await service.inspectListeningPorts.execute({});
-      assert.equal(firstScan.result.ok, true);
-      assert.equal(secondScan.result.ok, true);
-      const first = firstScan.result.value[0];
-      const second = secondScan.result.value[0];
-
-      const stale = await service.terminateInspectedProcess.execute({
-        inspectionId: first.inspectionId,
+        releaseProcessInspections: async (request) => {
+          releases.push(request);
+          return 1;
+        },
       });
-      assert.equal(stale.result.ok, false);
-      assert.equal(stale.result.error.code, "processes.stale-inspection");
-      assert.equal(terminations.length, 0);
-
-      const unknown = await service.terminateInspectedProcess.execute({
-        inspectionId: `unknown:${unknownSuffix}`,
-      });
-      assert.equal(unknown.result.ok, false);
-      assert.equal(unknown.result.error.code, "processes.stale-inspection");
-      assert.equal(terminations.length, 0);
-
-      const cancellation = {
-        cancelled,
-        subscribe: () => { throw new Error("pre-dispatch cancellation must not subscribe"); },
-      };
-      const current = await service.terminateInspectedProcess.execute(
-        { inspectionId: second.inspectionId },
-        { cancellation },
+      const { activation, identity, service } = productionService(candidate);
+      const outcome = await service.terminateInspectedProcess.execute(
+        { inspectionId },
+        { cancellation: { cancelled, subscribe: () => assert.fail("must not subscribe") } },
       );
       if (cancelled) {
-        assert.equal(current.result.ok, false);
-        assert.equal(current.result.error.code, "processes.cancelled");
+        assert.equal(outcome.result.ok, false);
+        assert.equal(outcome.result.error.code, "processes.cancelled");
         assert.equal(terminations.length, 0);
       } else {
-        assert.equal(terminations.length, 1);
-        assert.equal(terminations[0].processId, secondRaw.pid);
-        assert.deepEqual(terminations[0].request.activation, identity);
-        assert.equal(terminations[0].request.correlationId, current.correlationId);
-        assert.deepEqual(terminations[0].request.input, {
-          inspectionId: second.inspectionId,
+        assert.deepEqual(outcome.result, {
+          ok: true,
+          value: { inspectionId },
         });
-        assert.equal(current.result.ok, !denied);
-        if (denied) assert.equal(current.result.error.code, "processes.denied");
+        assert.deepEqual(terminations, [{
+          activation: identity,
+          correlationId: outcome.correlationId,
+          input: { inspectionId },
+        }]);
       }
 
-      if (!cancelled && !denied) {
-        const repeated = await service.terminateInspectedProcess.execute({
-          inspectionId: second.inspectionId,
-        });
-        assert.equal(repeated.result.ok, false);
-        assert.equal(repeated.result.error.code, "processes.stale-inspection");
-        assert.equal(terminations.length, 1);
-      }
       await activation.dispose();
+      assert.equal(releases.length, 1);
+      assert.equal(releases[0].activation, identity);
+      assert.deepEqual(releases[0].input, {});
+
+      const callsBeforeDisposedRequest = terminations.length;
+      const disposed = await service.terminateInspectedProcess.execute({ inspectionId });
+      assert.equal(disposed.result.ok, false);
+      assert.equal(disposed.result.error.code, "processes.activation-disposed");
+      assert.equal(terminations.length, callsBeforeDisposedRequest);
     },
-  ));
+  ), propertyParameters());
 });
 
 test("architecture.processes-service-fake.property", async () => {
   await fc.assert(fc.asyncProperty(
-    rawPortsArbitrary,
+    inspectionsArbitrary,
     fc.uniqueArray(fc.string({ minLength: 1 }).filter((value) => value.trim().length > 0)),
     fc.string(),
-    async (rawPorts, availableCommands, query) => {
-      const inspections = rawPorts.map((raw, index) =>
-        expectedInspection(raw, `fake-${index}`));
+    async (inspections, availableCommands, query) => {
       const trace = [];
       const host = new SemanticServiceTestHost([
         createFakeProcessesServiceProvider({
@@ -232,7 +213,7 @@ test("architecture.processes-service-fake.property", async () => {
       const activation = host.activate(createTestActivationIdentity("shipctl.ports"));
       const service = activation.context.services.require(processesService);
 
-      const scan = await service.inspectListeningPorts.execute({});
+      const scan = await service.inspectListeningPorts.execute(scanInput);
       assert.deepEqual(scan.result, { ok: true, value: inspections });
 
       const traceCount = trace.length;
@@ -277,5 +258,5 @@ test("architecture.processes-service-fake.property", async () => {
         request.activation.activationId === activation.context.identity.activationId));
       await activation.dispose();
     },
-  ));
+  ), propertyParameters());
 });

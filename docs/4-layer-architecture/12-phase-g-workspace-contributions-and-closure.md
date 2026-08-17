@@ -74,9 +74,10 @@ user layout actions back as semantic commands.
 6. Move Tauri layout transport behind `core/frontend/platform` and persist the
    semantic workspace document. Keep Layman snapshot conversion private to the
    Layman adapter while compatibility requires it.
-7. Migrate each remaining built-in through immutable artifacts and live
-   lifecycle according to the module matrix.
-8. Remove static membership and old native module crates.
+7. Consume the completed immutable-artifact catalog as the only feature-module
+   source for workspace definitions and instances.
+8. Keep compile-time feature membership empty and preserve the completed native
+   module-crate deletion gates.
 9. Make architecture, property, packaged-app, and control-plane proofs required
    release gates.
 

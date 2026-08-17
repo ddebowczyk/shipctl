@@ -12,7 +12,6 @@ let createTestActivationIdentity;
 let SemanticServiceRegistry;
 let SemanticServiceTestHost;
 let skillId;
-let skillInstallationClientFor;
 let skillInstallationService;
 
 function propertyParameters() {
@@ -46,9 +45,6 @@ before(async () => {
   ({ SemanticServiceRegistry } = await vite.ssrLoadModule(
     "/core/frontend/runtime/index.ts",
   ));
-  ({ skillInstallationClientFor } = await vite.ssrLoadModule(
-    "/modules/skills/frontend/src/skillInstallationClient.ts",
-  ));
 });
 
 after(async () => {
@@ -62,19 +58,29 @@ const skillNameArbitrary = fc
   )
   .map(([head, tail]) => `${head}${tail}`);
 
-const rawSkillArbitrary = fc.record({
-  name: skillNameArbitrary,
+const catalogEntryArbitrary = fc.record({
+  skillId: skillNameArbitrary,
   title: fc.string(),
   description: fc.string(),
   installed: fc.boolean(),
 });
 
-const rawCatalogArbitrary = fc.uniqueArray(rawSkillArbitrary, {
-  selector: ({ name }) => name,
+const catalogArbitrary = fc.uniqueArray(catalogEntryArbitrary, {
+  selector: ({ skillId: id }) => id,
 });
 const projectIdArbitrary = fc
   .string({ minLength: 1 })
   .filter((value) => value.trim().length > 0);
+
+function fullTransport(overrides = {}) {
+  return {
+    inspectInstallations: async () => [],
+    installSource: async () => undefined,
+    removeInstallation: async () => undefined,
+    releaseActivation: async () => undefined,
+    ...overrides,
+  };
+}
 
 function productionService(transport) {
   const registry = new SemanticServiceRegistry([
@@ -92,32 +98,26 @@ function productionService(transport) {
 test("architecture.service-adapter.skill-installation.property", async () => {
   await fc.assert(fc.asyncProperty(
     projectIdArbitrary,
-    rawCatalogArbitrary,
-    async (projectId, rawCatalog) => {
+    catalogArbitrary,
+    async (projectId, catalog) => {
       const requests = [];
-      const transport = {
-        inspectSkills: async (request) => {
+      const transport = fullTransport({
+        inspectInstallations: async (request) => {
           requests.push(request);
-          return rawCatalog;
+          return catalog.map(({ skillId: id, installed }) => ({ skillId: id, installed }));
         },
-        installSkill: async () => undefined,
-        removeSkill: async () => undefined,
-      };
+      });
       const { activation, identity, service } = productionService(transport);
-      const outcome = await service.inspectSkills.execute({ projectId });
+      const descriptors = catalog.map(({ installed: _installed, ...descriptor }) => descriptor);
+      const outcome = await service.inspectSkills.execute({ projectId, catalog: descriptors });
       assert.deepEqual(outcome.result, {
         ok: true,
-        value: rawCatalog.map((raw) => ({
-          skillId: raw.name,
-          title: raw.title,
-          description: raw.description,
-          installed: raw.installed,
-        })),
+        value: catalog.map((entry) => ({ ...entry })),
       });
       assert.deepEqual(requests, [{
         activation: identity,
         correlationId: outcome.correlationId,
-        input: { projectId },
+        input: { projectId, skillIds: catalog.map(({ skillId: id }) => id) },
       }]);
       await activation.dispose();
     },
@@ -133,12 +133,10 @@ test("architecture.service-adapter.skill-installation.property", async () => {
     ),
     async (detail, prefix) => {
       const message = `${prefix}: ${detail}`;
-      const { activation, service } = productionService({
-        inspectSkills: async () => { throw new Error(message); },
-        installSkill: async () => undefined,
-        removeSkill: async () => undefined,
-      });
-      const outcome = await service.inspectSkills.execute({ projectId: "/repo" });
+      const { activation, service } = productionService(fullTransport({
+        inspectInstallations: async () => { throw new Error(message); },
+      }));
+      const outcome = await service.inspectSkills.execute({ projectId: "/repo", catalog: [] });
       const expected = prefix.startsWith("permission")
         ? "skill-installation.denied"
         : prefix.startsWith("Project")
@@ -161,16 +159,21 @@ test("architecture.service-request.skill-installation.property", async () => {
     fc.boolean(),
     async (projectId, name, cancelled) => {
       const calls = [];
-      const transport = {
-        inspectSkills: async () => [],
-        installSkill: async (request) => { calls.push(["install", request]); },
-        removeSkill: async (request) => { calls.push(["remove", request]); },
-      };
+      const transport = fullTransport({
+        installSource: async (request) => { calls.push(["install", request]); },
+        removeInstallation: async (request) => { calls.push(["remove", request]); },
+      });
       const { activation, identity, service } = productionService(transport);
+      const skill = {
+        skillId: name,
+        title: "Generated skill",
+        description: "Generated source",
+        markdown: `---\nname: ${name}\n---\n\n# Generated\n`,
+      };
 
       const invalidProject = await service.installSkill.execute({
         projectId: " ",
-        skillId: name,
+        skill,
       });
       assert.equal(invalidProject.result.ok, false);
       assert.equal(invalidProject.result.error.code, "skill-installation.invalid-project");
@@ -178,14 +181,14 @@ test("architecture.service-request.skill-installation.property", async () => {
 
       const invalidSkill = await service.installSkill.execute({
         projectId,
-        skillId: "../outside",
+        skill: { ...skill, skillId: "../outside" },
       });
       assert.equal(invalidSkill.result.ok, false);
       assert.equal(invalidSkill.result.error.code, "skill-installation.invalid-request");
       assert.equal(calls.length, 0);
 
       const installed = await service.installSkill.execute(
-        { projectId, skillId: name },
+        { projectId, skill },
         { cancellation: { cancelled } },
       );
       if (cancelled) {
@@ -200,6 +203,7 @@ test("architecture.service-request.skill-installation.property", async () => {
         assert.equal(calls.length, 1);
         assert.deepEqual(calls[0][1].activation, identity);
         assert.equal(calls[0][1].correlationId, installed.correlationId);
+        assert.deepEqual(calls[0][1].input, { projectId, skillId: name, markdown: skill.markdown });
 
         const removed = await service.removeSkill.execute({ projectId, skillId: name });
         assert.deepEqual(removed.result, {
@@ -210,7 +214,7 @@ test("architecture.service-request.skill-installation.property", async () => {
       }
 
       await activation.dispose();
-      const disposed = await service.inspectSkills.execute({ projectId });
+      const disposed = await service.inspectSkills.execute({ projectId, catalog: [] });
       assert.equal(disposed.result.ok, false);
       assert.equal(disposed.result.error.code, "skill-installation.activation-disposed");
     },
@@ -225,47 +229,46 @@ test("architecture.skill-installation-service-fake.property", async () => {
     fc.string(),
     async (projectId, name, title, description) => {
       const trace = [];
+      const descriptor = { skillId: skillId(name), title, description };
       const host = new SemanticServiceTestHost([
         createFakeSkillInstallationServiceProvider({
           trace,
           projects: [{
             projectId,
-            skills: [{
-              skillId: skillId(name),
-              title,
-              description,
-              installed: false,
-            }],
+            skills: [{ ...descriptor, installed: false }],
           }],
         }),
       ]);
       const activation = host.activate(createTestActivationIdentity("shipctl.skills"));
-      const client = skillInstallationClientFor(activation.context);
+      const service = activation.context.services.require(skillInstallationService);
 
-      assert.deepEqual(await client.listSkills(projectId), [{
-        name,
-        title,
-        description,
-        installed: false,
-      }]);
-      await client.installSkill(projectId, name);
-      assert.equal((await client.listSkills(projectId))[0].installed, true);
-      await client.removeSkill(projectId, name);
-      assert.equal((await client.listSkills(projectId))[0].installed, false);
-      await assert.rejects(client.installSkill(projectId, "../invalid"), /Invalid skill/);
+      const inspected = await service.inspectSkills.execute({ projectId, catalog: [descriptor] });
+      assert.deepEqual(inspected.result, {
+        ok: true,
+        value: [{ ...descriptor, installed: false }],
+      });
+      const installed = await service.installSkill.execute({
+        projectId,
+        skill: {
+          ...descriptor,
+          markdown: `---\nname: ${name}\n---\n\n# Generated\n`,
+        },
+      });
+      assert.equal(installed.result.value.installed, true);
+      const removed = await service.removeSkill.execute({ projectId, skillId: skillId(name) });
+      assert.equal(removed.result.value.installed, false);
       assert.deepEqual(trace.map(({ operation }) => operation), [
         "inspect-skills",
         "install-skill",
-        "inspect-skills",
         "remove-skill",
-        "inspect-skills",
       ]);
       assert.ok(trace.every(({ request }) => (
         request.activation.activationId === activation.context.identity.activationId
       )));
 
       await activation.dispose();
-      await assert.rejects(client.listSkills(projectId), /no longer active/);
+      const disposed = await service.inspectSkills.execute({ projectId, catalog: [descriptor] });
+      assert.equal(disposed.result.error.code, "skill-installation.activation-disposed");
     },
   ), propertyParameters());
 });

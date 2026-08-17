@@ -1,7 +1,11 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { watchRepo, unwatchRepo } from "@shipctl/core/platform";
-import type { ModuleActivationContext, ModuleId } from "@shipctl/module-api";
+import type {
+  ModuleActivationContext,
+  ModuleId,
+  ShipctlModule,
+} from "@shipctl/module-api";
 import {
   MODULE_HOST_SERVICES,
   notifyModulesFilesystemChanged,
@@ -19,6 +23,7 @@ interface FsChangedPayload {
 export function useProjectWatcher(
   projectPaths: string[],
   moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>,
+  modules: readonly ShipctlModule[],
 ) {
   const watchedRef = useRef<Set<string>>(new Set());
 
@@ -28,13 +33,14 @@ export function useProjectWatcher(
         event.payload.paths,
         MODULE_HOST_SERVICES,
         moduleActivations,
+        modules,
       );
     });
 
     return () => {
       unlisten.then((f) => f());
     };
-  }, [moduleActivations]);
+  }, [moduleActivations, modules]);
 
   useEffect(() => {
     const current = new Set(projectPaths);
@@ -63,8 +69,9 @@ export function useProjectWatcher(
       projectPaths,
       MODULE_HOST_SERVICES,
       moduleActivations,
+      modules,
     );
-  }, [projectPaths.join("\0"), moduleActivations]);
+  }, [projectPaths.join("\0"), moduleActivations, modules]);
 
   useEffect(() => {
     return () => {

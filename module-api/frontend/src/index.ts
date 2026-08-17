@@ -92,6 +92,7 @@ export { processesService } from "./protocol/processes.ts";
 export type {
   CommandInspection,
   InspectCommandInput,
+  InspectListeningProcessesInput,
   ListeningProcessInspection,
   ProcessesErrorCode,
   ProcessesService,
@@ -132,12 +133,14 @@ export type {
 } from "./protocol/git";
 export { skillId, skillInstallationService } from "./protocol/skillInstallation.ts";
 export type {
+  InstallSkillInput,
   InspectSkillsInput,
+  RemoveSkillInput,
+  SkillDescriptor,
   SkillId,
   SkillInspection,
   SkillInstallationErrorCode,
   SkillInstallationService,
-  SkillMutationInput,
   SkillMutationReceipt,
 } from "./protocol/skillInstallation";
 export { credentialId, credentialStoreService } from "./protocol/credentials.ts";
@@ -151,37 +154,59 @@ export type {
   InspectCredentialInput,
   SaveCredentialInput,
 } from "./protocol/credentials";
+export {
+  ASSISTANT_LAUNCH_GRANTS,
+  assistantLaunchService,
+  assistantProviderId,
+  assistantSessionId,
+} from "./protocol/assistantLaunch.ts";
+export type {
+  AssistantIdentityState,
+  AssistantLaunchErrorCode,
+  AssistantLaunchGrant,
+  AssistantLaunchService,
+  AssistantModelCatalog,
+  AssistantProviderConfiguration,
+  AssistantProviderId,
+  AssistantProviderSettings,
+  AssistantRecoveryRecord,
+  AssistantSessionChanged,
+  AssistantSessionChangeKind,
+  AssistantSessionId,
+  AssistantSessionInput,
+  AssistantSessionMode,
+  AssistantSessionObservationScope,
+  AssistantTerminalStartContext,
+  InspectAssistantModelsInput,
+  InspectAssistantProviderConfigurationInput,
+  RecordAssistantLabelInput,
+  RecordAssistantPlacementInput,
+  ResumeAssistantSessionInput,
+  SaveAssistantProviderConfigurationInput,
+  StartAssistantSessionInput,
+  StartedAssistantSession,
+} from "./protocol/assistantLaunch";
 export { usageSourcesService } from "./protocol/usageSources.ts";
 export type {
   InspectUsageSourceInput,
-  LocalUsageDetails,
-  ProviderUsageSnapshot,
   RefreshUsageSourcesInput,
-  UsageBreakdownItem,
   UsageConfidence,
-  UsageCost,
-  UsageCostBasis,
   UsageCostKind,
-  UsageNamedTokens,
-  UsageOverview,
-  UsageOverviewProvider,
-  UsageProject,
   UsageProvider,
+  UsageProviderObservation,
+  UsageProviderWindow,
   UsageSourceDescriptor,
+  UsageSourceDataset,
   UsageSourceInspection,
   UsageSourceKind,
   UsageSourceObservationScope,
+  UsageSourceRecord,
   UsageSourceRefreshReceipt,
   UsageSourcesChanged,
   UsageSourcesErrorCode,
   UsageSourcesGrant,
   UsageSourcesService,
   UsageSourceType,
-  UsageTask,
-  UsageTimeWindow,
-  UsageTrendBucket,
-  UsageTrendProviderValue,
-  UsageWindowSnapshot,
 } from "./protocol/usageSources";
 export { pluginDataService } from "./protocol/pluginData.ts";
 export type {
@@ -240,9 +265,11 @@ export type {
 } from "./module/module";
 export { defineShipctlPlugin } from "./module/plugins.ts";
 export type {
+  PluginArtifactDeclarations,
   PluginActivationInspection,
   PluginActivationStatus,
   PluginActivationView,
+  PluginContributionDeclaration,
   PluginContributionFamily,
   PluginContributionInspection,
   PluginEffectInspection,

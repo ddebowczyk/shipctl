@@ -8,6 +8,7 @@ import {
 } from "@shipctl/module-api";
 
 import type { SkillInfo } from "./types";
+import { BUILTIN_SKILL_SOURCES } from "./catalog";
 
 export class SkillInstallationClientError extends Error {
   readonly code: SkillInstallationErrorCode;
@@ -44,7 +45,14 @@ export function createSkillInstallationClient(
 ): SkillInstallationClient {
   const client: SkillInstallationClient = {
     listSkills: async (projectId) => {
-      const skills = await execute(service.inspectSkills, { projectId });
+      const skills = await execute(service.inspectSkills, {
+        projectId,
+        catalog: BUILTIN_SKILL_SOURCES.map(({ skillId: id, title, description }) => ({
+          skillId: id,
+          title,
+          description,
+        })),
+      });
       return skills.map((skill): SkillInfo => ({
         name: skill.skillId,
         title: skill.title,
@@ -53,10 +61,25 @@ export function createSkillInstallationClient(
       }));
     },
     installSkill: async (projectId, id) => {
-      await execute(service.installSkill, { projectId, skillId: skillId(id) });
+      const selectedId = skillId(id);
+      const skill = BUILTIN_SKILL_SOURCES.find((source) => source.skillId === selectedId);
+      if (!skill) {
+        throw new SkillInstallationClientError(
+          "skill-installation.unknown-skill",
+          `Unknown skill: ${id}`,
+        );
+      }
+      await execute(service.installSkill, { projectId, skill });
     },
     removeSkill: async (projectId, id) => {
-      await execute(service.removeSkill, { projectId, skillId: skillId(id) });
+      const selectedId = skillId(id);
+      if (!BUILTIN_SKILL_SOURCES.some((source) => source.skillId === selectedId)) {
+        throw new SkillInstallationClientError(
+          "skill-installation.unknown-skill",
+          `Unknown skill: ${id}`,
+        );
+      }
+      await execute(service.removeSkill, { projectId, skillId: selectedId });
     },
   };
   return Object.freeze(client);

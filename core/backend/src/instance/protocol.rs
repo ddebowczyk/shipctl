@@ -455,6 +455,8 @@ pub enum ModuleCommand {
         module_id: String,
         kind: ModuleOperationKind,
         target_registry_revision: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        artifact_content_digest: Option<String>,
     },
 }
 

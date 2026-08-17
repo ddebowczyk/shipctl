@@ -15,6 +15,7 @@ reads:
   - docs/4-layer-architecture/*.md
   - module-api/**
   - modules/**
+  - ops/modularity/lib/module-boundaries.mjs
   - ops/modularity/legacy-tauri-imports.json
 generates: []
 commands:
@@ -45,6 +46,22 @@ commands:
     lane: fast
   - name: cordis
     summary: Run the seeded Cordis static-composition property suite.
+    lane: fast
+  - name: ports-extraction
+    summary: Prove the Ports native-provider extraction and deletion gate.
+    lane: fast
+  - name: todos-extraction
+    summary: Prove the Todos native-provider extraction and deletion gate.
+    lane: fast
+  - name: git-extraction
+    summary: Prove the Git native-provider extraction and deletion gate.
+    lane: fast
+  - name: skills-extraction
+    summary: Prove the Skills native-provider extraction and deletion gate.
+    lane: fast
+  - name: semantic-terminal-extraction
+    summary: >-
+      Prove the Semantic Terminal native-provider extraction and deletion gate.
     lane: fast
   - name: all
     summary: Validate the program, boundaries, baseline, and property proofs.

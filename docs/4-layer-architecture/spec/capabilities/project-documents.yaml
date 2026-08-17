@@ -10,8 +10,9 @@ consumers: [todos]
 current_implementations:
   - module-api/frontend/src/protocol/projectDocuments.ts
   - core/frontend/platform/projectDocuments.ts
-  - modules/todos/backend
-  - modules/todos/host
+  - core/backend/src/project_documents
+  - core/tauri/src/project_documents.rs
+  - modules/todos/frontend
 target_owners:
   provider: core/backend/src/project_documents
   tauri_adapter: core/tauri/src/project_documents.rs
@@ -45,8 +46,10 @@ property_ids:
   - PROP-B-REQUEST-001
   - PROP-D-PARITY-001
   - PROP-D-AUTHORITY-001
+  - PROP-D-OWNERSHIP-001
+  - PROP-D-CLOSURE-001
 open_questions:
   - >-
-    The host ProjectRef identity is currently path-backed. Phase D must replace
-    that implementation detail with an opaque stable project identity before
-    third-party artifacts receive the capability.
+    The host ProjectRef identity remains path-backed. Phase E admission must
+    replace that implementation detail with an opaque stable project identity
+    before third-party artifacts receive the capability.

@@ -125,6 +125,7 @@ function transportWith(overrides = {}) {
     switchBranch: async () => undefined,
     createBranch: async () => undefined,
     diffStats: async () => [],
+    releaseActivation: async () => true,
     subscribeChanges: async () => () => undefined,
     ...overrides,
   };

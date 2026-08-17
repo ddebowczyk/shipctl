@@ -160,6 +160,7 @@ impl ControlHandler for FixtureHandler {
                 module_id,
                 kind,
                 target_registry_revision,
+                artifact_content_digest: _,
             } => {
                 let operation = self.operation(module_id, kind, target_registry_revision);
                 Ok(ControlStream {
@@ -246,6 +247,7 @@ fn named_endpoint_transports_fixture_module_frames_without_runtime_mutation() {
             "shipctl.fixture".to_string(),
             ModuleOperationKind::Enable,
             12,
+            None,
         )
         .unwrap();
     assert!(matches!(
@@ -265,6 +267,7 @@ fn named_endpoint_transports_fixture_module_frames_without_runtime_mutation() {
             "shipctl.fixture".to_string(),
             ModuleOperationKind::Disable,
             13,
+            None,
         )
         .unwrap();
     assert_eq!(disabled.kind, ModuleOperationKind::Disable);
@@ -277,6 +280,7 @@ fn named_endpoint_transports_fixture_module_frames_without_runtime_mutation() {
             "shipctl.native".to_string(),
             ModuleOperationKind::Enable,
             14,
+            None,
         )
         .unwrap();
     assert_eq!(native.result, ModuleOperationResult::Failed);

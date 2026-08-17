@@ -6,12 +6,10 @@ status: migrating
 source_manifest: modules/git/module.yaml
 current:
   frontend: modules/git/frontend
-  backend_crates:
-    - modules/git/backend
-  host_crates:
-    - modules/git/host
+  backend_crates: []
+  host_crates: []
   direct_tauri: false
-  static_activation: true
+  static_activation: false
 target:
   roles: [compound]
   responsibilities:
@@ -25,16 +23,23 @@ prerequisites:
   - Characterize repository, worktree, branch, diff, stage, and commit behavior.
 compatibility_paths:
   - >-
-    Current frontend calls use the typed Git capability client over the
-    transitional trusted Tauri adapter.
-  - Keep the built-in module on the common activation path until externalized.
+    Phase D native extraction is complete: Git is frontend-only and uses the
+    public Git capability client.
+  - >-
+    The host-wide project watcher remains a permanent core resource; Git
+    subscriptions are activation-owned and filter its events by registered
+    project.
+  - >-
+    Phase E packages Git as an immutable built-in artifact. The host admits and
+    activates it through the same runtime path as user-installed plugins.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE
-    proof_ids: [PROP-D-PARITY-001, PROP-D-AUTHORITY-001]
+    proof_ids: [PROP-D-PARITY-001, PROP-D-AUTHORITY-001, PROP-D-CLOSURE-001]
     targets:
       - modules/git/backend
       - modules/git/host
   - id: DELETE-E-STATIC-IMPORT
-    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    proof_ids: [PROP-E-GIT-PARITY-001, PROP-E-HEADLESS-001]
     targets:
-      - modules/git/frontend/src/index.ts
+      - core/frontend/host/enabledModules.ts
+      - package.json

@@ -6,7 +6,7 @@ version: 1.0.0
 title: Namespaced durable plugin data
 status: implementing
 layer: native-kernel
-consumers: [commands, skills, assistants, usage]
+consumers: [commands, assistants, usage]
 current_implementations:
   - module-api/frontend/src/protocol/pluginData.ts
   - module-api/frontend/src/testing/pluginData.ts

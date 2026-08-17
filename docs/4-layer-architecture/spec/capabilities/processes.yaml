@@ -10,8 +10,9 @@ consumers: [ports, assistants]
 current_implementations:
   - module-api/frontend/src/protocol/processes.ts
   - core/frontend/platform/processes.ts
+  - core/backend/src/processes
+  - core/tauri/src/processes.rs
   - modules/ports/frontend
-  - modules/ports/backend
   - modules/assistants/backend
 target_owners:
   provider: core/backend/src/processes
@@ -34,16 +35,23 @@ required_grants:
   - process.terminate
 ownership:
   authority: The native kernel owns OS process access and scope enforcement.
-  resources: An inspection identity is immutable and expires by provider policy.
-  activation_scope: Every request carries activation, grant, and project scope.
+  resources: >-
+    An inspection identity binds an opaque ID to PID and process start time and
+    expires on rescan, termination, or activation disposal.
+  activation_scope: >-
+    Every request carries activation identity; operation grants admit native
+    work, and an activation-owned inspection lease scopes termination.
 depends_on: []
 property_ids:
   - PROP-B-ADAPTER-001
   - PROP-B-REQUEST-001
   - PROP-D-PARITY-001
   - PROP-D-AUTHORITY-001
+  - PROP-D-OWNERSHIP-001
+  - PROP-D-CLOSURE-001
 open_questions:
   - >-
-    Measure and select the stable macOS process identity fields for Phase D.
-    The Phase B adapter expires opaque identities after a successful rescan but
-    cannot yet prove that the OS did not reuse a PID before termination.
+    Phase E admission must replace the bootstrap static module grant table and
+    bind project scope from the admitted activation identity. Phase D closes
+    PID reuse with the observed process start time, with only the unavoidable
+    operating-system interval between the final identity check and the signal.

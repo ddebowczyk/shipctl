@@ -6,12 +6,10 @@ status: migrating
 source_manifest: modules/todos/module.yaml
 current:
   frontend: modules/todos/frontend
-  backend_crates:
-    - modules/todos/backend
-  host_crates:
-    - modules/todos/host
+  backend_crates: []
+  host_crates: []
   direct_tauri: false
-  static_activation: true
+  static_activation: false
 target:
   roles: [compound]
   responsibilities:
@@ -25,15 +23,19 @@ prerequisites:
   - Characterize todo parsing, ordering, mutation, and conflict behavior.
 compatibility_paths:
   - >-
-    Route current calls through the project documents capability client and a
-    transitional Todos-native provider until Phase D extracts its authority.
-  - Keep the built-in module active until artifact parity is proven.
+    Phase D native extraction is complete: Todos is frontend-only and uses the
+    public project documents capability client.
+  - >-
+    Phase E packages Todos as an immutable built-in artifact. The host admits
+    and activates it through the same runtime path as user-installed plugins.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE
     proof_ids: [PROP-D-PARITY-001, PROP-D-CLOSURE-001]
     targets:
       - modules/todos/backend
+      - modules/todos/host
   - id: DELETE-E-STATIC-IMPORT
-    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    proof_ids: [PROP-E-TODOS-PARITY-001, PROP-E-HEADLESS-001]
     targets:
-      - modules/todos/frontend/src/index.ts
+      - core/frontend/host/enabledModules.ts
+      - package.json

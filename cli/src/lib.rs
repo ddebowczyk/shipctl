@@ -1,6 +1,7 @@
 mod args;
 mod instances;
 mod logs;
+mod module_watch;
 mod offline_modules;
 mod output;
 mod terminals;
@@ -23,8 +24,8 @@ use shipctl_core::module_control::agent::{
     CAPABILITY_RUNTIME_INSPECTED, CAPABILITY_RUNTIME_INVOKED, CAPABILITY_RUNTIME_LISTED,
 };
 use shipctl_core::module_control::codes::{
-    ARTIFACT_ADDED, ARTIFACT_PREFLIGHTED, CAPABILITY_INSPECTED, OPERATION_ACCEPTED,
-    OPERATION_INSPECTED, REGISTRY_LISTED, RUNTIME_DIAGNOSED, RUNTIME_INSPECTED,
+    ARTIFACT_ADDED, ARTIFACT_PACKED, ARTIFACT_PREFLIGHTED, CAPABILITY_INSPECTED,
+    OPERATION_ACCEPTED, OPERATION_INSPECTED, REGISTRY_LISTED, RUNTIME_DIAGNOSED, RUNTIME_INSPECTED,
 };
 use shipctl_core::module_control::ModuleOperationKind;
 use shipctl_core::scheduler::contracts::ScheduleDeliveryOutcome;
@@ -113,7 +114,9 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
             logs::run(args, cli.output, requested_output(remaining).is_some())
         }
         Some(CliCommand::Instances { command }) => run_instances(command, cli.output),
-        Some(CliCommand::Modules { command }) => run_modules(command, cli.output),
+        Some(CliCommand::Modules { command }) => {
+            run_modules(command, cli.output, requested_output(remaining).is_some())
+        }
         Some(CliCommand::Messages { command }) => run_messages(command, cli.output),
         Some(CliCommand::Capabilities { command }) => run_capabilities(command, cli.output),
         Some(CliCommand::Terminals { command }) => terminals::run(command, cli.output),
@@ -501,8 +504,19 @@ fn run_schedules(command: ScheduleCommand, output: OutputFormat, full: bool) -> 
     }
 }
 
-fn run_modules(command: ModulesCommand, output: OutputFormat) -> ExitCode {
+fn run_modules(
+    command: ModulesCommand,
+    output: OutputFormat,
+    format_was_requested: bool,
+) -> ExitCode {
     match command {
+        ModulesCommand::Pack(args) => {
+            match offline_modules::pack(&args.source, &args.destination) {
+                Ok(data) => emit_success(output, "modules.pack", ARTIFACT_PACKED, false, data)
+                    .unwrap_or_else(|message| emit_render_failure(output, "modules.pack", message)),
+                Err(error) => emit_failure(output, "modules.pack", &error, false),
+            }
+        }
         ModulesCommand::Preflight(args) => {
             debug_assert!(args.offline);
             match offline_modules::preflight(args.state_root.as_deref(), &args.archive) {
@@ -619,6 +633,31 @@ fn run_modules(command: ModulesCommand, output: OutputFormat) -> ExitCode {
         }
         ModulesCommand::Enable(args) => run_module_transition(args, output, true),
         ModulesCommand::Disable(args) => run_module_transition(args, output, false),
+        ModulesCommand::Replace(args) => match instances::transition_module(
+            args.runtime_root.as_deref(),
+            args.instance.as_deref(),
+            args.module_id,
+            ModuleOperationKind::Update,
+            args.target_revision,
+            Some(args.artifact_content_digest),
+        ) {
+            Ok(data) => emit_success(output, "modules.replace", OPERATION_ACCEPTED, false, data)
+                .unwrap_or_else(|message| emit_render_failure(output, "modules.replace", message)),
+            Err(error) => emit_failure(output, "modules.replace", &error, false),
+        },
+        ModulesCommand::Remove(args) => match instances::transition_module(
+            args.runtime_root.as_deref(),
+            args.instance.as_deref(),
+            args.module_id,
+            ModuleOperationKind::Remove,
+            args.target_revision,
+            None,
+        ) {
+            Ok(data) => emit_success(output, "modules.remove", OPERATION_ACCEPTED, false, data)
+                .unwrap_or_else(|message| emit_render_failure(output, "modules.remove", message)),
+            Err(error) => emit_failure(output, "modules.remove", &error, false),
+        },
+        ModulesCommand::Watch(args) => module_watch::run(args, output, format_was_requested),
     }
 }
 
@@ -654,6 +693,7 @@ fn run_module_transition(
         },
         args.target_revision
             .expect("clap requires target revision for online transitions"),
+        None,
     ) {
         Ok(data) => emit_success(output, operation, OPERATION_ACCEPTED, false, data)
             .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
@@ -918,6 +958,7 @@ fn operation_hint(args: &[OsString]) -> &str {
             ("instances", "diagnose") => "instances.diagnose",
             ("instances", "stop") => "instances.stop",
             ("modules", "preflight") => "modules.preflight",
+            ("modules", "pack") => "modules.pack",
             ("modules", "add") => "modules.add",
             ("modules", "list") => "modules.list",
             ("modules", "inspect") => "modules.inspect",
@@ -926,6 +967,8 @@ fn operation_hint(args: &[OsString]) -> &str {
             ("modules", "verify") => "modules.verify",
             ("modules", "enable") => "modules.enable",
             ("modules", "disable") => "modules.disable",
+            ("modules", "replace") => "modules.replace",
+            ("modules", "watch") => "modules.watch",
             ("messages", "inspect") => "messages.inspect",
             ("messages", "diagnose") => "messages.diagnose",
             ("schedule", "list") => "schedule.list",
@@ -1149,7 +1192,7 @@ fn print_version(format: OutputFormat) {
 mod tests {
     use crate::args::TerminalsCommand;
     use shipctl_core::instance::{DiscoveryProblem, DEFAULT_INSTANCE_NAME};
-    use shipctl_module_semantic_terminal_core::projection::ProjectedSpace;
+    use shipctl_core::semantic_terminal::projection::ProjectedSpace;
 
     use super::*;
 
@@ -1707,6 +1750,45 @@ mod tests {
         let parsed = Cli::try_parse_from([
             "shipctl",
             "modules",
+            "replace",
+            "shipctl.fixture",
+            "--artifact",
+            &"a".repeat(64),
+            "--target-revision=13",
+            "--instance=fixture",
+        ])
+        .unwrap();
+        let Some(CliCommand::Modules {
+            command: ModulesCommand::Replace(module),
+        }) = parsed.command
+        else {
+            panic!("expected modules replace")
+        };
+        assert_eq!(module.module_id, "shipctl.fixture");
+        assert_eq!(module.artifact_content_digest, "a".repeat(64));
+        assert_eq!(module.target_revision, 13);
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "modules",
+            "remove",
+            "shipctl.fixture",
+            "--target-revision=14",
+            "--instance=fixture",
+        ])
+        .unwrap();
+        let Some(CliCommand::Modules {
+            command: ModulesCommand::Remove(module),
+        }) = parsed.command
+        else {
+            panic!("expected modules remove")
+        };
+        assert_eq!(module.module_id, "shipctl.fixture");
+        assert_eq!(module.target_revision, 14);
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "modules",
             "enable",
             "shipctl.fixture",
             "--offline",
@@ -1748,6 +1830,22 @@ mod tests {
     fn clap_requires_explicit_offline_artifact_operations() {
         let archive = Path::new("/tmp/fixture.shipctl-module");
         let state_root = Path::new("/tmp/state");
+
+        let pack = Cli::try_parse_from([
+            "shipctl",
+            "modules",
+            "pack",
+            "/tmp/staging",
+            "--to",
+            archive.to_str().unwrap(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            pack.command,
+            Some(CliCommand::Modules {
+                command: ModulesCommand::Pack(args),
+            }) if args.source == Path::new("/tmp/staging") && args.destination == archive
+        ));
 
         let preflight = Cli::try_parse_from([
             "shipctl",

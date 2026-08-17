@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "id": "shipctl.git",
+  "name": "Git",
+  "version": "0.0.0",
+  "apiRange": "^1.0.0",
+  "runtimeKind": "frontend_esm",
+  "entry": "dist/plugin.mjs",
+  "styles": [],
+  "assets": [],
+  "messages": {
+    "schemaVersion": 1,
+    "provides": [],
+    "handles": [],
+    "publishes": [],
+    "subscribes": [],
+    "ports": []
+  },
+  "capabilities": {
+    "schemaVersion": 1,
+    "definitions": [],
+    "providers": [],
+    "consumers": []
+  },
+  "application": {
+    "schemaVersion": 1,
+    "role": "compound",
+    "requiredServices": [
+      {
+        "id": "shipctl.git",
+        "version": 1
+      }
+    ],
+    "providedServices": [],
+    "backgroundEffects": [],
+    "contributions": [
+      {
+        "family": "panel",
+        "id": "core.git",
+        "schemaVersion": 1
+      },
+      {
+        "family": "project-navigation",
+        "id": "git.project-navigation",
+        "schemaVersion": 1
+      },
+      {
+        "family": "project-layout",
+        "id": "git.diff-summary",
+        "schemaVersion": 1
+      },
+      {
+        "family": "project-action",
+        "id": "git.project-actions",
+        "schemaVersion": 1
+      },
+      {
+        "family": "project-facts",
+        "id": "git.project-facts",
+        "schemaVersion": 1
+      },
+      {
+        "family": "project-import",
+        "id": "git.related-projects",
+        "schemaVersion": 1
+      },
+      {
+        "family": "settings",
+        "id": "git.settings",
+        "schemaVersion": 1
+      }
+    ]
+  },
+  "uiContributions": [],
+  "requestedGrants": [],
+  "nativeAdapters": [],
+  "secretReferences": [],
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "supportedScopes": [
+    "instance",
+    "workspace"
+  ],
+  "lifecycle": "live",
+  "sourceProvenance": {
+    "builder": "ops/architecture/bin/build-plugin-artifact.mjs",
+    "module": "git"
+  }
+}

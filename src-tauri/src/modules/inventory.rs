@@ -35,38 +35,11 @@ fn inventory_from_membership(
 }
 
 fn current_membership() -> Vec<BuildModuleMembership> {
-    vec![
-        membership("shipctl.fixture", cfg!(feature = "fixture-module"), false),
-        membership("shipctl.todos", cfg!(feature = "todos-module"), true),
-        membership("shipctl.ports", cfg!(feature = "ports-module"), true),
-        membership("shipctl.skills", cfg!(feature = "skills-module"), true),
-        membership(
-            "shipctl.git",
-            cfg!(feature = "git-module"),
-            frontend_enabled(option_env!("VITE_SHIPCTL_GIT_MODULE")),
-        ),
-        membership(
-            "shipctl.assistants",
-            cfg!(feature = "assistants-module"),
-            frontend_enabled(option_env!("VITE_SHIPCTL_ASSISTANTS_MODULE")),
-        ),
-        membership(
-            "shipctl.usage",
-            cfg!(feature = "usage-module"),
-            frontend_enabled(option_env!("VITE_SHIPCTL_USAGE_MODULE")),
-        ),
-        membership(
-            "shipctl.commands",
-            false,
-            frontend_enabled(option_env!("VITE_SHIPCTL_COMMANDS_MODULE")),
-        ),
-        membership(
-            "shipctl.semantic-terminal",
-            cfg!(feature = "semantic-terminal-module"),
-            true,
-        ),
-        membership("shipctl.thin-terminal", false, true),
-    ]
+    vec![membership(
+        "shipctl.fixture",
+        cfg!(feature = "fixture-module"),
+        false,
+    )]
 }
 
 fn membership(
@@ -79,10 +52,6 @@ fn membership(
         native_compiled,
         frontend_shipped,
     }
-}
-
-pub(crate) fn frontend_enabled(value: Option<&str>) -> bool {
-    !matches!(value, Some("disabled"))
 }
 
 #[cfg(test)]
@@ -134,26 +103,7 @@ mod tests {
         }
 
         let frontend_profile = include_str!("../../../core/frontend/host/enabledModules.ts");
-        for module_id in [
-            "shipctl.assistants",
-            "shipctl.commands",
-            "shipctl.git",
-            "shipctl.ports",
-            "shipctl.skills",
-            "shipctl.todos",
-            "shipctl.usage",
-        ] {
-            let short_id = module_id.strip_prefix("shipctl.").unwrap();
-            assert!(
-                frontend_profile.contains(&format!("{short_id}Module")),
-                "frontend static profile omitted {module_id}"
-            );
-        }
-        for module_name in ["semanticTerminalModule", "thinTerminalModule"] {
-            assert!(
-                frontend_profile.contains(module_name),
-                "frontend static profile omitted {module_name}"
-            );
-        }
+        assert!(frontend_profile.contains("ENABLED_MODULES = []"));
+        assert!(!frontend_profile.contains("@shipctl/module-"));
     }
 }

@@ -1,4 +1,4 @@
-//! Agent-safe access to capabilities provided by the active restart-bound module set.
+//! Agent-safe access to capabilities provided by the active module set.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

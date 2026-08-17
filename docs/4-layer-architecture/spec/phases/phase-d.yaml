@@ -3,7 +3,7 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-d
 title: Native provider extraction
-status: specified
+status: implementing
 source: docs/4-layer-architecture/09-phase-d-native-provider-extraction.md
 depends_on: [phase-a, phase-b]
 semantics:
@@ -78,11 +78,11 @@ properties:
     runner:
       language: rust
       library: proptest
-      test_id: architecture.provider.capability.parity.property
+      test_id: architecture.provider.processes.parity.property
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: implemented
     deletion_gates: [DELETE-D-NATIVE-MODULE]
   - id: PROP-D-AUTHORITY-001
     claim: >-
@@ -115,11 +115,11 @@ properties:
     runner:
       language: rust
       library: proptest
-      test_id: architecture.provider.capability.authority.property
+      test_id: architecture.provider.processes.authority.property
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: implemented
     deletion_gates: [DELETE-D-NATIVE-MODULE]
   - id: PROP-D-OWNERSHIP-001
     claim: >-
@@ -152,11 +152,11 @@ properties:
     runner:
       language: rust
       library: proptest
-      test_id: architecture.resource-ownership.property
+      test_id: architecture.provider.processes.ownership.property
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: proposed
+    status: implemented
     deletion_gates: [DELETE-D-NATIVE-MODULE]
   - id: PROP-D-CLOSURE-001
     claim: >-
@@ -179,7 +179,9 @@ properties:
         - acl
         - private-command
     preconditions:
-      - The disposition record marks the module complete.
+      - >-
+        The disposition record has no current native crates and records the
+        completed native-extraction compatibility path for the pilot module.
     oracle:
       primary:
         kind: model
@@ -201,7 +203,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: proposed
+    status: implemented
     deletion_gates:
       - DELETE-D-NATIVE-MODULE
       - DELETE-D-MODULE-API-BACKEND
@@ -209,6 +211,12 @@ deliverables:
   - One permanent native capability per authority boundary.
   - A Tauri-free provider, private adapter, and authorization model per slice.
   - Ports as the first complete native extraction.
+  - Todos as the second complete native extraction.
+  - Git as the third complete native extraction.
+  - Skills as the fourth complete native extraction.
+  - Semantic Terminal as the fifth complete native extraction.
+  - Usage as the sixth complete native extraction.
+  - Assistants as the seventh complete native extraction.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE
     condition: >-

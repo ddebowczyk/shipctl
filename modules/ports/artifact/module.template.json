@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 2,
+  "id": "shipctl.ports",
+  "name": "Ports",
+  "version": "0.0.0",
+  "apiRange": "^1.0.0",
+  "runtimeKind": "frontend_esm",
+  "entry": "dist/plugin.mjs",
+  "styles": [],
+  "assets": [],
+  "messages": {
+    "schemaVersion": 1,
+    "provides": [],
+    "handles": [],
+    "publishes": [],
+    "subscribes": [],
+    "ports": []
+  },
+  "capabilities": {
+    "schemaVersion": 1,
+    "definitions": [],
+    "providers": [],
+    "consumers": []
+  },
+  "application": {
+    "schemaVersion": 1,
+    "role": "presentation",
+    "requiredServices": [
+      {
+        "id": "shipctl.processes",
+        "version": 1
+      }
+    ],
+    "providedServices": [],
+    "backgroundEffects": [],
+    "contributions": [
+      {
+        "family": "global-navigation",
+        "id": "ports.global-navigation",
+        "schemaVersion": 1
+      },
+      {
+        "family": "global-surface",
+        "id": "ports.overview",
+        "schemaVersion": 1
+      }
+    ]
+  },
+  "uiContributions": [],
+  "requestedGrants": [],
+  "nativeAdapters": [],
+  "secretReferences": [],
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "supportedScopes": [
+    "instance",
+    "workspace"
+  ],
+  "lifecycle": "live",
+  "sourceProvenance": {
+    "builder": "ops/architecture/bin/build-plugin-artifact.mjs",
+    "module": "ports"
+  }
+}

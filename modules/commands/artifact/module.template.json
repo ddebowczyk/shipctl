@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "id": "shipctl.commands",
+  "name": "Commands",
+  "version": "0.0.0",
+  "apiRange": "^1.0.0",
+  "runtimeKind": "frontend_esm",
+  "entry": "dist/plugin.mjs",
+  "styles": [],
+  "assets": [],
+  "messages": {
+    "schemaVersion": 1,
+    "provides": [],
+    "handles": [],
+    "publishes": [],
+    "subscribes": [],
+    "ports": []
+  },
+  "capabilities": {
+    "schemaVersion": 1,
+    "definitions": [],
+    "providers": [],
+    "consumers": []
+  },
+  "application": {
+    "schemaVersion": 1,
+    "role": "compound",
+    "requiredServices": [
+      {
+        "id": "shipctl.plugin-data",
+        "version": 1
+      }
+    ],
+    "providedServices": [],
+    "backgroundEffects": [],
+    "contributions": [
+      {
+        "family": "command",
+        "id": "commands.open-panel",
+        "schemaVersion": 1
+      },
+      {
+        "family": "panel",
+        "id": "core.commands",
+        "schemaVersion": 1
+      },
+      {
+        "family": "project-navigation",
+        "id": "commands.project-navigation",
+        "schemaVersion": 1
+      }
+    ]
+  },
+  "uiContributions": [],
+  "requestedGrants": [],
+  "nativeAdapters": [],
+  "secretReferences": [],
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "supportedScopes": [
+    "instance",
+    "workspace"
+  ],
+  "lifecycle": "live",
+  "sourceProvenance": {
+    "builder": "ops/architecture/bin/build-plugin-artifact.mjs",
+    "module": "commands"
+  }
+}

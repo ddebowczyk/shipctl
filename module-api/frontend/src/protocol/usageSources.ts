@@ -12,7 +12,6 @@ export type UsageProvider =
   | "opencode"
   | "pi";
 
-export type UsageTimeWindow = "5h" | "7d" | "30d" | "365d";
 export type UsageSourceKind = "provider-quota" | "local-transcript";
 export type UsageSourcesGrant =
   | "usage-source.read"
@@ -21,7 +20,6 @@ export type UsageSourcesGrant =
 export type UsageSourceType = "provider" | "local";
 export type UsageConfidence = "official" | "observed" | "estimated";
 export type UsageCostKind = "recorded" | "estimated" | "included" | "free" | "mixed" | "unknown";
-export type UsageCostBasis = "provider" | "local-pricing" | "subscription" | "gateway" | "none";
 
 /** Reviewed source identity. Native paths and credential bytes are not public data. */
 export interface UsageSourceDescriptor {
@@ -30,14 +28,8 @@ export interface UsageSourceDescriptor {
   readonly authority: "host-managed";
 }
 
-export interface UsageCost {
-  amount: number | null;
-  kind: UsageCostKind;
-  basis: UsageCostBasis;
-  confidence: UsageConfidence;
-}
-
-export interface UsageWindowSnapshot {
+/** Provider quota fact produced inside the credential boundary. */
+export interface UsageProviderWindow {
   provider: UsageProvider;
   windowId: string;
   window: string;
@@ -55,147 +47,52 @@ export interface UsageWindowSnapshot {
   paceStatus: string | null;
 }
 
-export interface UsageNamedTokens {
-  name: string;
-  tokens: number;
-  cost: number | null;
-  costDetail: UsageCost;
+/** Normalized transcript event or durable daily rollup. */
+export interface UsageSourceRecord {
+  readonly grain: "message" | "daily";
+  readonly provider: UsageProvider;
+  readonly sessionId: string | null;
+  readonly date: string | null;
+  readonly project: string | null;
+  readonly model: string | null;
+  readonly timestamp: number | null;
+  readonly tokensInput: number;
+  readonly tokensOutput: number;
+  readonly tokensCacheWrite: number;
+  readonly tokensCacheRead: number;
+  readonly tokensThoughts: number;
+  readonly tokensTotal: number;
+  readonly messageCount: number;
+  readonly pricingProvider: string;
+  readonly recordedCost: number | null;
 }
 
-export interface UsageTask {
-  id: string;
-  label: string;
-  tokens: number;
-  cost: number | null;
-  costDetail: UsageCost;
-  model: string | null;
-  project: string | null;
-  updatedAt: string | null;
+/** Redacted state of one credential-bound provider quota source. */
+export interface UsageProviderObservation {
+  readonly provider: UsageProvider;
+  readonly available: boolean;
+  readonly fetchedAt: string | null;
+  readonly summaryWindows: readonly UsageProviderWindow[];
+  readonly extraWindows: readonly UsageProviderWindow[];
 }
 
-export interface UsageProject {
-  name: string;
-  tokens: number;
-  cost: number | null;
-  costDetail: UsageCost;
-  sessions: number | null;
+/** Raw semantic facts. It contains no pricing, aliases, totals, or UI projections. */
+export interface UsageSourceDataset {
+  readonly capturedAt: string;
+  readonly records: readonly UsageSourceRecord[];
+  readonly providerObservations: readonly UsageProviderObservation[];
 }
 
-export interface LocalUsageDetails {
-  sourceType: "local";
-  confidence: UsageConfidence;
-  tokensTotal: number;
-  tokensInput: number | null;
-  tokensOutput: number | null;
-  tokensCached: number | null;
-  tokensThoughts: number | null;
-  tokens5h: number;
-  tokens7d: number;
-  tokens30d: number;
-  costTotal: number | null;
-  costTotalDetail: UsageCost;
-  costMonth: number | null;
-  costMonthDetail: UsageCost;
-  cost5h: number | null;
-  cost5hDetail: UsageCost;
-  cost7d: number | null;
-  cost7dDetail: UsageCost;
-  cost30d: number | null;
-  cost30dDetail: UsageCost;
-  topModels: UsageNamedTokens[];
-  topTasks: UsageTask[];
-  topProjects: UsageProject[];
+export interface InspectUsageSourceInput {
+  readonly kind: "source-dataset";
+  readonly sourceIds?: readonly UsageProvider[];
 }
 
-export interface ProviderUsageSnapshot {
-  provider: UsageProvider;
-  status: string;
-  fetchedAt: string;
-  summaryWindows: UsageWindowSnapshot[];
-  extraWindows: UsageWindowSnapshot[];
-  localDetails: LocalUsageDetails | null;
-  /** Redacted diagnostic text. It never contains paths or credentials. */
-  error: string | null;
+export interface UsageSourceInspection {
+  readonly kind: "source-dataset";
+  readonly sources: readonly UsageSourceDescriptor[];
+  readonly dataset: UsageSourceDataset;
 }
-
-export interface UsageTrendProviderValue {
-  provider: UsageProvider;
-  tokens: number;
-  cost: number | null;
-  costDetail: UsageCost;
-}
-
-export interface UsageTrendBucket {
-  start: number;
-  end: number;
-  label: string;
-  tokens: number;
-  cost: number | null;
-  costDetail: UsageCost;
-  providers: UsageTrendProviderValue[];
-}
-
-export interface UsageOverviewProvider {
-  provider: UsageProvider;
-  tokens: number;
-  tokensInput: number;
-  tokensOutput: number;
-  tokensCacheRead: number;
-  tokensCacheWrite: number;
-  tokensThoughts: number;
-  cost: number | null;
-  costDetail: UsageCost;
-  sharePercent: number;
-  trend: number[];
-}
-
-export interface UsageBreakdownItem {
-  provider: UsageProvider;
-  label: string;
-  tokens: number;
-  tokensInput: number;
-  tokensOutput: number;
-  tokensCacheRead: number;
-  tokensCacheWrite: number;
-  tokensThoughts: number;
-  cost: number | null;
-  costDetail: UsageCost;
-  sessions: number | null;
-  trend: number[];
-}
-
-export interface UsageOverview {
-  window: UsageTimeWindow;
-  totalTokens: number;
-  totalCost: number | null;
-  totalCostDetail: UsageCost;
-  activeProjects: number;
-  activeSessions: number;
-  providers: UsageOverviewProvider[];
-  trend: UsageTrendBucket[];
-  topModels: UsageBreakdownItem[];
-  topProjects: UsageBreakdownItem[];
-}
-
-export type InspectUsageSourceInput =
-  | { readonly kind: "source-snapshots" }
-  | {
-      /** Transitional projection. Phase D replaces it with TypeScript policy. */
-      readonly kind: "legacy-overview-projection";
-      readonly window: UsageTimeWindow;
-    };
-
-export type UsageSourceInspection =
-  | {
-      readonly kind: "source-snapshots";
-      readonly sources: readonly UsageSourceDescriptor[];
-      readonly snapshots: readonly ProviderUsageSnapshot[];
-    }
-  | {
-      /** Compatibility result, not a permanent native capability. */
-      readonly kind: "legacy-overview-projection";
-      readonly overview: UsageOverview;
-    };
 
 export interface RefreshUsageSourcesInput {
   readonly sourceIds?: readonly UsageProvider[];
@@ -240,5 +137,5 @@ export interface UsageSourcesService {
 
 export const usageSourcesService = defineSemanticService<UsageSourcesService>(
   "shipctl.usage-sources",
-  1,
+  2,
 );

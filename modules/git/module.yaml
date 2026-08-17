@@ -4,41 +4,9 @@ id: git
 frontend:
   package: "@shipctl/module-git"
   path: modules/git/frontend
-  composition_symbol: gitModule
-backend:
-  crate: tauri-plugin-shipctl-git
-  path: modules/git/backend
-  cargo_feature: git-module
-  dependency_alias: shipctl-module-git
-  install: "shipctl_module_git_host::install(builder, workspace.clone())"
-  host:
-    crate: shipctl-module-git-host
-    path: modules/git/host
-    dependency_alias: shipctl-module-git-host
-tauri:
-  capability_identifier: git
-  permissions:
-    - shipctl-git:allow-is-git-repo
-    - shipctl-git:allow-git-init
-    - shipctl-git:allow-git-current-branch
-    - shipctl-git:allow-git-list-branches
-    - shipctl-git:allow-git-push-branch
-    - shipctl-git:allow-git-list-worktrees
-    - shipctl-git:allow-git-create-worktree
-    - shipctl-git:allow-git-status
-    - shipctl-git:allow-git-changed-files
-    - shipctl-git:allow-git-file-diff
-    - shipctl-git:allow-git-file-contents
-    - shipctl-git:allow-git-list-files
-    - shipctl-git:allow-git-stage-file
-    - shipctl-git:allow-git-stage-all
-    - shipctl-git:allow-git-commit
-    - shipctl-git:allow-git-unstage-file
-    - shipctl-git:allow-git-unstage-all
-    - shipctl-git:allow-git-switch-branch
-    - shipctl-git:allow-git-create-branch
-    - shipctl-git:allow-git-diff-stats
-profile: ops/modularity/profiles/git-disabled/tauri.conf.json
+  delivery: runtime-artifact
+  artifact: modules/git/artifact
+profile: null
 tests:
   frontend: modules/git/frontend/tests
-  backend: cargo test --manifest-path modules/git/backend/Cargo.toml -- --test-threads=1
+  backend: null

@@ -185,6 +185,7 @@ test("an unknown or disabled surface renders a recoverable host state", () => {
     contribution: undefined,
     surfaceId: "fixture.disabled",
     close: () => undefined,
+    projectPaths: [],
     services,
     moduleActivations: new Map(),
   }));

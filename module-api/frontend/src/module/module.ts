@@ -6,6 +6,7 @@ import type { ModuleMessageContributions } from "../protocol/messages";
 import type { RegisterScheduleInput } from "../protocol/schedules";
 import type { ModuleHost } from "../host/module";
 import type { ModuleHostServices, ModuleSkillsPort } from "../host/services";
+import type { ModuleActivationContext } from "../protocol/semanticServices";
 import type { CommandContribution } from "./commands";
 import type { PanelContribution } from "./panels";
 import type { TerminalPresentationProvider } from "./terminalHost";
@@ -62,6 +63,9 @@ export interface ShipctlModule {
   /** Build-installed terminal presentations. One terminal selects one driver. */
   readonly terminalPresentations?: readonly TerminalPresentationProvider[];
   /** Runs in module registration order before native process shutdown begins. */
-  beforeShutdown?(services: ModuleHostServices): void | Promise<void>;
+  beforeShutdown?(
+    services: ModuleHostServices,
+    activation: ModuleActivationContext,
+  ): void | Promise<void>;
   activate?(host: ModuleHost): void | ModuleDeactivation;
 }

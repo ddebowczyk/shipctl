@@ -41,6 +41,15 @@ export type {
   FakeCredentialTrace,
 } from "./testing/credentials.ts";
 export {
+  createFakeAssistantLaunchServiceProvider,
+  FakeAssistantSessionChangeController,
+} from "./testing/assistantLaunch.ts";
+export type {
+  FakeAssistantLaunchOperation,
+  FakeAssistantLaunchProviderOptions,
+  FakeAssistantLaunchTrace,
+} from "./testing/assistantLaunch.ts";
+export {
   createFakeUsageSourcesServiceProvider,
   FakeUsageSourceChangeController,
 } from "./testing/usageSources.ts";

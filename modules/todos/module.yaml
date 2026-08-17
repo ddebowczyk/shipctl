@@ -4,28 +4,9 @@ id: todos
 frontend:
   package: "@shipctl/module-todos"
   path: modules/todos/frontend
-  composition_symbol: todosModule
-backend:
-  crate: tauri-plugin-shipctl-todos
-  path: modules/todos/backend
-  cargo_feature: todos-module
-  dependency_alias: shipctl-module-todos
-  install: "shipctl_module_todos_host::install(builder, workspace.clone())"
-  host:
-    crate: shipctl-module-todos-host
-    path: modules/todos/host
-    dependency_alias: shipctl-module-todos-host
-tauri:
-  capability_identifier: todos
-  permissions:
-    - shipctl-todos:allow-read-todos
-    - shipctl-todos:allow-toggle-todo
-    - shipctl-todos:allow-add-todo
-    - shipctl-todos:allow-move-todo
-    - shipctl-todos:allow-discover-project-documents
-    - shipctl-todos:allow-read-project-document
-    - shipctl-todos:allow-write-project-document
-profile: ops/modularity/profiles/todos-disabled/tauri.conf.json
+  delivery: runtime-artifact
+  artifact: modules/todos/artifact
+profile: null
 tests:
   frontend: modules/todos/frontend/tests
-  backend: cargo test --manifest-path modules/todos/backend/Cargo.toml
+  backend: null

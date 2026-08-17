@@ -221,9 +221,14 @@ export function moduleScheduledTasks(
  */
 export async function notifyModulesBeforeShutdown(
   services: ModuleHostServices,
+  activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
   modules: readonly ShipctlModule[] = ENABLED_MODULES,
 ): Promise<void> {
-  for (const module of modules) await module.beforeShutdown?.(services);
+  for (const module of modules) {
+    const activation = activations.get(module.id);
+    if (!module.beforeShutdown || !activation || activation.disposed) continue;
+    await module.beforeShutdown(services, activation);
+  }
 }
 
 async function notifyProjectLifecycle(

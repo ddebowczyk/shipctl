@@ -269,12 +269,12 @@ test("default profile enables the extracted TODO panel", () => {
   assert.equal(registry.panel("todos.board")?.migrationAlias?.kind, "todos");
 });
 
-test("default profile enables the extracted Ports surface", () => {
+test("static profile leaves Ports to its admitted artifact", () => {
   const registry = createEnabledGlobalSurfaceRegistry(builtinGlobalSurfaceLoaders);
-  assert.equal(registry.has("ports.overview"), true);
+  assert.equal(registry.has("ports.overview"), false);
   assert.equal(
     registry.navigation().some(({ id }) => id === "ports.global-navigation"),
-    true,
+    false,
   );
 });
 
@@ -295,15 +295,14 @@ test("default profile composes Usage only through its module contributions", () 
   );
 });
 
-test("default profile enables the extracted Commands surfaces", () => {
+test("static profile leaves Commands to its admitted artifact", () => {
   const registry = createEnabledPanelRegistry();
-  assert.equal(registry.has("core.commands"), true);
-  assert.equal(registry.panel("core.commands")?.migrationAlias?.kind, "commands");
+  assert.equal(registry.has("core.commands"), false);
   assert.equal(
     moduleProjectNavigationContributions().some(
       ({ id, panelId }) => id === "commands.project-navigation" && panelId === "core.commands",
     ),
-    true,
+    false,
   );
 });
 
@@ -533,7 +532,10 @@ test("partial scheduler registration is rolled back with module activation", asy
       new Map(),
       registry,
     );
-    assert.deepEqual(activation.failures, [{ moduleId: module.id }]);
+    assert.deepEqual(activation.failures, [{
+      moduleId: module.id,
+      message: "Scheduled task rollback.invalid was rejected: scheduler.request.invalid",
+    }]);
     await activation.deactivate();
   } finally {
     console.error = originalConsoleError;
@@ -797,7 +799,14 @@ test("pre-shutdown lifecycle is ordered and stops before native shutdown on fail
   ];
 
   await assert.rejects(
-    notifyModulesBeforeShutdown(services, modules),
+    notifyModulesBeforeShutdown(
+      services,
+      new Map(modules.map((module) => [
+        module.id,
+        { disposed: false } as ModuleActivationContext,
+      ])),
+      modules,
+    ),
     /capture failed/,
   );
   assert.deepEqual(calls, ["first", "failing"]);

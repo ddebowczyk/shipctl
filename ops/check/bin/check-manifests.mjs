@@ -68,6 +68,7 @@ export function validateManifests(root) {
     if (kind === "product" && id !== directoryId) fail(id, `id does not match modules/${directoryId}`);
 
     const frontend = manifest.frontend;
+    const runtimeArtifact = frontend.delivery === "runtime-artifact";
     const frontendPackagePath = path.join(root, frontend.path, "package.json");
     if (!existsSync(frontendPackagePath)) {
       fail(id, `${frontend.path}/package.json does not exist`);
@@ -76,8 +77,24 @@ export function validateManifests(root) {
     }
 
     const fixtureProfile = manifest.profile !== null && !manifest.profile.includes("-disabled/");
-    if (!fixtureProfile && rootPackage.dependencies?.[frontend.package] !== "workspace:*") {
+    if (!fixtureProfile && !runtimeArtifact
+      && rootPackage.dependencies?.[frontend.package] !== "workspace:*") {
       fail(id, `package.json must depend on ${frontend.package} as workspace:*`);
+    }
+    if (!fixtureProfile && runtimeArtifact
+      && rootPackage.dependencies?.[frontend.package] !== undefined) {
+      fail(id, `package.json must not statically depend on runtime artifact ${frontend.package}`);
+    }
+
+    if (runtimeArtifact) {
+      if (frontend.composition_symbol) {
+        fail(id, "runtime artifact must not declare a static composition symbol");
+      }
+      for (const relative of ["module.template.json", "src/index.ts"]) {
+        if (!existsSync(path.join(root, frontend.artifact ?? "", relative))) {
+          fail(id, `${frontend.artifact}/${relative} does not exist`);
+        }
+      }
     }
 
     if (frontend.composition_symbol) {

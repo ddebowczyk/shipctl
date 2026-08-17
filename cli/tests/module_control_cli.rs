@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader};
 use std::process::Command;
+use std::process::Stdio;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -13,10 +15,15 @@ use shipctl_core::message_bus::{
     MessageModuleInspection, MessageRouteSnapshot, MessageRuntimeInspection,
     MESSAGE_CONTRACT_SCHEMA_VERSION,
 };
-use shipctl_core::module_control::{
-    Diagnostic, DiagnosticSeverity, ModuleOperation, ModuleOperationPhase, ModuleOperationResult,
-    ModuleTransition, RedactedEvidence,
+use shipctl_core::module_control::registry::{
+    ArtifactAcquisition, ModuleRegistry, RegistryMutation,
 };
+use shipctl_core::module_control::{
+    DesiredModuleState, Diagnostic, DiagnosticSeverity, ModuleIdentity, ModuleOperation,
+    ModuleOperationKind, ModuleOperationPhase, ModuleOperationResult, ModuleRuntimeKind,
+    ModuleSource, ModuleTransition, RedactedEvidence, MODULE_CONTROL_SCHEMA_VERSION,
+};
+use shipctl_core::state::paths::ShipctlPaths;
 use uuid::Uuid;
 
 struct FixtureHandler;
@@ -66,6 +73,7 @@ impl ControlHandler for FixtureHandler {
             module_id,
             kind,
             target_registry_revision,
+            artifact_content_digest: _,
         } = command
         else {
             return Err(ControlError::new(
@@ -145,6 +153,8 @@ fn cli_renders_complete_native_restart_fixture_stream_as_json_and_toon() {
         Arc::new(FixtureHandler),
     )
     .unwrap();
+    let paths = ShipctlPaths::new(context.state_root.clone(), context.runtime_root.clone());
+    ModuleRegistry::open_writable(&paths).unwrap();
 
     let json = run_cli(&context, "json");
     let toon = run_cli(&context, "toon");
@@ -159,6 +169,99 @@ fn cli_renders_complete_native_restart_fixture_stream_as_json_and_toon() {
     );
     assert_eq!(json_value["data"]["kind"], "enable");
     assert_eq!(json_value["data"]["targetRegistryRevision"], 14);
+
+    let replacement = run_replace_cli(&context, "json");
+    assert!(replacement.status.success());
+    let replacement: Value = serde_json::from_slice(&replacement.stdout).unwrap();
+    assert_eq!(replacement["operation"], "modules.replace");
+    assert_eq!(replacement["data"]["kind"], "update");
+    assert_eq!(replacement["data"]["targetRegistryRevision"], 15);
+
+    let removal = run_remove_cli(&context, "json");
+    assert!(removal.status.success());
+    let removal: Value = serde_json::from_slice(&removal.stdout).unwrap();
+    assert_eq!(removal["operation"], "modules.remove");
+    assert_eq!(removal["data"]["kind"], "remove");
+    assert_eq!(removal["data"]["targetRegistryRevision"], 16);
+
+    let mut watch = Command::new(env!("CARGO_BIN_EXE_shipctl"))
+        .args([
+            "modules",
+            "watch",
+            "--instance",
+            "fixture",
+            "--runtime-root",
+        ])
+        .arg(&context.runtime_root)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut reader = BufReader::new(watch.stdout.take().unwrap());
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let event: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(event["schemaVersion"], 1);
+    assert_eq!(event["instanceId"], context.instance_id.to_string());
+    assert_eq!(event["instanceName"], "fixture");
+    assert_eq!(event["registryRevision"], 0);
+    assert!(event["desired"].as_array().unwrap().is_empty());
+
+    let artifact = ModuleIdentity {
+        schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+        id: "shipctl.watch-fixture".to_string(),
+        version: "1.0.0".to_string(),
+        content_digest: "a".repeat(64),
+        runtime_kind: ModuleRuntimeKind::StaticBuiltin,
+    };
+    ModuleRegistry::open_writable(&paths)
+        .unwrap()
+        .commit(&RegistryMutation {
+            request_id: Uuid::new_v4(),
+            module_id: artifact.id.clone(),
+            instance_id: context.instance_id,
+            kind: ModuleOperationKind::Enable,
+            artifacts: vec![ArtifactAcquisition {
+                identity: artifact.clone(),
+                source: ModuleSource::Bundled,
+            }],
+            desired: Some(DesiredModuleState {
+                schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+                module_id: artifact.id.clone(),
+                selected_artifact: Some(artifact),
+                enabled: true,
+                configuration_revision: 1,
+            }),
+            observations: Vec::new(),
+        })
+        .unwrap();
+    let event = loop {
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        let event: Value = serde_json::from_str(&line).unwrap();
+        if event["registryRevision"] == 1 {
+            break event;
+        }
+    };
+    assert_eq!(event["registryRevision"], 1);
+    assert_eq!(event["desired"][0]["moduleId"], "shipctl.watch-fixture");
+    watch.kill().unwrap();
+    watch.wait().unwrap();
+
+    let invalid_watch_output = Command::new(env!("CARGO_BIN_EXE_shipctl"))
+        .args([
+            "modules",
+            "watch",
+            "--instance",
+            "fixture",
+            "--runtime-root",
+        ])
+        .arg(&context.runtime_root)
+        .args(["--output", "json"])
+        .output()
+        .unwrap();
+    assert!(!invalid_watch_output.status.success());
+    let invalid_watch_output: Value = serde_json::from_slice(&invalid_watch_output.stdout).unwrap();
+    assert_eq!(invalid_watch_output["operation"], "modules.watch");
 
     let message_json = run_message_cli(&context, "inspect", "json");
     let message_toon = run_message_cli(&context, "inspect", "toon");
@@ -223,6 +326,44 @@ fn run_cli(context: &InstanceContext, output: &str) -> std::process::Output {
         String::from_utf8_lossy(&output.stderr)
     );
     output
+}
+
+fn run_replace_cli(context: &InstanceContext, output: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_shipctl"))
+        .args([
+            "modules",
+            "replace",
+            "shipctl.native",
+            "--artifact",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--target-revision",
+            "15",
+            "--instance",
+            "fixture",
+            "--runtime-root",
+        ])
+        .arg(&context.runtime_root)
+        .args(["--output", output])
+        .output()
+        .unwrap()
+}
+
+fn run_remove_cli(context: &InstanceContext, output: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_shipctl"))
+        .args([
+            "modules",
+            "remove",
+            "shipctl.native",
+            "--target-revision",
+            "16",
+            "--instance",
+            "fixture",
+            "--runtime-root",
+        ])
+        .arg(&context.runtime_root)
+        .args(["--output", output])
+        .output()
+        .unwrap()
 }
 
 fn run_message_cli(context: &InstanceContext, command: &str, output: &str) -> std::process::Output {

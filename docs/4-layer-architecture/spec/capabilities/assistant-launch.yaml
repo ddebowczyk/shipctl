@@ -4,25 +4,47 @@ schema_version: capability/v1
 id: assistant-launch
 version: 1.0.0
 title: Assistant process and session launch
-status: proposed
+status: implemented
 layer: native-kernel
 consumers: [assistants]
 current_implementations:
-  - modules/assistants/backend
-  - modules/assistants/host
+  - module-api/frontend/src/protocol/assistantLaunch.ts
+  - module-api/frontend/src/testing/assistantLaunch.ts
+  - core/frontend/platform/assistantLaunch.ts
+  - modules/assistants/frontend/src/assistantLaunchClient.ts
+  - core/backend/src/assistant_launch
+  - core/tauri/src/assistant_launch.rs
 target_owners:
   provider: core/backend/src/assistant_launch
   tauri_adapter: core/tauri/src/assistant_launch.rs
   typescript_client: core/frontend/platform/assistantLaunch
 operations:
-  - id: startAssistant
+  - id: startSession
+    kind: request
+    contract: Start an approved provider through a host terminal transaction.
+  - id: resumeSession
+    kind: request
+    contract: Resume a recoverable assistant by its stable host record identity.
+  - id: refreshSessionIdentity
     kind: request
     contract: >-
-      Start or resume an approved provider through a host terminal session.
+      Refresh provider-specific capture through a provider-neutral host record.
   - id: recordPlacement
     kind: request
     contract: Persist host-owned recovery placement by stable session identity.
-  - id: observeAssistant
+  - id: recordLabel
+    kind: request
+    contract: Persist a presentation label by stable session identity.
+  - id: manageRecovery
+    kind: request
+    contract: >-
+      Inspect, rearm, discard, and preserve host-owned recovery records.
+  - id: inspectProvider
+    kind: request
+    contract: >-
+      Inspect provider models and non-secret configuration; save closed
+      settings.
+  - id: observeSessions
     kind: event
     contract: Observe host session lifecycle through an activation lease.
 required_grants:
@@ -32,14 +54,17 @@ ownership:
   authority: >-
     The host owns process launch, session identity, and recovery records.
   resources: Assistant sessions survive presentation replacement by policy.
-  activation_scope: Provider and project scope are explicit on every launch.
+  activation_scope: >-
+    Every request carries the exact activation; launch and observation add
+    explicit provider, project, or stable record scope.
 depends_on: [processes, terminal-sessions, credential-store, plugin-data]
 property_ids:
   - PROP-B-ADAPTER-001
+  - PROP-B-REQUEST-001
+  - PROP-B-ACTIVATION-001
   - PROP-B-EVENT-001
+  - PROP-B-FAKE-001
   - PROP-D-PARITY-001
   - PROP-D-AUTHORITY-001
   - PROP-D-OWNERSHIP-001
-open_questions:
-  - >-
-    Separate provider-specific capture policy from host recovery identity.
+open_questions: []

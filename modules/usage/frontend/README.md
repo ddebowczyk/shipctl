@@ -1,8 +1,9 @@
 # Usage frontend module
 
-This package owns Shipctl's Usage frontend: provider DTOs and Tauri client,
-global stores, quota helpers, Usage panel, sidebar utilization widget, settings
-section, styles, logos, refresh scheduling, and ingestion-event lifecycle.
+This package owns Shipctl's Usage policy and frontend: pricing, aggregation,
+alias review, the semantic Usage Sources client, global stores, quota helpers,
+the Usage panel, the sidebar utilization widget, settings, styles, refresh
+scheduling, and the ingestion-event lifecycle.
 
 The host imports only the public `usageModule` contribution from
 `@shipctl/module-usage`. The persisted global surface ID is `core.usage`.
@@ -12,5 +13,7 @@ port under the `usage` key. This package owns their schema, defaults,
 normalization, and merge behavior; the host stores the document opaquely and
 preserves unknown values.
 
-All native calls use the `plugin:shipctl-usage|...` namespace. Model discovery is
+The module consumes normalized facts through the public `usageSourcesService`.
+It does not import Tauri APIs. The permanent Rust provider owns reviewed source,
+credential, process, network, and SQLite authority. Model discovery is
 Assistant behavior and is not part of this package.

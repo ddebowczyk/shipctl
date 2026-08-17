@@ -103,7 +103,7 @@ function fixture(options: {
   let deliver: ((raw: unknown) => void) | null = null;
   const transport: SemanticTerminalsNativeTransport = {
     snapshot: async () => options.snapshot ?? state,
-    attach: async (_terminalId, _claimsResize, listener) => {
+    attach: async (_request, listener) => {
       deliver = listener;
       return {
         attachmentId: "semantic-attachment-one",
@@ -113,14 +113,14 @@ function fixture(options: {
         snapshot: state,
       };
     },
-    creditScreen: async (attachmentId, committedSequence) => {
+    creditScreen: async ({ input: { attachmentId, committedSequence } }) => {
       credits.push({ attachmentId, committedSequence });
     },
-    detach: async (attachmentId) => { detached.push(attachmentId); },
-    resize: async (terminalId, attachmentId, columns, rows) => {
+    detach: async ({ input: { attachmentId } }) => { detached.push(attachmentId); },
+    resize: async ({ input: { terminalId, attachmentId, columns, rows } }) => {
       resizes.push({ terminalId, attachmentId, columns, rows });
     },
-    input: async (_terminalId, input) => {
+    input: async ({ input: { input } }) => {
       inputs.push(input);
       const text = input.kind === "key" ? input.text ?? "" : "text" in input ? input.text : "";
       return new TextEncoder().encode(text).length;
@@ -138,7 +138,7 @@ function fixture(options: {
         selected: false,
       }],
     }] }),
-    anchor: async (_terminalId, _space, at) => ({
+    anchor: async ({ input: { at } }) => ({
       id: 9,
       retained: true,
       lossReported: false,
@@ -150,9 +150,10 @@ function fixture(options: {
     resolveAnchor: async () => null,
     releaseAnchor: async () => true,
     select: async () => ({ active: true, text: "$" }),
-    inspectPaste: async (text) => !/[\r\n]/u.test(text),
+    inspectPaste: async ({ input: { text } }) => !/[\r\n]/u.test(text),
     publicationStats: async () => publicationStats(),
     appMemory: async () => ({ appRss: 4096 }),
+    releaseActivation: async () => 0,
   };
   const runtime: ActivationTerminalSessionsRuntime = {
     getDimensions: () => ({ columns: 80, rows: 24 }),

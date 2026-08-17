@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use shipctl_core::instance::DEFAULT_INSTANCE_NAME;
+use shipctl_core::semantic_terminal::projection::ProjectedSpace;
 use shipctl_core::terminal_host::{TerminalAgentReportKind, TerminalId};
-use shipctl_module_semantic_terminal_core::projection::ProjectedSpace;
 use uuid::Uuid;
 
 use crate::output::OutputFormat;
@@ -510,6 +510,8 @@ impl InstanceStopArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum ModulesCommand {
+    /// Seal a staging directory into a deterministic immutable module archive.
+    Pack(ModulePackArgs),
     /// Validate an immutable module archive without installing or activating it.
     Preflight(OfflineArtifactArgs),
     /// Install a validated immutable module archive in disabled state.
@@ -528,6 +530,22 @@ pub enum ModulesCommand {
     Enable(ModuleTransitionArgs),
     /// Request that a running instance disable a module.
     Disable(ModuleTransitionArgs),
+    /// Select an installed artifact for a module in a running instance.
+    Replace(ModuleReplaceArgs),
+    /// Remove a module from desired runtime state in a running instance.
+    Remove(ModuleRemoveArgs),
+    /// Stream desired and applied module revisions from a running instance.
+    Watch(ModuleWatchArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ModulePackArgs {
+    /// Directory containing module.yaml and every declared artifact file.
+    pub source: PathBuf,
+
+    /// New immutable archive path. Existing files are never replaced.
+    #[arg(long = "to", value_name = "FILE")]
+    pub destination: PathBuf,
 }
 
 #[derive(Debug, Subcommand)]
@@ -779,7 +797,7 @@ pub struct ModuleTransitionArgs {
     #[arg(long, value_name = "PATH", requires = "offline")]
     pub state_root: Option<PathBuf>,
 
-    /// Registry revision the online caller expects to replace.
+    /// Registry revision that the online transition must create.
     #[arg(long, required_unless_present = "offline")]
     pub target_revision: Option<u64>,
 
@@ -794,6 +812,55 @@ pub struct ModuleTransitionArgs {
 
     /// Override the local instance discovery directory.
     #[arg(long, value_name = "PATH", conflicts_with = "offline")]
+    pub runtime_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct ModuleReplaceArgs {
+    pub module_id: String,
+
+    /// SHA-256 content digest of an installed immutable artifact.
+    #[arg(long = "artifact", value_name = "SHA256")]
+    pub artifact_content_digest: String,
+
+    /// Registry revision that the online transition must create.
+    #[arg(long)]
+    pub target_revision: u64,
+
+    /// Running instance name or UUID.
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
+    pub instance: Option<String>,
+
+    /// Override the local instance discovery directory.
+    #[arg(long, value_name = "PATH")]
+    pub runtime_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct ModuleRemoveArgs {
+    pub module_id: String,
+
+    /// Registry revision that the online transition must create.
+    #[arg(long)]
+    pub target_revision: u64,
+
+    /// Running instance name or UUID.
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
+    pub instance: Option<String>,
+
+    /// Override the local instance discovery directory.
+    #[arg(long, value_name = "PATH")]
+    pub runtime_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct ModuleWatchArgs {
+    /// Running instance name or UUID.
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
+    pub instance: Option<String>,
+
+    /// Override the local instance discovery directory.
+    #[arg(long, value_name = "PATH")]
     pub runtime_root: Option<PathBuf>,
 }
 

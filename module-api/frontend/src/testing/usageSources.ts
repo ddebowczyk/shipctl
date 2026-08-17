@@ -1,10 +1,9 @@
 import {
   usageSourcesService,
   type InspectUsageSourceInput,
-  type ProviderUsageSnapshot,
   type RefreshUsageSourcesInput,
-  type UsageOverview,
   type UsageProvider,
+  type UsageSourceDataset,
   type UsageSourceDescriptor,
   type UsageSourceInspection,
   type UsageSourceObservationScope,
@@ -13,7 +12,6 @@ import {
   type UsageSourcesErrorCode,
   type UsageSourcesGrant,
   type UsageSourcesService,
-  type UsageTimeWindow,
 } from "../protocol/usageSources";
 import type { SemanticServiceError } from "../protocol/semanticServices";
 import type {
@@ -37,8 +35,6 @@ const PROVIDERS = [
   "pi",
 ] as const satisfies readonly UsageProvider[];
 
-const WINDOWS = ["5h", "7d", "30d", "365d"] as const;
-
 export type FakeUsageSourcesOperation = "inspect-source" | "refresh-sources";
 
 export interface FakeUsageSourcesTrace {
@@ -48,8 +44,7 @@ export interface FakeUsageSourcesTrace {
 
 export interface FakeUsageSourcesProviderOptions {
   readonly descriptors?: readonly UsageSourceDescriptor[];
-  readonly snapshots?: readonly ProviderUsageSnapshot[];
-  readonly overviews?: Partial<Record<UsageTimeWindow, UsageOverview>>;
+  readonly dataset?: UsageSourceDataset;
   readonly deniedGrants?: readonly UsageSourcesGrant[];
   readonly trace?: FakeUsageSourcesTrace[];
   readonly changes?: FakeUsageSourceChangeController;
@@ -81,6 +76,12 @@ const DISPOSED = {
   retryable: false,
 } as const;
 
+const EMPTY_DATASET: UsageSourceDataset = Object.freeze({
+  capturedAt: "1970-01-01T00:00:00Z",
+  records: Object.freeze([]),
+  providerObservations: Object.freeze([]),
+});
+
 function failedError(error: unknown): SemanticServiceError<UsageSourcesErrorCode> {
   if (error instanceof FakeUsageSourcesFailure) {
     return { code: error.code, message: error.message, retryable: false };
@@ -106,10 +107,6 @@ function requireGrant(
 
 function isProvider(value: string): value is UsageProvider {
   return (PROVIDERS as readonly string[]).includes(value);
-}
-
-function isUsageWindow(value: unknown): value is UsageTimeWindow {
-  return typeof value === "string" && (WINDOWS as readonly string[]).includes(value);
 }
 
 function normalizedSourceIds(
@@ -167,6 +164,19 @@ function defaultDescriptors(): readonly UsageSourceDescriptor[] {
       : ["provider-quota", "local-transcript"],
     authority: "host-managed",
   }));
+}
+
+function filterDataset(
+  dataset: UsageSourceDataset,
+  sourceIds: readonly UsageProvider[],
+): UsageSourceDataset {
+  return {
+    capturedAt: dataset.capturedAt,
+    records: dataset.records.filter(({ provider }) => sourceIds.includes(provider)),
+    providerObservations: dataset.providerObservations.filter(
+      ({ provider }) => sourceIds.includes(provider),
+    ),
+  };
 }
 
 interface FakeUsageSourceSubscription {
@@ -251,33 +261,20 @@ export function createFakeUsageSourcesServiceProvider(
           options,
           (input) => {
             requireGrant(options, "usage-source.read");
-            if (input.kind === "source-snapshots") {
-              return {
-                kind: "source-snapshots",
-                sources: options.descriptors ?? defaultDescriptors(),
-                snapshots: (options.snapshots ?? []).map((snapshot) => ({
-                  ...snapshot,
-                  error: snapshot.error === null ? null : "Usage source is unavailable",
-                })),
-              };
-            }
-            if (
-              input.kind !== "legacy-overview-projection"
-              || !isUsageWindow(input.window)
-            ) {
+            if (input.kind !== "source-dataset") {
               throw new FakeUsageSourcesFailure(
                 "usage-sources.invalid-request",
                 "Usage source request is invalid",
               );
             }
-            const overview = options.overviews?.[input.window];
-            if (!overview) {
-              throw new FakeUsageSourcesFailure(
-                "usage-sources.unavailable",
-                `No fake usage overview for ${input.window}`,
-              );
-            }
-            return { kind: "legacy-overview-projection", overview };
+            const sourceIds = normalizedSourceIds(input.sourceIds);
+            return {
+              kind: "source-dataset",
+              sources: (options.descriptors ?? defaultDescriptors()).filter(
+                ({ sourceId }) => sourceIds.includes(sourceId),
+              ),
+              dataset: filterDataset(options.dataset ?? EMPTY_DATASET, sourceIds),
+            };
           },
         ),
         refreshSources: operation<RefreshUsageSourcesInput, UsageSourceRefreshReceipt>(

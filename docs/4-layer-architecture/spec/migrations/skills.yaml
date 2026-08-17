@@ -6,12 +6,10 @@ status: migrating
 source_manifest: modules/skills/module.yaml
 current:
   frontend: modules/skills/frontend
-  backend_crates:
-    - modules/skills/backend
-  host_crates:
-    - modules/skills/host
+  backend_crates: []
+  host_crates: []
   direct_tauri: false
-  static_activation: true
+  static_activation: false
 target:
   roles: [compound]
   responsibilities:
@@ -19,21 +17,36 @@ target:
     - Publish skill management views and commands as typed contributions.
   capabilities:
     - skill-installation
-    - plugin-data
     - workspace
 phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
 prerequisites:
   - Characterize skill discovery, installation, removal, and error behavior.
 compatibility_paths:
-  - Route existing feature calls through the skill installation client.
-  - Keep the built-in module active through the common artifact loader.
+  - >-
+    Phase D native extraction is complete: Skills is frontend-only and uses
+    the public Skill Installation capability client.
+  - >-
+    The TypeScript plugin owns built-in identities, catalog metadata, source
+    selection, and Markdown; the native provider remains catalog-agnostic.
+  - >-
+    Phase E packages Skills as an immutable built-in artifact. The host admits
+    and activates it through the same runtime path as user-installed plugins.
+  - >-
+    Skills has no durable plugin-owned record. Its per-project Zustand state is
+    a render cache of the filesystem-backed Skill Installation capability, so
+    the artifact does not declare an unused Plugin Data dependency.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE
-    proof_ids: [PROP-D-PARITY-001, PROP-D-AUTHORITY-001]
+    proof_ids:
+      - PROP-D-PARITY-001
+      - PROP-D-AUTHORITY-001
+      - PROP-D-OWNERSHIP-001
+      - PROP-D-CLOSURE-001
     targets:
       - modules/skills/backend
       - modules/skills/host
   - id: DELETE-E-STATIC-IMPORT
-    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    proof_ids: [PROP-E-SKILLS-PARITY-001, PROP-E-HEADLESS-001]
     targets:
-      - modules/skills/frontend/src/index.ts
+      - core/frontend/host/enabledModules.ts
+      - package.json

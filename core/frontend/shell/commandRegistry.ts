@@ -87,10 +87,7 @@ function register(
   commandsById.set(command.id, command);
 }
 
-/**
- * Compile the fixed startup command profile. Runtime artifacts never reach
- * this registry because their loader accepts headless modules only.
- */
+/** Compile commands from the core and the modules that activated at startup. */
 export function createCommandRegistry({
   coreCommands = [],
   modules = [],

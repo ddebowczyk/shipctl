@@ -75,8 +75,8 @@ test("architecture.property-replay.property", async () => {
   const { stdout: rustStdout } = await exec("cargo", [
     "run",
     "--quiet",
-    "-p",
-    "shipctl-architecture-proptest-replay",
+    "--manifest-path",
+    "ops/architecture/fixtures/proptest-replay/Cargo.toml",
     "--",
     "--seed",
     rustSeed,

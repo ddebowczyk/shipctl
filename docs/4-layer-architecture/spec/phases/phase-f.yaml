@@ -3,7 +3,7 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-f
 title: Live candidate reconciliation
-status: specified
+status: complete
 source: docs/4-layer-architecture/11-phase-f-live-reconciliation.md
 depends_on: [phase-a, phase-b, phase-c, phase-e]
 semantics:
@@ -85,7 +85,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, nightly]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
   - id: PROP-F-ATOMIC-001
     claim: >-
@@ -120,7 +120,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
   - id: PROP-F-REVISION-001
     claim: >-
@@ -154,7 +154,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
   - id: PROP-F-CONTINUITY-001
     claim: >-
@@ -190,7 +190,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
   - id: PROP-F-INSPECTION-001
     claim: >-
@@ -226,7 +226,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
   - id: PROP-F-SERVICE-001
     claim: >-
@@ -263,7 +263,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
   - id: PROP-F-RESTART-001
     claim: >-
@@ -300,7 +300,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
 deliverables:
   - Desired-state observation and pure reconciliation planning.

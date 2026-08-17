@@ -8,14 +8,21 @@ export type ProcessInspectionId = string & {
   readonly [processInspectionIdBrand]: true;
 };
 
+export interface InspectListeningProcessesInput {
+  /** File names used to find the nearest relevant ancestor of a process CWD. */
+  readonly projectRootMarkers: readonly string[];
+  /** File names to observe at that root without assigning them native meaning. */
+  readonly observedProjectFileNames: readonly string[];
+}
+
 export interface ListeningProcessInspection {
   readonly inspectionId: ProcessInspectionId;
   readonly port: number;
   readonly processId: number;
   readonly name: string;
   readonly workingDirectory: string;
-  readonly projectName: string;
-  readonly framework: string;
+  readonly commandLine: string;
+  readonly observedProjectFiles: readonly string[];
   readonly uptime: string;
   readonly memoryKilobytes: number;
 }
@@ -47,7 +54,7 @@ export type ProcessesErrorCode =
 
 export interface ProcessesService {
   readonly inspectListeningPorts: SemanticRequestOperation<
-    Readonly<Record<never, never>>,
+    InspectListeningProcessesInput,
     readonly ListeningProcessInspection[],
     ProcessesErrorCode
   >;

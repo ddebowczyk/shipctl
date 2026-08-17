@@ -19,7 +19,10 @@ use super::{ModuleIdentity, ModuleRuntimeKind, MODULE_CONTROL_SCHEMA_VERSION};
 /// The manifest and index names in a portable runtime-artifact archive.
 pub const ARTIFACT_MANIFEST_PATH: &str = "module.yaml";
 pub const ARTIFACT_INTEGRITY_PATH: &str = "integrity.json";
-pub const ARTIFACT_CONTRACT_SCHEMA_VERSION: u32 = 1;
+pub const ARTIFACT_CONTRACT_SCHEMA_VERSION: u32 = 2;
+pub const ARTIFACT_MINIMUM_SCHEMA_VERSION: u32 = 1;
+pub const APPLICATION_DECLARATION_SCHEMA_VERSION: u32 = 1;
+pub const PLUGIN_API_VERSION: &str = "1.0.0";
 pub const CAPABILITY_CONTRACT_SCHEMA_VERSION: u32 = 1;
 
 pub const ARTIFACT_ARCHIVE_INVALID: &str = "module.artifact.archive.invalid";
@@ -31,6 +34,8 @@ pub const CAPABILITY_CONTRACT_INVALID: &str = "module.artifact.capability.invali
 pub const CAPABILITY_CONTRACT_CONFLICT: &str = "module.artifact.capability.conflict";
 pub const ARTIFACT_API_INCOMPATIBLE: &str = "module.artifact.api.incompatible";
 pub const ARTIFACT_PEER_INCOMPATIBLE: &str = "module.artifact.peer.incompatible";
+pub const ARTIFACT_SERVICE_INCOMPATIBLE: &str = "module.artifact.service.incompatible";
+pub const ARTIFACT_CONTRIBUTION_INCOMPATIBLE: &str = "module.artifact.contribution.incompatible";
 pub const ARTIFACT_GRANT_DENIED: &str = "module.artifact.grant.denied";
 pub const ARTIFACT_NATIVE_ADAPTER_UNAVAILABLE: &str = "module.artifact.native_adapter.unavailable";
 
@@ -483,6 +488,121 @@ pub struct RuntimeUiContribution {
     pub entry: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimePluginRole {
+    #[default]
+    Headless,
+    Presentation,
+    Compound,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeServiceDeclaration {
+    pub id: String,
+    pub version: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuntimeContributionFamily {
+    Command,
+    GlobalNavigation,
+    GlobalSurface,
+    MessageGraph,
+    Panel,
+    ProjectAction,
+    ProjectFacts,
+    ProjectImport,
+    ProjectLayout,
+    ProjectNavigation,
+    ScheduledTask,
+    Settings,
+    Sidebar,
+    SkillsProvider,
+    TerminalPresentation,
+}
+
+impl RuntimeContributionFamily {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Command => "command",
+            Self::GlobalNavigation => "global-navigation",
+            Self::GlobalSurface => "global-surface",
+            Self::MessageGraph => "message-graph",
+            Self::Panel => "panel",
+            Self::ProjectAction => "project-action",
+            Self::ProjectFacts => "project-facts",
+            Self::ProjectImport => "project-import",
+            Self::ProjectLayout => "project-layout",
+            Self::ProjectNavigation => "project-navigation",
+            Self::ScheduledTask => "scheduled-task",
+            Self::Settings => "settings",
+            Self::Sidebar => "sidebar",
+            Self::SkillsProvider => "skills-provider",
+            Self::TerminalPresentation => "terminal-presentation",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeContributionDeclaration {
+    pub family: RuntimeContributionFamily,
+    pub id: String,
+    pub schema_version: u32,
+}
+
+/// Static application declarations which can be compared with a provisionally
+/// loaded TypeScript plugin before any service or contribution is published.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeApplicationManifest {
+    pub schema_version: u32,
+    pub role: RuntimePluginRole,
+    #[serde(default)]
+    pub required_services: Vec<RuntimeServiceDeclaration>,
+    #[serde(default)]
+    pub provided_services: Vec<RuntimeServiceDeclaration>,
+    #[serde(default)]
+    pub background_effects: Vec<String>,
+    #[serde(default)]
+    pub contributions: Vec<RuntimeContributionDeclaration>,
+}
+
+impl RuntimeApplicationManifest {
+    fn is_legacy_empty(&self) -> bool {
+        self == &Self::default()
+    }
+
+    fn validate(&self) -> Result<(), ArtifactContractError> {
+        if self.schema_version != APPLICATION_DECLARATION_SCHEMA_VERSION {
+            return Err(ArtifactContractError::new(
+                ARTIFACT_MANIFEST_INVALID,
+                "Application declarations use an unsupported schema version",
+            ));
+        }
+        validate_service_declarations(&self.required_services, "Required services")?;
+        validate_service_declarations(&self.provided_services, "Provided services")?;
+        validate_unique_scoped_strings(&self.background_effects, "Background effects")?;
+
+        let mut contributions = BTreeSet::new();
+        for contribution in &self.contributions {
+            if contribution.schema_version == 0
+                || !valid_contribution_id(contribution.family, &contribution.id)
+                || !contributions.insert((contribution.family, contribution.id.as_str()))
+            {
+                return Err(ArtifactContractError::new(
+                    ARTIFACT_MANIFEST_INVALID,
+                    "Application contributions require unique family-appropriate IDs and nonzero schema versions",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactLifecycleRequirement {
@@ -511,6 +631,11 @@ pub struct RuntimeArtifactManifest {
     pub assets: Vec<String>,
     pub messages: MessageDeclarations,
     pub capabilities: CapabilityManifest,
+    #[serde(
+        default,
+        skip_serializing_if = "RuntimeApplicationManifest::is_legacy_empty"
+    )]
+    pub application: RuntimeApplicationManifest,
     #[serde(default)]
     pub ui_contributions: Vec<RuntimeUiContribution>,
     #[serde(default)]
@@ -553,7 +678,8 @@ impl RuntimeArtifactManifest {
     }
 
     fn validate_shape(&self) -> Result<(), ArtifactContractError> {
-        if self.schema_version != ARTIFACT_CONTRACT_SCHEMA_VERSION
+        if !(ARTIFACT_MINIMUM_SCHEMA_VERSION..=ARTIFACT_CONTRACT_SCHEMA_VERSION)
+            .contains(&self.schema_version)
             || !valid_scoped_id(&self.id)
             || self.name.trim().is_empty()
             || Version::parse(&self.version).is_err()
@@ -564,6 +690,20 @@ impl RuntimeArtifactManifest {
             return Err(ArtifactContractError::new(
                 ARTIFACT_MANIFEST_INVALID,
                 "Runtime manifest requires schema version, id, name, semantic version, API range, frontend ESM runtime kind, and a normalized entry path",
+            ));
+        }
+        if self.schema_version >= 2 {
+            self.application.validate()?;
+            if !self.ui_contributions.is_empty() {
+                return Err(ArtifactContractError::new(
+                    ARTIFACT_MANIFEST_INVALID,
+                    "Schema version 2 declares contributions only through application.contributions",
+                ));
+            }
+        } else if !self.application.is_legacy_empty() {
+            return Err(ArtifactContractError::new(
+                ARTIFACT_MANIFEST_INVALID,
+                "Schema version 1 cannot declare version 2 application metadata",
             ));
         }
         validate_unique_paths(&self.styles)?;
@@ -777,6 +917,8 @@ impl RuntimeArtifactArchive {
 pub struct ArtifactPreflightContext {
     pub host_api_version: Option<String>,
     pub peer_versions: BTreeMap<String, String>,
+    pub service_versions: BTreeMap<String, u32>,
+    pub contribution_schema_versions: BTreeMap<String, u32>,
     pub allowed_grants: BTreeSet<String>,
     pub supported_native_adapters: BTreeSet<String>,
 }
@@ -833,6 +975,29 @@ impl ArtifactPreflightContext {
                 return Err(ArtifactContractError::new(
                     ARTIFACT_PEER_INCOMPATIBLE,
                     format!("Required host peer {peer:?} is incompatible"),
+                ));
+            }
+        }
+        for required in &artifact.manifest.application.required_services {
+            if self.service_versions.get(&required.id) != Some(&required.version) {
+                return Err(ArtifactContractError::new(
+                    ARTIFACT_SERVICE_INCOMPATIBLE,
+                    format!(
+                        "Required service {}@{} is unavailable or incompatible",
+                        required.id, required.version
+                    ),
+                ));
+            }
+        }
+        for contribution in &artifact.manifest.application.contributions {
+            let family = contribution.family.as_str();
+            if self.contribution_schema_versions.get(family) != Some(&contribution.schema_version) {
+                return Err(ArtifactContractError::new(
+                    ARTIFACT_CONTRIBUTION_INCOMPATIBLE,
+                    format!(
+                        "Contribution family {family} schema version {} is unsupported",
+                        contribution.schema_version
+                    ),
                 ));
             }
         }
@@ -1281,6 +1446,39 @@ fn validate_unique_strings(values: &[String], subject: &str) -> Result<(), Artif
     Ok(())
 }
 
+fn validate_unique_scoped_strings(
+    values: &[String],
+    subject: &str,
+) -> Result<(), ArtifactContractError> {
+    let mut seen = BTreeSet::new();
+    if values
+        .iter()
+        .any(|value| !valid_scoped_id(value) || !seen.insert(value.as_str()))
+    {
+        return Err(ArtifactContractError::new(
+            ARTIFACT_MANIFEST_INVALID,
+            format!("{subject} must be unique stable scoped identifiers"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_service_declarations(
+    services: &[RuntimeServiceDeclaration],
+    subject: &str,
+) -> Result<(), ArtifactContractError> {
+    let mut seen = BTreeSet::new();
+    if services.iter().any(|service| {
+        !valid_scoped_id(&service.id) || service.version == 0 || !seen.insert(service.id.as_str())
+    }) {
+        return Err(ArtifactContractError::new(
+            ARTIFACT_MANIFEST_INVALID,
+            format!("{subject} require unique stable ids and nonzero versions"),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_unique_paths(paths: &[String]) -> Result<(), ArtifactContractError> {
     let mut seen = BTreeSet::new();
     if paths
@@ -1300,16 +1498,16 @@ fn validate_manifest_files(
     files: &BTreeMap<String, Vec<u8>>,
 ) -> Result<(), ArtifactContractError> {
     let mut required = BTreeSet::new();
-    required.insert(manifest.entry.as_str());
-    required.extend(manifest.styles.iter().map(String::as_str));
-    required.extend(manifest.assets.iter().map(String::as_str));
+    required.insert(manifest.entry.clone());
+    required.extend(manifest.styles.iter().cloned());
+    required.extend(manifest.assets.iter().cloned());
     required.extend(
         manifest
             .ui_contributions
             .iter()
-            .map(|item| item.entry.as_str()),
+            .map(|item| item.entry.clone()),
     );
-    if required.iter().any(|path| !files.contains_key(*path)) {
+    if required.iter().any(|path| !files.contains_key(path)) {
         return Err(ArtifactContractError::new(
             ARTIFACT_MANIFEST_INVALID,
             "Runtime manifest references a file absent from the archive",
@@ -1353,6 +1551,28 @@ fn validate_manifest_files(
                 "Capability definition document does not match the declared definition",
             ));
         }
+        required.insert(path);
+    }
+    required.insert(ARTIFACT_MANIFEST_PATH.to_string());
+    for contract in manifest.messages.provides.iter().chain(
+        manifest
+            .capabilities
+            .definitions
+            .iter()
+            .flat_map(|definition| definition.schemas.iter()),
+    ) {
+        required.extend(contract.schema.resources.keys().cloned());
+    }
+    let actual = files
+        .keys()
+        .filter(|path| path.as_str() != ARTIFACT_INTEGRITY_PATH)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if actual != required {
+        return Err(ArtifactContractError::new(
+            ARTIFACT_MANIFEST_INVALID,
+            "Artifact contains missing or undeclared files",
+        ));
     }
     Ok(())
 }
@@ -1423,7 +1643,8 @@ fn validate_integrity_index(
     index: &ArtifactIntegrityIndex,
     files: &BTreeMap<String, Vec<u8>>,
 ) -> Result<(), ArtifactContractError> {
-    if index.schema_version != ARTIFACT_CONTRACT_SCHEMA_VERSION
+    if !(ARTIFACT_MINIMUM_SCHEMA_VERSION..=ARTIFACT_CONTRACT_SCHEMA_VERSION)
+        .contains(&index.schema_version)
         || !valid_sha256(&index.content_digest_sha256)
     {
         return Err(ArtifactContractError::new(
@@ -1572,8 +1793,18 @@ fn valid_scoped_id(value: &str) -> bool {
         })
 }
 
+fn valid_contribution_id(family: RuntimeContributionFamily, value: &str) -> bool {
+    match family {
+        RuntimeContributionFamily::TerminalPresentation => {
+            shipctl_module_api::TerminalDriverId::new(value).is_ok()
+        }
+        _ => valid_scoped_id(value),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
     use serde_json::json;
 
     use crate::message_bus::{
@@ -1681,7 +1912,10 @@ mod tests {
             runtime_kind: ModuleRuntimeKind::FrontendEsm,
             entry: "module.mjs".to_string(),
             styles: vec!["styles/work-review.css".to_string()],
-            assets: vec!["assets/work-review.svg".to_string()],
+            assets: vec![
+                "assets/work-review.svg".to_string(),
+                "chunks/work-review-panel.mjs".to_string(),
+            ],
             messages: MessageDeclarations {
                 schema_version: MESSAGE_CONTRACT_SCHEMA_VERSION,
                 provides: vec![
@@ -1744,11 +1978,19 @@ mod tests {
                     scopes: vec![CapabilityScope::Workspace],
                 }],
             },
-            ui_contributions: vec![RuntimeUiContribution {
-                id: "fixture.work-review.panel".to_string(),
-                slot: "sidebar".to_string(),
-                entry: "chunks/work-review-panel.mjs".to_string(),
-            }],
+            application: RuntimeApplicationManifest {
+                schema_version: APPLICATION_DECLARATION_SCHEMA_VERSION,
+                role: RuntimePluginRole::Compound,
+                required_services: Vec::new(),
+                provided_services: Vec::new(),
+                background_effects: vec!["fixture.work-review.refresh".to_string()],
+                contributions: vec![RuntimeContributionDeclaration {
+                    family: RuntimeContributionFamily::Panel,
+                    id: "fixture.work-review.panel".to_string(),
+                    schema_version: 1,
+                }],
+            },
+            ui_contributions: Vec::new(),
             requested_grants: Vec::new(),
             native_adapters: Vec::new(),
             configuration_schema: Some(json!({"type": "object"})),
@@ -1827,6 +2069,30 @@ mod tests {
 
     fn fixture_archive(provenance: &str) -> RuntimeArtifactArchive {
         RuntimeArtifactArchive::new(archive_files(&fixture_manifest(provenance))).unwrap()
+    }
+
+    #[test]
+    fn contribution_ids_follow_their_public_domain_contracts() {
+        let mut application = fixture_manifest("/fixture/source").application;
+        application.contributions = vec![RuntimeContributionDeclaration {
+            family: RuntimeContributionFamily::TerminalPresentation,
+            id: "thin-terminal".to_string(),
+            schema_version: 1,
+        }];
+        assert!(application.validate().is_ok());
+
+        application.contributions[0].id = "Thin Terminal".to_string();
+        assert_eq!(
+            application.validate().unwrap_err().code,
+            ARTIFACT_MANIFEST_INVALID
+        );
+
+        application.contributions[0].family = RuntimeContributionFamily::Panel;
+        application.contributions[0].id = "thin-terminal".to_string();
+        assert_eq!(
+            application.validate().unwrap_err().code,
+            ARTIFACT_MANIFEST_INVALID
+        );
     }
 
     #[test]
@@ -1917,5 +2183,153 @@ mod tests {
             archive.inspect().unwrap_err().code,
             CAPABILITY_CONTRACT_INVALID
         );
+    }
+
+    proptest! {
+        #[test]
+        fn architecture_artifact_roundtrip_property(
+            entry_bytes in any::<Vec<u8>>(),
+            style_bytes in any::<Vec<u8>>(),
+            asset_bytes in any::<Vec<u8>>(),
+        ) {
+            let manifest = fixture_manifest("/generated/source");
+            let mut files = archive_files(&manifest);
+            files.insert("module.mjs".to_string(), entry_bytes.clone());
+            files.insert("styles/work-review.css".to_string(), style_bytes.clone());
+            files.insert("assets/work-review.svg".to_string(), asset_bytes.clone());
+            reindex(&mut files);
+            let retained = files.clone();
+
+            let archive = RuntimeArtifactArchive::new(files).unwrap();
+            let inspected = archive.inspect().unwrap();
+
+            prop_assert_eq!(&archive.files, &retained);
+            prop_assert_eq!(archive.files.get("module.mjs"), Some(&entry_bytes));
+            prop_assert_eq!(archive.files.get("styles/work-review.css"), Some(&style_bytes));
+            prop_assert_eq!(archive.files.get("assets/work-review.svg"), Some(&asset_bytes));
+            prop_assert_eq!(
+                inspected.identity().content_digest,
+                inspected.integrity.content_digest_sha256,
+            );
+        }
+
+        #[test]
+        fn architecture_artifact_tamper_property(
+            entry_bytes in any::<Vec<u8>>(),
+            mutation in any::<u8>(),
+        ) {
+            let manifest = fixture_manifest("/generated/source");
+            let mut valid = archive_files(&manifest);
+            valid.insert("module.mjs".to_string(), entry_bytes);
+            reindex(&mut valid);
+            prop_assert!(RuntimeArtifactArchive::new(valid.clone()).unwrap().inspect().is_ok());
+
+            match mutation % 7 {
+                0 => {
+                    let bytes = valid.get_mut("module.mjs").unwrap();
+                    if bytes.is_empty() { bytes.push(0xff); } else { bytes[0] ^= 0xff; }
+                    prop_assert!(RuntimeArtifactArchive::new(valid).unwrap().inspect().is_err());
+                }
+                1 => {
+                    valid.remove("module.mjs");
+                    prop_assert!(RuntimeArtifactArchive::new(valid).unwrap().inspect().is_err());
+                }
+                2 => {
+                    valid.insert("assets/undeclared.bin".to_string(), vec![mutation]);
+                    prop_assert!(RuntimeArtifactArchive::new(valid).unwrap().inspect().is_err());
+                }
+                3 => {
+                    let mut index: ArtifactIntegrityIndex = serde_json::from_slice(
+                        valid.get(ARTIFACT_INTEGRITY_PATH).unwrap(),
+                    ).unwrap();
+                    index.files[0].digest_sha256 = "0".repeat(64);
+                    valid.insert(
+                        ARTIFACT_INTEGRITY_PATH.to_string(),
+                        serde_json::to_vec(&index).unwrap(),
+                    );
+                    prop_assert!(RuntimeArtifactArchive::new(valid).unwrap().inspect().is_err());
+                }
+                4 => {
+                    let mut index: ArtifactIntegrityIndex = serde_json::from_slice(
+                        valid.get(ARTIFACT_INTEGRITY_PATH).unwrap(),
+                    ).unwrap();
+                    index.content_digest_sha256 = "0".repeat(64);
+                    valid.insert(
+                        ARTIFACT_INTEGRITY_PATH.to_string(),
+                        serde_json::to_vec(&index).unwrap(),
+                    );
+                    prop_assert!(RuntimeArtifactArchive::new(valid).unwrap().inspect().is_err());
+                }
+                5 => {
+                    let bytes = valid.get_mut(ARTIFACT_MANIFEST_PATH).unwrap();
+                    bytes.push(b' ');
+                    prop_assert!(RuntimeArtifactArchive::new(valid).unwrap().inspect().is_err());
+                }
+                _ => {
+                    valid.insert("../escape.mjs".to_string(), vec![mutation]);
+                    prop_assert!(RuntimeArtifactArchive::new(valid).is_err());
+                }
+            }
+        }
+
+        #[test]
+        fn architecture_artifact_compatibility_property(
+            manifest_schema in any::<u8>(),
+            host_api_major in any::<u8>(),
+            required_api_major in any::<u8>(),
+            service_version in any::<u8>(),
+            host_service_version in any::<u8>(),
+            contribution_version in any::<u8>(),
+            host_contribution_version in any::<u8>(),
+            host_api_available in any::<bool>(),
+            malformed_api_range in any::<bool>(),
+        ) {
+            let mut manifest = fixture_manifest("/generated/source");
+            manifest.schema_version = u32::from(manifest_schema);
+            manifest.api_range = if malformed_api_range {
+                "not-a-version-range".to_string()
+            } else {
+                format!("={required_api_major}.0.0")
+            };
+            if manifest.schema_version == 1 {
+                manifest.application = RuntimeApplicationManifest::default();
+            } else {
+                manifest.application.required_services = vec![RuntimeServiceDeclaration {
+                    id: "fixture.required-service".to_string(),
+                    version: u32::from(service_version) + 1,
+                }];
+                manifest.application.contributions[0].schema_version =
+                    u32::from(contribution_version) + 1;
+            }
+            let inspected = RuntimeArtifactArchive::new(archive_files(&manifest))
+                .unwrap()
+                .inspect();
+            let manifest_is_valid = matches!(manifest.schema_version, 1 | 2)
+                && !malformed_api_range;
+            prop_assert_eq!(inspected.is_ok(), manifest_is_valid);
+            if !manifest_is_valid {
+                return Ok(());
+            }
+
+            let artifact = inspected.unwrap();
+            let context = ArtifactPreflightContext {
+                host_api_version: host_api_available.then(|| format!("{host_api_major}.0.0")),
+                service_versions: BTreeMap::from([(
+                    "fixture.required-service".to_string(),
+                    u32::from(host_service_version) + 1,
+                )]),
+                contribution_schema_versions: BTreeMap::from([(
+                    "panel".to_string(),
+                    u32::from(host_contribution_version) + 1,
+                )]),
+                ..ArtifactPreflightContext::default()
+            };
+            let expected = host_api_available
+                && host_api_major == required_api_major
+                && (manifest.schema_version == 1
+                    || (service_version == host_service_version
+                        && contribution_version == host_contribution_version));
+            prop_assert_eq!(context.validate_requirements(&artifact).is_ok(), expected);
+        }
     }
 }

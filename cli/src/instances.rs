@@ -457,6 +457,7 @@ pub fn transition_module(
     module_id: String,
     kind: ModuleOperationKind,
     target_registry_revision: u64,
+    artifact_content_digest: Option<String>,
 ) -> Result<ModuleOperation, ControlError> {
     let (runtime_root, _) = resolve_runtime_root(runtime_root)
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
@@ -465,6 +466,7 @@ pub fn transition_module(
         module_id,
         kind,
         target_registry_revision,
+        artifact_content_digest,
     )
 }
 

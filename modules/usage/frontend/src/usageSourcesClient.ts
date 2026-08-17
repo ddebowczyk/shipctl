@@ -1,15 +1,15 @@
 import {
   usageSourcesService,
   type ModuleActivationContext,
-  type ProviderUsageSnapshot,
   type SemanticEventLease,
   type SemanticRequestOperation,
-  type UsageOverview,
   type UsageProvider,
   type UsageSourcesErrorCode,
   type UsageSourcesService,
-  type UsageTimeWindow,
 } from "@shipctl/module-api";
+
+import type { ProviderUsageSnapshot, UsageOverview, UsageTimeWindow } from "./types";
+import { projectUsageOverview, projectUsageSnapshots } from "./usageProjection";
 
 export class UsageSourcesClientError extends Error {
   readonly code: UsageSourcesErrorCode;
@@ -45,27 +45,26 @@ export interface UsageSourcesClient {
 export function createUsageSourcesClient(service: UsageSourcesService): UsageSourcesClient {
   const client: UsageSourcesClient = {
     async getAllUsageSnapshots() {
-      const inspection = await execute(service.inspectSource, { kind: "source-snapshots" });
-      if (inspection.kind !== "source-snapshots") {
+      const inspection = await execute(service.inspectSource, { kind: "source-dataset" });
+      if (inspection.kind !== "source-dataset") {
         throw new UsageSourcesClientError(
           "usage-sources.transport-failed",
           "Usage source response did not match its request",
         );
       }
-      return inspection.snapshots;
+      return projectUsageSnapshots(inspection.dataset);
     },
     async getUsageOverview(window) {
       const inspection = await execute(service.inspectSource, {
-        kind: "legacy-overview-projection",
-        window,
+        kind: "source-dataset",
       });
-      if (inspection.kind !== "legacy-overview-projection") {
+      if (inspection.kind !== "source-dataset") {
         throw new UsageSourcesClientError(
           "usage-sources.transport-failed",
           "Usage source response did not match its request",
         );
       }
-      return inspection.overview;
+      return projectUsageOverview(inspection.dataset, window);
     },
     async refreshUsageData(sourceIds) {
       await execute(service.refreshSources, sourceIds === undefined ? {} : { sourceIds });

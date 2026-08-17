@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "id": "fixture.headless-service",
+  "name": "Phase E headless service fixture",
+  "version": "1.0.0",
+  "apiRange": "^1.0.0",
+  "runtimeKind": "frontend_esm",
+  "entry": "dist/plugin.mjs",
+  "styles": [],
+  "assets": [],
+  "messages": {
+    "schemaVersion": 1,
+    "provides": [],
+    "handles": [],
+    "publishes": [],
+    "subscribes": [],
+    "ports": []
+  },
+  "capabilities": {
+    "schemaVersion": 1,
+    "definitions": [],
+    "providers": [],
+    "consumers": []
+  },
+  "application": {
+    "schemaVersion": 1,
+    "role": "headless",
+    "requiredServices": [],
+    "providedServices": [
+      {
+        "id": "fixture.headless-service.echo",
+        "version": 1
+      }
+    ],
+    "backgroundEffects": [
+      "fixture.headless-service.poller"
+    ],
+    "contributions": []
+  },
+  "uiContributions": [],
+  "requestedGrants": [],
+  "nativeAdapters": [],
+  "secretReferences": [],
+  "peerDependencies": {},
+  "supportedScopes": [
+    "instance"
+  ],
+  "lifecycle": "live",
+  "sourceProvenance": {
+    "builder": "ops/architecture/bin/build-plugin-artifact.mjs",
+    "fixture": "phase-e-headless-service"
+  }
+}

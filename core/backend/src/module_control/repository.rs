@@ -6,17 +6,19 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use shipctl_module_api::DurableWriteBarrier;
 use uuid::Uuid;
 
 use super::artifact::{
-    ArtifactContractError, ArtifactIntegrityIndex, ArtifactPreflightContext,
-    CanonicalArtifactMetadata, CapabilityDefinition, CapabilityDefinitionIndex,
-    RuntimeArtifactArchive, ValidatedRuntimeArtifact,
+    canonical_content_digest, ArtifactContractError, ArtifactIntegrityFile, ArtifactIntegrityIndex,
+    ArtifactPreflightContext, CanonicalArtifactMetadata, CapabilityDefinition,
+    CapabilityDefinitionIndex, RuntimeArtifactArchive, RuntimeArtifactManifest,
+    ValidatedRuntimeArtifact, ARTIFACT_INTEGRITY_PATH, ARTIFACT_MANIFEST_PATH,
 };
 use super::contracts::{
     DesiredModuleState, ModuleIdentity, ModuleSource, MODULE_CONTROL_SCHEMA_VERSION,
@@ -38,11 +40,34 @@ pub const ARTIFACT_REPOSITORY_LOCK_UNAVAILABLE: &str =
     "module.artifact.repository.lock_unavailable";
 pub const ARTIFACT_REPOSITORY_STAGE_FAILED: &str = "module.artifact.repository.stage_failed";
 pub const ARTIFACT_REPOSITORY_PUBLISH_FAILED: &str = "module.artifact.repository.publish_failed";
+pub const ARTIFACT_REPOSITORY_PACK_FAILED: &str = "module.artifact.repository.pack_failed";
 pub const ARTIFACT_REPOSITORY_MISSING: &str = "module.artifact.repository.missing";
 pub const ARTIFACT_REPOSITORY_INCONSISTENT: &str = "module.artifact.repository.inconsistent";
 
 const STAGING_DIRECTORY: &str = ".staging";
 const REPOSITORY_LOCK_FILE: &str = ".module-artifact.lock";
+const HOST_SUPPORTED_ARTIFACT_GRANTS: [&str; 20] = [
+    "assistant.launch",
+    "assistant.session-record",
+    "credential.inspect",
+    "credential.write",
+    "terminal.start",
+    "terminal.attach",
+    "terminal.input",
+    "terminal.resize",
+    "semantic-terminal.attach",
+    "semantic-terminal.input",
+    "semantic-terminal.inspect",
+    "usage-source.read",
+    "usage-source.refresh",
+    "usage-source.observe",
+    "plugin-data.read",
+    "plugin-data.write",
+    "message.send.usage.refresh-request",
+    "message.publish.usage.ingest-completed",
+    "message.subscribe.usage.ingest-completed",
+    "schedule.register",
+];
 
 /// A stable failure from the offline artifact repository.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -134,6 +159,172 @@ pub struct OfflineArtifactPreflightReport {
     pub artifact: OfflineArtifactMetadata,
 }
 
+/// A deterministic package result. It is explicit that packaging validates
+/// declarations and bytes but does not load code or make a capability live.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OfflineArtifactPackReport {
+    pub schema_version: u32,
+    pub source_directory: PathBuf,
+    pub output_path: PathBuf,
+    pub archive_digest_sha256: String,
+    pub archive_size_bytes: u64,
+    pub runtime_available: bool,
+    pub callable: bool,
+    pub artifact: OfflineArtifactMetadata,
+}
+
+/// Seal one staging directory into a byte-reproducible immutable artifact.
+///
+/// The staging directory supplies every declared file except `integrity.json`.
+/// This function owns integrity generation, validates exact manifest closure,
+/// and publishes the completed TAR atomically without replacing an output.
+pub fn pack_artifact_directory(
+    source_directory: &Path,
+    output_path: &Path,
+) -> Result<OfflineArtifactPackReport, ArtifactRepositoryError> {
+    if output_path.exists() {
+        return Err(ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!("Artifact output {} already exists", output_path.display()),
+        ));
+    }
+
+    let source_metadata = fs::symlink_metadata(source_directory).map_err(|error| {
+        ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!(
+                "Could not inspect artifact staging directory {}: {error}",
+                source_directory.display()
+            ),
+        )
+    })?;
+    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+        return Err(ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!(
+                "Artifact staging path {} is not a directory",
+                source_directory.display()
+            ),
+        ));
+    }
+
+    let mut files = BTreeMap::new();
+    collect_artifact_directory(source_directory, source_directory, &mut files)?;
+    if files.contains_key(ARTIFACT_INTEGRITY_PATH) {
+        return Err(ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            "Artifact staging directories must not supply integrity.json",
+        ));
+    }
+    let manifest_bytes = files.get(ARTIFACT_MANIFEST_PATH).ok_or_else(|| {
+        ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            "Artifact staging directory does not contain module.yaml",
+        )
+    })?;
+    let manifest: RuntimeArtifactManifest =
+        serde_yaml::from_slice(manifest_bytes).map_err(|error| {
+            ArtifactRepositoryError::new(
+                ARTIFACT_REPOSITORY_PACK_FAILED,
+                format!("Artifact module.yaml cannot be decoded: {error}"),
+            )
+        })?;
+    let integrity_files = files
+        .iter()
+        .map(|(path, contents)| ArtifactIntegrityFile {
+            path: path.clone(),
+            digest_sha256: sha256_hex(contents),
+        })
+        .collect::<Vec<_>>();
+    let integrity = ArtifactIntegrityIndex {
+        schema_version: manifest.schema_version,
+        content_digest_sha256: canonical_content_digest(&manifest, &integrity_files)?,
+        files: integrity_files,
+    };
+    files.insert(
+        ARTIFACT_INTEGRITY_PATH.to_string(),
+        serde_json::to_vec(&integrity).map_err(|error| {
+            ArtifactRepositoryError::new(
+                ARTIFACT_REPOSITORY_PACK_FAILED,
+                format!("Could not encode artifact integrity index: {error}"),
+            )
+        })?,
+    );
+
+    let archive = RuntimeArtifactArchive::new(files)?;
+    let validated = archive.inspect()?;
+    let archive_bytes = deterministic_tar_bytes(&archive)?;
+    let archive_digest_sha256 = sha256_hex(&archive_bytes);
+    let archive_size_bytes = archive_bytes.len() as u64;
+
+    let output_parent = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent_metadata = fs::symlink_metadata(output_parent).map_err(|error| {
+        ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!(
+                "Could not inspect artifact output directory {}: {error}",
+                output_parent.display()
+            ),
+        )
+    })?;
+    if !parent_metadata.is_dir() {
+        return Err(ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!(
+                "Artifact output parent {} is not a directory",
+                output_parent.display()
+            ),
+        ));
+    }
+
+    let mut temporary = tempfile::NamedTempFile::new_in(output_parent).map_err(|error| {
+        ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!("Could not create temporary artifact output: {error}"),
+        )
+    })?;
+    temporary.write_all(&archive_bytes).map_err(|error| {
+        ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!("Could not write temporary artifact output: {error}"),
+        )
+    })?;
+    temporary.as_file().sync_all().map_err(|error| {
+        ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!("Could not sync temporary artifact output: {error}"),
+        )
+    })?;
+    temporary.persist_noclobber(output_path).map_err(|error| {
+        ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!(
+                "Could not publish artifact output {}: {}",
+                output_path.display(),
+                error.error
+            ),
+        )
+    })?;
+    sync_directory(output_parent).map_err(|error| {
+        ArtifactRepositoryError::new(ARTIFACT_REPOSITORY_PACK_FAILED, error.message)
+    })?;
+
+    Ok(OfflineArtifactPackReport {
+        schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+        source_directory: source_directory.to_path_buf(),
+        output_path: output_path.to_path_buf(),
+        archive_digest_sha256,
+        archive_size_bytes,
+        runtime_available: false,
+        callable: false,
+        artifact: OfflineArtifactMetadata::from_validated(&validated),
+    })
+}
+
 /// A successful immutable publication and disabled registry registration.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -175,14 +366,66 @@ pub struct OfflineCapabilityInspection {
 }
 
 impl ArtifactRepository {
-    /// Construct an offline repository with a supplied host API version and
-    /// no ambient peer, grant, or native-adapter authority.
+    /// Construct an offline repository with the same declared frontend
+    /// compatibility surface that the Tauri host supplies at activation.
     pub fn for_offline(paths: ShipctlPaths, host_api_version: impl Into<String>) -> Self {
+        Self::for_host(paths, DurableWriteBarrier::default(), host_api_version)
+    }
+
+    /// Construct a host repository that participates in the caller's durable
+    /// write barrier while using the public frontend compatibility catalog.
+    pub fn for_host(
+        paths: ShipctlPaths,
+        durable_writes: DurableWriteBarrier,
+        host_api_version: impl Into<String>,
+    ) -> Self {
         let preflight_context = ArtifactPreflightContext {
             host_api_version: Some(host_api_version.into()),
+            peer_versions: BTreeMap::from([
+                ("react".to_string(), "19.2.8".to_string()),
+                ("react-dom".to_string(), "19.2.8".to_string()),
+            ]),
+            service_versions: BTreeMap::from([
+                ("shipctl.assistant-launch".to_string(), 1),
+                ("shipctl.credential-store".to_string(), 1),
+                ("shipctl.git".to_string(), 1),
+                ("shipctl.plugin-data".to_string(), 1),
+                ("shipctl.processes".to_string(), 1),
+                ("shipctl.project-documents".to_string(), 1),
+                ("shipctl.skill-installation".to_string(), 2),
+                ("shipctl.semantic-terminals".to_string(), 1),
+                ("shipctl.terminal-sessions".to_string(), 1),
+                ("shipctl.usage-sources".to_string(), 2),
+                ("shipctl.messages".to_string(), 1),
+                ("shipctl.scheduler".to_string(), 1),
+            ]),
+            contribution_schema_versions: [
+                "command",
+                "global-navigation",
+                "global-surface",
+                "message-graph",
+                "panel",
+                "project-action",
+                "project-facts",
+                "project-import",
+                "project-layout",
+                "project-navigation",
+                "scheduled-task",
+                "settings",
+                "sidebar",
+                "skills-provider",
+                "terminal-presentation",
+            ]
+            .into_iter()
+            .map(|family| (family.to_string(), 1))
+            .collect(),
+            allowed_grants: HOST_SUPPORTED_ARTIFACT_GRANTS
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
             ..ArtifactPreflightContext::default()
         };
-        Self::new(paths, DurableWriteBarrier::default(), preflight_context)
+        Self::new(paths, durable_writes, preflight_context)
     }
 
     /// Construct a repository with an explicit durable-write barrier and
@@ -236,6 +479,39 @@ impl ArtifactRepository {
         archive_path: &Path,
     ) -> Result<OfflineArtifactAddReport, ArtifactRepositoryError> {
         self.add_archive_with_request(archive_path, Uuid::new_v4(), ModuleSource::User)
+    }
+
+    /// Install a host-embedded artifact through the same validation and
+    /// publication path as an external archive. The archive digest supplies a
+    /// stable request identity, so repeated application starts are idempotent.
+    pub fn ensure_bundled_archive(
+        &self,
+        archive_bytes: &[u8],
+    ) -> Result<OfflineArtifactAddReport, ArtifactRepositoryError> {
+        let mut archive = tempfile::NamedTempFile::new().map_err(|error| {
+            ArtifactRepositoryError::new(
+                ARTIFACT_REPOSITORY_STAGE_FAILED,
+                format!("Cannot create a temporary bundled artifact: {error}"),
+            )
+        })?;
+        archive.write_all(archive_bytes).map_err(|error| {
+            ArtifactRepositoryError::new(
+                ARTIFACT_REPOSITORY_STAGE_FAILED,
+                format!("Cannot stage a bundled artifact: {error}"),
+            )
+        })?;
+        archive.as_file().sync_all().map_err(|error| {
+            ArtifactRepositoryError::new(
+                ARTIFACT_REPOSITORY_STAGE_FAILED,
+                format!("Cannot sync a bundled artifact: {error}"),
+            )
+        })?;
+        let archive_digest = sha256_hex(archive_bytes);
+        let request_id = Uuid::new_v5(
+            &Uuid::NAMESPACE_URL,
+            format!("shipctl:bundled:{archive_digest}").as_bytes(),
+        );
+        self.add_archive_with_request(archive.path(), request_id, ModuleSource::Bundled)
     }
 
     /// Add an archive without activating it. The request identity makes the
@@ -1109,6 +1385,46 @@ fn is_sha256_digest(value: &str) -> bool {
         })
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn deterministic_tar_bytes(
+    archive: &RuntimeArtifactArchive,
+) -> Result<Vec<u8>, ArtifactRepositoryError> {
+    let mut builder = tar::Builder::new(Vec::new());
+    for (path, contents) in archive.files() {
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_mode(0o600);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mtime(0);
+        header.set_size(contents.len() as u64);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, path, Cursor::new(contents))
+            .map_err(|error| {
+                ArtifactRepositoryError::new(
+                    ARTIFACT_REPOSITORY_PACK_FAILED,
+                    format!("Could not encode artifact entry {path}: {error}"),
+                )
+            })?;
+    }
+    builder.finish().map_err(|error| {
+        ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!("Could not finish artifact archive: {error}"),
+        )
+    })?;
+    builder.into_inner().map_err(|error| {
+        ArtifactRepositoryError::new(
+            ARTIFACT_REPOSITORY_PACK_FAILED,
+            format!("Could not finalize artifact archive: {error}"),
+        )
+    })
+}
+
 /// Decode a TAR archive without extracting it to the filesystem.  Only
 /// portable regular files are admitted; duplicate, non-UTF-8, absolute, and
 /// traversal paths are rejected before a path can influence local storage.
@@ -1276,6 +1592,10 @@ mod tests {
     /// than fabricating a validated catalog record. The fixture declares a
     /// new capability and matching typed port, but no live route exists.
     fn fixture_archive() -> RuntimeArtifactArchive {
+        fixture_archive_with_grants(&[])
+    }
+
+    fn fixture_archive_with_grants(requested_grants: &[&str]) -> RuntimeArtifactArchive {
         let module_id = "fixture.repository";
         let capability_id = "fixture.repository-capability";
         let request = message_contract("fixture.repository.request");
@@ -1352,8 +1672,16 @@ mod tests {
             "assets": [],
             "messages": messages,
             "capabilities": capabilities,
+            "application": {
+                "schemaVersion": 1,
+                "role": "headless",
+                "requiredServices": [],
+                "providedServices": [],
+                "backgroundEffects": [],
+                "contributions": []
+            },
             "uiContributions": [],
-            "requestedGrants": [],
+            "requestedGrants": requested_grants,
             "nativeAdapters": [],
             "peerDependencies": {},
             "supportedScopes": ["instance"],
@@ -1414,6 +1742,100 @@ mod tests {
         }
         builder.into_inner().unwrap().sync_all().unwrap();
         file
+    }
+
+    fn write_staging_directory(directory: &Path, archive: &RuntimeArtifactArchive) {
+        fs::create_dir_all(directory).unwrap();
+        for (path, contents) in archive.files() {
+            if path == ARTIFACT_INTEGRITY_PATH {
+                continue;
+            }
+            let target = directory.join(path);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(target, contents).unwrap();
+        }
+    }
+
+    #[test]
+    fn packer_seals_the_exact_closure_deterministically() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source");
+        let first_output = temporary.path().join("first.shipctl-module");
+        let second_output = temporary.path().join("second.shipctl-module");
+        let fixture = fixture_archive();
+        write_staging_directory(&source, &fixture);
+
+        let first = pack_artifact_directory(&source, &first_output).unwrap();
+        let second = pack_artifact_directory(&source, &second_output).unwrap();
+
+        assert_eq!(
+            fs::read(&first_output).unwrap(),
+            fs::read(&second_output).unwrap()
+        );
+        assert_eq!(first.archive_digest_sha256, second.archive_digest_sha256);
+        assert_eq!(first.artifact, second.artifact);
+        assert_eq!(
+            first.artifact.identity,
+            fixture.inspect().unwrap().identity()
+        );
+        assert!(!first.runtime_available);
+        assert!(!first.callable);
+        assert_eq!(
+            read_tar_archive(&first_output)
+                .unwrap()
+                .inspect()
+                .unwrap()
+                .identity(),
+            first.artifact.identity
+        );
+
+        let error = pack_artifact_directory(&source, &first_output).unwrap_err();
+        assert_eq!(error.code, ARTIFACT_REPOSITORY_PACK_FAILED);
+    }
+
+    #[test]
+    fn packer_rejects_builder_owned_or_undeclared_content_without_output() {
+        let temporary = tempfile::tempdir().unwrap();
+        let fixture = fixture_archive();
+
+        let indexed_source = temporary.path().join("indexed");
+        let indexed_output = temporary.path().join("indexed.shipctl-module");
+        write_staging_directory(&indexed_source, &fixture);
+        fs::write(
+            indexed_source.join(ARTIFACT_INTEGRITY_PATH),
+            fixture.files().get(ARTIFACT_INTEGRITY_PATH).unwrap(),
+        )
+        .unwrap();
+        let error = pack_artifact_directory(&indexed_source, &indexed_output).unwrap_err();
+        assert_eq!(error.code, ARTIFACT_REPOSITORY_PACK_FAILED);
+        assert!(!indexed_output.exists());
+
+        let extra_source = temporary.path().join("extra");
+        let extra_output = temporary.path().join("extra.shipctl-module");
+        write_staging_directory(&extra_source, &fixture);
+        fs::write(extra_source.join("undeclared.txt"), b"not in module.yaml").unwrap();
+        let error = pack_artifact_directory(&extra_source, &extra_output).unwrap_err();
+        assert_eq!(
+            error.code,
+            crate::module_control::artifact::ARTIFACT_MANIFEST_INVALID
+        );
+        assert!(!extra_output.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn packer_rejects_links_without_output() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source");
+        let output = temporary.path().join("linked.shipctl-module");
+        write_staging_directory(&source, &fixture_archive());
+        symlink(source.join("dist/index.js"), source.join("linked.js")).unwrap();
+
+        let error = pack_artifact_directory(&source, &output).unwrap_err();
+        assert_eq!(error.code, ARTIFACT_REPOSITORY_INCONSISTENT);
+        assert!(!output.exists());
     }
 
     fn tar_with_entry(path: &str, entry_type: tar::EntryType) -> tempfile::NamedTempFile {
@@ -1541,6 +1963,33 @@ mod tests {
                 .unwrap()
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn host_preflight_approves_only_its_supported_artifact_grants() {
+        let temporary = tempfile::tempdir().unwrap();
+        let paths = ShipctlPaths::new(
+            temporary.path().join("state"),
+            temporary.path().join("runtime"),
+        );
+        let repository = ArtifactRepository::for_offline(paths, "1.0.0");
+
+        for grant in HOST_SUPPORTED_ARTIFACT_GRANTS {
+            let archive = write_archive(&fixture_archive_with_grants(&[grant]));
+            assert!(
+                repository.preflight_report(archive.path()).is_ok(),
+                "{grant}"
+            );
+        }
+
+        let archive = write_archive(&fixture_archive_with_grants(&["terminal.unknown"]));
+        assert_eq!(
+            repository
+                .preflight_report(archive.path())
+                .unwrap_err()
+                .code,
+            crate::module_control::artifact::ARTIFACT_GRANT_DENIED
         );
     }
 

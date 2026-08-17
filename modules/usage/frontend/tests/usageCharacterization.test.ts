@@ -114,6 +114,9 @@ test("snapshot and persisted-settings stores bound success and failure behavior"
 
 test("Usage remains global across project switches and refreshes through its declared route", () => {
   const shell = source("../../../../core/frontend/shell/AppShell.tsx");
+  const staticProfile = source("../../../../core/frontend/host/enabledModules.ts");
+  const rootPackage = source("../../../../package.json");
+  const manifest = source("../../module.yaml");
   const adapter = source("../src/index.ts");
   const client = source("../src/usageSourcesClient.ts");
   const dataClient = source("../src/usageSettingsDataClient.ts");
@@ -123,6 +126,11 @@ test("Usage remains global across project switches and refreshes through its dec
 
   assert.doesNotMatch(store, /useRepoStore|activeRepoPath|projectPath/);
   assert.doesNotMatch(shell, /useUsageStore|useUsageSettingsStore|refreshUsageData/);
+  assert.doesNotMatch(staticProfile, /module-usage|usageModule/);
+  assert.doesNotMatch(rootPackage, /@shipctl\/module-usage/);
+  assert.match(manifest, /delivery: runtime-artifact/);
+  assert.match(manifest, /artifact: modules\/usage\/artifact/);
+  assert.match(manifest, /profile: null/);
   assert.match(adapter, /useUsageSettingsStore\.getState\(\)\.loadSettings\(\)/);
   assert.match(adapter, /cron: "\* \* \* \* \* Etc\/UTC"/);
   assert.match(adapter, /target: \{ kind: "channel", endpoint: USAGE_REFRESH_CHANNEL \}/);
@@ -183,17 +191,17 @@ test("usage refresh exposes a strict, bounded scheduler-directed message contrac
 });
 
 test("native cache, unavailable states, and capability-owned config remain bounded", () => {
-  const usage = source("../../backend/src/usage/mod.rs");
+  const usage = source("../../../../core/backend/src/usage_sources/mod.rs");
+  const projection = source("../src/usageProjection.ts");
   const config = source("../../../../core/backend/src/workspace/config.rs");
   const loader = source("../../../../core/backend/src/workspace/loader.rs");
 
   assert.match(usage, /COOLDOWN_SUCCESS_SECS: u64 = 300/);
   assert.match(usage, /COOLDOWN_ERROR_BASE_SECS: u64 = 30/);
   assert.match(usage, /COOLDOWN_ERROR_MAX_SECS: u64 = 300/);
-  assert.match(usage, /PROVIDER_REFRESH_RUNNING\.swap\(true, Ordering::SeqCst\)/);
-  assert.match(usage, /eprintln!\("Claude provider API error \(using cache\): \{e\}"\)/);
-  assert.match(usage, /"unavailable"\.to_string\(\)/);
-  assert.match(usage, /error = if cached_data\.is_none\(\) && !cache\.antigravity\.last_error\.is_empty\(\)/);
+  assert.match(usage, /consecutive_errors: u32/);
+  assert.match(usage, /Usage provider refresh failed/);
+  assert.match(projection, /observation\?\.available \? "ready" : "partial"/);
 
   assert.doesNotMatch(config, /pub usage: UsageSettings|struct UsageSettings|ProviderBudgetConfig/);
   assert.match(config, /fn usage_document_is_opaque_capability_data/);
@@ -204,7 +212,7 @@ test("native cache, unavailable states, and capability-owned config remain bound
 test("native ownership seam includes ingestion, query DB, and provider subprocess access", () => {
   const host = source("../../../../src-tauri/src/lib.rs");
   const installer = source("../../../../src-tauri/src/modules/mod.rs");
-  const adapter = source("../../host/src/lib.rs");
+  const adapter = source("../../../../core/tauri/src/usage_sources.rs");
   const commands = [
     "platform",
     "projects",
@@ -215,42 +223,25 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
   const client = source("../src/usageSourcesClient.ts");
   const trustedAdapter = source("../../../../core/frontend/platform/usageSources.ts");
   const packageManifest = source("../package.json");
-  const plugin = source("../../backend/src/lib.rs");
-  const usage = source("../../backend/src/usage/mod.rs");
-  const providers = source("../../backend/src/usage/providers.rs");
+  const provider = source("../../../../core/backend/src/usage_sources/mod.rs");
+  const providers = source("../../../../core/backend/src/usage_sources/providers.rs");
+  const projection = source("../src/usageProjection.ts");
 
-  assert.doesNotMatch(host, /\.manage\(UsageDb::open\(\)/);
-  assert.doesNotMatch(host, /usage::run_background_ingest\(&db\)/);
-  assert.match(
-    installer,
-    /shipctl_module_usage_host::install\([\s\S]*plugin_data\.clone\(\)[\s\S]*message_bridges\.clone\(\)[\s\S]*paths\.usage_database\.clone\(\)/,
-  );
-  assert.match(adapter, /builder\.plugin\(shipctl_module_usage::init\([\s\S]*host_services\(plugin_data, messages\)[\s\S]*database_path/);
-  assert.match(plugin, /plugin::Builder::new\(PLUGIN_NAME\)/);
-  assert.match(plugin, /app\.manage\(UsagePluginState/);
-  assert.match(plugin, /spawn_ingest\(state\.db\.clone\(\), state\.services\.clone\(\)\)/);
-  assert.match(plugin, /trait UsageIngestNotifier/);
-  assert.doesNotMatch(plugin, /["']usage-ingest-complete["']/);
-  assert.match(plugin, /pub fn start_background_ingest<R: Runtime>/);
-  assert.match(
-    host,
-    /ControlServer::start[\s\S]*modules::start_background_tasks\(app\.handle\(\), reconcile_external_sources\)/,
-  );
-  assert.match(plugin, /"plugin:shipctl-usage\|get_all_usage_snapshots"/);
+  assert.match(host, /UsageSourcesService::open_at/);
+  assert.match(host, /\.manage\(usage_sources\)/);
+  assert.doesNotMatch(installer, /usage/i);
+  assert.match(adapter, /inspect_usage_sources/);
+  assert.match(adapter, /refresh_usage_sources/);
+  assert.match(provider, /"core" \| "shipctl\.usage"/);
+  assert.match(provider, /pub fn release_activation/);
   assert.match(client, /activation\.services\.require\(usageSourcesService\)/);
   assert.doesNotMatch(client, /@tauri-apps|invoke\(/);
   assert.doesNotMatch(packageManifest, /@tauri-apps\/api/);
-  assert.match(trustedAdapter, /plugin:shipctl-usage\|get_all_usage_snapshots/);
-  assert.match(trustedAdapter, /plugin:shipctl-usage\|get_usage_overview/);
-  assert.match(trustedAdapter, /plugin:shipctl-usage\|refresh_usage_data/);
-  assert.match(trustedAdapter, /observeUsageSourceMessageFrame/);
+  assert.match(trustedAdapter, /inspect_usage_sources/);
+  assert.match(trustedAdapter, /refresh_usage_sources/);
+  assert.match(projection, /projectUsageOverview/);
+  assert.match(projection, /projectUsageSnapshots/);
   assert.doesNotMatch(commands, /get_all_usage_snapshots|get_usage_settings|refresh_usage_data/);
-  assert.doesNotMatch(host, /commands::get_all_usage_snapshots/);
-  assert.doesNotMatch(host, /commands::refresh_usage_data/);
-  assert.doesNotMatch(host, /mod usage;/);
-  assert.match(plugin, /trait GlobalCapabilityDataAuthority/);
-  assert.doesNotMatch(plugin, /ProviderSettingsAuthority|get_observed_models_for_provider|Transitional/);
-  assert.match(usage, /queries::usage_overview\(&conn, window\)/);
   assert.match(providers, /run_command\(\s*"curl"/);
   assert.match(providers, /find-generic-password/);
 });

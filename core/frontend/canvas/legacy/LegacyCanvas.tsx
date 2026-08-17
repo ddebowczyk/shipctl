@@ -85,6 +85,7 @@ function DefaultGlobalSurface({
       contribution={ports.surfaceCatalog.globalSurface(surfaceId)}
       surfaceId={surfaceId}
       close={close}
+      projectPaths={ports.projectPaths}
       services={ports.moduleHostServices}
       moduleActivations={ports.moduleActivations}
     />

@@ -76,7 +76,8 @@ for tool in codesign ditto git jq node pnpm rustc shasum yamllint yq ys; do
   require_command "$tool"
 done
 
-just version check || fail 'product version is invalid or its packaging projection has drifted'
+just -f ops/version/justfile check \
+  || fail 'product version is invalid or its packaging projection has drifted'
 ys -f ops/version/schema/current.v1.schema.yaml ops/version/current.yaml \
   || fail 'authoritative version record failed schema validation'
 

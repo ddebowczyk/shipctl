@@ -1,4 +1,7 @@
 import type { ListeningProcessInspection } from "@shipctl/module-api";
 
-/** Ports view name for the public process inspection DTO. */
-export type PortInfo = ListeningProcessInspection;
+/** Ports-owned projection of generic process facts into UI meaning. */
+export interface PortInfo extends ListeningProcessInspection {
+  readonly projectName: string;
+  readonly framework: string;
+}

@@ -65,7 +65,7 @@ export interface ModuleActivationContext {
   readonly identity: ModuleActivationIdentity;
   readonly services: SemanticServiceAccess;
   readonly disposed: boolean;
-  own(cleanup: SemanticCleanup): SemanticOwnedLease;
+  own(cleanup: SemanticCleanup, backgroundEffectId?: string): SemanticOwnedLease;
 }
 
 export interface SemanticCancellation {

@@ -8,25 +8,25 @@ This document maps each current module to its target plugin and platform
 capabilities. It prevents a directory move from deciding architecture by
 accident.
 
-The live repository has nine module manifests. Seven describe Rust backends.
-Six of those also have a separate Rust host adapter. Seven frontend packages
-import Tauri directly. The matrix splits TypeScript application-lifecycle work
-from native-provider extraction because they have different risk and proof
-needs.
+The live repository has nine module manifests. All nine are frontend-only.
+Permanent Rust providers and private Tauri adapters now live under `core/`.
+The matrix separates the remaining TypeScript application-lifecycle work from
+the completed native-provider extraction because they have different risk and
+proof needs.
 
 ## Summary matrix
 
 | Module | Current native shape | Target plugin ownership | Target platform services | Migration position |
 | --- | --- | --- | --- | --- |
-| `commands` | No Rust backend | Saved-command service, persistence policy, autostart, session tracking, commands, optional presentation | Terminal, contribution, and workspace command services | First compound Cordis and artifact pilot |
-| `ports` | Backend and host; two permissions | Polling policy, port projection, commands, action wording, notices, optional UI | Scoped process inspection and termination | First native-provider pilot |
-| `thin-terminal` | No module Rust; uses host terminal capability | xterm view, terminal workflow, local presentation state | Terminal session, stream, input, resize, clipboard | Early service consumer; later artifact migration |
-| `todos` | Backend without host adapter | TODO parsing policy, ordering, presentation, mutations | Scoped project document read and atomic write | Early policy-extraction slice |
-| `skills` | Backend and host | Discovery and indexing services, setup workflow, commands, optional presentation | Scoped files, approved installation operations, plugin data | After file-service semantics |
-| `git` | Backend and host; native events | Git projections, workflow, refresh policy, commands, optional UI | Scoped Git operations and watcher leases | After event and watcher services |
-| `assistants` | Backend and host; session and credential work | Session services, provider orchestration, commands, labels, models, optional UI | Terminal/process, credentials, durable plugin data | After terminal ownership is proven |
-| `usage` | Backend and host; database, ingest, queries | Ingestion, normalization, aggregation, scheduled refresh, projections, optional dashboard | Approved source access, durable plugin data, scheduling and messages | Late durable-state slice |
-| `semantic-terminal` | Backend, host, and a large Rust core | Semantic terminal view, interaction policy, presentation | Host terminal plus semantic screen protocol and durable anchors | Last continuity-sensitive slice |
+| `commands` | Frontend-only immutable artifact | Saved-command service, persistence policy, autostart, session tracking, commands, optional presentation | Terminal, contribution, and workspace command services | First compound Cordis and artifact pilot complete; live replacement remains |
+| `ports` | Frontend-only; permanent process provider | Polling policy, port projection, commands, action wording, notices, optional UI | Scoped process inspection and termination | First native-provider slice complete |
+| `thin-terminal` | Frontend-only immutable artifact | xterm view, terminal workflow, local presentation state | Terminal session, stream, input, and resize | First terminal presentation artifact complete |
+| `todos` | Frontend-only immutable artifact; permanent project-document provider | TODO parsing policy, ordering, presentation, mutations | Scoped project document read and atomic write | Second native-provider and third artifact slice complete |
+| `skills` | Frontend-only immutable artifact; permanent native provider | Catalog and source policy, setup workflow, commands, optional presentation | Approved skill installation operations | Fourth native-provider and fifth artifact slice complete |
+| `git` | Frontend-only immutable artifact; permanent Git provider and watcher | Git projections, workflow, refresh policy, commands, optional UI | Scoped Git operations and watcher leases | Third native-provider and fourth artifact slice complete |
+| `assistants` | Frontend-only immutable artifact; permanent launch and credential providers | Session services, provider orchestration, commands, labels, models, optional UI | Terminal/process, credentials, durable plugin data | Seventh native-provider and eighth artifact slice complete |
+| `usage` | Frontend-only immutable artifact; permanent usage-source provider | Ingestion, normalization, aggregation, scheduled refresh, projections, optional dashboard | Approved source access, durable plugin data, scheduling and messages | Sixth native-provider and ninth artifact slice complete |
+| `semantic-terminal` | Frontend-only immutable artifact; permanent native parser and authority provider | Semantic terminal view, interaction policy, presentation | Host terminal plus semantic screen protocol and durable anchors | Fifth native-provider and seventh artifact slice complete |
 
 “Migration position” is dependency order, not an effort estimate.
 
@@ -47,9 +47,9 @@ records pass. The order can branch; it is not one large serial rewrite.
 ## Shared Rust module API
 
 `module-api/backend` is not a tenth product module. It is a leaf compatibility
-crate created for the current native module model. Core, Tauri, assistants,
-usage, and semantic terminal use its terminal, snapshot, and durable-write
-contracts.
+crate created for the former native module model. No feature module uses it.
+Core and its Tauri composition still use its terminal, snapshot, and
+durable-write contracts.
 
 Its target disposition is:
 
@@ -62,16 +62,17 @@ Its target disposition is:
 - the `shipctl-module-api` crate and all Cargo edges to it are deleted after
   the last native feature provider is extracted.
 
-This move occurs late in the native-provider track because the crate is a
-shared bridge for current modules. The public `module-api/frontend` contract
-can evolve earlier and independently.
+This is the remaining Phase D closure move. The public `module-api/frontend`
+contract evolves independently.
 
 ## Commands
 
 Current facts:
 
 - the module is frontend-only;
-- it is statically imported through the current built-in list;
+- it is built as an immutable compound artifact and admitted through the common
+  native repository and frontend loader;
+- it has no static host import or root package dependency;
 - `runtime.ts` owns saved-command persistence, terminal-session lifecycle
   tracking, start/stop, and autostart behavior outside the React panel;
 - saved commands use the activation-scoped Plugin Data service with one
@@ -89,16 +90,17 @@ Target split:
 - no Commands-specific native capability is added. Persistence uses the shared
   Plugin Data capability.
 
-Deletion gate: remove its direct static activation only after Cordis lifecycle,
-contribution parity, disposal, and immutable artifact properties pass.
+The Phase E deletion gate is complete. Cordis lifecycle, contribution parity,
+disposal, immutable-artifact, embedded-startup, and packaged-app proofs pass.
+Phase F owns live replacement without restart.
 
 ## Ports
 
 Current facts:
 
-- `modules/ports/backend` lists listeners and kills a selected port process;
-- `modules/ports/host` installs the Tauri plugin;
-- the frontend imports Tauri directly.
+- the module is frontend-only and uses the public Processes capability;
+- process authority lives in `core/backend/src/processes/`;
+- the private adapter lives in `core/tauri/src/processes.rs`.
 
 Target split:
 
@@ -110,8 +112,14 @@ Target split:
 - the public service uses an inspection identity so a reused PID cannot become
   a different termination target.
 
-Deletion gate: delete the ports backend crate, host crate, Cargo feature, ACL
-projection, and direct Tauri client after the process provider proofs pass.
+The Phase D deletion gate is complete. Process parity, identity, scope,
+activation ownership, and native graph closure have replayable properties.
+The Phase E deletion gate is also complete. Ports is packaged as a
+presentation-only immutable artifact, declares `shipctl.processes@1`, and is
+absent from static host composition. Differential properties cover navigation,
+scan and filter policy, inspection denial, termination denial, service traces,
+and idempotent disposal. Generated bundle inventory proves that the host seeds
+the artifact as enabled at startup.
 
 ## Thin terminal
 
@@ -128,18 +136,26 @@ Target split:
   input, resize, and authorized clipboard access;
 - session ownership is independent from plugin activation ownership.
 
-Deletion gate: remove direct host or Tauri knowledge from the plugin after the
-terminal service fake, packaged focus/input proof, and session ownership model
-pass. Do not make this the first lifecycle pilot because interactive focus is a
-poor control variable for Cordis adoption.
+The Phase E deletion gate is complete. Thin Terminal is an immutable
+presentation artifact that declares `shipctl.terminal-sessions@1`, attach,
+input, and resize grants, and one terminal-presentation contribution. React is
+host-supplied, xterm remains bundled, and its generated stylesheet is admitted
+by digest and owned by the activation. Differential properties cover source
+and artifact presentation identity and wrapper props. Existing focused tests
+cover focus scheduling and raw-byte identity; the Terminal Sessions fake covers
+key and paste attribution, resize ownership, exits, and attachment teardown.
+The packaged proof creates a Thin Terminal through the application menu and
+preserves its host-owned session across live module transitions.
 
 ## Todos
 
 Current facts:
 
-- the Rust backend reads, parses, changes, and writes project TODO content;
-- the module has no separate host crate;
-- much of this behavior is feature policy, not native authority.
+- the module is frontend-only and uses the public Project Documents capability;
+- it is built as an immutable compound artifact and has no static host import
+  or root package dependency;
+- scoped filesystem authority lives in `core/backend/src/project_documents/`;
+- TODO parsing, ordering, mutation, and presentation remain in TypeScript.
 
 Target split:
 
@@ -148,39 +164,59 @@ Target split:
 - a temporary TODO-specific adapter can preserve current behavior while
   TypeScript policy is characterized and moved.
 
-Deletion gate: remove the TODO command plugin only after generated document
-roundtrips, concurrent-write policy, path-scope denial, and legacy parity pass.
-The final core must not contain TODO concepts.
+The Phase D deletion gate is complete. Document roundtrip, conflict, path
+scope, atomic-write, activation ownership, and native graph closure have
+replayable properties. Core contains no TODO policy. The Phase E deletion gate
+is also complete. Todos declares `shipctl.project-documents@1`; differential
+properties cover its contribution catalog, enabled and disabled lifecycle,
+document discovery success and denial, passive CSS, and idempotent disposal.
+Generated bundle inventory proves that the host seeds the artifact as enabled
+at startup.
 
 ## Skills
 
 Current facts:
 
-- the Rust backend lists, installs, and removes skills;
+- the module is frontend-only and uses the public Skill Installation
+  capability;
+- the Tauri-free provider lives in
+  `core/backend/src/skill_installation/`;
+- the private adapter lives in `core/tauri/src/skill_installation.rs`;
 - the frontend uses the public Skill Installation service through its module
   activation;
-- operations cross filesystem and installation boundaries.
+- the plugin owns the built-in catalog and Markdown sources;
+- operations cross an authorized project filesystem boundary.
 
 Target split:
 
-- the plugin owns discovery and indexing behavior, setup workflow, commands,
-  and optional presentation;
-- platform services own scoped filesystem access and only the reviewed
-  installation operations named by capability records;
+- the plugin owns catalog identities and metadata, source selection, Markdown,
+  setup workflow, commands, notices, and optional presentation;
+- the platform capability owns registered-root authorization, source identity
+  validation, safe directory traversal, atomic publication, rollback, and safe
+  removal;
 - grants identify allowed roots and operations. They do not expose an
   unrestricted filesystem bridge.
 
-Deletion gate: remove the skills crates after traversal, scope, atomic install,
-rollback, and behavior properties pass.
+The Phase D deletion gate is complete. Traversal, scope, parity, atomic
+installation, rollback, activation ownership, and native graph closure have
+replayable properties. The Phase E deletion gate is also complete. Skills is a
+DOM-free immutable compound artifact that declares `shipctl.skill-installation@2`
+and its project-action and skills-provider contributions. Generated discovery,
+refresh, install, remove, denial, notice, cache-eviction, and disposal cases
+match the static reference. The packaged app seeds and activates the artifact
+through the common loader. The static host import and root dependency are
+deleted. Skills does not declare Plugin Data because it owns no durable record;
+its Zustand state is a cache of filesystem-backed capability results.
 
 ## Git
 
 Current facts:
 
-- the Rust backend exposes repository, branch, worktree, status, diff, stage,
-  commit, switch, and push operations;
-- the frontend also listens for native events;
-- the host adapter is tied to a workspace scope.
+- the module is frontend-only and uses the public Git capability;
+- scoped repository operations live in `core/backend/src/git/`;
+- the private command adapter lives in `core/tauri/src/git.rs`;
+- a host-wide project watcher publishes the trusted native change signal, and
+  activation-owned Git subscriptions filter it by project.
 
 Target split:
 
@@ -191,18 +227,24 @@ Target split:
 - a semantic event subscription service replaces raw Tauri event names and
   returns an activation-owned lease.
 
-Deletion gate: remove the Git module crates and native listeners after command
-parity, repository-scope, watcher ownership, event ordering, and disposal
-properties pass.
+The Phase D deletion gate is complete. Command parity, repository scope,
+activation access, event ordering, subscription disposal, and native graph
+closure have replayable properties. The Phase E gate is also complete. Git now
+declares `shipctl.git@1` and its seven contribution families in an immutable
+artifact. Differential properties cover refresh success and denial, clean and
+dirty project facts, worktree expansion, service traces, and repeated disposal.
+The static host import and root package dependency are deleted.
 
 ## Assistants
 
 Current facts:
 
-- native code covers session spawn and resume, capture, placement, labels,
-  provider model data, Pi configuration, and credentials;
-- Pi credential operations cross an activation-scoped semantic service. Only
-  the trusted adapter knows their current Tauri command names;
+- the module is frontend-only and uses the Assistant Launch and Credential
+  Store capabilities;
+- launch and recovery authority lives in `core/backend/src/assistant_launch/`;
+- credential authority and non-disclosure live in
+  `core/backend/src/credentials/`;
+- private Tauri adapters contain transport only;
 - terminal sessions and assistant records have durable meaning outside a
   mounted React view.
 
@@ -218,20 +260,30 @@ Target split:
 - session resources survive plugin replacement according to an explicit lease
   and adoption protocol.
 
-Deletion gate: remove the assistant crates only after session recovery,
-credential non-disclosure, terminal continuity, record migration, and provider
-behavior properties pass.
+The Phase D deletion gate is complete. Launch and credential parity, native
+authority, activation disposal, durable-resource ownership, credential
+non-disclosure, and native graph closure have replayable properties.
+
+The Phase E deletion gate is complete. Assistants is an immutable compound
+artifact with no static host import or root package dependency. Its manifest
+declares the four services used by current code: Assistant Launch, Credential
+Store, Processes, and Terminal Sessions. It requests the exact six grants for
+assistant launch and records, credential inspection and writes, and terminal
+start and attachment. Differential properties preserve the launcher panel,
+restore warning, shutdown preparation, semantic service results and traces,
+activation subscription, and repeated disposal. Plugin Data and Workspace stay
+target capabilities until the module consumes their public contracts.
 
 ## Usage
 
 Current facts:
 
-- native code owns provider ingestion, a database, queries, pricing data, and
-  snapshots;
-- source refresh participates in the message bus. Settings use the public
-  Plugin Data service, and the native Usage host reads the same owned record;
-- source interpretation and dashboard aggregation are mixed with native file
-  and scheduling mechanisms.
+- the module is frontend-only and uses Usage Sources, Plugin Data, Scheduler,
+  and Messages capabilities;
+- approved source and credential authority, normalized source facts, SQLite
+  persistence, and snapshots live in `core/backend/src/usage_sources/`;
+- pricing, aliases, aggregation, projections, refresh policy, and presentation
+  live in TypeScript.
 
 Target split:
 
@@ -244,19 +296,30 @@ Target split:
   rules are explicit. A private compatibility adapter can keep the old schema
   during the move.
 
-Deletion gate: remove the usage crates after database migration, ingestion
-idempotency, message compatibility, source-scope, snapshot parity, and restart
-recovery properties pass. This is a late slice because data loss is harder to
-reverse than a presentation defect.
+The Phase D deletion gate is complete. Source parity, authority, redaction,
+durable-record ownership, TypeScript policy ownership, and native graph
+closure have replayable properties.
+
+The Phase E deletion gate is also complete. Usage is an immutable compound
+artifact with no static host import or root package dependency. Its manifest
+declares the four services used by current code: Usage Sources, Plugin Data,
+Messages, and Scheduler. It requests the exact nine grants for source reads,
+refresh and observation, settings reads and writes, message publication,
+subscription and directed refresh, and schedule registration. Differential
+properties preserve settings access, source ingestion and observation,
+directed refresh, schedule registration, presentation loaders, runtime
+inspection, and repeated disposal. Credential Store stays private behind the
+native Usage Sources provider. Workspace stays a target capability until the
+module consumes its public contract.
 
 ## Semantic terminal
 
 Current facts:
 
-- the module contains a Tauri backend, a host adapter, and a substantial Rust
-  semantic engine with input, projection, replay, retention, anchors, painting,
-  and trace behavior;
-- the frontend is large and imports Tauri directly;
+- the module is frontend-only and uses the public Semantic Terminal capability;
+- the substantial Rust semantic engine lives in
+  `core/backend/src/semantic_terminal/`;
+- the private adapter lives in `core/tauri/src/semantic_terminal.rs`;
 - live PTY continuity and incremental screen revisions are high-risk state.
 
 Target split:
@@ -271,11 +334,21 @@ Target split:
 - PTY and semantic-screen resources are host-owned. Plugin activations attach
   through replaceable leases.
 
-Deletion gate: delete all three module Rust crates and the Cargo/Tauri
-projections only after replay, revision, backpressure, input, paste, resize,
-anchor, detach/reattach, replacement, and packaged interactive proofs pass.
-This is the final native extraction unless measured evidence supports an
-earlier safe slice.
+The Phase D deletion gate is complete. Replay, revision, backpressure, input,
+paste, resize, anchor, detach/reattach, activation disposal, PTY continuity,
+and native graph closure have replayable properties.
+
+The Phase E deletion gate is also complete. Semantic Terminal is an immutable
+presentation artifact with no static host import or root package dependency.
+It declares `shipctl.terminal-sessions@1`, `shipctl.semantic-terminals@1`, its
+six existing grants, and one terminal-presentation contribution. The artifact
+property compares source and admitted catalogs, wrapper props, service binding,
+passive import, stylesheet ownership, and repeated disposal. The existing 65
+focused interaction tests cover attachment, flow control, input, history,
+anchors, selection, paste, resize, recovery, focus, and teardown.
+The packaged proof creates a Semantic Terminal through the application menu,
+writes through the real PTY before and after live module transitions, and
+preserves its host-owned identity beside a running Thin Terminal.
 
 ## Closure rule for every module
 

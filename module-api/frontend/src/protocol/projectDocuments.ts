@@ -42,6 +42,7 @@ export type ProjectDocumentsErrorCode =
   | "project-documents.conflict"
   | "project-documents.too-large"
   | "project-documents.invalid-content"
+  | "project-documents.invalid-request"
   | "project-documents.cancelled"
   | "project-documents.activation-disposed";
 

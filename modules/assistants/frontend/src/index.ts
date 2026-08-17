@@ -1,6 +1,10 @@
-import type { ShipctlModule } from "@shipctl/module-api";
+import {
+  ASSISTANT_LAUNCH_GRANTS,
+  TERMINAL_SESSION_GRANTS,
+  type ShipctlModule,
+} from "@shipctl/module-api";
 
-import { beginAssistantSessionPreservingShutdown } from "./client";
+import { assistantLaunchClientFor } from "./assistantLaunchClient";
 import { activateAssistantRuntime, restoreAssistantSessions } from "./runtime";
 
 export const ASSISTANT_LAUNCHER_PANEL_ID = "assistants.launcher" as const;
@@ -8,6 +12,14 @@ export const ASSISTANT_LAUNCHER_PANEL_ID = "assistants.launcher" as const;
 export const assistantsModule = {
   id: "shipctl.assistants",
   version: "0.0.0",
+  requiredGrants: [
+    ASSISTANT_LAUNCH_GRANTS.launch,
+    ASSISTANT_LAUNCH_GRANTS.sessionRecord,
+    "credential.inspect",
+    "credential.write",
+    TERMINAL_SESSION_GRANTS.start,
+    TERMINAL_SESSION_GRANTS.attach,
+  ],
   panels: [
     {
       id: ASSISTANT_LAUNCHER_PANEL_ID,
@@ -28,11 +40,15 @@ export const assistantsModule = {
     },
   ],
   projectLifecycle: {
-    onProjectsChanged: restoreAssistantSessions,
+    onProjectsChanged: (projectPaths, services, activation) => (
+      restoreAssistantSessions(projectPaths, services, assistantLaunchClientFor(activation))
+    ),
   },
-  beforeShutdown: beginAssistantSessionPreservingShutdown,
-  activate: ({ services }) => {
-    const deactivate = activateAssistantRuntime(services);
+  beforeShutdown: (_services, activation) => (
+    assistantLaunchClientFor(activation).beginAssistantSessionPreservingShutdown()
+  ),
+  activate: ({ services, activation }) => {
+    const deactivate = activateAssistantRuntime(services, assistantLaunchClientFor(activation));
     return { deactivate };
   },
 } as const satisfies ShipctlModule;

@@ -6,18 +6,7 @@ import type {
 
 import { assistantPresentation } from "./branding";
 import { CODING_ASSISTANTS, restorableProvider } from "./catalog";
-import {
-  discardSession,
-  failSessionCapture,
-  listRestorableSessions,
-  rearmSession,
-  resumeAssistantSession,
-  spawnAssistantSession,
-  takeStartupWarning,
-  tryCaptureCodexSession,
-  updateSessionLabel,
-  updateSessionPlacement,
-} from "./client";
+import type { AssistantLaunchClient } from "./assistantLaunchClient";
 import type {
   AssistantOwnerMetadata,
   AssistantSessionRecord,
@@ -79,6 +68,7 @@ function captureCodexSession(
   session: ModuleTerminalSession,
   metadata: AssistantOwnerMetadata,
   services: ModuleHostServices,
+  client: AssistantLaunchClient,
 ) {
   const record = metadata.record;
   if (record?.provider !== "codex" || record.captureState !== "pending") return;
@@ -86,7 +76,7 @@ function captureCodexSession(
 
   const attemptCapture = async () => {
     try {
-      const captured = await tryCaptureCodexSession(record.recordId);
+      const captured = await client.tryCaptureSessionIdentity(record.recordId);
       if (captured) {
         clearTimer(captureTimers, session.id);
         await updateMetadata(services, session.id, { ...metadata, record: captured });
@@ -102,7 +92,7 @@ function captureCodexSession(
         return;
       }
 
-      const failed = await failSessionCapture(record.recordId);
+      const failed = await client.failSessionCapture(record.recordId);
       await updateMetadata(services, session.id, { ...metadata, record: failed });
       services.notices.push({
         tone: "info",
@@ -111,7 +101,7 @@ function captureCodexSession(
       });
     } catch (error) {
       clearTimer(captureTimers, session.id);
-      const failed = await failSessionCapture(record.recordId).catch(() => null);
+      const failed = await client.failSessionCapture(record.recordId).catch(() => null);
       if (failed) {
         await updateMetadata(services, session.id, { ...metadata, record: failed }).catch(() => undefined);
       }
@@ -129,6 +119,7 @@ function captureCodexSession(
 async function handleLifecycle(
   event: ModuleTerminalSessionLifecycleEvent,
   services: ModuleHostServices,
+  client: AssistantLaunchClient,
 ) {
   if (!isOwned(event.session)) return;
   const metadata = metadataBySession.get(event.session.id) ?? metadataOf(event.session);
@@ -136,20 +127,20 @@ async function handleLifecycle(
 
   if (["launched", "adopted", "updated"].includes(event.type)) {
     metadataBySession.set(event.session.id, metadata);
-    if (event.type !== "updated") captureCodexSession(event.session, metadata, services);
+    if (event.type !== "updated") captureCodexSession(event.session, metadata, services, client);
     return;
   }
 
   if (event.type === "rename-requested") {
     if (!metadata.record) return;
-    const record = await updateSessionLabel(metadata.record.recordId, event.label);
+    const record = await client.updateSessionLabel(metadata.record.recordId, event.label);
     await updateMetadata(services, event.session.id, { ...metadata, record });
     return;
   }
 
   if (event.type === "placement-requested") {
     if (!metadata.record) return;
-    const record = await updateSessionPlacement(metadata.record.recordId, event.projectPath);
+    const record = await client.updateSessionPlacement(metadata.record.recordId, event.projectPath);
     await updateMetadata(services, event.session.id, { ...metadata, record });
     return;
   }
@@ -157,7 +148,7 @@ async function handleLifecycle(
   if (event.type === "stop-requested") {
     clearTimer(captureTimers, event.session.id);
     clearTimer(restoreTimers, event.session.id);
-    if (metadata.record) await discardSession(metadata.record.recordId);
+    if (metadata.record) await client.discardSession(metadata.record.recordId);
     return;
   }
 
@@ -174,7 +165,7 @@ async function handleLifecycle(
   if (!metadata.record) return;
 
   if (metadata.restoring) {
-    await rearmSession(metadata.record.recordId);
+    await client.rearmSession(metadata.record.recordId);
     services.notices.push({
       tone: "info",
       title: `Couldn’t restore ${event.session.label}`,
@@ -183,7 +174,7 @@ async function handleLifecycle(
     return;
   }
 
-  await discardSession(metadata.record.recordId).catch(() => undefined);
+  await client.discardSession(metadata.record.recordId).catch(() => undefined);
 }
 
 export async function launchAssistant(
@@ -192,6 +183,7 @@ export async function launchAssistant(
   mode: SessionMode,
   model: string | undefined,
   services: ModuleHostServices,
+  client: AssistantLaunchClient,
 ): Promise<boolean> {
   const assistant = CODING_ASSISTANTS.find(({ id }) => id === assistantId);
   if (!assistant) return false;
@@ -237,7 +229,7 @@ export async function launchAssistant(
       columns: dimensions.columns,
       rows: dimensions.rows,
       start: async (context) => {
-        const spawned = await spawnAssistantSession(
+        const spawned = await client.spawnAssistantSession(
           {
             provider,
             launchRepoPath: projectPath,
@@ -269,6 +261,7 @@ export async function launchAssistant(
 async function resumeRecord(
   record: AssistantSessionRecord,
   services: ModuleHostServices,
+  client: AssistantLaunchClient,
 ) {
   const dimensions = services.terminalSessions.getDimensions();
   const metadata: AssistantOwnerMetadata = {
@@ -288,7 +281,7 @@ async function resumeRecord(
     columns: dimensions.columns,
     rows: dimensions.rows,
     start: async (context) => {
-      const spawned = await resumeAssistantSession(record.recordId, context);
+      const spawned = await client.resumeAssistantSession(record.recordId, context);
       return {
         terminalId: spawned.terminalId,
         ownerMetadata: { ...metadata, record: spawned.record },
@@ -311,9 +304,10 @@ function showRestoreRecovery(
   message: string,
   projectPaths: ReadonlySet<string>,
   services: ModuleHostServices,
+  client: AssistantLaunchClient,
 ) {
-  const retry = () => void restoreRecord(record, projectPaths, services);
-  const discard = () => void discardSavedRecord(record, projectPaths, services);
+  const retry = () => void restoreRecord(record, projectPaths, services, client);
+  const discard = () => void discardSavedRecord(record, projectPaths, services, client);
   services.notices.push({
     tone: "info",
     title: `Couldn’t restore ${record.label}`,
@@ -329,16 +323,23 @@ async function discardSavedRecord(
   record: AssistantSessionRecord,
   projectPaths: ReadonlySet<string>,
   services: ModuleHostServices,
+  client: AssistantLaunchClient,
 ) {
   try {
-    await discardSession(record.recordId);
+    await client.discardSession(record.recordId);
     services.notices.push({
       tone: "success",
       title: `Discarded ${record.label}`,
       message: "Shipctl will not attempt to restore this saved session again.",
     });
   } catch (error) {
-    showRestoreRecovery(record, error instanceof Error ? error.message : String(error), projectPaths, services);
+    showRestoreRecovery(
+      record,
+      error instanceof Error ? error.message : String(error),
+      projectPaths,
+      services,
+      client,
+    );
   }
 }
 
@@ -346,6 +347,7 @@ async function restoreRecord(
   record: AssistantSessionRecord,
   projectPaths: ReadonlySet<string>,
   services: ModuleHostServices,
+  client: AssistantLaunchClient,
 ) {
   if (!projectPaths.has(record.placementProjectPath)) {
     showRestoreRecovery(
@@ -353,25 +355,33 @@ async function restoreRecord(
       "Its placement project is no longer registered in Shipctl.",
       projectPaths,
       services,
+      client,
     );
     return;
   }
   try {
-    await resumeRecord(record, services);
+    await resumeRecord(record, services, client);
   } catch (error) {
-    showRestoreRecovery(record, error instanceof Error ? error.message : String(error), projectPaths, services);
+    showRestoreRecovery(
+      record,
+      error instanceof Error ? error.message : String(error),
+      projectPaths,
+      services,
+      client,
+    );
   }
 }
 
 export async function restoreAssistantSessions(
   projectPaths: readonly string[],
   services: ModuleHostServices,
+  client: AssistantLaunchClient,
 ) {
   if (restoreAttempted || projectPaths.length === 0) return;
   restoreAttempted = true;
   const registered = new Set(projectPaths);
   try {
-    const warning = await takeStartupWarning();
+    const warning = await client.takeStartupWarning();
     if (warning) {
       services.notices.push({
         tone: "info",
@@ -379,8 +389,8 @@ export async function restoreAssistantSessions(
         message: warning,
       });
     }
-    const records = await listRestorableSessions();
-    for (const record of records) await restoreRecord(record, registered, services);
+    const records = await client.listRestorableSessions();
+    for (const record of records) await restoreRecord(record, registered, services, client);
   } catch (error) {
     services.notices.push({
       tone: "info",
@@ -390,9 +400,12 @@ export async function restoreAssistantSessions(
   }
 }
 
-export function activateAssistantRuntime(services: ModuleHostServices) {
+export function activateAssistantRuntime(
+  services: ModuleHostServices,
+  client: AssistantLaunchClient,
+) {
   const unsubscribe = services.terminalSessions.subscribe((event) =>
-    handleLifecycle(event, services));
+    handleLifecycle(event, services, client));
   return () => {
     unsubscribe();
     for (const sessionId of captureTimers.keys()) clearTimer(captureTimers, sessionId);

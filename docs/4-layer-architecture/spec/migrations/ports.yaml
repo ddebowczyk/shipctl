@@ -6,14 +6,12 @@ status: migrating
 source_manifest: modules/ports/module.yaml
 current:
   frontend: modules/ports/frontend
-  backend_crates:
-    - modules/ports/backend
-  host_crates:
-    - modules/ports/host
+  backend_crates: []
+  host_crates: []
   direct_tauri: false
-  static_activation: true
+  static_activation: false
 target:
-  roles: [compound]
+  roles: [presentation]
   responsibilities:
     - Implement port inspection and termination policy in TypeScript.
     - Publish port views and actions through typed contributions.
@@ -24,8 +22,12 @@ phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
 prerequisites:
   - Characterize port discovery, process identity, and termination behavior.
 compatibility_paths:
-  - Use the current ports module as the first native-module extraction pilot.
-  - Keep old UI behavior while calls move to the process capability client.
+  - >-
+    Phase D native extraction is complete: Ports is frontend-only and uses the
+    public process capability client.
+  - >-
+    Phase E packages Ports as an immutable built-in artifact. The host admits
+    and activates it through the same runtime path as user-installed plugins.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE
     proof_ids: [PROP-D-PARITY-001, PROP-D-CLOSURE-001]
@@ -33,6 +35,7 @@ deletion_gates:
       - modules/ports/backend
       - modules/ports/host
   - id: DELETE-E-STATIC-IMPORT
-    proof_ids: [PROP-E-BUILTIN-PARITY-001, PROP-E-HEADLESS-001]
+    proof_ids: [PROP-E-PORTS-PARITY-001, PROP-E-HEADLESS-001]
     targets:
-      - modules/ports/frontend/src/index.ts
+      - core/frontend/host/enabledModules.ts
+      - package.json

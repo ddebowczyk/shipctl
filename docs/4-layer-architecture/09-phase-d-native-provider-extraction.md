@@ -24,6 +24,187 @@ Ports has two native operations and a small frontend. Its split is clear:
 This slice proves the extraction method before it touches terminal continuity,
 assistant sessions, Git watching, or usage persistence.
 
+The pilot is now implemented. Ports has no backend crate, host crate, Cargo
+feature, Tauri plugin registration, or ACL projection. The replayable proof is:
+
+```sh
+just --justfile ops/architecture/justfile ports-extraction
+```
+
+This completes the Ports native-extraction slice. Ports still uses static
+frontend activation. Todos, Git, Skills, Semantic Terminal, Usage, and
+Assistants are the next completed slices.
+
+## Second slice: Todos
+
+The Todos extraction is also implemented:
+
+- registered-project lookup, normalized relative paths, bounded discovery,
+  UTF-8 reads, revision comparison, and atomic publication now belong to
+  `core/backend/src/project_documents/`;
+- `core/tauri/src/project_documents.rs` contains only private request-envelope
+  validation and command delegation;
+- Todo parsing, ordering, checkbox mutation, board moves, conflict handling,
+  and presentation remain in `modules/todos/frontend/`;
+- activation disposal revokes native access but preserves every project-owned
+  document;
+- the Todos backend crate, host crate, Cargo feature, Tauri plugin, ACL
+  projection, and legacy private command edge are deleted.
+
+The replayable proof is:
+
+```sh
+just --justfile ops/architecture/justfile todos-extraction
+```
+
+Todos still uses static frontend activation. Its path-backed `ProjectRef.id`
+also remains a trusted-host compatibility detail until Phase E admission
+introduces opaque project identities for third-party artifacts.
+
+## Third slice: Git
+
+The Git extraction is implemented:
+
+- scoped repository execution and stable errors now belong to the Tauri-free
+  provider in `core/backend/src/git/`;
+- `core/tauri/src/git.rs` validates private request envelopes and delegates
+  every operation without feature workflow or presentation policy;
+- Git projections, workflow, refresh policy, commands, and views remain in
+  `modules/git/frontend/`;
+- exact registered project paths, module grants, and activation disposal are
+  enforced before native work;
+- the host-wide project watcher remains a permanent core resource, while each
+  Git event subscription is filtered by project and owned by its activation;
+- the Git backend crate, host crate, Cargo feature, Tauri plugin, ACL
+  projection, and namespaced private commands are deleted.
+
+The replayable proof is:
+
+```sh
+just --justfile ops/architecture/justfile git-extraction
+```
+
+Git still uses static frontend activation. Phase E will replace that static
+composition edge; it does not need another native migration.
+
+## Fourth slice: Skills
+
+The Skills extraction is implemented:
+
+- registered-project authorization, stable skill-identity validation, safe
+  directory traversal, atomic `SKILL.md` publication, compatibility-pointer
+  publication, rollback, and safe removal belong to the Tauri-free provider in
+  `core/backend/src/skill_installation/`;
+- `core/tauri/src/skill_installation.rs` validates private request envelopes
+  and delegates without a skill catalog or feature workflow policy;
+- the TypeScript plugin owns built-in identities, titles, descriptions,
+  source selection, Markdown, install workflow, commands, notices, and views;
+- activation disposal revokes native access but preserves project-owned skill
+  files;
+- the Skills backend crate, host crate, Cargo feature, Tauri plugin, ACL
+  projection, and namespaced private commands are deleted.
+
+The public contract is `shipctl.skill-installation@2`. Version 2 makes the
+caller-supplied catalog and source explicit. This prevents a permanent Rust
+provider from compiling feature identities or Markdown into the host.
+
+The replayable proof is:
+
+```sh
+just --justfile ops/architecture/justfile skills-extraction
+```
+
+Phase D left Skills on static frontend activation. Phase E has now replaced
+that edge with the immutable artifact path; it did not require another native
+migration.
+
+## Fifth slice: Semantic Terminal
+
+The Semantic Terminal extraction is implemented:
+
+- the Ghostty-backed parser, projection, input encoding, native driver, and
+  activation-scoped authority now belong to the Tauri-free provider in
+  `core/backend/src/semantic_terminal/`;
+- `core/tauri/src/semantic_terminal.rs` validates attributed private request
+  envelopes, supplies the event channel, and delegates without feature policy;
+- every native request carries module, activation, and correlation identity;
+  terminal ownership and attachment leases are checked again below the
+  TypeScript wall;
+- activation disposal releases presentation attachments but preserves the
+  host-owned PTY and terminal identity;
+- the TypeScript module still owns semantic interaction, browser presentation,
+  flow control, selection, clipboard behavior, and view policy;
+- the Semantic Terminal backend, core, and host crates, Cargo feature, Tauri
+  plugin, ACL projection, and namespaced private commands are deleted.
+
+The lean CLI imports the permanent parser contract through `shipctl-core`; it
+does not link Tauri or the desktop shell.
+
+The replayable proof is:
+
+```sh
+just --justfile ops/architecture/justfile semantic-terminal-extraction
+```
+
+Semantic Terminal still uses static frontend activation. Phase E will replace
+that edge. The host-owned terminal continues across presentation replacement.
+
+## Sixth slice: Usage
+
+The Usage extraction is implemented:
+
+- reviewed filesystem, credential, subprocess, network, and SQLite authority
+  now belongs to the Tauri-free provider in `core/backend/src/usage_sources/`;
+- `core/tauri/src/usage_sources.rs` validates private request envelopes and
+  delegates source inspection, refresh, and activation disposal;
+- provider pricing, aliases, aggregation, projections, refresh workflow,
+  schedules, messages, and views remain in `modules/usage/frontend/`;
+- activation disposal revokes source access while preserving durable usage
+  records owned by the host;
+- the Usage backend crate, host crate, Cargo feature, Tauri plugin, ACL
+  projection, and namespaced private commands are deleted.
+
+The replayable proof is:
+
+```sh
+just --justfile ops/architecture/justfile usage-sources
+```
+
+Usage now uses the common immutable artifact and live-reconciliation path. Its
+Phase D provider remains the permanent native authority behind the public Usage
+Sources service.
+
+## Seventh slice: Assistants
+
+The Assistants extraction is implemented:
+
+- assistant launch, capture, recovery records, placement, labels, model
+  inspection, and non-secret provider configuration now belong to the
+  Tauri-free provider in `core/backend/src/assistant_launch/`;
+- namespaced secret storage and non-disclosure now belong to the separate
+  Tauri-free provider in `core/backend/src/credentials/`;
+- private adapters in `core/tauri/src/assistant_launch.rs` and
+  `core/tauri/src/credentials.rs` validate attributed request envelopes and
+  delegate without React or provider-selection policy;
+- activation disposal revokes access while preserving host-owned terminal,
+  recovery, and credential resources;
+- provider orchestration, launch workflow, labels, model choices, notices, and
+  views remain in `modules/assistants/frontend/`;
+- the Assistants backend crate, host crate, Cargo feature, Tauri plugin, ACL
+  projection, and namespaced private commands are deleted.
+
+Credential existence checks use Keychain status only. Secret bytes are not
+returned to JavaScript or loaded for an existence check.
+
+The replayable proof is:
+
+```sh
+just --justfile ops/architecture/justfile assistants-extraction
+```
+
+Assistants still uses static frontend activation. Phases E and F own immutable
+artifact loading, replacement, and recovery adoption.
+
 ## Normative semantics
 
 - **SEM-D-001:** Native code moves to core only when it owns OS authority,
@@ -90,8 +271,8 @@ The detailed proposed disposition is in
 - **Failure value:** extraction changes TODO ordering or Git path
   authorization while unit tests exercise only success.
 - **Tier:** pull request.
-- **Initial status/test ID:** proposed template /
-  `architecture.provider.<capability>.parity.property`.
+- **First implementation/test ID:** Processes provider /
+  `architecture.provider.processes.parity.property`.
 
 ### PROP-D-AUTHORITY-001
 
@@ -109,8 +290,8 @@ The detailed proposed disposition is in
 - **Failure value:** a disabled plugin can terminate an arbitrary process or
   read a repository outside its grant.
 - **Tier:** pull request.
-- **Initial status/test ID:** proposed template /
-  `architecture.provider.<capability>.authority.property`.
+- **First implementation/test ID:** Processes provider /
+  `architecture.provider.processes.authority.property`.
 
 ### PROP-D-OWNERSHIP-001
 
@@ -128,7 +309,8 @@ The detailed proposed disposition is in
 - **Failure value:** replacing semantic terminal kills its PTY or losing usage
   UI deletes its durable data.
 - **Tier:** pull request, with terminal cases also in release verification.
-- **Initial status/test ID:** proposed / `architecture.resource-ownership.property`.
+- **First implementation/test ID:** Processes provider /
+  `architecture.provider.processes.ownership.property`.
 
 ### PROP-D-CLOSURE-001
 
@@ -140,18 +322,23 @@ The detailed proposed disposition is in
 - **Evidence:** SEM-D-001, SEM-D-002, SEM-D-007, SEM-D-008.
 - **Domain:** generated architecture snapshots and mutation fixtures that add
   one forbidden residual edge at a time. Exclude historical ignored plans.
-- **Preconditions:** the module disposition record says `native-extracted`.
+- **Preconditions:** the module disposition record has no current native crates
+  and records completion of the native-extraction compatibility path. The
+  overall module can remain `migrating` while later dynamic-activation work is
+  still open.
 - **Oracle:** a closed list of allowed target owners in the normative record is
   compared with resolved source, Cargo, and ACL graphs.
 - **Failure value:** the frontend moved but `src-tauri` still rebuilds a hidden
   module plugin.
 - **Tier:** pull request.
-- **Initial status/test ID:** proposed / `architecture.native-extraction-closure.property`.
+- **First implementation/test ID:** Ports extraction /
+  `architecture.native-extraction-closure.property`.
 
 ## Ports-specific properties
 
-- Generated process tables filtered by project scope return the same visible
-  rows before and after extraction.
+- Generated process tables preserve the characterized listening-port
+  projection. Ports applies development-process, project matching, and
+  framework policy in TypeScript.
 - Termination is attempted only for a process from the authorized inspection
   snapshot and fails closed when the PID identity is stale.
 - Repeating a successful termination request cannot target a different process
@@ -173,6 +360,6 @@ These become separate full property cards in the `processes` capability record.
 
 ## Phase relationship
 
-After the ports pilot proves the method, other provider slices can proceed
-independently of artifact work when their prerequisites are met. Final wall
-closure waits for all seven native-backed modules.
+Ports, Todos, Git, Skills, Semantic Terminal, Usage, and Assistants have proved
+the native extraction method. Final wall closure now waits for the shared Rust
+compatibility API deletion gate. Artifact work can proceed independently.

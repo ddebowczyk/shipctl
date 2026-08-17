@@ -99,7 +99,7 @@ and diagnostic records.
   code.
 - **Failure value:** a failed replacement removes the active old plugin.
 - **Tier:** pull request and scheduled extended histories.
-- **Initial status/test ID:** proposed / `architecture.live-reconcile.property`.
+- **Current status/test ID:** passing / `architecture.live-reconcile.property`.
 
 ### PROP-F-ATOMIC-001
 
@@ -118,7 +118,7 @@ and diagnostic records.
 - **Failure value:** a new menu command becomes clickable before its command
   handler is routed.
 - **Tier:** pull request.
-- **Initial status/test ID:** proposed / `architecture.catalog-atomicity.property`.
+- **Current status/test ID:** passing / `architecture.catalog-atomicity.property`.
 
 ### PROP-F-REVISION-001
 
@@ -134,7 +134,7 @@ and diagnostic records.
 - **Failure value:** a delayed event rolls the browser back to an older plugin
   graph.
 - **Tier:** pull request.
-- **Initial status/test ID:** proposed / `architecture.runtime-revision.property`.
+- **Current status/test ID:** passing / `architecture.runtime-revision.property`.
 
 ### PROP-F-CONTINUITY-001
 
@@ -153,7 +153,7 @@ and diagnostic records.
 - **Failure value:** changing terminal presentation kills or re-IDs a running
   CLI session.
 - **Tier:** release, with a fake-host form in pull requests.
-- **Initial status/test ID:** proposed / `architecture.terminal-plugin-continuity.property`.
+- **Current status/test ID:** passing / `architecture.terminal-plugin-continuity.property`.
 
 ### PROP-F-INSPECTION-001
 
@@ -171,7 +171,7 @@ and diagnostic records.
 - **Failure value:** an agent sees a broken view or failed headless service but
   cannot identify its plugin activation or failure record.
 - **Tier:** pull request.
-- **Initial status/test ID:** proposed / `architecture.runtime-inspection.property`.
+- **Current status/test ID:** passing / `architecture.runtime-inspection.property`.
 
 ### PROP-F-SERVICE-001
 
@@ -191,7 +191,7 @@ and diagnostic records.
 - **Failure value:** a consumer calls the old service after replacement disposal
   or observes the candidate before atomic publication.
 - **Tier:** pull request and scheduled extended histories.
-- **Initial status/test ID:** proposed / `architecture.service-reconcile.property`.
+- **Current status/test ID:** passing / `architecture.service-routing.property`.
 
 ### PROP-F-RESTART-001
 
@@ -209,26 +209,61 @@ and diagnostic records.
 - **Failure value:** restart activates a disabled plugin or forgets the
   last-good provider.
 - **Tier:** pull request and release.
-- **Initial status/test ID:** proposed / `architecture.runtime-restart.property`.
+- **Current status/test ID:** passing / `architecture.runtime-restart.property`.
 
 Live state is not a substitute for durable desired state. Host-owned terminals
 are re-attached by identity rather than recreated.
 
+## Implemented proof surface
+
+- `core/frontend/runtime/liveReconciler.ts` owns the pure plan, private
+  candidate graph, atomic catalog family, last-good recovery, provider routing,
+  and ordered disposal.
+- `core/frontend/host/liveModuleSupervisor.ts` applies the same reconciler at
+  startup and after every observed registry revision.
+- `core/backend/src/module_control/live.rs` persists desired state, acceptance,
+  failures, operation transitions, and a retained filesystem revision
+  observer. An explicit removal tombstone prevents a bundled artifact from
+  becoming enabled again after restart.
+- `cli/src/module_watch.rs` exposes monotonic registry and applied revisions as
+  structured JSONL. Inspection and operation commands expose stable module,
+  activation, request, and transition identities.
+- `ops/architecture/bin/run-live-reconciliation-properties.mjs` runs all seven
+  replayable `fast-check` properties, the external-registry observer test, and
+  the named-socket mutation tests. Seed `20260817` passes.
+- `ops/architecture/bin/run-live-reconciliation-package-proof.mjs` starts the
+  bundled macOS application through its bundled CLI. It creates a real thin
+  terminal, writes PTY canaries before and after live enable and remove,
+  verifies one process and terminal identity, restarts the app, and verifies
+  revision parity plus the durable disabled tombstone.
+
+Run the proof lanes with:
+
+```sh
+just -f ops/architecture/justfile live-reconciliation --seed=20260817
+just -f ops/architecture/justfile live-reconciliation-package
+```
+
 ## Exit proof
 
-- fixture plugin add, replace, invalid replace, disable, and remove work without
-  webview reload;
-- headless service-provider replacement preserves consumer routing and disposes
-  the old provider cleanly;
-- last-good and atomic catalog properties pass;
-- no effect remains after disposal;
-- desired and applied revisions are visible in CLI JSON;
-- terminal continuity passes in a packaged app;
-- static built-ins may remain for features not yet migrated, but they are
-  explicitly marked compatibility activations.
+- **Passed:** fixture plugin add, replace, invalid replace, disable, and remove
+  work without webview reload;
+- **Passed:** headless service-provider replacement preserves consumer routing
+  and disposes the old provider cleanly;
+- **Passed:** last-good and atomic catalog properties pass;
+- **Passed:** no effect remains after disposal;
+- **Passed:** desired and applied revisions are visible in CLI JSON;
+- **Passed:** terminal continuity passes in a packaged app;
+- **Passed:** static built-ins may remain for features not yet migrated, but
+  they are explicitly marked compatibility activations.
 
 ## Deletion gate
 
 Delete restart-bound-only browser startup logic after the live supervisor can
 reconstruct the same graph at startup and after revision change. Keep native
 artifact admission and durable registry; they are permanent authorities.
+
+**Gate result:** satisfied for dynamic artifacts. Startup and revision changes
+use one supervisor path, and package restart proof reconstructs revision 6 with
+zero lag and no selected artifact for the removed module. Static compatibility
+activations remain until their separate Phase E migration tasks complete.

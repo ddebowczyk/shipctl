@@ -20,6 +20,7 @@ import {
   type GitTextResult,
   type GitWorktree,
   type ModuleActivationIdentity,
+  type SemanticCorrelationId,
   type SemanticEventLease,
   type SemanticEventRecord,
   type SemanticServiceError,
@@ -34,26 +35,27 @@ import {
 } from "./semanticServiceAdapter.ts";
 
 const COMMANDS = {
-  isRepository: "plugin:shipctl-git|is_git_repo",
-  initializeRepository: "plugin:shipctl-git|git_init",
-  currentBranch: "plugin:shipctl-git|git_current_branch",
-  listBranches: "plugin:shipctl-git|git_list_branches",
-  pushBranch: "plugin:shipctl-git|git_push_branch",
-  listWorktrees: "plugin:shipctl-git|git_list_worktrees",
-  createWorktree: "plugin:shipctl-git|git_create_worktree",
-  inspectStatus: "plugin:shipctl-git|git_status",
-  listChangedFiles: "plugin:shipctl-git|git_changed_files",
-  readFileDiff: "plugin:shipctl-git|git_file_diff",
-  readFile: "plugin:shipctl-git|git_file_contents",
-  listFiles: "plugin:shipctl-git|git_list_files",
-  stageFile: "plugin:shipctl-git|git_stage_file",
-  stageAll: "plugin:shipctl-git|git_stage_all",
-  commit: "plugin:shipctl-git|git_commit",
-  unstageFile: "plugin:shipctl-git|git_unstage_file",
-  unstageAll: "plugin:shipctl-git|git_unstage_all",
-  switchBranch: "plugin:shipctl-git|git_switch_branch",
-  createBranch: "plugin:shipctl-git|git_create_branch",
-  diffStats: "plugin:shipctl-git|git_diff_stats",
+  isRepository: "git_is_repository",
+  initializeRepository: "git_initialize_repository",
+  currentBranch: "git_current_branch",
+  listBranches: "git_list_branches",
+  pushBranch: "git_push_branch",
+  listWorktrees: "git_list_worktrees",
+  createWorktree: "git_create_worktree",
+  inspectStatus: "git_inspect_status",
+  listChangedFiles: "git_list_changed_files",
+  readFileDiff: "git_read_file_diff",
+  readFile: "git_read_file",
+  listFiles: "git_list_files",
+  stageFile: "git_stage_file",
+  stageAll: "git_stage_all",
+  commit: "git_commit",
+  unstageFile: "git_unstage_file",
+  unstageAll: "git_unstage_all",
+  switchBranch: "git_switch_branch",
+  createBranch: "git_create_branch",
+  diffStats: "git_diff_stats",
+  releaseActivation: "release_git_activation",
 } as const;
 
 const CHANGES_EVENT = "git-fs-changed";
@@ -99,7 +101,15 @@ interface RawGitChangeEvent {
   readonly paths: readonly string[];
 }
 
-export interface LegacyGitTransport {
+type EmptyInput = Readonly<Record<never, never>>;
+
+interface NativeGitError {
+  readonly code?: unknown;
+  readonly message?: unknown;
+  readonly retryable?: unknown;
+}
+
+export interface NativeGitTransport {
   isRepository(request: PrivateSemanticRequestEnvelope<GitProjectInput>): Promise<boolean>;
   initializeRepository(request: PrivateSemanticRequestEnvelope<GitProjectInput>): Promise<void>;
   currentBranch(request: PrivateSemanticRequestEnvelope<GitProjectInput>): Promise<string>;
@@ -120,6 +130,7 @@ export interface LegacyGitTransport {
   switchBranch(request: PrivateSemanticRequestEnvelope<GitBranchInput>): Promise<void>;
   createBranch(request: PrivateSemanticRequestEnvelope<GitBranchInput>): Promise<void>;
   diffStats(request: PrivateSemanticRequestEnvelope<GitProjectInput>): Promise<readonly RawDiffStat[]>;
+  releaseActivation(request: PrivateSemanticRequestEnvelope<EmptyInput>): Promise<boolean>;
   subscribeChanges(
     activation: ModuleActivationIdentity,
     listener: (event: RawGitChangeEvent) => void,
@@ -127,59 +138,32 @@ export interface LegacyGitTransport {
 }
 
 export interface GitServiceProviderOptions {
-  readonly transport?: LegacyGitTransport;
+  readonly transport?: NativeGitTransport;
+  readonly createCorrelationId?: () => SemanticCorrelationId;
 }
 
-const TAURI_TRANSPORT: LegacyGitTransport = {
-  isRepository: ({ input }) => invoke(COMMANDS.isRepository, { path: input.projectId }),
-  initializeRepository: ({ input }) => invoke(COMMANDS.initializeRepository, { path: input.projectId }),
-  currentBranch: ({ input }) => invoke(COMMANDS.currentBranch, { path: input.projectId }),
-  listBranches: ({ input }) => invoke(COMMANDS.listBranches, { path: input.projectId }),
-  pushBranch: ({ input }) => invoke(COMMANDS.pushBranch, {
-    path: input.projectId,
-    branch: input.branchName,
-  }),
-  listWorktrees: ({ input }) => invoke(COMMANDS.listWorktrees, { path: input.projectId }),
-  createWorktree: ({ input }) => invoke(COMMANDS.createWorktree, {
-    path: input.projectId,
-    branchName: input.branchName,
-  }),
-  inspectStatus: ({ input }) => invoke(COMMANDS.inspectStatus, { path: input.projectId }),
-  listChangedFiles: ({ input }) => invoke(COMMANDS.listChangedFiles, { path: input.projectId }),
-  readFileDiff: ({ input }) => invoke(COMMANDS.readFileDiff, {
-    path: input.projectId,
-    filePath: input.relativePath,
-    staged: input.staged,
-  }),
-  readFile: ({ input }) => invoke(COMMANDS.readFile, {
-    path: input.projectId,
-    filePath: input.relativePath,
-    source: input.source,
-  }),
-  listFiles: ({ input }) => invoke(COMMANDS.listFiles, { path: input.projectId }),
-  stageFile: ({ input }) => invoke(COMMANDS.stageFile, {
-    path: input.projectId,
-    filePath: input.relativePath,
-  }),
-  stageAll: ({ input }) => invoke(COMMANDS.stageAll, { path: input.projectId }),
-  commit: ({ input }) => invoke(COMMANDS.commit, {
-    path: input.projectId,
-    message: input.message,
-  }),
-  unstageFile: ({ input }) => invoke(COMMANDS.unstageFile, {
-    path: input.projectId,
-    filePath: input.relativePath,
-  }),
-  unstageAll: ({ input }) => invoke(COMMANDS.unstageAll, { path: input.projectId }),
-  switchBranch: ({ input }) => invoke(COMMANDS.switchBranch, {
-    path: input.projectId,
-    branchName: input.branchName,
-  }),
-  createBranch: ({ input }) => invoke(COMMANDS.createBranch, {
-    path: input.projectId,
-    branchName: input.branchName,
-  }),
-  diffStats: ({ input }) => invoke(COMMANDS.diffStats, { path: input.projectId }),
+const TAURI_TRANSPORT: NativeGitTransport = {
+  isRepository: (request) => invoke(COMMANDS.isRepository, { request }),
+  initializeRepository: (request) => invoke(COMMANDS.initializeRepository, { request }),
+  currentBranch: (request) => invoke(COMMANDS.currentBranch, { request }),
+  listBranches: (request) => invoke(COMMANDS.listBranches, { request }),
+  pushBranch: (request) => invoke(COMMANDS.pushBranch, { request }),
+  listWorktrees: (request) => invoke(COMMANDS.listWorktrees, { request }),
+  createWorktree: (request) => invoke(COMMANDS.createWorktree, { request }),
+  inspectStatus: (request) => invoke(COMMANDS.inspectStatus, { request }),
+  listChangedFiles: (request) => invoke(COMMANDS.listChangedFiles, { request }),
+  readFileDiff: (request) => invoke(COMMANDS.readFileDiff, { request }),
+  readFile: (request) => invoke(COMMANDS.readFile, { request }),
+  listFiles: (request) => invoke(COMMANDS.listFiles, { request }),
+  stageFile: (request) => invoke(COMMANDS.stageFile, { request }),
+  stageAll: (request) => invoke(COMMANDS.stageAll, { request }),
+  commit: (request) => invoke(COMMANDS.commit, { request }),
+  unstageFile: (request) => invoke(COMMANDS.unstageFile, { request }),
+  unstageAll: (request) => invoke(COMMANDS.unstageAll, { request }),
+  switchBranch: (request) => invoke(COMMANDS.switchBranch, { request }),
+  createBranch: (request) => invoke(COMMANDS.createBranch, { request }),
+  diffStats: (request) => invoke(COMMANDS.diffStats, { request }),
+  releaseActivation: (request) => invoke(COMMANDS.releaseActivation, { request }),
   subscribeChanges: async (_activation, listener) => listen<RawGitChangeEvent>(
     CHANGES_EVENT,
     (event) => listener(event.payload),
@@ -204,10 +188,33 @@ const DISPOSED_ERROR = {
 } as const;
 
 function errorMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String(error.message);
+  }
   return error instanceof Error ? error.message : String(error);
 }
 
+const ERROR_CODES = new Set<GitErrorCode>([
+  "git.transport-failed",
+  "git.denied",
+  "git.invalid-project",
+  "git.invalid-path",
+  "git.invalid-request",
+  "git.not-repository",
+  "git.conflict",
+  "git.cancelled",
+  "git.activation-disposed",
+]);
+
 function transportError(error: unknown): SemanticServiceError<GitErrorCode> {
+  const native = error && typeof error === "object" ? error as NativeGitError : null;
+  if (typeof native?.code === "string" && ERROR_CODES.has(native.code as GitErrorCode)) {
+    return {
+      code: native.code as GitErrorCode,
+      message: errorMessage(error),
+      retryable: native.retryable === true,
+    };
+  }
   const message = errorMessage(error);
   const normalized = message.toLowerCase();
   const code: GitErrorCode = normalized.includes("project is not registered")
@@ -234,12 +241,14 @@ function transportError(error: unknown): SemanticServiceError<GitErrorCode> {
 function request<Input, Output>(
   context: SemanticServiceProviderContext,
   transport: PrivateSemanticRequestTransport<Input, Output, GitErrorCode>,
+  createCorrelationId?: () => SemanticCorrelationId,
 ) {
   return createSemanticRequestAdapter({
     activation: context.activation,
     active: () => context.active,
     policy: REQUEST_POLICY,
     transport,
+    correlationId: createCorrelationId,
     transportError,
     cancelledError: CANCELLED_ERROR,
     disposedError: DISPOSED_ERROR,
@@ -266,6 +275,7 @@ function projectRequest<Input extends GitProjectInput, Output, Mapped = Output>(
   context: SemanticServiceProviderContext,
   dispatch: (envelope: PrivateSemanticRequestEnvelope<Input>) => Promise<Output>,
   map: (output: Output, input: Input) => Mapped = (output) => output as unknown as Mapped,
+  createCorrelationId?: () => SemanticCorrelationId,
 ) {
   return request<Input, Mapped>(context, {
     async request(envelope) {
@@ -274,13 +284,14 @@ function projectRequest<Input extends GitProjectInput, Output, Mapped = Output>(
       }
       return { ok: true, value: map(await dispatch(envelope), envelope.input) };
     },
-  });
+  }, createCorrelationId);
 }
 
 function fileRequest<Input extends GitFileInput, Output, Mapped = Output>(
   context: SemanticServiceProviderContext,
   dispatch: (envelope: PrivateSemanticRequestEnvelope<Input>) => Promise<Output>,
   map: (output: Output, input: Input) => Mapped = (output) => output as unknown as Mapped,
+  createCorrelationId?: () => SemanticCorrelationId,
 ) {
   return request<Input, Mapped>(context, {
     async request(envelope) {
@@ -292,12 +303,13 @@ function fileRequest<Input extends GitFileInput, Output, Mapped = Output>(
       }
       return { ok: true, value: map(await dispatch(envelope), envelope.input) };
     },
-  });
+  }, createCorrelationId);
 }
 
 function branchRequest(
   context: SemanticServiceProviderContext,
   dispatch: (envelope: PrivateSemanticRequestEnvelope<GitBranchInput>) => Promise<void>,
+  createCorrelationId?: () => SemanticCorrelationId,
 ) {
   return request<GitBranchInput, GitMutationReceipt>(context, {
     async request(envelope) {
@@ -310,7 +322,22 @@ function branchRequest(
       await dispatch(envelope);
       return { ok: true, value: { projectId: envelope.input.projectId } };
     },
-  });
+  }, createCorrelationId);
+}
+
+function correlationId(): SemanticCorrelationId {
+  return crypto.randomUUID() as SemanticCorrelationId;
+}
+
+function releaseEnvelope(
+  activation: ModuleActivationIdentity,
+  createCorrelationId: () => SemanticCorrelationId,
+): PrivateSemanticRequestEnvelope<EmptyInput> {
+  return {
+    activation,
+    correlationId: createCorrelationId(),
+    input: {},
+  };
 }
 
 function mapStatus(raw: RawGitStatus): GitRepositoryStatus {
@@ -350,7 +377,7 @@ function mapDiffStat(raw: RawDiffStat): GitDiffStat {
 
 function createRepositoryChanges(
   context: SemanticServiceProviderContext,
-  transport: LegacyGitTransport,
+  transport: NativeGitTransport,
 ) {
   let sequence = 0;
   return Object.freeze({
@@ -390,31 +417,60 @@ function createRepositoryChanges(
   });
 }
 
-/** Trusted adapter for the current namespaced Git plugin and filesystem event. */
+/** Trusted adapter for the permanent native Git provider and filesystem event. */
 export function createGitServiceProvider(
   options: GitServiceProviderOptions = {},
 ): SemanticServiceProvider<GitService> {
   const transport = options.transport ?? TAURI_TRANSPORT;
+  const createCorrelationId = options.createCorrelationId ?? correlationId;
   return {
     service: gitService,
     bind(context) {
+      context.own(() => transport.releaseActivation(
+        releaseEnvelope(context.activation, createCorrelationId),
+      ).then(() => undefined));
+
       const mutation = <Input extends GitProjectInput>(
         dispatch: (envelope: PrivateSemanticRequestEnvelope<Input>) => Promise<void>,
-      ) => projectRequest(context, dispatch, (_output, input): GitMutationReceipt => ({
-        projectId: input.projectId,
-      }));
+      ) => projectRequest(
+        context,
+        dispatch,
+        (_output, input): GitMutationReceipt => ({ projectId: input.projectId }),
+        createCorrelationId,
+      );
 
       return Object.freeze({
-        isRepository: projectRequest(context, transport.isRepository),
+        isRepository: projectRequest(
+          context,
+          transport.isRepository,
+          undefined,
+          createCorrelationId,
+        ),
         initializeRepository: mutation(transport.initializeRepository),
-        inspectStatus: projectRequest(context, transport.inspectStatus, mapStatus),
-        currentBranch: projectRequest(context, transport.currentBranch),
-        listBranches: projectRequest(context, transport.listBranches),
-        pushBranch: branchRequest(context, transport.pushBranch),
+        inspectStatus: projectRequest(
+          context,
+          transport.inspectStatus,
+          mapStatus,
+          createCorrelationId,
+        ),
+        currentBranch: projectRequest(
+          context,
+          transport.currentBranch,
+          undefined,
+          createCorrelationId,
+        ),
+        listBranches: projectRequest(
+          context,
+          transport.listBranches,
+          undefined,
+          createCorrelationId,
+        ),
+        pushBranch: branchRequest(context, transport.pushBranch, createCorrelationId),
         listWorktrees: projectRequest(
           context,
           transport.listWorktrees,
           (worktrees): readonly GitWorktree[] => worktrees.map(mapWorktree),
+          createCorrelationId,
         ),
         createWorktree: projectRequest(
           context,
@@ -423,27 +479,37 @@ export function createGitServiceProvider(
             projectId: created.path,
             branchName: created.branch,
           }),
+          createCorrelationId,
         ),
         listChangedFiles: projectRequest(
           context,
           transport.listChangedFiles,
           (files): readonly GitChangedFile[] => files.map(mapChangedFile),
+          createCorrelationId,
         ),
         readFileDiff: fileRequest(
           context,
           transport.readFileDiff,
           (contents): GitTextResult => ({ contents }),
+          createCorrelationId,
         ),
         readFile: fileRequest(
           context,
           transport.readFile,
           (contents): GitTextResult => ({ contents }),
+          createCorrelationId,
         ),
-        listFiles: projectRequest(context, transport.listFiles),
+        listFiles: projectRequest(
+          context,
+          transport.listFiles,
+          undefined,
+          createCorrelationId,
+        ),
         stageFile: fileRequest(
           context,
           transport.stageFile,
           (_output, input): GitMutationReceipt => ({ projectId: input.projectId }),
+          createCorrelationId,
         ),
         stageAll: mutation(transport.stageAll),
         commit: request<GitCommitInput, GitMutationReceipt>(context, {
@@ -457,19 +523,21 @@ export function createGitServiceProvider(
             await transport.commit(envelope);
             return { ok: true, value: { projectId: envelope.input.projectId } };
           },
-        }),
+        }, createCorrelationId),
         unstageFile: fileRequest(
           context,
           transport.unstageFile,
           (_output, input): GitMutationReceipt => ({ projectId: input.projectId }),
+          createCorrelationId,
         ),
         unstageAll: mutation(transport.unstageAll),
-        switchBranch: branchRequest(context, transport.switchBranch),
-        createBranch: branchRequest(context, transport.createBranch),
+        switchBranch: branchRequest(context, transport.switchBranch, createCorrelationId),
+        createBranch: branchRequest(context, transport.createBranch, createCorrelationId),
         diffStats: projectRequest(
           context,
           transport.diffStats,
           (stats): readonly GitDiffStat[] => stats.map(mapDiffStat),
+          createCorrelationId,
         ),
         repositoryChanges: createRepositoryChanges(context, transport),
       });

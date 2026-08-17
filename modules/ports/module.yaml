@@ -4,23 +4,9 @@ id: ports
 frontend:
   package: "@shipctl/module-ports"
   path: modules/ports/frontend
-  composition_symbol: portsModule
-backend:
-  crate: tauri-plugin-shipctl-ports
-  path: modules/ports/backend
-  cargo_feature: ports-module
-  dependency_alias: shipctl-module-ports
-  install: "shipctl_module_ports_host::install(builder, workspace.clone())"
-  host:
-    crate: shipctl-module-ports-host
-    path: modules/ports/host
-    dependency_alias: shipctl-module-ports-host
-tauri:
-  capability_identifier: ports
-  permissions:
-    - shipctl-ports:allow-list-listening-ports
-    - shipctl-ports:allow-kill-port
-profile: ops/modularity/profiles/ports-disabled/tauri.conf.json
+  delivery: runtime-artifact
+  artifact: modules/ports/artifact
+profile: null
 tests:
   frontend: modules/ports/frontend/tests
-  backend: cargo test --manifest-path modules/ports/backend/Cargo.toml
+  backend: null

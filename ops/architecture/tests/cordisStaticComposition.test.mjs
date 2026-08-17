@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import fc from "fast-check";
 import { createServer } from "vite";
 
-import { checkModuleBoundaries } from "../../modularity/bin/check-module-boundaries.mjs";
+import { checkModuleBoundaries } from "../../modularity/lib/module-boundaries.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
 let api;
@@ -343,6 +343,67 @@ test("architecture.cordis-plugin-role.property", async () => {
   await failedRuntime.dispose();
 });
 
+test("architecture.candidate-host-services.property", async () => {
+  let settingsListener = () => undefined;
+  let delivered = 0;
+  let mutations = 0;
+  let notices = 0;
+  let subscriptionsDisposed = 0;
+  const gatedServices = {
+    ...services,
+    settings: {
+      ...services.settings,
+      subscribe: (listener) => {
+        settingsListener = listener;
+        return () => { subscriptionsDisposed += 1; };
+      },
+      update: async () => { mutations += 1; },
+    },
+    notices: { push: () => { notices += 1; } },
+  };
+  let capturedServices;
+  const definition = plugin({
+    id: "fixture.gated-host-services",
+    version: "1",
+    activate: ({ services: activationServices }) => {
+      capturedServices = activationServices;
+      activationServices.settings.subscribe(() => { delivered += 1; });
+      activationServices.notices.push({ tone: "info", title: "Ready" });
+    },
+  });
+  const runtime = new runtimeApi.CordisStaticPluginRuntime({
+    services: gatedServices,
+    gateHostServices: true,
+  });
+  const activation = await runtime.activateAll([definition]);
+
+  settingsListener();
+  assert.equal(delivered, 0);
+  assert.equal(notices, 0);
+  await assert.rejects(
+    capturedServices.settings.update({ candidate: true }),
+    /unavailable while the activation is candidate/,
+  );
+  assert.equal(mutations, 0);
+
+  activation.publishHostServices();
+  assert.equal(notices, 1);
+  settingsListener();
+  assert.equal(delivered, 1);
+  await capturedServices.settings.update({ accepted: true });
+  assert.equal(mutations, 1);
+
+  await activation.deactivate();
+  settingsListener();
+  assert.equal(delivered, 1);
+  assert.equal(subscriptionsDisposed, 1);
+  await assert.rejects(
+    capturedServices.settings.update({ disposed: true }),
+    /unavailable while the activation is disposed/,
+  );
+  assert.equal(mutations, 1);
+});
+
 function generatedModule({ key, fields }, index) {
   const moduleId = `fixture.parity-${index}-${key}`;
   const panelId = `${moduleId}.panel`;
@@ -530,7 +591,10 @@ test("architecture.static-cordis-parity.property", async () => {
   const conflict = await conflictRuntime.activateAll(
     duplicateModules.map(runtimeApi.adaptShipctlModule),
   );
-  assert.deepEqual(conflict.failures, [{ moduleId: "fixture.conflict-second" }]);
+  assert.deepEqual(conflict.failures, [{
+    moduleId: "fixture.conflict-second",
+    message: "Duplicate plugin contribution: panel:fixture.conflict.panel",
+  }]);
   assert.deepEqual(
     conflictRuntime.inspect().contributions.map(({ id }) => id),
     [duplicateId],

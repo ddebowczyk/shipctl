@@ -1,6 +1,6 @@
 # Rapid terminal probe
 
-This is the restart-bound module demonstrator for Shipctl's rapid
+This is the live module demonstrator for Shipctl's rapid
 time-to-value release. It is example code, not host-core functionality.
 
 `package.rs` defines the complete package: the ESM entry point, runtime

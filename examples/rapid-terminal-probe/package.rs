@@ -218,20 +218,30 @@ fn rapid_demo_archive() -> Result<RuntimeArtifactArchive, Box<dyn std::error::Er
         "id": MODULE_ID,
         "name": "Shipctl rapid terminal probe",
         "version": "1.0.0",
-        "apiRange": "^0.1.0",
+        "apiRange": "^1.0.0",
         "runtimeKind": "frontend_esm",
         "entry": "module.mjs",
         "styles": [],
         "assets": [],
         "messages": messages,
         "capabilities": capabilities,
+        "application": {
+            "schemaVersion": 1,
+            "role": "headless",
+            "requiredServices": [],
+            "providedServices": [],
+            "backgroundEffects": [],
+            "contributions": [
+                {"family": "message-graph", "id": "shipctl.rapid-demo.messages", "schemaVersion": 1}
+            ]
+        },
         "uiContributions": [],
         "requestedGrants": [],
         "nativeAdapters": [],
         "secretReferences": [],
         "peerDependencies": {},
         "supportedScopes": ["instance"],
-        "lifecycle": "restart_required"
+        "lifecycle": "live"
     });
     let manifest: RuntimeArtifactManifest = serde_json::from_value(manifest_value.clone())?;
     let module_source = module_source(&manifest.messages)?;
@@ -306,7 +316,7 @@ const PING = {{ id: "shipctl.rapid-demo.ping", message: REQUEST }};
 const TOPIC = {{ id: "shipctl.terminal-probe.completed-topic", message: COMPLETED }};
 const PORT = {{ id: "shipctl.terminal-probe.probe", request: REQUEST, response: RESPONSE }};
 
-export function createShipctlModule() {{
+export function createShipctlPlugin() {{
   let services = null;
   let runtimeMessages = null;
   let directedCount = 0;
@@ -328,7 +338,7 @@ export function createShipctlModule() {{
     }};
   }}
 
-  return {{
+  const module = {{
     id: "shipctl.rapid-demo",
     version: "1.0.0",
     messages: {{
@@ -425,6 +435,7 @@ export function createShipctlModule() {{
       }};
     }},
   }};
+  return {{ role: "headless", backgroundEffects: [], module }};
 }}
 "#
     ))

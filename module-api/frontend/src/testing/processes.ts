@@ -118,7 +118,7 @@ export function createFakeProcessesServiceProvider(
     bind(context) {
       const current = new Map<ProcessInspectionId, ListeningProcessInspection>();
       const availableCommands = new Set(options.availableCommands ?? []);
-      return Object.freeze({
+      const service = Object.freeze({
         inspectListeningPorts: operation(
           context,
           "inspect-listening-ports",
@@ -169,6 +169,8 @@ export function createFakeProcessesServiceProvider(
           },
         ),
       });
+      context.own(() => current.clear());
+      return service;
     },
   };
 }

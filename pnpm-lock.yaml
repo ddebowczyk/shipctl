@@ -14,33 +14,6 @@ importers:
       '@shipctl/module-api':
         specifier: workspace:*
         version: link:module-api/frontend
-      '@shipctl/module-assistants':
-        specifier: workspace:*
-        version: link:modules/assistants/frontend
-      '@shipctl/module-commands':
-        specifier: workspace:*
-        version: link:modules/commands/frontend
-      '@shipctl/module-git':
-        specifier: workspace:*
-        version: link:modules/git/frontend
-      '@shipctl/module-ports':
-        specifier: workspace:*
-        version: link:modules/ports/frontend
-      '@shipctl/module-semantic-terminal':
-        specifier: workspace:*
-        version: link:modules/semantic-terminal/frontend
-      '@shipctl/module-skills':
-        specifier: workspace:*
-        version: link:modules/skills/frontend
-      '@shipctl/module-thin-terminal':
-        specifier: workspace:*
-        version: link:modules/thin-terminal/frontend
-      '@shipctl/module-todos':
-        specifier: workspace:*
-        version: link:modules/todos/frontend
-      '@shipctl/module-usage':
-        specifier: workspace:*
-        version: link:modules/usage/frontend
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -150,9 +123,6 @@ importers:
       '@shipctl/module-api':
         specifier: workspace:*
         version: link:../../../module-api/frontend
-      '@tauri-apps/api':
-        specifier: ^2.11.1
-        version: 2.11.1
       lucide-react:
         specifier: ^1.30.0
         version: 1.30.0(react@19.2.8)

@@ -4,7 +4,8 @@ id: commands
 frontend:
   package: "@shipctl/module-commands"
   path: modules/commands/frontend
-  composition_symbol: commandsModule
+  delivery: runtime-artifact
+  artifact: modules/commands/artifact
 profile: null
 tests:
   frontend: modules/commands/frontend/tests

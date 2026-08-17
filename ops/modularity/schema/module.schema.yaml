@@ -23,6 +23,24 @@ properties:
       composition_symbol:
         type: string
         pattern: ^[a-z][A-Za-z0-9]*Module$
+      delivery:
+        enum: [static-bundle, runtime-artifact]
+      artifact:
+        type: string
+        pattern: ^modules/[a-z][a-z0-9-]*/artifact$
+    anyOf:
+      - required: [composition_symbol]
+        properties:
+          delivery:
+            enum: [static-bundle]
+          artifact:
+            type: "null"
+      - required: [delivery, artifact]
+        properties:
+          delivery:
+            const: runtime-artifact
+          composition_symbol:
+            type: "null"
   backend:
     type: object
     additionalProperties: false

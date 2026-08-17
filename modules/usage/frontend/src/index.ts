@@ -39,11 +39,11 @@ const USAGE_INGEST_COMPLETED_CONTRACT: MessageTypeContract<UsageIngestCompleted>
   message: USAGE_INGEST_COMPLETED,
   schema: {
     draft: "https://json-schema.org/draft/2020-12/schema",
-    root: "modules/usage/messages/ingest-completed.schema.json",
+    root: "messages/ingest-completed.schema.json",
     resources: {
-      "modules/usage/messages/ingest-completed.schema.json": {
+      "messages/ingest-completed.schema.json": {
         $schema: "https://json-schema.org/draft/2020-12/schema",
-        $id: "shipctl-artifact:///modules/usage/messages/ingest-completed.schema.json",
+        $id: "shipctl-artifact:///messages/ingest-completed.schema.json",
         type: "object",
         additionalProperties: false,
       },
@@ -69,11 +69,11 @@ const USAGE_REFRESH_REQUEST_CONTRACT: MessageTypeContract<UsageRefreshRequest> =
   message: USAGE_REFRESH_REQUEST,
   schema: {
     draft: "https://json-schema.org/draft/2020-12/schema",
-    root: "modules/usage/messages/refresh-request.schema.json",
+    root: "messages/refresh-request.schema.json",
     resources: {
-      "modules/usage/messages/refresh-request.schema.json": {
+      "messages/refresh-request.schema.json": {
         $schema: "https://json-schema.org/draft/2020-12/schema",
-        $id: "shipctl-artifact:///modules/usage/messages/refresh-request.schema.json",
+        $id: "shipctl-artifact:///messages/refresh-request.schema.json",
         type: "object",
         additionalProperties: false,
       },
@@ -97,6 +97,17 @@ async function refreshUsageAndSnapshots() {
 export const usageModule = {
   id: "shipctl.usage",
   version: "0.0.0",
+  requiredGrants: [
+    "usage-source.read",
+    "usage-source.refresh",
+    "usage-source.observe",
+    "plugin-data.read",
+    "plugin-data.write",
+    "message.send.usage.refresh-request",
+    "message.publish.usage.ingest-completed",
+    "message.subscribe.usage.ingest-completed",
+    "schedule.register",
+  ],
   globalSurfaces: [
     {
       id: USAGE_SURFACE_ID,

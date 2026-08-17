@@ -152,12 +152,17 @@ export function createFakeSkillInstallationServiceProvider(
         return { projectId, skillId: id, installed };
       };
       return Object.freeze({
-        inspectSkills: operation(context, "inspect-skills", options, ({ projectId }) => (
-          [...projectCatalog(projectId).values()].map(cloneInspection)
+        inspectSkills: operation(context, "inspect-skills", options, ({ projectId, catalog }) => (
+          catalog.map((skill) => ({
+            ...skill,
+            installed: projectCatalog(projectId).get(skill.skillId)?.installed ?? false,
+          }))
         )),
-        installSkill: operation(context, "install-skill", options, ({ projectId, skillId }) => (
-          mutate(projectId, skillId, true)
-        )),
+        installSkill: operation(context, "install-skill", options, ({ projectId, skill }) => {
+          const catalog = projectCatalog(projectId);
+          catalog.set(skill.skillId, { ...skill, installed: true });
+          return { projectId, skillId: skill.skillId, installed: true };
+        }),
         removeSkill: operation(context, "remove-skill", options, ({ projectId, skillId }) => (
           mutate(projectId, skillId, false)
         )),

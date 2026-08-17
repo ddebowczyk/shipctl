@@ -2,11 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   processesService,
   type CommandInspection,
+  type InspectCommandInput,
+  type InspectListeningProcessesInput,
   type ListeningProcessInspection,
+  type ModuleActivationIdentity,
   type ProcessesErrorCode,
   type ProcessesService,
-  type ProcessInspectionId,
-  type InspectCommandInput,
+  type SemanticCorrelationId,
+  type SemanticResult,
   type SemanticServiceError,
   type SemanticServiceProvider,
   type SemanticServiceProviderContext,
@@ -20,45 +23,42 @@ import {
   type PrivateSemanticRequestTransport,
 } from "./semanticServiceAdapter.ts";
 
-const LIST_LISTENING_PORTS_COMMAND = "plugin:shipctl-ports|list_listening_ports";
-const KILL_PORT_COMMAND = "plugin:shipctl-ports|kill_port";
-const CHECK_COMMAND_EXISTS_COMMAND = "check_command_exists";
+const INSPECT_LISTENING_PROCESSES_COMMAND = "inspect_listening_processes";
+const TERMINATE_INSPECTED_PROCESS_COMMAND = "terminate_inspected_process";
+const INSPECT_PROCESS_COMMAND_COMMAND = "inspect_process_command";
+const RELEASE_PROCESS_INSPECTIONS_COMMAND = "release_process_inspections";
 
-export interface LegacyPortInfo {
-  readonly port: number;
-  readonly pid: number;
-  readonly process: string;
-  readonly cwd: string;
-  readonly project: string;
-  readonly framework: string;
-  readonly uptime: string;
-  readonly memoryKb: number;
-}
+type EmptyInput = Readonly<Record<never, never>>;
 
-/** Private transport seam used by the production adapter and differential tests. */
-export interface LegacyProcessesTransport {
-  listListeningPorts(
-    request: PrivateSemanticRequestEnvelope<Readonly<Record<never, never>>>,
-  ): Promise<readonly LegacyPortInfo[]>;
-  terminateProcess(
-    processId: number,
+/** Private transport seam used by the production adapter and property tests. */
+export interface NativeProcessesTransport {
+  inspectListeningProcesses(
+    request: PrivateSemanticRequestEnvelope<InspectListeningProcessesInput>,
+  ): Promise<readonly ListeningProcessInspection[]>;
+  terminateInspectedProcess(
     request: PrivateSemanticRequestEnvelope<TerminateInspectedProcessInput>,
-  ): Promise<void>;
+  ): Promise<TerminatedProcess>;
   inspectCommand(
-    command: string,
     request: PrivateSemanticRequestEnvelope<InspectCommandInput>,
-  ): Promise<boolean>;
+  ): Promise<CommandInspection>;
+  releaseProcessInspections(
+    request: PrivateSemanticRequestEnvelope<EmptyInput>,
+  ): Promise<number>;
 }
 
 export interface ProcessesServiceProviderOptions {
-  readonly transport?: LegacyProcessesTransport;
-  readonly createInspectionId?: () => ProcessInspectionId;
+  readonly transport?: NativeProcessesTransport;
+  readonly createCorrelationId?: () => SemanticCorrelationId;
 }
 
-const TAURI_PROCESSES_TRANSPORT: LegacyProcessesTransport = {
-  listListeningPorts: () => invoke(LIST_LISTENING_PORTS_COMMAND),
-  terminateProcess: (pid) => invoke(KILL_PORT_COMMAND, { pid }),
-  inspectCommand: (command) => invoke(CHECK_COMMAND_EXISTS_COMMAND, { command }),
+const TAURI_PROCESSES_TRANSPORT: NativeProcessesTransport = {
+  inspectListeningProcesses: (request) =>
+    invoke(INSPECT_LISTENING_PROCESSES_COMMAND, { request }),
+  terminateInspectedProcess: (request) =>
+    invoke(TERMINATE_INSPECTED_PROCESS_COMMAND, { request }),
+  inspectCommand: (request) => invoke(INSPECT_PROCESS_COMMAND_COMMAND, { request }),
+  releaseProcessInspections: (request) =>
+    invoke(RELEASE_PROCESS_INSPECTIONS_COMMAND, { request }),
 };
 
 const REQUEST_POLICY = {
@@ -78,15 +78,41 @@ const DISPOSED_ERROR = {
   retryable: false,
 } as const;
 
-function inspectionId(): ProcessInspectionId {
-  return crypto.randomUUID() as ProcessInspectionId;
+function correlationId(): SemanticCorrelationId {
+  return crypto.randomUUID() as SemanticCorrelationId;
+}
+
+function isProcessesErrorCode(value: unknown): value is ProcessesErrorCode {
+  return typeof value === "string" && [
+    "processes.transport-failed",
+    "processes.denied",
+    "processes.stale-inspection",
+    "processes.cancelled",
+    "processes.activation-disposed",
+    "processes.invalid-request",
+  ].includes(value);
 }
 
 function errorMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String(error.message);
+  }
   return error instanceof Error ? error.message : String(error);
 }
 
 function transportError(error: unknown): SemanticServiceError<ProcessesErrorCode> {
+  if (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && isProcessesErrorCode(error.code)
+  ) {
+    return {
+      code: error.code,
+      message: errorMessage(error),
+      retryable: "retryable" in error && error.retryable === true,
+    };
+  }
   const message = errorMessage(error);
   const normalized = message.toLowerCase();
   const denied = normalized.includes("permission")
@@ -100,122 +126,74 @@ function transportError(error: unknown): SemanticServiceError<ProcessesErrorCode
   };
 }
 
+function successfulTransport<Input, Output>(
+  operation: (request: PrivateSemanticRequestEnvelope<Input>) => Promise<Output>,
+): PrivateSemanticRequestTransport<Input, Output, ProcessesErrorCode> {
+  return {
+    async request(envelope): Promise<SemanticResult<Output, ProcessesErrorCode>> {
+      return { ok: true, value: await operation(envelope) };
+    },
+  };
+}
+
 function request<Input, Output>(
   context: SemanticServiceProviderContext,
   transport: PrivateSemanticRequestTransport<Input, Output, ProcessesErrorCode>,
+  createCorrelationId?: () => SemanticCorrelationId,
 ) {
   return createSemanticRequestAdapter({
     activation: context.activation,
     active: () => context.active,
     policy: REQUEST_POLICY,
     transport,
+    correlationId: createCorrelationId,
     transportError,
     cancelledError: CANCELLED_ERROR,
     disposedError: DISPOSED_ERROR,
   });
 }
 
-/**
- * Trusted adapter for the current native process commands.
- *
- * Inspection identities are valid only for the latest successful scan in one
- * activation. The Phase D native provider will replace this frontend guard
- * with an operating-system identity that also detects PID reuse.
- */
+function releaseEnvelope(
+  activation: ModuleActivationIdentity,
+  createCorrelationId: () => SemanticCorrelationId,
+): PrivateSemanticRequestEnvelope<EmptyInput> {
+  return {
+    activation,
+    correlationId: createCorrelationId(),
+    input: {},
+  };
+}
+
+/** Trusted adapter for the permanent native Processes provider. */
 export function createProcessesServiceProvider(
   options: ProcessesServiceProviderOptions = {},
 ): SemanticServiceProvider<ProcessesService> {
   const transport = options.transport ?? TAURI_PROCESSES_TRANSPORT;
-  const createInspectionId = options.createInspectionId ?? inspectionId;
+  const createCorrelationId = options.createCorrelationId ?? correlationId;
 
   return {
     service: processesService,
     bind(context) {
-      const currentInspections = new Map<ProcessInspectionId, LegacyPortInfo>();
-
-      const inspectListeningPorts = request<
-        Readonly<Record<never, never>>,
-        readonly ListeningProcessInspection[]
-      >(context, {
-        async request(envelope) {
-          const rawPorts = await transport.listListeningPorts(envelope);
-          const nextInspections = new Map<ProcessInspectionId, LegacyPortInfo>();
-          const inspections = rawPorts.map((raw): ListeningProcessInspection => {
-            const id = createInspectionId();
-            if (nextInspections.has(id)) {
-              throw new Error(`Duplicate process inspection identity: ${id}`);
-            }
-            nextInspections.set(id, raw);
-            return {
-              inspectionId: id,
-              port: raw.port,
-              processId: raw.pid,
-              name: raw.process,
-              workingDirectory: raw.cwd,
-              projectName: raw.project,
-              framework: raw.framework,
-              uptime: raw.uptime,
-              memoryKilobytes: raw.memoryKb,
-            };
-          });
-          currentInspections.clear();
-          for (const [id, raw] of nextInspections) currentInspections.set(id, raw);
-          return { ok: true, value: inspections };
-        },
-      });
-
-      const terminateInspectedProcess = request<
-        TerminateInspectedProcessInput,
-        TerminatedProcess
-      >(context, {
-        async request(envelope) {
-          const { input } = envelope;
-          const raw = currentInspections.get(input.inspectionId);
-          if (!raw) {
-            return {
-              ok: false,
-              error: {
-                code: "processes.stale-inspection",
-                message: "The process inspection is no longer current",
-                retryable: false,
-              },
-            };
-          }
-          await transport.terminateProcess(raw.pid, envelope);
-          for (const [id, candidate] of currentInspections) {
-            if (candidate.pid === raw.pid) currentInspections.delete(id);
-          }
-          return {
-            ok: true,
-            value: { inspectionId: input.inspectionId },
-          };
-        },
-      });
-
-      const inspectCommand = request<InspectCommandInput, CommandInspection>(context, {
-        async request(envelope) {
-          const { input } = envelope;
-          const command = input.command.trim();
-          if (command.length === 0) {
-            return {
-              ok: false,
-              error: {
-                code: "processes.invalid-request",
-                message: "Command cannot be empty",
-                retryable: false,
-              },
-            };
-          }
-          const available = await transport.inspectCommand(command, envelope);
-          const value: CommandInspection = { command, available };
-          return { ok: true, value };
-        },
-      });
+      context.own(() => transport.releaseProcessInspections(
+        releaseEnvelope(context.activation, createCorrelationId),
+      ).then(() => undefined));
 
       return Object.freeze({
-        inspectListeningPorts,
-        terminateInspectedProcess,
-        inspectCommand,
+        inspectListeningPorts: request(
+          context,
+          successfulTransport(transport.inspectListeningProcesses),
+          createCorrelationId,
+        ),
+        terminateInspectedProcess: request(
+          context,
+          successfulTransport(transport.terminateInspectedProcess),
+          createCorrelationId,
+        ),
+        inspectCommand: request(
+          context,
+          successfulTransport(transport.inspectCommand),
+          createCorrelationId,
+        ),
       });
     },
   };

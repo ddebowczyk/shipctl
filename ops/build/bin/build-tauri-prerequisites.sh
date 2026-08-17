@@ -7,5 +7,5 @@ repo_root="$(cd -- "$script_dir/../../.." && pwd)"
 cd "$repo_root"
 
 frontend_recipe="${1:-app}"
-just build "$frontend_recipe"
+just --justfile ops/build/justfile "$frontend_recipe"
 bash ops/build/bin/prepare-cli-sidecar.sh

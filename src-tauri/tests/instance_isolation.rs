@@ -1,21 +1,18 @@
-#![cfg(all(feature = "assistants-module", feature = "usage-module"))]
-
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use shipctl_core::assistant_launch::{
+    AssistantProvider, AssistantSessionRegistry, PrepareAssistantSession, SessionMode,
+};
 use shipctl_core::instance::{InstanceContext, InstanceLaunchOptions};
 use shipctl_core::state::ui::UiStateStore;
 use shipctl_core::terminal_host::retention::TerminalRetentionPolicy;
 use shipctl_core::terminal_host::{TerminalId, TerminalService};
+use shipctl_core::usage_sources::UsageDb;
 use shipctl_core::workspace::config::EditorSettings;
 use shipctl_core::workspace::manager::WorkspaceManager;
-use shipctl_module_assistants::{
-    AssistantProvider, AssistantSessionRegistry, PrepareAssistantSession, SessionMode,
-};
-use shipctl_module_usage::UsageDb;
-
 fn test_root() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
