@@ -271,7 +271,7 @@ mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use shipctl_module_api::TerminalColorTheme;
+    use super::super::TerminalColorTheme;
 
     use super::*;
     use crate::terminal_host::types::{TerminalLaunchTarget, TerminalOwner};

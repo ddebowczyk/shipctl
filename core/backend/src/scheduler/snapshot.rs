@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-use shipctl_module_api::{
+use crate::state::{
     CapturedSnapshotEntry, SnapshotClassification, SnapshotEntryDeclaration, SnapshotProvider,
 };
+use serde::{Deserialize, Serialize};
 
 use super::contracts::normalized_schedule_path;
 

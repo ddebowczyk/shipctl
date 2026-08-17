@@ -9,7 +9,7 @@ use super::config::{
     RepoInfo, SidebarSettings, TerminalSettings, WorkspaceConfig,
 };
 use crate::state::paths::ShipctlPaths;
-use shipctl_module_api::DurableWriteBarrier;
+use crate::state::DurableWriteBarrier;
 
 type ConfigCache = Option<(GlobalConfig, SystemTime)>;
 

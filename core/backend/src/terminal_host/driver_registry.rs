@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::module::TerminalDriverFactory;
-use crate::protocol::{TerminalDriverDescriptor, TerminalDriverError, TerminalDriverId};
+use super::driver::{TerminalDriverDescriptor, TerminalDriverError, TerminalDriverId};
+use super::driver_session::TerminalDriverFactory;
 
 /// Build-profile registry of the native drivers available to the host. It is
 /// deliberately separate from a terminal session: a host resolves a factory
@@ -88,11 +88,11 @@ impl TerminalDriverRegistry {
 mod tests {
     use std::sync::Arc;
 
-    use crate::module::{TerminalDriverFactory, TerminalDriverSession};
-    use crate::protocol::{
+    use super::super::driver::{
         TerminalDriverDescriptor, TerminalDriverError, TerminalDriverId,
         TerminalDriverSessionRequest,
     };
+    use super::super::driver_session::{TerminalDriverFactory, TerminalDriverSession};
 
     use super::TerminalDriverRegistry;
 

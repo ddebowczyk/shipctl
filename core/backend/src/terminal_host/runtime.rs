@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
+use super::{
+    TerminalByteOccurrence, TerminalColorTheme, TerminalDriverError, TerminalDriverFactory,
+    TerminalDriverSession, TerminalDriverSessionRequest, TerminalDriverUpdate,
+};
 use crossbeam_channel::{bounded, select, unbounded, Receiver, Sender, TryRecvError, TrySendError};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use shipctl_module_api::{
-    TerminalByteOccurrence, TerminalColorTheme, TerminalDriverFactory, TerminalDriverSession,
-    TerminalDriverSessionRequest, TerminalDriverUpdate,
-};
 
 use super::process::{ProcessTerminator, TERMINATION_GRACE_PERIOD};
 use super::publication::{
@@ -1698,7 +1698,7 @@ fn io_error(message: impl Into<String>) -> TerminalError {
     TerminalError::new(TerminalErrorCode::Io, message)
 }
 
-fn driver_error(error: shipctl_module_api::TerminalDriverError) -> TerminalError {
+fn driver_error(error: TerminalDriverError) -> TerminalError {
     io_error(format!("Selected terminal driver failed: {error}"))
 }
 

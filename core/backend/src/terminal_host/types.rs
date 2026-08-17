@@ -1,6 +1,6 @@
+use super::{TerminalColorTheme, TerminalDriverId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use shipctl_module_api::TerminalDriverId;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
@@ -370,7 +370,7 @@ pub struct TerminalLaunchRequest {
     pub environment: HashMap<String, String>,
     pub columns: u16,
     pub rows: u16,
-    pub color_theme: shipctl_module_api::TerminalColorTheme,
+    pub color_theme: TerminalColorTheme,
     pub metadata: TerminalMetadata,
 }
 
@@ -418,7 +418,7 @@ mod tests {
             environment: HashMap::from([("API_TOKEN".to_string(), ENV_SECRET.to_string())]),
             columns: 80,
             rows: 24,
-            color_theme: shipctl_module_api::TerminalColorTheme {
+            color_theme: TerminalColorTheme {
                 foreground: "#ffffff".to_string(),
                 background: "#000000".to_string(),
                 palette: vec!["#000000".to_string(); 16],

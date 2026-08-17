@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::protocol::{CapturedSnapshotEntry, SnapshotEntryDeclaration};
+use super::{CapturedSnapshotEntry, SnapshotEntryDeclaration};
 
 /// A durable state owner participating in save, offline validation, and
 /// restore. Providers own payload schema; the coordinator owns archive safety,

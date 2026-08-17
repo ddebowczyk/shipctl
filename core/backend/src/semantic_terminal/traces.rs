@@ -28,7 +28,7 @@ use super::projection::{
 };
 use super::replay::VtReplayEngine;
 use super::retention::TerminalRetentionPolicy;
-use shipctl_module_api::TerminalColorTheme;
+use crate::terminal_host::TerminalColorTheme;
 
 /// One recording: the program, the geometry it ran under, and the name the
 /// recorded bytes and recorded state are filed under.

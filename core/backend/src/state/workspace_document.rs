@@ -11,9 +11,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use super::DurableWriteBarrier;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use shipctl_module_api::DurableWriteBarrier;
 use uuid::Uuid;
 
 pub const WORKSPACE_DOCUMENT_STORE_SCHEMA_VERSION: u32 = 1;

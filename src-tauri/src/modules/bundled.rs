@@ -5,8 +5,7 @@ use shipctl_core::module_control::{
     DesiredModuleState, ModuleIdentity, ModuleOperationKind, ModuleRuntimeKind, ModuleSource,
     MODULE_CONTROL_SCHEMA_VERSION,
 };
-use shipctl_core::state::paths::ShipctlPaths;
-use shipctl_module_api::DurableWriteBarrier;
+use shipctl_core::state::{paths::ShipctlPaths, DurableWriteBarrier};
 use uuid::Uuid;
 
 pub(super) struct BundledArtifact {

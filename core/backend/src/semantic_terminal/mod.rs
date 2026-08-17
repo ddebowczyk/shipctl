@@ -36,13 +36,13 @@ pub use service::{
     SEMANTIC_TERMINALS_UNAVAILABLE,
 };
 
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value as JsonValue};
-use shipctl_module_api::{
-    TerminalByteOccurrence, TerminalDriverDescriptor, TerminalDriverError, TerminalDriverFactory,
-    TerminalDriverId, TerminalDriverRequestResult, TerminalDriverSession,
+use crate::terminal_host::{
+    TerminalByteOccurrence, TerminalColorTheme, TerminalDriverDescriptor, TerminalDriverError,
+    TerminalDriverFactory, TerminalDriverId, TerminalDriverRequestResult, TerminalDriverSession,
     TerminalDriverSessionRequest, TerminalDriverUpdate,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value as JsonValue};
 use std::sync::Arc;
 
 pub fn driver_id() -> TerminalDriverId {
@@ -205,7 +205,7 @@ impl TerminalDriverSession for SemanticTerminalDriverSession {
 
     fn set_color_theme(
         &mut self,
-        theme: &shipctl_module_api::TerminalColorTheme,
+        theme: &TerminalColorTheme,
     ) -> Result<TerminalDriverUpdate, TerminalDriverError> {
         let reply_bytes = self
             .engine
@@ -316,7 +316,7 @@ impl TerminalDriverSession for SemanticTerminalDriverSession {
 
 #[cfg(test)]
 mod tests {
-    use shipctl_module_api::{
+    use crate::terminal_host::{
         TerminalByteOccurrence, TerminalColorTheme, TerminalDriverSessionRequest,
     };
 

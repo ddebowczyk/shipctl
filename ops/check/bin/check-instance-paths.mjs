@@ -7,7 +7,6 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 const files = globSync([
   "core/backend/src/**/*.rs",
   "core/frontend/**/*.{ts,tsx}",
-  "module-api/backend/src/**/*.rs",
   "modules/*/backend/src/**/*.rs",
   "src-tauri/src/**/*.rs",
 ], { cwd: root, exclude: ["**/workspace/migration.rs"] });

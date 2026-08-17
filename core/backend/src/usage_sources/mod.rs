@@ -176,12 +176,12 @@ pub struct UsageSourcesService {
 impl UsageSourcesService {
     pub fn open_at(
         path: &Path,
-        durable_writes: shipctl_module_api::DurableWriteBarrier,
+        durable_writes: crate::state::DurableWriteBarrier,
     ) -> Result<Self, String> {
         UsageDb::open_at_with_barrier(path, durable_writes).map(Self::new)
     }
 
-    pub fn open_in_memory(durable_writes: shipctl_module_api::DurableWriteBarrier) -> Self {
+    pub fn open_in_memory(durable_writes: crate::state::DurableWriteBarrier) -> Self {
         Self::new(UsageDb::open_in_memory_with_barrier(durable_writes))
     }
 

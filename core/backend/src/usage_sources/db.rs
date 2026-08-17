@@ -1,5 +1,5 @@
+use crate::state::DurableWriteBarrier;
 use rusqlite::Connection;
-use shipctl_module_api::DurableWriteBarrier;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 

@@ -1796,7 +1796,7 @@ fn valid_scoped_id(value: &str) -> bool {
 fn valid_contribution_id(family: RuntimeContributionFamily, value: &str) -> bool {
     match family {
         RuntimeContributionFamily::TerminalPresentation => {
-            shipctl_module_api::TerminalDriverId::new(value).is_ok()
+            crate::terminal_host::TerminalDriverId::new(value).is_ok()
         }
         _ => valid_scoped_id(value),
     }

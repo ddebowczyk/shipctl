@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use shipctl_module_api::{TerminalColorTheme, TerminalDriverRegistry};
+use super::{TerminalColorTheme, TerminalDriverDescriptor, TerminalDriverRegistry};
 
 use super::record::TerminalRecord;
 use super::retention::TerminalRetentionPolicy;
@@ -70,7 +70,7 @@ impl TerminalService {
     pub fn new(instance_id: impl Into<String>, retention: TerminalRetentionPolicy) -> Self {
         let mut registry = TerminalDriverRegistry::default();
         registry
-            .register_browser_driver(shipctl_module_api::TerminalDriverDescriptor {
+            .register_browser_driver(TerminalDriverDescriptor {
                 id: crate::terminal_host::types::default_terminal_driver_id(),
                 native_interpretation: false,
             })

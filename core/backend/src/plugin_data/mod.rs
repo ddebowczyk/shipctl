@@ -11,9 +11,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::state::DurableWriteBarrier;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use shipctl_module_api::DurableWriteBarrier;
 use uuid::Uuid;
 
 use crate::workspace::manager::WorkspaceManager;

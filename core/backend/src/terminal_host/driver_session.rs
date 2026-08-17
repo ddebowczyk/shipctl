@@ -1,9 +1,8 @@
 use serde_json::Value as JsonValue;
 
-use crate::protocol::{
+use super::driver::{
     TerminalByteOccurrence, TerminalColorTheme, TerminalDriverDescriptor, TerminalDriverError,
     TerminalDriverRequestResult, TerminalDriverSessionRequest, TerminalDriverUpdate,
-    TerminalObservation,
 };
 
 /// Native parser state stays on the host actor thread. In particular, a
@@ -61,12 +60,4 @@ pub trait TerminalDriverFactory: Send + Sync {
         &self,
         request: TerminalDriverSessionRequest,
     ) -> Result<Box<dyn TerminalDriverSession>, TerminalDriverError>;
-}
-
-/// Thin-mode observers are deliberately unable to create parser replies.
-pub trait TerminalObserver: Send {
-    fn on_output(
-        &mut self,
-        occurrence: &TerminalByteOccurrence,
-    ) -> Result<Vec<TerminalObservation>, TerminalDriverError>;
 }

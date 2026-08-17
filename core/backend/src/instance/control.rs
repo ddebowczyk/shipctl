@@ -2639,11 +2639,11 @@ mod tests {
     use crate::instance::context::{InstanceLaunchOptions, LaunchProvenance};
     use crate::scheduler::contracts::{ScheduleDeliveryOutcome, ScheduleDeliverySummary};
     use crate::scheduler::{SCHEDULE_CONTROL_SCHEMA_VERSION, SCHEDULE_INSPECTION_SCHEMA_VERSION};
+    use crate::terminal_host::TerminalColorTheme;
     use crate::terminal_host::{
         TerminalLaunchRequest, TerminalLaunchTarget, TerminalMetadata, TerminalOwner,
         TerminalService,
     };
-    use shipctl_module_api::TerminalColorTheme;
     use std::collections::HashMap;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Mutex;

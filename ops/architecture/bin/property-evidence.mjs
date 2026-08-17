@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
+const CAMPAIGN_KINDS = new Set(["fresh", "replay"]);
 
 function hashCommand(hash, command, args, cwd) {
   return new Promise((resolve, reject) => {
@@ -59,6 +60,32 @@ export async function repositoryIdentity(repositoryRoot) {
   };
 }
 
+export function configuredCampaign({
+  argv = process.argv,
+  env = process.env,
+} = {}) {
+  const argumentsForCampaign = argv
+    .filter((value) => value.startsWith("--campaign="))
+    .map((value) => value.slice("--campaign=".length));
+  const requested = argumentsForCampaign[0] ?? env.SHIPCTL_PROPERTY_CAMPAIGN ?? "fresh";
+
+  if (argumentsForCampaign.some((value) => value !== requested)) {
+    throw new Error("--campaign may name only one campaign kind");
+  }
+  if (!CAMPAIGN_KINDS.has(requested)) {
+    throw new Error("campaign must be fresh or replay");
+  }
+  return requested;
+}
+
+function campaignEvidenceFile(file, kind) {
+  const suffix = ".evidence.json";
+  if (!file.endsWith(suffix)) {
+    throw new Error(`property evidence file must end with ${suffix}: ${file}`);
+  }
+  return `${file.slice(0, -suffix.length)}.${kind}${suffix}`;
+}
+
 export function propertyEvidence({
   propertyId,
   testId,
@@ -67,7 +94,7 @@ export function propertyEvidence({
   library,
   version,
   repository,
-  kind = "fresh",
+  kind = configuredCampaign(),
   seed,
   shrinkPath,
   classifications,
@@ -76,6 +103,9 @@ export function propertyEvidence({
   result = "fail",
   deletionGates = [],
 }) {
+  if (!CAMPAIGN_KINDS.has(kind)) {
+    throw new Error("campaign must be fresh or replay");
+  }
   const campaign = {
     kind,
     seed: String(seed),
@@ -99,12 +129,16 @@ export function propertyEvidence({
 
 export async function writePropertyEvidence({ repositoryRoot, file, evidence }) {
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`);
-  await exec("ys", [
-    "-f",
-    path.join(repositoryRoot, "docs/4-layer-architecture/spec/schema/property-evidence.v1.schema.yaml"),
-    file,
-  ], { cwd: repositoryRoot });
+  const body = `${JSON.stringify(evidence, null, 2)}\n`;
+  const campaignFile = campaignEvidenceFile(file, evidence.campaign.kind);
+  const schema = path.join(
+    repositoryRoot,
+    "docs/4-layer-architecture/spec/schema/property-evidence.v1.schema.yaml",
+  );
+  await writeFile(file, body);
+  await writeFile(campaignFile, body);
+  await exec("ys", ["-f", schema, file], { cwd: repositoryRoot });
+  await exec("ys", ["-f", schema, campaignFile], { cwd: repositoryRoot });
   return file;
 }
 

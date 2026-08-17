@@ -4593,7 +4593,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
- "shipctl-module-api",
  "sysinfo",
  "tar",
  "tempfile",
@@ -4602,14 +4601,6 @@ dependencies = [
  "url",
  "uuid",
  "widestring",
-]
-
-[[package]]
-name = "shipctl-module-api"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -4634,7 +4625,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shipctl-core",
- "shipctl-module-api",
  "sysinfo",
  "tauri",
  "tempfile",
@@ -4653,7 +4643,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shipctl-core",
- "shipctl-module-api",
  "shipctl-tauri-adapter",
  "tauri",
  "tauri-build",
@@ -5260,7 +5249,6 @@ dependencies = [
 name = "tauri-plugin-shipctl-fixture"
 version = "0.0.0"
 dependencies = [
- "shipctl-module-api",
  "tauri",
  "tauri-plugin",
 ]

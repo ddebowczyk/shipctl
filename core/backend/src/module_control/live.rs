@@ -37,7 +37,7 @@ pub struct FrontendContributionInput {
 
 fn valid_frontend_contribution_id(kind: &str, id: &str) -> bool {
     if kind == "terminal_presentation" {
-        return shipctl_module_api::TerminalDriverId::new(id).is_ok();
+        return crate::terminal_host::TerminalDriverId::new(id).is_ok();
     }
     id.contains('.')
 }

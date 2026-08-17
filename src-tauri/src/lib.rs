@@ -44,10 +44,12 @@ use shipctl_core::state::providers::{
 use shipctl_core::state::ui::UiStateStore;
 use shipctl_core::state::workspace_document::WorkspaceDocumentStore;
 use shipctl_core::state::workspace_layout::WorkspaceLayoutStore;
-use shipctl_core::terminal_host::TerminalService;
+use shipctl_core::state::{DurableWriteBarrier, SnapshotProvider};
+use shipctl_core::terminal_host::{
+    TerminalDriverDescriptor, TerminalDriverId, TerminalDriverRegistry, TerminalService,
+};
 use shipctl_core::usage_sources::{UsageSnapshotProvider, UsageSourcesService};
 use shipctl_core::workspace::manager::WorkspaceManager;
-use shipctl_module_api::{DurableWriteBarrier, SnapshotProvider};
 use shipctl_tauri_adapter::{GitWatcher, MessageBusBridgeService};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -110,13 +112,13 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
     let terminals = {
         let mut settings = workspace.load_terminal_settings().unwrap_or_default();
         shipctl_core::workspace::config::normalize_terminal_settings(&mut settings);
-        let mut drivers = shipctl_module_api::TerminalDriverRegistry::default();
+        let mut drivers = TerminalDriverRegistry::default();
         drivers
             .register(shipctl_core::semantic_terminal::native_factory())
             .expect("the semantic terminal driver registers once");
         drivers
-            .register_browser_driver(shipctl_module_api::TerminalDriverDescriptor {
-                id: shipctl_module_api::TerminalDriverId::new("thin-terminal")
+            .register_browser_driver(TerminalDriverDescriptor {
+                id: TerminalDriverId::new("thin-terminal")
                     .expect("thin-terminal has a valid static driver id"),
                 native_interpretation: false,
             })

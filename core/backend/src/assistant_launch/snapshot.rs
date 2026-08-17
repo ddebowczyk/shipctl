@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use shipctl_module_api::{
+use crate::state::{
     CapturedSnapshotEntry, SnapshotClassification, SnapshotEntryDeclaration, SnapshotProvider,
 };
 

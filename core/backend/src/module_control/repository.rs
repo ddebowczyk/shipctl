@@ -9,9 +9,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+use crate::state::DurableWriteBarrier;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use shipctl_module_api::DurableWriteBarrier;
 use uuid::Uuid;
 
 use super::artifact::{

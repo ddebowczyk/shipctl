@@ -5,9 +5,9 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::{DurableWriteBarrier, SnapshotClassification, SnapshotProvider};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use shipctl_module_api::{DurableWriteBarrier, SnapshotClassification, SnapshotProvider};
 use uuid::Uuid;
 
 use crate::instance::{ControlError, InstanceBuildIdentity, InstanceContext};
@@ -892,7 +892,7 @@ mod tests {
     use super::*;
     use crate::instance::{InstanceLaunchOptions, LaunchProvenance};
     use crate::scheduler::SchedulerSnapshotProvider;
-    use shipctl_module_api::{CapturedSnapshotEntry, SnapshotEntryDeclaration};
+    use crate::state::{CapturedSnapshotEntry, SnapshotEntryDeclaration};
 
     struct FixtureProvider {
         path: PathBuf,

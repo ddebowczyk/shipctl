@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use super::DurableWriteBarrier;
 use serde::{Deserialize, Serialize};
-use shipctl_module_api::DurableWriteBarrier;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

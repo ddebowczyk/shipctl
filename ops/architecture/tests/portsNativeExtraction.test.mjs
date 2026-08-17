@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readdir, readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -32,16 +32,6 @@ async function exists(relativePath) {
 
 async function source(relativePath) {
   return readFile(path.join(repositoryRoot, relativePath), "utf8");
-}
-
-async function sourceTree(relativePath) {
-  const root = path.join(repositoryRoot, relativePath);
-  const entries = await readdir(root, { recursive: true, withFileTypes: true });
-  const files = entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => path.join(entry.parentPath, entry.name))
-    .sort();
-  return (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
 }
 
 const allowedNativeAuthorityOwners = [
@@ -118,16 +108,15 @@ test("architecture.native-extraction-closure.property", async () => {
   assert.doesNotMatch(tauriConfiguration, /shipctl-ports/);
   assert.doesNotMatch(`${tauriShell}\n${moduleComposition}`, /shipctl_module_ports|shipctl-ports/);
 
-  const [provider, adapter, client, portsPolicy, moduleApiBackend] = await Promise.all([
+  const [provider, adapter, client, portsPolicy] = await Promise.all([
     source("core/backend/src/processes/mod.rs"),
     source("core/tauri/src/processes.rs"),
     source("core/frontend/platform/processes.ts"),
     source("modules/ports/frontend/src/PortsPanel.tsx"),
-    sourceTree("module-api/backend"),
   ]);
   assert.doesNotMatch(provider, /\btauri\b/i);
   assert.doesNotMatch(adapter, /detectFramework|isDevelopmentProcess|matchProject|PortInfo|spotify/i);
-  assert.doesNotMatch(`${client}\n${moduleApiBackend}`, /plugin:shipctl-ports|list_listening_ports|kill_port/);
+  assert.doesNotMatch(client, /plugin:shipctl-ports|list_listening_ports|kill_port/);
   for (const policySymbol of [
     "PROJECT_ROOT_MARKERS",
     "FRAMEWORK_FILE_NAMES",

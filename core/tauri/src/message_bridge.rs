@@ -867,7 +867,7 @@ mod tests {
         RegisterScheduleInput, ScheduleTargetKind, SchedulerActor, SchedulerLeaseService,
         SchedulerService, SCHEDULER_REGISTER_GRANT,
     };
-    use shipctl_module_api::DurableWriteBarrier;
+    use shipctl_core::state::DurableWriteBarrier;
     use tempfile::tempdir;
 
     use super::*;

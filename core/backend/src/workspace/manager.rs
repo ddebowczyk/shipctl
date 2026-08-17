@@ -4,7 +4,7 @@ use super::config::{
 };
 use super::loader;
 use crate::state::paths::ShipctlPaths;
-use shipctl_module_api::DurableWriteBarrier;
+use crate::state::DurableWriteBarrier;
 use std::sync::Arc;
 
 #[derive(Clone)]

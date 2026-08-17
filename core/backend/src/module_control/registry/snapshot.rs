@@ -1,11 +1,11 @@
 use std::fs;
 use std::path::PathBuf;
 
-use rusqlite::backup::{Backup, StepResult};
-use rusqlite::{Connection, OpenFlags};
-use shipctl_module_api::{
+use crate::state::{
     CapturedSnapshotEntry, SnapshotClassification, SnapshotEntryDeclaration, SnapshotProvider,
 };
+use rusqlite::backup::{Backup, StepResult};
+use rusqlite::{Connection, OpenFlags};
 use tempfile::NamedTempFile;
 
 use super::ModuleRegistry;
@@ -113,7 +113,7 @@ impl SnapshotProvider for ModuleRegistrySnapshotProvider {
 mod tests {
     use super::*;
     use crate::state::paths::ShipctlPaths;
-    use shipctl_module_api::SnapshotProvider;
+    use crate::state::SnapshotProvider;
     use tempfile::TempDir;
 
     #[test]

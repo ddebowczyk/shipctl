@@ -9,9 +9,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 
+use crate::state::DurableWriteBarrier;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use shipctl_module_api::DurableWriteBarrier;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 

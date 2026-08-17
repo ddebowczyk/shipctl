@@ -1,7 +1,7 @@
 use std::process::Command;
 use std::sync::Arc;
 
-use shipctl_module_api::TerminalColorTheme;
+use shipctl_core::terminal_host::TerminalColorTheme;
 use tauri::ipc::{Channel, Response};
 use tauri::State;
 

@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::terminal_host::TerminalColorTheme;
 use libghostty_vt::{
     fmt::{Format, Formatter, FormatterOptions},
     key, mouse, paste,
@@ -16,7 +17,6 @@ use libghostty_vt::{
     terminal::{ColorScheme, Mode, Point, PointCoordinate},
     Error, RenderState, Terminal, TerminalOptions,
 };
-use shipctl_module_api::TerminalColorTheme;
 
 use crate::semantic_terminal::input::{focus_event, TerminalInput};
 use crate::semantic_terminal::projection::{
