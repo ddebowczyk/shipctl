@@ -150,7 +150,9 @@ function instance(value: unknown): WorkspaceViewInstance {
   if (
     !hasIdentity(candidate.instanceId)
     || !hasWorkspaceName(candidate.viewTypeId)
-    || !hasWorkspaceName(candidate.ownerModuleId)
+    // Workspace catalog admission permits the stable host owner `core`; a
+    // persisted instance must preserve that same owner identity.
+    || !hasIdentity(candidate.ownerModuleId)
     || !hasIdentity(candidate.ownerActivationId)
     || (candidate.label !== null && !hasIdentity(candidate.label))
     || (candidate.lifecycle !== "placed" && candidate.lifecycle !== "hidden")

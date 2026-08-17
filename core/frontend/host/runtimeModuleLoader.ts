@@ -9,6 +9,7 @@ import {
   loadShipctlModuleArtifact,
   moduleArtifactUrl,
   ModuleArtifactLoadError,
+  type LoadShipctlModuleArtifactRequest,
 } from "./moduleArtifactLoader.ts";
 
 export type RuntimeModuleLoadDescriptor = RuntimeModuleDescriptor;
@@ -28,14 +29,30 @@ export interface LoadedRuntimeModules {
   readonly failures: readonly RuntimeModuleLoadFailure[];
 }
 
+/**
+ * Host-owned artifact-import adapter. The production default remains the
+ * immutable artifact loader; embedders can provide another trusted resolver
+ * without exposing a loader choice to a module.
+ */
+export interface RuntimeModuleLoadOptions {
+  /**
+   * Host-platform URL adapter. The returned URL is still checked against the
+   * requested immutable digest before an artifact can be imported.
+   */
+  readonly resolveArtifactUrl?: (artifactPath: string, contentDigest: string) => string;
+  readonly importModule?: NonNullable<LoadShipctlModuleArtifactRequest["importModule"]>;
+}
+
 export async function getRuntimeModuleLoadCatalog(): Promise<RuntimeModuleLoadCatalog> {
   return getRuntimeModuleCatalog();
 }
 
 export async function loadRuntimeModules(
   catalog?: RuntimeModuleLoadCatalog,
+  options: RuntimeModuleLoadOptions = {},
 ): Promise<LoadedRuntimeModules> {
   const runtimeCatalog = catalog ?? await getRuntimeModuleLoadCatalog();
+  const resolveArtifactUrl = options.resolveArtifactUrl ?? moduleArtifactUrl;
   const modules: ShipctlModule[] = [];
   const definitions: ShipctlPluginDefinition[] = [];
   const failures: RuntimeModuleLoadFailure[] = [];
@@ -47,9 +64,9 @@ export async function loadRuntimeModules(
           `Module ${descriptor.moduleId} declares ${descriptor.manifest.lifecycle} lifecycle and cannot enter the live runtime`,
         );
       }
-      const entryUrl = moduleArtifactUrl(descriptor.entryPath, descriptor.contentDigest);
+      const entryUrl = resolveArtifactUrl(descriptor.entryPath, descriptor.contentDigest);
       const styleUrls = descriptor.stylePaths.map((stylePath) =>
-        moduleArtifactUrl(stylePath, descriptor.contentDigest));
+        resolveArtifactUrl(stylePath, descriptor.contentDigest));
       const loaded = await loadShipctlModuleArtifact({
         digest: descriptor.contentDigest,
         entryUrl,
@@ -59,6 +76,7 @@ export async function loadRuntimeModules(
         admittedMessages: descriptor.manifest.messages,
         admittedGrants: descriptor.manifest.requestedGrants,
         styleUrls,
+        ...(options.importModule === undefined ? {} : { importModule: options.importModule }),
       });
       modules.push(loaded.module);
       definitions.push(loaded.definition);

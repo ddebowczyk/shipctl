@@ -30,9 +30,10 @@ import {
   openModuleMessageBridge,
   type MessageBusBridge,
   type ModuleMessageBridgeBindings,
+  type OpenModuleMessageBridge,
 } from "./messageBusBridge.ts";
 import type { ModuleMessageActivation } from "./moduleMessageContext.ts";
-import { loadRuntimeModules } from "./runtimeModuleLoader.ts";
+import { loadRuntimeModules, type LoadedRuntimeModules } from "./runtimeModuleLoader.ts";
 import type { WorkspaceContributionCatalog } from "./workspaceContributionCatalog.ts";
 
 export interface LiveModuleFamily {
@@ -63,6 +64,17 @@ export interface LiveModuleSupervisorOptions {
   readonly reportRejected?: (diagnostic: ReconciliationDiagnostic) => void | Promise<void>;
   readonly getCatalog?: () => Promise<RuntimeModuleCatalog>;
   readonly observeRevisions?: typeof observeModuleRegistryRevisions;
+  /**
+   * Host-only platform adapters. Production composition leaves these unset and
+   * uses the native message bridge and immutable artifact loader. Modules have
+   * no access to either choice.
+   */
+  readonly openMessageBridge?: (
+    modules: readonly ShipctlModule[],
+  ) => Promise<OpenModuleMessageBridge>;
+  readonly loadModules?: (
+    catalog: RuntimeModuleCatalog,
+  ) => Promise<LoadedRuntimeModules>;
   /**
    * Compiles accepted activation-owned UI declarations while the candidate is
    * still private. It must not activate modules or mutate durable workspace
@@ -193,7 +205,9 @@ export class LiveModuleSupervisor {
   }
 
   async #start(): Promise<void> {
-    const opened = await openModuleMessageBridge(this.#options.staticModules);
+    const opened = await (this.#options.openMessageBridge ?? openModuleMessageBridge)(
+      this.#options.staticModules,
+    );
     this.#bridge = opened.bridge;
     if (this.#disposed) return;
     this.#staticMessageActivations = createModuleMessageActivations(
@@ -339,7 +353,7 @@ export class LiveModuleSupervisor {
     if (catalog === undefined || bridge === null) {
       throw new Error(`Runtime catalog ${desired.registryRevision} is unavailable`);
     }
-    const loaded = await loadRuntimeModules(catalog);
+    const loaded = await (this.#options.loadModules ?? loadRuntimeModules)(catalog);
     if (loaded.failures.length > 0) {
       const failure = loaded.failures[0];
       const failedDescriptor = catalog.modules.find(

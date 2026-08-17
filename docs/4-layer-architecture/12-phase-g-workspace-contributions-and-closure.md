@@ -352,21 +352,27 @@ and storage failure does not reject the accepted runtime family.
 ### PROP-G-ABSENCE-001
 
 - **Claim:** For every generated subset of built-in plugins, the host boots to
-  an operable workspace using exactly that subset and reports each excluded or
-  failed plugin without requiring its implementation package.
+  an operable workspace using exactly that subset, makes no import request for
+  an excluded package, and retains the accepted workspace after a failed
+  candidate.
 - **Shape:** safety.
 - **Evidence:** SEM-G-007, SEM-G-008.
-- **Domain:** all built-in inclusion subsets selected by generated admitted
-  registries, plus one injected load or readiness failure. The campaign can
-  sample subsets in normal lanes and enumerate them where the existing
-  plug-out profile contract already requires enumeration.
+- **Domain:** empty, singleton, and mixed selections from the emitted built-in
+  artifact templates, plus one injected load or readiness failure.
 - **Preconditions:** required platform services are available.
-- **Oracle:** compare the accepted plugin IDs, contribution owners, and core
-  workspace operability against the generated subset model.
-- **Failure value:** removing Git prevents the host from starting because a
-  shell import still requires its package.
-- **Tier:** release, with focused pull-request fixtures.
-- **Initial status/test ID:** proposed / `architecture.plugin-absence.property`.
+- **Oracle:** compare accepted plugin IDs, contribution owners, and core
+  workspace operability against the generated subset model. The execution path
+  is the real live supervisor, message bridge, immutable artifact loader,
+  Cordis activation, and workspace authority. A host-only URL/import adapter
+  admits only the current catalog identities and provides no module
+  implementation package.
+- **Failure value:** a missing built-in package prevents the host from
+  starting because a shell import still requires its package.
+- **Tier:** pull request and release.
+- **Current status/test ID:** passing /
+  `architecture.plugin-absence.property`. It proves both injected load and
+  readiness failures retain the last accepted catalog and leave the core
+  workspace operable.
 
 ### PROP-G-CONTRIBUTION-SCHEMA-001
 

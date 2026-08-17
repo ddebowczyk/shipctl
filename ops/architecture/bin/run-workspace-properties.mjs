@@ -33,6 +33,7 @@ const testFiles = [
   "ops/architecture/tests/workspaceCapability.test.mjs",
   "ops/architecture/tests/canvasAdapterParity.test.mjs",
   "ops/architecture/tests/workspaceContributionCatalog.test.mjs",
+  "ops/architecture/tests/pluginAbsence.test.mjs",
 ];
 const testArguments = ["exec", "node", "--test", "--test-concurrency=1", ...testFiles];
 const replayCommand = [
@@ -126,6 +127,14 @@ const properties = [
         "navigation",
         "component-cache",
       ],
+    },
+  },
+  {
+    propertyId: "PROP-G-ABSENCE-001",
+    testId: "architecture.plugin-absence.property",
+    classifications: {
+      subset: ["empty-optional", "singleton", "mixed"],
+      candidate: ["load-failure", "not-ready"],
     },
   },
 ];

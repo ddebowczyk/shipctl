@@ -171,6 +171,7 @@ export {
 } from "./runtimeModuleLoader.ts";
 export type {
   LoadedRuntimeModules,
+  RuntimeModuleLoadOptions,
   RuntimeModuleLoadCatalog,
   RuntimeModuleLoadDescriptor,
   RuntimeModuleLoadFailure,
