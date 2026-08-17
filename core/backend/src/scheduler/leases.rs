@@ -15,7 +15,10 @@ use shipctl_module_api::DurableWriteBarrier;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
-use crate::message_bus::{MessageTypeId, ModuleMessageAuthority};
+use crate::message_bus::{
+    MessageContractError, MessageRouteSnapshot, MessageTypeId, ModuleMessageAuthority,
+    PreparedRegistration,
+};
 
 use super::{
     parse_schedule_source, ScheduleDefinition, ScheduleDeliveryObservation, ScheduleTarget,
@@ -135,10 +138,27 @@ struct ScheduleSourceMessage<'a> {
     payload: &'a Value,
 }
 
+#[derive(Clone)]
+enum LeaseSource {
+    Durable(PathBuf),
+    Declared(ScheduleDefinition),
+}
+
+#[derive(Clone)]
 struct LeaseRecord {
     actor: SchedulerActor,
     inspection: ScheduleLeaseInspection,
-    source_path: PathBuf,
+    source: LeaseSource,
+}
+
+/// A module manifest schedule paired with the exact private bridge authority
+/// that admitted its owning activation. This value is internal to the host
+/// transaction; plugins never manufacture it or receive a timer primitive.
+#[derive(Clone)]
+pub struct DeclaredScheduleRegistration {
+    pub actor: SchedulerActor,
+    pub authority: ModuleMessageAuthority,
+    pub input: RegisterScheduleInput,
 }
 
 struct Observer {
@@ -270,10 +290,159 @@ impl SchedulerLeaseService {
             LeaseRecord {
                 actor,
                 inspection: inspection.clone(),
-                source_path,
+                source: LeaseSource::Durable(source_path),
             },
         );
         Ok(inspection)
+    }
+
+    /// Atomically replaces manifest-declared schedules for the bridge
+    /// activations being reconciled. These schedules are ephemeral: their
+    /// durable source of truth is the admitted module artifact, not a lease
+    /// YAML file. The scheduler and message routes therefore commit as one
+    /// in-memory graph and restart reconstruction simply declares them again.
+    pub async fn reconcile_declared(
+        &self,
+        expected_route_generation: u64,
+        retired_activation_ids: &[String],
+        registrations: Vec<Arc<PreparedRegistration>>,
+        declarations: Vec<DeclaredScheduleRegistration>,
+    ) -> Result<MessageRouteSnapshot, SchedulerLeaseError> {
+        let _mutation = self.inner.mutations.lock().await;
+        let retired = retired_activation_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let (mut leases, mut schedule_owners, retired_declarations) = {
+            let state = self
+                .inner
+                .state
+                .lock()
+                .expect("scheduler lease state mutex must not be poisoned");
+            let retired_declarations = state
+                .leases
+                .iter()
+                .filter_map(|(lease_id, record)| {
+                    (retired.contains(&record.actor.activation_id)
+                        && matches!(record.source, LeaseSource::Declared(_)))
+                    .then_some((*lease_id, record.clone()))
+                })
+                .collect::<BTreeMap<_, _>>();
+            let leases = state
+                .leases
+                .iter()
+                .filter(|(_, record)| {
+                    !(retired.contains(&record.actor.activation_id)
+                        && matches!(record.source, LeaseSource::Declared(_)))
+                })
+                .map(|(lease_id, record)| (*lease_id, record.clone()))
+                .collect::<BTreeMap<_, _>>();
+            let schedule_owners = leases
+                .iter()
+                .map(|(lease_id, record)| (record.inspection.schedule_id.clone(), *lease_id))
+                .collect::<BTreeMap<_, _>>();
+            (leases, schedule_owners, retired_declarations)
+        };
+
+        for declaration in declarations {
+            authorize_scheduler(&declaration.actor, &declaration.authority)?;
+            let source_name = format!("shipctl-declared-{}.yaml", Uuid::new_v4());
+            let definition = source_definition(&source_name, &declaration.input)?;
+            if schedule_owners.contains_key(&declaration.input.schedule_id) {
+                return Err(SchedulerLeaseError::new(
+                    SCHEDULER_CONFLICT,
+                    "The schedule identity is already registered",
+                ));
+            }
+            let retained = retired_declarations.values().find(|record| {
+                record.actor == declaration.actor
+                    && record.inspection.schedule_id == declaration.input.schedule_id
+                    && matches!(
+                        &record.source,
+                        LeaseSource::Declared(previous)
+                            if previous.definition_digest_sha256 == definition.definition_digest_sha256
+                    )
+            });
+            let (lease_id, record) = match retained {
+                Some(record) => {
+                    let lease_id = Uuid::parse_str(&record.inspection.lease_id).map_err(|_| {
+                        SchedulerLeaseError::new(
+                            SCHEDULER_INVALID_REQUEST,
+                            "The existing declared schedule identity is invalid",
+                        )
+                    })?;
+                    (lease_id, record.clone())
+                }
+                None => {
+                    let lease_id = Uuid::new_v4();
+                    let inspection = ScheduleLeaseInspection {
+                        schema_version: SCHEDULER_SERVICE_SCHEMA_VERSION,
+                        lease_id: lease_id.to_string(),
+                        owner_module_id: declaration.actor.module_id.clone(),
+                        owner_activation_id: declaration.actor.activation_id.clone(),
+                        schedule_id: declaration.input.schedule_id.clone(),
+                        definition_digest_sha256: definition.definition_digest_sha256.clone(),
+                        registered_at_unix_ms: unix_time_ms()?,
+                    };
+                    (
+                        lease_id,
+                        LeaseRecord {
+                            actor: declaration.actor,
+                            inspection,
+                            source: LeaseSource::Declared(definition),
+                        },
+                    )
+                }
+            };
+            schedule_owners.insert(declaration.input.schedule_id, lease_id);
+            leases.insert(lease_id, record);
+        }
+
+        let runtime_definitions = runtime_definitions(&leases);
+        let snapshot = self
+            .scheduler
+            .reconcile_runtime_definitions(
+                expected_route_generation,
+                retired_activation_ids,
+                registrations,
+                runtime_definitions,
+            )
+            .await
+            .map_err(route_or_schedule_rejection)?;
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .expect("scheduler lease state mutex must not be poisoned");
+        state.leases = leases;
+        state.schedule_owners = schedule_owners;
+        Ok(snapshot)
+    }
+
+    fn runtime_definitions_without(
+        &self,
+        removed: &[Uuid],
+    ) -> BTreeMap<String, ScheduleDefinition> {
+        let removed = removed
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let state = self
+            .inner
+            .state
+            .lock()
+            .expect("scheduler lease state mutex must not be poisoned");
+        state
+            .leases
+            .iter()
+            .filter(|(lease_id, _)| !removed.contains(lease_id))
+            .filter_map(|(lease_id, record)| match &record.source {
+                LeaseSource::Declared(definition) => {
+                    Some((lease_id.to_string(), definition.clone()))
+                }
+                LeaseSource::Durable(_) => None,
+            })
+            .collect()
     }
 
     pub fn inspect(
@@ -319,13 +488,21 @@ impl SchedulerLeaseService {
                     "The schedule lease belongs to another activation",
                 ));
             }
-            (
-                record.inspection.schedule_id.clone(),
-                record.source_path.clone(),
-            )
+            (record.inspection.schedule_id.clone(), record.source.clone())
         };
-        retire_source(&record.1, &self.inner.durable_writes)?;
-        self.scheduler.withdraw_schedule(&record.0).await;
+        match &record.1 {
+            LeaseSource::Durable(source_path) => {
+                retire_source(source_path, &self.inner.durable_writes)?;
+                self.scheduler.withdraw_schedule(&record.0).await;
+            }
+            LeaseSource::Declared(_) => {
+                let definitions = self.runtime_definitions_without(&[lease_id]);
+                self.scheduler
+                    .replace_runtime_definitions(definitions)
+                    .await
+                    .map_err(schedule_rejection)?;
+            }
+        }
         let mut state = self
             .inner
             .state
@@ -357,6 +534,29 @@ impl SchedulerLeaseService {
                 (record.actor.activation_id == activation_id).then_some(*lease_id)
             })
             .collect::<Vec<_>>();
+        let declared_ids = {
+            let state = self
+                .inner
+                .state
+                .lock()
+                .expect("scheduler lease state mutex must not be poisoned");
+            lease_ids
+                .iter()
+                .filter(|lease_id| {
+                    matches!(
+                        state.leases.get(lease_id).map(|record| &record.source),
+                        Some(LeaseSource::Declared(_))
+                    )
+                })
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        if !declared_ids.is_empty() {
+            self.scheduler
+                .replace_runtime_definitions(self.runtime_definitions_without(&declared_ids))
+                .await
+                .map_err(schedule_rejection)?;
+        }
         let mut released = 0;
         let mut first_error = None;
         for lease_id in lease_ids {
@@ -367,20 +567,17 @@ impl SchedulerLeaseService {
                 .expect("scheduler lease state mutex must not be poisoned")
                 .leases
                 .get(&lease_id)
-                .map(|record| {
-                    (
-                        record.inspection.schedule_id.clone(),
-                        record.source_path.clone(),
-                    )
-                });
-            let Some((schedule_id, source_path)) = record else {
+                .map(|record| (record.inspection.schedule_id.clone(), record.source.clone()));
+            let Some((schedule_id, source)) = record else {
                 continue;
             };
-            if let Err(error) = retire_source(&source_path, &self.inner.durable_writes) {
-                first_error.get_or_insert(error);
-                continue;
+            if let LeaseSource::Durable(source_path) = source {
+                if let Err(error) = retire_source(&source_path, &self.inner.durable_writes) {
+                    first_error.get_or_insert(error);
+                    continue;
+                }
+                self.scheduler.withdraw_schedule(&schedule_id).await;
             }
-            self.scheduler.withdraw_schedule(&schedule_id).await;
             let mut state = self
                 .inner
                 .state
@@ -501,6 +698,30 @@ fn authorize_actor(
         ));
     }
     Ok(())
+}
+
+fn runtime_definitions(
+    leases: &BTreeMap<Uuid, LeaseRecord>,
+) -> BTreeMap<String, ScheduleDefinition> {
+    leases
+        .iter()
+        .filter_map(|(lease_id, record)| match &record.source {
+            LeaseSource::Declared(definition) => Some((lease_id.to_string(), definition.clone())),
+            LeaseSource::Durable(_) => None,
+        })
+        .collect()
+}
+
+fn route_or_schedule_rejection(error: MessageContractError) -> SchedulerLeaseError {
+    SchedulerLeaseError::new(error.code, "The route-and-schedule candidate was rejected")
+}
+
+fn schedule_rejection(diagnostics: Vec<super::ScheduleDiagnostic>) -> SchedulerLeaseError {
+    let code = diagnostics
+        .first()
+        .map(|diagnostic| diagnostic.code.clone())
+        .unwrap_or_else(|| SCHEDULER_INVALID_REQUEST.to_string());
+    SchedulerLeaseError::new(code, "The schedule candidate was rejected")
 }
 
 fn authorize_scheduler(

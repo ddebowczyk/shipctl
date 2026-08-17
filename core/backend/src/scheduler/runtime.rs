@@ -16,9 +16,9 @@ use uuid::Uuid;
 
 use crate::instance::InstanceContext;
 use crate::message_bus::{
-    MessageEnvelope, MessageTypeId, RuntimeMessageBus, SchedulerPreflightError,
-    SchedulerPreflightRequest, SchedulerPreflightSnapshot, SchedulerPreflightTargetKind,
-    MESSAGE_CONTRACT_SCHEMA_VERSION,
+    MessageContractError, MessageEnvelope, MessageRouteSnapshot, MessageTypeId,
+    PreparedRegistration, RuntimeMessageBus, SchedulerPreflightError, SchedulerPreflightRequest,
+    SchedulerPreflightSnapshot, SchedulerPreflightTargetKind, MESSAGE_CONTRACT_SCHEMA_VERSION,
 };
 
 use super::contracts::{
@@ -258,6 +258,18 @@ struct SchedulerState {
     binding: Option<SchedulerRouteBinding>,
     diagnostics: Vec<ScheduleDiagnostic>,
     runtime: BTreeMap<String, ScheduleRuntimeState>,
+    runtime_definitions: BTreeMap<String, ScheduleDefinition>,
+}
+
+/// A scheduler candidate that has passed source validation and route
+/// preflight but is not observable yet. The message bus publishes its route
+/// table first, then commits this value without an await or fallible step.
+struct PreparedSchedulerCandidate {
+    accepted: Arc<AcceptedScheduleSnapshot>,
+    snapshot: ScheduleSnapshot,
+    binding: SchedulerRouteBinding,
+    runtime: BTreeMap<String, ScheduleRuntimeState>,
+    runtime_definitions: BTreeMap<String, ScheduleDefinition>,
 }
 
 #[derive(Debug, Default)]
@@ -379,6 +391,7 @@ impl SchedulerService {
                     binding: Some(initial_binding),
                     diagnostics,
                     runtime: BTreeMap::new(),
+                    runtime_definitions: BTreeMap::new(),
                 }),
                 snapshots,
                 startup: Mutex::new(StartupState {
@@ -548,7 +561,7 @@ impl SchedulerService {
     /// job set, or runtime observation.
     pub fn verify(&self) -> ScheduleVerification {
         let accepted = self.inspect();
-        let candidate = load_schedule_candidate(&self.inner.schedule_root);
+        let candidate = self.load_candidate_with_runtime_definitions(self.runtime_definitions());
         let (candidate_digest_sha256, mut diagnostics) =
             match candidate.valid_snapshot(accepted.schedule_generation) {
                 Ok(snapshot) => (Some(snapshot.digest_sha256), Vec::new()),
@@ -744,6 +757,88 @@ impl SchedulerService {
             .map_err(|errors| preflight_diagnostics(std::slice::from_ref(definition), errors))
     }
 
+    /// Replaces the complete activation-owned schedule overlay together with
+    /// a successor message-route family. The operation locks scheduler refresh
+    /// before route publication, validates every target against the private
+    /// successor table, and commits the scheduler only after that table is
+    /// public. There is no route-only success path.
+    pub async fn reconcile_runtime_definitions(
+        &self,
+        expected_route_generation: u64,
+        retired_activation_ids: &[String],
+        registrations: Vec<Arc<PreparedRegistration>>,
+        runtime_definitions: BTreeMap<String, ScheduleDefinition>,
+    ) -> Result<MessageRouteSnapshot, MessageContractError> {
+        let _refresh = self.inner.refresh.lock().await;
+        let candidate = self.load_candidate_with_runtime_definitions(runtime_definitions.clone());
+        let definitions = candidate
+            .into_validated_definitions()
+            .map_err(|diagnostics| scheduler_candidate_contract_error(&diagnostics))?;
+        let requests = definitions
+            .iter()
+            .map(preflight_request)
+            .collect::<Vec<_>>();
+        self.inner
+            .bus
+            .reconcile_many_with_scheduler_preflight(
+                expected_route_generation,
+                retired_activation_ids,
+                registrations,
+                &requests,
+                |preflight| {
+                    self.prepare_scheduler_candidate(
+                        definitions.clone(),
+                        preflight,
+                        runtime_definitions,
+                    )
+                    .map_err(|diagnostics| scheduler_candidate_contract_error(&diagnostics))
+                },
+                |prepared| self.commit_scheduler_candidate(prepared),
+            )
+            .await
+    }
+
+    /// Replaces activation-owned definitions against the current live route
+    /// table. This is used only when an already-admitted activation releases
+    /// its schedules; removing a schedule before withdrawing its route cannot
+    /// expose a target without a route.
+    pub async fn replace_runtime_definitions(
+        &self,
+        runtime_definitions: BTreeMap<String, ScheduleDefinition>,
+    ) -> Result<ScheduleRefreshResult, Vec<ScheduleDiagnostic>> {
+        let _refresh = self.inner.refresh.lock().await;
+        let candidate = self.load_candidate_with_runtime_definitions(runtime_definitions.clone());
+        let definitions = candidate.into_validated_definitions()?;
+        let requests = definitions
+            .iter()
+            .map(preflight_request)
+            .collect::<Vec<_>>();
+        let publication = self
+            .inner
+            .bus
+            .with_scheduler_preflight_all(&requests, |preflight| {
+                self.prepare_scheduler_candidate(
+                    definitions.clone(),
+                    preflight,
+                    runtime_definitions,
+                )
+            })
+            .await;
+        match publication {
+            Ok(Ok(prepared)) => {
+                let snapshot = prepared.snapshot.clone();
+                self.commit_scheduler_candidate(prepared);
+                Ok(ScheduleRefreshResult {
+                    applied: true,
+                    snapshot,
+                    diagnostics: Vec::new(),
+                })
+            }
+            Ok(Err(diagnostics)) => Err(diagnostics),
+            Err(errors) => Err(preflight_diagnostics(&definitions, errors)),
+        }
+    }
+
     async fn refresh_locked(&self) -> ScheduleRefreshResult {
         // An explicit refresh supersedes a source snapshot retained before the
         // bridge first became ready. It must never be overwritten later.
@@ -752,8 +847,25 @@ impl SchedulerService {
             .lock()
             .expect("scheduler startup mutex must not be poisoned")
             .candidate = None;
-        let candidate = load_schedule_candidate(&self.inner.schedule_root);
+        let candidate = self.load_candidate_with_runtime_definitions(self.runtime_definitions());
         self.apply_candidate_locked(candidate).await
+    }
+
+    fn runtime_definitions(&self) -> BTreeMap<String, ScheduleDefinition> {
+        self.inner
+            .state
+            .lock()
+            .expect("scheduler state mutex must not be poisoned")
+            .runtime_definitions
+            .clone()
+    }
+
+    fn load_candidate_with_runtime_definitions(
+        &self,
+        runtime_definitions: BTreeMap<String, ScheduleDefinition>,
+    ) -> ScheduleLoadCandidate {
+        load_schedule_candidate(&self.inner.schedule_root)
+            .with_runtime_definitions(runtime_definitions.into_values())
     }
 
     /// Performs one explicit refresh under an outer request identity. A retry
@@ -856,107 +968,136 @@ impl SchedulerService {
             .inner
             .bus
             .with_scheduler_preflight_all(&requests, |preflight| -> Result<_, Vec<_>> {
-                // The bus update lock is held across this synchronous
-                // callback. Publishing the scheduler watch value here binds
-                // accepted state to exactly the route generation preflighted.
-                // Calculate at this publication point so every enabled
-                // definition retains a strictly future occurrence even if a
-                // refresh waited for a concurrent route update.
-                let binding = SchedulerRouteBinding::from(preflight);
-                let next_occurrences = next_occurrences(&definitions, self.inner.clock.now())?;
-                let (snapshot, accepted) = {
-                    let mut state = self
-                        .inner
-                        .state
-                        .lock()
-                        .expect("scheduler state mutex must not be poisoned");
-                    let prior_definitions = state.snapshot.definitions.clone();
-                    let prior_runtime = std::mem::take(&mut state.runtime);
-                    let generation = state
-                        .snapshot
-                        .generation
-                        .checked_add(1)
-                        .expect("scheduler generation overflow");
-                    let removed_schedule_ids = prior_definitions
-                        .iter()
-                        .filter(|accepted| {
-                            !definitions
-                                .iter()
-                                .any(|candidate| candidate.id == accepted.id)
-                        })
-                        .map(|definition| definition.id.clone())
-                        .collect::<Vec<_>>();
-                    let snapshot = schedule_snapshot(generation, definitions.clone())
-                        .expect("validated schedule candidates cannot fail canonicalization");
-                    let retained_ids = definitions
-                        .iter()
-                        .filter(|candidate| {
-                            prior_definitions.iter().any(|accepted| {
-                                accepted.id == candidate.id
-                                    && accepted.definition_digest_sha256
-                                        == candidate.definition_digest_sha256
-                            })
-                        })
-                        .map(|definition| definition.id.clone())
-                        .collect::<BTreeSet<_>>();
-                    let runtime = definitions
-                        .iter()
-                        .map(|definition| {
-                            let mut value = ScheduleRuntimeState {
-                                next_occurrence_utc: next_occurrences
-                                    .get(&definition.id)
-                                    .cloned()
-                                    .flatten(),
-                                last_attempt: None,
-                                target_availability: ScheduleTargetAvailability::Available,
-                                diagnostic: None,
-                            };
-                            if retained_ids.contains(&definition.id) {
-                                if let Some(previous) = prior_runtime.get(&definition.id) {
-                                    value.next_occurrence_utc =
-                                        previous.next_occurrence_utc.clone();
-                                    value.last_attempt = previous.last_attempt.clone();
-                                    // A definition digest intentionally
-                                    // excludes its source filename so a move
-                                    // retains the same job. Its inspection
-                                    // diagnostics must nevertheless describe
-                                    // the newly accepted source, never the
-                                    // retired path.
-                                    rebind_runtime_provenance(&mut value, definition);
-                                }
-                            }
-                            (definition.id.clone(), value)
-                        })
-                        .collect::<BTreeMap<_, _>>();
-
-                    state.snapshot = snapshot.clone();
-                    state.binding = Some(binding.clone());
-                    state.diagnostics.clear();
-                    state.runtime = runtime;
-                    let accepted = Arc::new(AcceptedScheduleSnapshot {
-                        snapshot: snapshot.clone(),
-                        instance_id: binding.instance_id.clone(),
-                        incarnation: binding.incarnation.clone(),
-                        bus_route_generation: binding.route_generation,
-                        removed_schedule_ids,
-                    });
-                    (snapshot, accepted)
-                };
-                self.inner.snapshots.send_replace(Arc::clone(&accepted));
-                self.reconcile_jobs(accepted);
-                Ok(snapshot)
+                self.prepare_scheduler_candidate(
+                    definitions.clone(),
+                    preflight,
+                    self.runtime_definitions(),
+                )
             })
             .await;
 
         match publication {
-            Ok(Ok(snapshot)) => ScheduleRefreshResult {
-                applied: true,
-                snapshot,
-                diagnostics: Vec::new(),
-            },
+            Ok(Ok(prepared)) => {
+                let snapshot = prepared.snapshot.clone();
+                self.commit_scheduler_candidate(prepared);
+                ScheduleRefreshResult {
+                    applied: true,
+                    snapshot,
+                    diagnostics: Vec::new(),
+                }
+            }
             Ok(Err(diagnostics)) => self.reject(diagnostics),
             Err(errors) => self.reject(preflight_diagnostics(&definitions, errors)),
         }
+    }
+
+    fn prepare_scheduler_candidate(
+        &self,
+        definitions: Vec<ScheduleDefinition>,
+        preflight: SchedulerPreflightSnapshot,
+        runtime_definitions: BTreeMap<String, ScheduleDefinition>,
+    ) -> Result<PreparedSchedulerCandidate, Vec<ScheduleDiagnostic>> {
+        // The bus update lock is held by the caller. Calculate at this
+        // publication point so every enabled definition retains a strictly
+        // future occurrence even if the operation waited for a route update.
+        let binding = SchedulerRouteBinding::from(preflight);
+        let next_occurrences = next_occurrences(&definitions, self.inner.clock.now())?;
+        let state = self
+            .inner
+            .state
+            .lock()
+            .expect("scheduler state mutex must not be poisoned");
+        let prior_definitions = state.snapshot.definitions.clone();
+        let prior_runtime = state.runtime.clone();
+        let generation = state
+            .snapshot
+            .generation
+            .checked_add(1)
+            .expect("scheduler generation overflow");
+        let removed_schedule_ids = prior_definitions
+            .iter()
+            .filter(|accepted| {
+                !definitions
+                    .iter()
+                    .any(|candidate| candidate.id == accepted.id)
+            })
+            .map(|definition| definition.id.clone())
+            .collect::<Vec<_>>();
+        let snapshot = schedule_snapshot(generation, definitions.clone())
+            .expect("validated schedule candidates cannot fail canonicalization");
+        let retained_ids = definitions
+            .iter()
+            .filter(|candidate| {
+                prior_definitions.iter().any(|accepted| {
+                    accepted.id == candidate.id
+                        && accepted.definition_digest_sha256 == candidate.definition_digest_sha256
+                })
+            })
+            .map(|definition| definition.id.clone())
+            .collect::<BTreeSet<_>>();
+        let runtime = definitions
+            .iter()
+            .map(|definition| {
+                let mut value = ScheduleRuntimeState {
+                    next_occurrence_utc: next_occurrences.get(&definition.id).cloned().flatten(),
+                    last_attempt: None,
+                    target_availability: ScheduleTargetAvailability::Available,
+                    diagnostic: None,
+                };
+                if retained_ids.contains(&definition.id) {
+                    if let Some(previous) = prior_runtime.get(&definition.id) {
+                        value.next_occurrence_utc = previous.next_occurrence_utc.clone();
+                        value.last_attempt = previous.last_attempt.clone();
+                        // A definition digest intentionally excludes its
+                        // source filename. Retained diagnostics must still
+                        // report the current declaration provenance.
+                        rebind_runtime_provenance(&mut value, definition);
+                    }
+                }
+                (definition.id.clone(), value)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let accepted = Arc::new(AcceptedScheduleSnapshot {
+            snapshot: snapshot.clone(),
+            instance_id: binding.instance_id.clone(),
+            incarnation: binding.incarnation.clone(),
+            bus_route_generation: binding.route_generation,
+            removed_schedule_ids,
+        });
+        Ok(PreparedSchedulerCandidate {
+            accepted,
+            snapshot,
+            binding,
+            runtime,
+            runtime_definitions,
+        })
+    }
+
+    fn commit_scheduler_candidate(&self, prepared: PreparedSchedulerCandidate) {
+        // A route-and-schedule transaction has established a newer complete
+        // graph than the disk-only startup candidate. Do not let the startup
+        // waiter later replace declared module schedules with that stale view.
+        self.inner
+            .startup
+            .lock()
+            .expect("scheduler startup mutex must not be poisoned")
+            .candidate = None;
+        {
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .expect("scheduler state mutex must not be poisoned");
+            state.snapshot = prepared.snapshot;
+            state.binding = Some(prepared.binding);
+            state.diagnostics.clear();
+            state.runtime = prepared.runtime;
+            state.runtime_definitions = prepared.runtime_definitions;
+        }
+        self.inner
+            .snapshots
+            .send_replace(Arc::clone(&prepared.accepted));
+        self.reconcile_jobs(prepared.accepted);
     }
 
     /// Reconciles only this service's owned task controls. The caller has
@@ -1785,6 +1926,14 @@ fn preflight_diagnostics(
         .collect::<Vec<_>>();
     sort_diagnostics(&mut diagnostics);
     diagnostics
+}
+
+fn scheduler_candidate_contract_error(diagnostics: &[ScheduleDiagnostic]) -> MessageContractError {
+    let code = diagnostics
+        .first()
+        .map(|diagnostic| diagnostic.code.clone())
+        .unwrap_or_else(|| SCHEDULE_NOT_FOUND.to_string());
+    MessageContractError::new(code, "The schedule candidate was rejected")
 }
 
 fn preflight_code(code: &str) -> &'static str {

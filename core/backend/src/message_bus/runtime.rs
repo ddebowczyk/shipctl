@@ -723,6 +723,77 @@ impl RuntimeMessageBus {
         self.publish_locked(&mut updates, next)
     }
 
+    /// Reconciles one caller-owned registration family together with schedule
+    /// candidates that depend on the successor route table.
+    ///
+    /// The route table is built and scheduler requests are validated while the
+    /// update lock is held, but neither is public at that point. `prepare`
+    /// must only construct private scheduler state. After the route table is
+    /// published, `commit` receives that prepared state without an await or a
+    /// fallible step. A rejected schedule therefore leaves the old routes
+    /// public, and a committed schedule can never target an unpublished route.
+    pub async fn reconcile_many_with_scheduler_preflight<T>(
+        &self,
+        expected_route_generation: u64,
+        retired_activation_ids: &[String],
+        registrations: Vec<Arc<PreparedRegistration>>,
+        requests: &[SchedulerPreflightRequest],
+        prepare: impl FnOnce(SchedulerPreflightSnapshot) -> Result<T, MessageContractError>,
+        commit: impl FnOnce(T),
+    ) -> Result<MessageRouteSnapshot, MessageContractError> {
+        let mut updates = self.inner.updates.lock().await;
+        let current_generation = self.inner.routes.borrow().public.route_generation;
+        if current_generation != expected_route_generation {
+            return Err(MessageContractError::new(
+                ROUTE_GENERATION_CHANGED,
+                format!(
+                    "Expected message route generation {expected_route_generation}, found {current_generation}"
+                ),
+            ));
+        }
+
+        let mut next = updates.registrations.clone();
+        for activation_id in retired_activation_ids {
+            next.remove(activation_id);
+        }
+        for registration in registrations {
+            if next
+                .insert(
+                    registration.activation_id().to_string(),
+                    Arc::clone(&registration),
+                )
+                .is_some()
+            {
+                return Err(MessageContractError::new(
+                    DUPLICATE_CHANNEL_OWNER,
+                    format!(
+                        "Activation {:?} is already registered",
+                        registration.activation_id()
+                    ),
+                ));
+            }
+        }
+
+        let generation = self.inner.routes.borrow().public.route_generation + 1;
+        let table = Arc::new(RouteTable::build(&self.inner.context, generation, &next)?);
+        let errors = requests
+            .iter()
+            .enumerate()
+            .filter_map(|(request_index, request)| {
+                validate_scheduler_preflight_request(&table, request)
+                    .err()
+                    .map(|error| SchedulerPreflightError::new(request_index, error))
+            })
+            .collect::<Vec<_>>();
+        if let Some(error) = errors.first() {
+            return Err(error.error().clone());
+        }
+        let prepared = prepare(SchedulerPreflightSnapshot::from_routes(&table.public))?;
+        let snapshot = self.publish_table_locked(&mut updates, next, table);
+        commit(prepared);
+        Ok(snapshot)
+    }
+
     pub async fn publish_complete(
         &self,
         registrations: Vec<Arc<PreparedRegistration>>,
@@ -812,6 +883,15 @@ impl RuntimeMessageBus {
     ) -> Result<MessageRouteSnapshot, MessageContractError> {
         let generation = self.inner.routes.borrow().public.route_generation + 1;
         let table = Arc::new(RouteTable::build(&self.inner.context, generation, &next)?);
+        Ok(self.publish_table_locked(updates, next, table))
+    }
+
+    fn publish_table_locked(
+        &self,
+        updates: &mut UpdateState,
+        next: BTreeMap<String, Arc<PreparedRegistration>>,
+        table: Arc<RouteTable>,
+    ) -> MessageRouteSnapshot {
         let observations = Arc::clone(&self.inner.observations);
         let recorder: DeliveryRecorder =
             Arc::new(move |endpoint, envelope, generation, failure| {
@@ -840,7 +920,7 @@ impl RuntimeMessageBus {
             registration.withdraw_and_cancel();
             updates.retired.push(registration);
         }
-        Ok(table.public.clone())
+        table.public.clone()
     }
 
     pub async fn send(

@@ -422,7 +422,11 @@ ui:
     [
       "global_navigation:usage.global-navigation",
       "global_surface:core.usage",
-      "message_graph:shipctl.usage.messages",
+      "message_contract:usage.ingest-completed",
+      "message_contract:usage.refresh-request",
+      "message_handler:usage.refresh-request",
+      "message_publisher:usage.ingest-completed",
+      "message_subscription:usage.ingest-completed",
       "scheduled_task:usage.periodic-refresh",
       "settings:usage.settings",
       "sidebar:usage.sidebar",

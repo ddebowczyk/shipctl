@@ -32,6 +32,11 @@ function configuredSeed() {
 }
 
 const seed = configuredSeed();
+const environment = {
+  ...process.env,
+  SHIPCTL_PROPERTY_SEED: String(seed),
+  PROPTEST_RNG_SEED: String(seed),
+};
 const testFile = "ops/architecture/tests/liveReconciliation.test.mjs";
 const testArguments = ["exec", "node", "--test", "--test-concurrency=1", testFile];
 const replayCommand = [
@@ -42,7 +47,7 @@ const replayCommand = [
 
 const { stdout, stderr } = await exec("pnpm", testArguments, {
   cwd: repositoryRoot,
-  env: { ...process.env, SHIPCTL_PROPERTY_SEED: String(seed) },
+  env: environment,
 });
 process.stdout.write(stdout);
 process.stderr.write(stderr);
@@ -57,6 +62,17 @@ const native = await exec("cargo", [
 ], { cwd: repositoryRoot });
 process.stdout.write(native.stdout);
 process.stderr.write(native.stderr);
+
+const declaredScheduleTransaction = await exec("cargo", [
+  "test",
+  "-p",
+  "shipctl-tauri-adapter",
+  "message_bridge::tests::architecture_declared_schedule_transaction_property",
+  "--",
+  "--exact",
+], { cwd: repositoryRoot, env: environment });
+process.stdout.write(declaredScheduleTransaction.stdout);
+process.stderr.write(declaredScheduleTransaction.stderr);
 
 const controlPlane = await exec("cargo", [
   "test",
@@ -128,16 +144,27 @@ const properties = [
       comparison: ["live", "cold-start"],
     },
   },
+  {
+    propertyId: "PROP-F-SCHEDULE-ATOMIC-001",
+    testId: "architecture.declared-schedule-transaction.property",
+    language: "rust",
+    library: "proptest",
+    version: "1.11.0",
+    classifications: {
+      candidate: ["valid", "invalid"],
+      outcome: ["replace-routes-and-schedules", "retain-last-good-graph"],
+    },
+  },
 ];
 
 const evidenceFiles = [];
 for (const property of properties) {
   const evidence = propertyEvidence({
-    ...property,
     phaseId: "phase-f",
     language: "typescript",
     library: "fast-check",
     version: fastCheckVersion,
+    ...property,
     repository,
     seed,
     replayCommand,

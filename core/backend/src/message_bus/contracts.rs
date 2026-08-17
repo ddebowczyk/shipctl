@@ -25,9 +25,9 @@ pub struct MessageContractError {
 }
 
 impl MessageContractError {
-    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
-            code: code.to_string(),
+            code: code.into(),
             message: message.into(),
         }
     }

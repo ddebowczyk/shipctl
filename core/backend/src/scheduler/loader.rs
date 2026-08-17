@@ -74,6 +74,24 @@ impl ScheduleLoadCandidate {
         schedule_snapshot(generation, self.definitions.clone())
             .map_err(|error| vec![schedule_diagnostic(error.code.as_str(), None, None)])
     }
+
+    /// Adds ephemeral activation-owned definitions to the complete source
+    /// candidate. They follow the same duplicate-identity rule as files, but
+    /// do not need a durable source path because their owning activation is
+    /// already reconstructed from the module registry on restart.
+    pub fn with_runtime_definitions(
+        mut self,
+        definitions: impl IntoIterator<Item = ScheduleDefinition>,
+    ) -> Self {
+        self.definitions.extend(definitions);
+        self.definitions
+            .sort_by(|left, right| left.source_path.cmp(&right.source_path));
+        self.diagnostics
+            .retain(|diagnostic| diagnostic.code != DUPLICATE_ID);
+        append_duplicate_id_diagnostics(&self.definitions, &mut self.diagnostics);
+        sort_diagnostics(&mut self.diagnostics);
+        self
+    }
 }
 
 /// Discovers every direct source in `schedule_root`, parses all admissible

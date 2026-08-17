@@ -50,6 +50,12 @@ semantics:
     rule: >-
       Provider replacement validates consumers, routes atomically, and disposes
       the predecessor only after it is no longer public.
+  - id: SEM-F-010
+    kind: MUST
+    rule: >-
+      Declared schedules are part of the candidate route graph: their targets
+      are validated against the private successor, and a failure changes
+      neither the accepted schedules nor the public routes.
 properties:
   - id: PROP-F-RECONCILE-001
     claim: >-
@@ -117,6 +123,48 @@ properties:
       language: typescript
       library: fast-check
       test_id: architecture.catalog-atomicity.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-F-RESTART-LIFECYCLE]
+  - id: PROP-F-SCHEDULE-ATOMIC-001
+    claim: >-
+      Every declared-schedule candidate either replaces both its message routes
+      and accepted schedules, or retains the exact last-good route and
+      schedule snapshots.
+    shapes: [state-machine, safety]
+    evidence: [SEM-F-002, SEM-F-003, SEM-F-004, SEM-F-010]
+    domain:
+      generates: >-
+        Activation-qualified schedule identities and valid or invalid cron
+        expressions for a successor message-route owner.
+      excludes: [process crash, durable schedule-file corruption]
+      strategy: >-
+        Open a valid declared graph, then reconcile one generated successor.
+      classifications: [valid, invalid, replaced, retained]
+    preconditions:
+      - The initial declared schedule targets its own admitted message route.
+    oracle:
+      primary:
+        kind: invariant
+        description: >-
+          Compare message-bus and scheduler snapshots before and after the
+          candidate transaction.
+        independence: >-
+          The bus and scheduler maintain separate accepted snapshots.
+      alternative:
+        kind: reference
+        description: >-
+          Inspect the owner of every accepted route and every accepted schedule.
+        independence: Owner inspection does not use the candidate commit result.
+    failure_value: >-
+      An invalid candidate changes routes or schedules, or a valid candidate
+      exposes schedules from a different activation.
+    runner:
+      language: rust
+      library: proptest
+      test_id: architecture.declared-schedule-transaction.property
       shrink: required
       replay: required
     tiers: [pr]

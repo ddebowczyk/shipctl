@@ -41,6 +41,9 @@ fixture are proven.
 - **SEM-F-009:** Provider replacement validates all required-service bindings,
   atomically routes new calls to the accepted provider, and disposes the old
   provider only after it is no longer public.
+- **SEM-F-010:** Declared schedules are part of the candidate route graph.
+  Their targets validate against the private successor. A failure changes
+  neither the accepted schedules nor the public routes.
 
 ## Reconciler shape
 
@@ -119,6 +122,24 @@ and diagnostic records.
   handler is routed.
 - **Tier:** pull request.
 - **Current status/test ID:** passing / `architecture.catalog-atomicity.property`.
+
+### PROP-F-SCHEDULE-ATOMIC-001
+
+- **Claim:** Every declared-schedule candidate either replaces both its message
+  routes and accepted schedules, or retains the exact last-good route and
+  schedule snapshots.
+- **Shape:** state-machine and safety.
+- **Evidence:** SEM-F-002, SEM-F-003, SEM-F-004, SEM-F-010.
+- **Domain:** generated activation-qualified schedule identities and valid or
+  invalid cron expressions for a successor route owner. Process crash and
+  durable schedule-file corruption are excluded.
+- **Oracle:** compare the independently accepted message-bus and scheduler
+  snapshots; separately inspect the owner of every accepted route and schedule.
+- **Failure value:** a rejected schedule candidate exposes part of a successor
+  graph, or an accepted candidate retains an old activation schedule.
+- **Tier:** pull request.
+- **Current status/test ID:** passing /
+  `architecture.declared-schedule-transaction.property`.
 
 ### PROP-F-REVISION-001
 
@@ -236,6 +257,10 @@ are re-attached by identity rather than recreated.
   terminal, writes PTY canaries before and after live enable and remove,
   verifies one process and terminal identity, restarts the app, and verifies
   revision parity plus the durable disabled tombstone.
+- `core/tauri/src/message_bridge.rs` proves the native route-and-schedule
+  transaction. It rejects an invalid declared schedule while retaining the
+  exact prior route and scheduler snapshots, then accepts a replacement that
+  changes both together.
 
 Run the proof lanes with:
 

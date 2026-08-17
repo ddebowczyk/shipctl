@@ -1,6 +1,5 @@
 import {
   messagesService,
-  schedulerService,
   type ModuleActivationContext,
   type ModuleActivationId,
   type ModuleActivationIdentity,
@@ -132,18 +131,6 @@ export interface PluginActivationFailure {
   readonly moduleId: string;
   /** A redacted, stable reason that is safe to persist in runtime diagnostics. */
   readonly message: string;
-}
-
-/**
- * An activation error whose text was produced by the host runtime rather than
- * arbitrary plugin code. It may therefore be shown in inspection and notice
- * records. Generic plugin exceptions remain private to development logs.
- */
-class PublicPluginActivationFailure extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "PublicPluginActivationFailure";
-  }
 }
 
 export interface ObservedStaticPluginActivation {
@@ -418,16 +405,9 @@ export class CordisStaticPluginRuntime {
             `Scheduled task ${task.id} belongs to ${task.moduleId}, not ${module.id}`,
           );
         }
-        const scheduler = access.require(schedulerService);
-        const outcome = await scheduler.registerSchedule.execute({
-          scheduleId: task.id,
-          ...task.schedule,
-        });
-        if (!outcome.result.ok) {
-          throw new PublicPluginActivationFailure(
-            `Scheduled task ${task.id} was rejected: ${outcome.result.error.code}`,
-          );
-        }
+        // The host commits declared schedules with the candidate message-route
+        // graph. Registering a schedule here would make it an independent,
+        // non-transactional side effect of plugin activation.
         recordEffect("scheduled-task", task.id);
       }
 
@@ -511,12 +491,7 @@ export class CordisStaticPluginRuntime {
         role: definition.role,
         status: "failed",
       });
-      this.#failureMessages.set(
-        module.id,
-        error instanceof PublicPluginActivationFailure
-          ? error.message
-          : "Plugin activation failed",
-      );
+      this.#failureMessages.set(module.id, "Plugin activation failed");
       if (import.meta.env.DEV) console.error(`Plugin ${module.id} activation failed:`, error);
       return false;
     }

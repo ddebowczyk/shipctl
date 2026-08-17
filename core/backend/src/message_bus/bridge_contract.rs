@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::module_control::ModuleGrant;
+use crate::scheduler::RegisterScheduleInput;
 
 use super::contracts::{
     MessageContractError, MessageDeclarations, MessageEnvelope, MessageRouteSnapshot, MessageTypeId,
@@ -19,6 +20,10 @@ pub struct FrontendBridgeRegistration {
     #[serde(default)]
     pub grants: Vec<ModuleGrant>,
     pub declarations: MessageDeclarations,
+    /// Declarative schedules are admitted with this registration family.
+    /// They are never an imperative plugin activation side effect.
+    #[serde(default)]
+    pub scheduled_tasks: Vec<RegisterScheduleInput>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

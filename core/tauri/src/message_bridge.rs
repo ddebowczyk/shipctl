@@ -17,7 +17,9 @@ use shipctl_core::message_bus::{
     BRIDGE_CLOSED, DUPLICATE_CHANNEL_OWNER, HANDLER_FAILED, HANDLER_UNAVAILABLE,
     INVALID_IDENTIFIER, NO_ACTIVE_CHANNEL_OWNER, SUBSCRIBER_LAG, UNAUTHORIZED_SENDER,
 };
-use shipctl_core::scheduler::SchedulerLeaseService;
+use shipctl_core::scheduler::{
+    DeclaredScheduleRegistration, SchedulerActor, SchedulerLeaseService,
+};
 struct OrderedChannel {
     bridge_id: String,
     next_sequence: u64,
@@ -429,6 +431,35 @@ impl MessageBusBridgeService {
         Ok((prepared, authorities))
     }
 
+    fn declared_schedules(
+        registrations: &[FrontendBridgeRegistration],
+        authorities: &BTreeMap<String, ModuleMessageAuthority>,
+    ) -> Result<Vec<DeclaredScheduleRegistration>, MessageContractError> {
+        let mut declarations = Vec::new();
+        for registration in registrations {
+            let authority = authorities
+                .get(&registration.activation_id)
+                .cloned()
+                .ok_or_else(|| {
+                    MessageContractError::new(
+                        UNAUTHORIZED_SENDER,
+                        "Scheduled work has no admitted activation authority",
+                    )
+                })?;
+            declarations.extend(registration.scheduled_tasks.iter().cloned().map(|input| {
+                DeclaredScheduleRegistration {
+                    actor: SchedulerActor {
+                        module_id: registration.module_id.clone(),
+                        activation_id: registration.activation_id.clone(),
+                    },
+                    authority: authority.clone(),
+                    input,
+                }
+            }));
+        }
+        Ok(declarations)
+    }
+
     fn start_subscriptions(
         &self,
         bridge: &Arc<FrontendBridge>,
@@ -488,7 +519,34 @@ impl MessageBusBridgeService {
         let (prepared, authorities) =
             self.prepare_frontend_registrations(&bridge, &registrations)?;
 
-        let snapshot = self.bus.register_many(prepared.clone()).await?;
+        let snapshot = match &self.scheduler_leases {
+            Some(scheduler_leases) => scheduler_leases
+                .reconcile_declared(
+                    self.bus.snapshot().route_generation,
+                    &[],
+                    prepared.clone(),
+                    Self::declared_schedules(&registrations, &authorities)?,
+                )
+                .await
+                .map_err(|error| {
+                    MessageContractError::new(
+                        error.code,
+                        "The route-and-schedule candidate was rejected",
+                    )
+                })?,
+            None => {
+                if registrations
+                    .iter()
+                    .any(|registration| !registration.scheduled_tasks.is_empty())
+                {
+                    return Err(MessageContractError::new(
+                        INVALID_IDENTIFIER,
+                        "The scheduler is unavailable for declared module work",
+                    ));
+                }
+                self.bus.register_many(prepared.clone()).await?
+            }
+        };
         let subscriptions = self.start_subscriptions(&bridge, &registrations, &authorities)?;
         *bridge
             .registrations
@@ -530,14 +588,40 @@ impl MessageBusBridgeService {
             .map(|registration| registration.activation_id().to_string())
             .collect::<Vec<_>>();
 
-        let snapshot = self
-            .bus
-            .reconcile_many(
-                expected_route_generation,
-                &retired_activation_ids,
-                prepared.clone(),
-            )
-            .await?;
+        let snapshot = match &self.scheduler_leases {
+            Some(scheduler_leases) => scheduler_leases
+                .reconcile_declared(
+                    expected_route_generation,
+                    &retired_activation_ids,
+                    prepared.clone(),
+                    Self::declared_schedules(&registrations, &authorities)?,
+                )
+                .await
+                .map_err(|error| {
+                    MessageContractError::new(
+                        error.code,
+                        "The route-and-schedule candidate was rejected",
+                    )
+                })?,
+            None => {
+                if registrations
+                    .iter()
+                    .any(|registration| !registration.scheduled_tasks.is_empty())
+                {
+                    return Err(MessageContractError::new(
+                        INVALID_IDENTIFIER,
+                        "The scheduler is unavailable for declared module work",
+                    ));
+                }
+                self.bus
+                    .reconcile_many(
+                        expected_route_generation,
+                        &retired_activation_ids,
+                        prepared.clone(),
+                    )
+                    .await?
+            }
+        };
         let subscriptions = self.start_subscriptions(&bridge, &registrations, &authorities)?;
         *bridge
             .registrations
@@ -764,6 +848,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
+    use proptest::prelude::*;
     use serde_json::json;
     use tauri::ipc::InvokeResponseBody;
 
@@ -907,11 +992,33 @@ mod tests {
             })
             .collect(),
             declarations: declarations(),
+            scheduled_tasks: Vec::new(),
         }
     }
 
     fn registration() -> FrontendBridgeRegistration {
         registration_for("fixture@digest#activation")
+    }
+
+    fn declared_registration(
+        activation_id: &str,
+        schedule_id: &str,
+        cron: &str,
+    ) -> FrontendBridgeRegistration {
+        let mut registration = registration_for(activation_id);
+        registration.scheduled_tasks = vec![RegisterScheduleInput {
+            schedule_id: schedule_id.to_string(),
+            cron: cron.to_string(),
+            target: ScheduleRegistrationTarget {
+                kind: ScheduleTargetKind::Channel,
+                endpoint: ScheduleRegistrationEndpoint {
+                    id: CHANNEL.to_string(),
+                    message: message(MESSAGE),
+                },
+            },
+            payload: json!({"value": 1}),
+        }];
+        registration
     }
 
     fn test_channel(frames: Arc<Mutex<Vec<HostMessageFrame>>>) -> Channel<HostMessageFrame> {
@@ -1209,5 +1316,189 @@ mod tests {
         assert!(leases.inspect(&actor, &authority).unwrap().is_empty());
         assert!(scheduler.accepted_snapshot().definitions.is_empty());
         assert!(std::fs::read_dir(schedule_root).unwrap().next().is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn declared_schedules_commit_with_routes_and_failed_candidates_preserve_the_last_good_graph(
+    ) {
+        let temporary = tempdir().unwrap();
+        let mut context = context();
+        context.state_root = temporary.path().to_path_buf();
+        context.runtime_root = temporary.path().join("runtime");
+        let schedule_root = context.paths().schedule_root;
+        let bus = RuntimeMessageBus::new(context.clone());
+        let scheduler = SchedulerService::new(context, &schedule_root, bus.clone()).unwrap();
+        let leases = SchedulerLeaseService::new(scheduler.clone(), DurableWriteBarrier::default());
+        let service = MessageBusBridgeService::with_scheduler_leases(bus.clone(), leases.clone());
+        scheduler.start_initial_route_refresh();
+        tokio::task::yield_now().await;
+        let frames = Arc::new(Mutex::new(Vec::new()));
+        let old_registration = declared_registration(
+            "fixture@digest#old",
+            "fixture.old-refresh",
+            "* * * * * Etc/UTC",
+        );
+        let old_activation_id = old_registration.activation_id.clone();
+        let receipt = service
+            .open(vec![old_registration], test_channel(Arc::clone(&frames)))
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        let last_good_routes = bus.snapshot();
+        let last_good_schedules = scheduler.accepted_snapshot();
+        assert_eq!(
+            last_good_schedules
+                .definitions
+                .iter()
+                .map(|definition| definition.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fixture.old-refresh"],
+        );
+
+        let rejected = service
+            .reconcile(
+                &receipt.bridge_id,
+                receipt.snapshot.route_generation,
+                vec![declared_registration(
+                    "fixture@digest#invalid",
+                    "fixture.invalid-refresh",
+                    "* * * * *",
+                )],
+            )
+            .await
+            .unwrap_err();
+        assert!(!rejected.code.is_empty());
+        assert_eq!(bus.snapshot(), last_good_routes);
+        assert_eq!(scheduler.accepted_snapshot(), last_good_schedules);
+        service
+            .send(
+                &receipt.bridge_id,
+                &old_activation_id,
+                envelope(CHANNEL, MESSAGE, 1),
+            )
+            .await
+            .unwrap();
+        wait_until(|| frames.lock().unwrap().len() == 1).await;
+
+        let committed = service
+            .reconcile(
+                &receipt.bridge_id,
+                receipt.snapshot.route_generation,
+                vec![declared_registration(
+                    "fixture@digest#new",
+                    "fixture.new-refresh",
+                    "* * * * * Etc/UTC",
+                )],
+            )
+            .await
+            .unwrap();
+        assert!(committed.snapshot.route_generation > last_good_routes.route_generation);
+        assert_eq!(
+            scheduler
+                .accepted_snapshot()
+                .definitions
+                .iter()
+                .map(|definition| definition.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fixture.new-refresh"],
+        );
+        assert!(bus
+            .snapshot()
+            .channels
+            .iter()
+            .all(|route| route.owner_activation_id == "fixture@digest#new"));
+        service.close(&receipt.bridge_id).await.unwrap();
+    }
+
+    proptest! {
+        #[test]
+        fn architecture_declared_schedule_transaction_property(
+            suffix in "[a-z]{1,12}",
+            invalid_candidate in any::<bool>(),
+        ) {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    let temporary = tempdir().unwrap();
+                    let mut context = context();
+                    context.state_root = temporary.path().to_path_buf();
+                    context.runtime_root = temporary.path().join("runtime");
+                    let schedule_root = context.paths().schedule_root;
+                    let bus = RuntimeMessageBus::new(context.clone());
+                    let scheduler = SchedulerService::new(context, &schedule_root, bus.clone()).unwrap();
+                    let leases = SchedulerLeaseService::new(
+                        scheduler.clone(),
+                        DurableWriteBarrier::default(),
+                    );
+                    let service = MessageBusBridgeService::with_scheduler_leases(
+                        bus.clone(),
+                        leases,
+                    );
+                    scheduler.start_initial_route_refresh();
+                    tokio::task::yield_now().await;
+
+                    let old_activation_id = format!("fixture@digest#{suffix}-old");
+                    let old_schedule_id = format!("fixture.{suffix}.old-refresh");
+                    let receipt = service
+                        .open(
+                            vec![declared_registration(
+                                &old_activation_id,
+                                &old_schedule_id,
+                                "* * * * * Etc/UTC",
+                            )],
+                            test_channel(Arc::new(Mutex::new(Vec::new()))),
+                        )
+                        .await
+                        .unwrap();
+                    tokio::task::yield_now().await;
+                    let last_good_routes = bus.snapshot();
+                    let last_good_schedules = scheduler.accepted_snapshot();
+
+                    let new_activation_id = format!("fixture@digest#{suffix}-new");
+                    let new_schedule_id = format!("fixture.{suffix}.new-refresh");
+                    let candidate_cron = if invalid_candidate {
+                        "* * * * *"
+                    } else {
+                        "* * * * * Etc/UTC"
+                    };
+                    let transition = service
+                        .reconcile(
+                            &receipt.bridge_id,
+                            receipt.snapshot.route_generation,
+                            vec![declared_registration(
+                                &new_activation_id,
+                                &new_schedule_id,
+                                candidate_cron,
+                            )],
+                        )
+                        .await;
+
+                    if invalid_candidate {
+                        assert!(transition.is_err());
+                        assert_eq!(bus.snapshot(), last_good_routes);
+                        assert_eq!(scheduler.accepted_snapshot(), last_good_schedules);
+                    } else {
+                        let committed = transition.unwrap();
+                        assert!(
+                            committed.snapshot.route_generation > last_good_routes.route_generation
+                        );
+                        assert_eq!(
+                            scheduler
+                                .accepted_snapshot()
+                                .definitions
+                                .iter()
+                                .map(|definition| definition.id.as_str())
+                                .collect::<Vec<_>>(),
+                            vec![new_schedule_id.as_str()],
+                        );
+                        assert!(bus.snapshot().channels.iter().all(|route| {
+                            route.owner_activation_id == new_activation_id
+                        }));
+                    }
+                    service.close(&receipt.bridge_id).await.unwrap();
+                });
+        }
     }
 }

@@ -21,9 +21,10 @@ pub use contracts::{
 };
 pub use diagnostics::{ScheduleDiagnostic, ScheduleDiagnosticSeverity};
 pub use leases::{
-    purge_stale_lease_sources, RegisterScheduleInput, ScheduleLeaseInspection, SchedulerActor,
-    SchedulerDeliveryFrame, SchedulerLeaseError, SchedulerLeaseService, SCHEDULER_INVALID_REQUEST,
-    SCHEDULER_REGISTER_GRANT, SCHEDULER_SERVICE_SCHEMA_VERSION,
+    purge_stale_lease_sources, DeclaredScheduleRegistration, RegisterScheduleInput,
+    ScheduleLeaseInspection, SchedulerActor, SchedulerDeliveryFrame, SchedulerLeaseError,
+    SchedulerLeaseService, SCHEDULER_INVALID_REQUEST, SCHEDULER_REGISTER_GRANT,
+    SCHEDULER_SERVICE_SCHEMA_VERSION,
 };
 pub use loader::{load_schedule_candidate, ScheduleLoadCandidate};
 pub use runtime::{

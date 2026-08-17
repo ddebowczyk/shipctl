@@ -8,10 +8,6 @@ import type {
   ShipctlModule,
 } from "@shipctl/module-api";
 import { messagesService } from "@shipctl/module-api";
-import type {
-  FakeSchedulerClock as FakeSchedulerClockType,
-  createFakeSchedulerServiceProvider as CreateFakeSchedulerServiceProvider,
-} from "@shipctl/module-api/testing";
 import { createServer, type ViteDevServer } from "vite";
 
 import type { BuiltinGlobalSurfaceLoaders } from "../builtinGlobalSurfaceAdapters.ts";
@@ -29,8 +25,6 @@ let createEnabledPanelRegistry: ModuleComposition["createEnabledPanelRegistry"];
 let createEnabledGlobalSurfaceRegistry: ModuleComposition["createEnabledGlobalSurfaceRegistry"];
 let activateStaticPluginsObserved: StaticPluginRuntime["activateStaticPluginsObserved"];
 let createMessagesServiceProvider: typeof import("../../platform/messages.ts")["createMessagesServiceProvider"];
-let createFakeSchedulerServiceProvider: typeof CreateFakeSchedulerServiceProvider;
-let FakeSchedulerClock: typeof FakeSchedulerClockType;
 let SemanticServiceRegistry: typeof import("../../runtime/semanticServiceRuntime.ts")["SemanticServiceRegistry"];
 let discoverRelatedProjectPaths: ModuleComposition["discoverRelatedProjectPaths"];
 let moduleProjectNavigationContributions: ModuleComposition["moduleProjectNavigationContributions"];
@@ -88,9 +82,6 @@ before(async () => {
   ));
   ({ SemanticServiceRegistry } = await vite.ssrLoadModule(
     "/core/frontend/runtime/semanticServiceRuntime.ts",
-  ));
-  ({ createFakeSchedulerServiceProvider, FakeSchedulerClock } = await vite.ssrLoadModule(
-    "/module-api/frontend/src/testing.ts",
   ));
 });
 
@@ -263,10 +254,9 @@ test("disabled profile removes module global surfaces and navigation", () => {
   );
 });
 
-test("default profile enables the extracted TODO panel", () => {
+test("static profile leaves Todos to its admitted artifact", () => {
   const registry = createEnabledPanelRegistry();
-  assert.equal(registry.has("todos.board"), true);
-  assert.equal(registry.panel("todos.board")?.migrationAlias?.kind, "todos");
+  assert.equal(registry.has("todos.board"), false);
 });
 
 test("static profile leaves Ports to its admitted artifact", () => {
@@ -278,20 +268,20 @@ test("static profile leaves Ports to its admitted artifact", () => {
   );
 });
 
-test("default profile composes Usage only through its module contributions", () => {
+test("static profile leaves Usage to its admitted artifact", () => {
   const registry = createEnabledGlobalSurfaceRegistry(builtinGlobalSurfaceLoaders);
-  assert.equal(registry.surface("core.usage")?.moduleId, "shipctl.usage");
+  assert.equal(registry.has("core.usage"), false);
   assert.equal(
-    registry.navigation().find(({ id }) => id === "usage.global-navigation")?.surfaceId,
-    "core.usage",
+    registry.navigation().some(({ id }) => id === "usage.global-navigation"),
+    false,
   );
   assert.equal(
-    moduleSidebarContributions().find(({ id }) => id === "usage.sidebar")?.surfaceId,
-    "core.usage",
+    moduleSidebarContributions().some(({ id }) => id === "usage.sidebar"),
+    false,
   );
   assert.deepEqual(
     moduleSettingsContributions(undefined, "terminal.after").map(({ id }) => id),
-    ["usage.settings"],
+    [],
   );
 });
 
@@ -391,20 +381,8 @@ test("sidebar contributions are ordered, module-owned, and absent when disabled"
   );
 });
 
-test("module schedules use typed targets and activation-owned cleanup", async () => {
+test("module schedules remain declarations until the host transaction commits", async () => {
   const calls: string[] = [];
-  const clock = new FakeSchedulerClock(0);
-  clock.setOccurrences("scheduled.first", [1_000, 2_000]);
-  clock.setOccurrences("scheduled.second", [1_000, 2_000]);
-  const registry = new SemanticServiceRegistry([
-    createFakeSchedulerServiceProvider({
-      clock,
-      deliver: (input) => {
-        calls.push(input.scheduleId);
-        return { outcome: "delivered", routeGeneration: 1 };
-      },
-    }),
-  ]);
   const endpoint = {
     id: "scheduled.refresh",
     message: { id: "scheduled.refresh", version: 1 },
@@ -445,17 +423,18 @@ test("module schedules use typed targets and activation-owned cleanup", async ()
   const activation = await activateStaticPluginsObserved(
     services,
     [scheduledModule],
-    new Map(),
-    registry,
   );
   assert.deepEqual(activation.failures, []);
   assert.deepEqual(calls, ["activate"]);
-  await clock.advanceTo(1_000);
-  assert.deepEqual(calls, ["activate", "scheduled.first", "scheduled.second"]);
+  assert.deepEqual(
+    activation.inspect().effects
+      .filter((effect) => effect.kind === "scheduled-task")
+      .map((effect) => effect.id),
+    ["scheduled.first", "scheduled.second"],
+  );
 
   await activation.deactivate();
-  await clock.advanceTo(2_000);
-  assert.deepEqual(calls, ["activate", "scheduled.first", "scheduled.second", "deactivate"]);
+  assert.deepEqual(calls, ["activate", "deactivate"]);
 });
 
 test("disabled and invalid scheduled-task profiles fail safely", () => {
@@ -481,19 +460,8 @@ test("disabled and invalid scheduled-task profiles fail safely", () => {
   );
 });
 
-test("partial scheduler registration is rolled back with module activation", async () => {
+test("invalid schedule declarations are deferred to the native candidate transaction", async () => {
   const calls: string[] = [];
-  const clock = new FakeSchedulerClock(0);
-  clock.setOccurrences("rollback.first", [1_000]);
-  const registry = new SemanticServiceRegistry([
-    createFakeSchedulerServiceProvider({
-      clock,
-      deliver: () => {
-        calls.push("delivered");
-        return { outcome: "delivered", routeGeneration: 1 };
-      },
-    }),
-  ]);
   const schedule = {
     cron: "* * * * * Etc/UTC",
     target: {
@@ -523,25 +491,15 @@ test("partial scheduler registration is rolled back with module activation", asy
     ],
   };
 
-  const originalConsoleError = console.error;
-  console.error = () => undefined;
-  try {
-    const activation = await activateStaticPluginsObserved(
-      services,
-      [module],
-      new Map(),
-      registry,
-    );
-    assert.deepEqual(activation.failures, [{
-      moduleId: module.id,
-      message: "Scheduled task rollback.invalid was rejected: scheduler.request.invalid",
-    }]);
-    await activation.deactivate();
-  } finally {
-    console.error = originalConsoleError;
-  }
-
-  await clock.advanceTo(1_000);
+  const activation = await activateStaticPluginsObserved(services, [module]);
+  assert.deepEqual(activation.failures, []);
+  assert.deepEqual(
+    activation.inspect().effects
+      .filter((effect) => effect.kind === "scheduled-task")
+      .map((effect) => effect.id),
+    ["rollback.first", "rollback.invalid"],
+  );
+  await activation.deactivate();
   assert.deepEqual(calls, ["deactivate"]);
 });
 

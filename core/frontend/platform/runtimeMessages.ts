@@ -5,6 +5,7 @@ import type {
   MessageEnvelope,
   MessageRouteSnapshot,
   PublishReceipt,
+  RegisterScheduleInput,
 } from "@shipctl/module-api";
 
 export type HostMessageFrameKind = "directed" | "broadcast" | "portRequest";
@@ -17,6 +18,7 @@ export interface FrontendBridgeRegistration {
     readonly effective: boolean;
   }[];
   readonly declarations: MessageDeclarations;
+  readonly scheduledTasks: readonly RegisterScheduleInput<unknown>[];
 }
 
 export interface HostMessageFrame {

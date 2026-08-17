@@ -94,6 +94,17 @@ export function prepareModuleMessageActivation(
   activation: ModuleMessageActivation,
 ): PreparedModuleMessageActivation {
   const messages = activation.module.messages;
+  const scheduledTasks = (activation.module.scheduledTasks ?? []).map((task) => {
+    if (task.moduleId !== activation.module.id) {
+      throw new Error(
+        `Scheduled task ${task.id} belongs to ${task.moduleId}, not ${activation.module.id}`,
+      );
+    }
+    return {
+      scheduleId: task.id,
+      ...task.schedule,
+    };
+  });
   return {
     moduleId: activation.module.id,
     activationId: activation.activationId,
@@ -103,6 +114,7 @@ export function prepareModuleMessageActivation(
       activationId: activation.activationId,
       grants: activation.grants.map((id) => ({ id, effective: true })),
       declarations: messageDeclarations(activation.module),
+      scheduledTasks,
     },
     handlers: {
       directed: grouped(messages?.handles ?? []),
