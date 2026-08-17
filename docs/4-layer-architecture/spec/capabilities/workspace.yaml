@@ -9,6 +9,7 @@ layer: application-runtime
 consumers: [commands, assistants, git, ports, skills, todos, usage]
 current_implementations:
   - core/frontend/host/moduleComposition.ts
+  - core/frontend/host/workspaceContributionCatalog.ts
   - core/frontend/canvas
 target_owners:
   provider: core/frontend/workspace

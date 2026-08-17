@@ -33,6 +33,7 @@ import {
 } from "./messageBusBridge.ts";
 import type { ModuleMessageActivation } from "./moduleMessageContext.ts";
 import { loadRuntimeModules } from "./runtimeModuleLoader.ts";
+import type { WorkspaceContributionCatalog } from "./workspaceContributionCatalog.ts";
 
 export interface LiveModuleFamily {
   readonly registryRevision: number;
@@ -40,7 +41,15 @@ export interface LiveModuleFamily {
   readonly activationContextsByModule: ReadonlyMap<ModuleId, ModuleActivationContext>;
   readonly artifactDescriptorsByModule: ReadonlyMap<string, RuntimeModuleDescriptor>;
   readonly inspection: PluginRuntimeInspection;
+  /**
+   * A private, immutable host catalog compiled before this family becomes
+   * public. It contains a data-only semantic workspace catalog plus renderer
+   * loaders that never escape through the workspace service.
+   */
+  readonly workspaceContributions?: WorkspaceContributionCatalog;
 }
+
+type LiveModuleFamilyInput = Omit<LiveModuleFamily, "workspaceContributions">;
 
 export interface LiveModuleSupervisorOptions {
   readonly staticModules: readonly ShipctlModule[];
@@ -54,6 +63,14 @@ export interface LiveModuleSupervisorOptions {
   readonly reportRejected?: (diagnostic: ReconciliationDiagnostic) => void | Promise<void>;
   readonly getCatalog?: () => Promise<RuntimeModuleCatalog>;
   readonly observeRevisions?: typeof observeModuleRegistryRevisions;
+  /**
+   * Compiles accepted activation-owned UI declarations while the candidate is
+   * still private. It must not activate modules or mutate durable workspace
+   * state; publication remains owned by this supervisor.
+   */
+  readonly createWorkspaceContributions?: (
+    family: LiveModuleFamilyInput,
+  ) => WorkspaceContributionCatalog;
 }
 
 interface PreparedFamilyCandidate extends RuntimeCandidate<LiveModuleFamily> {
@@ -365,7 +382,7 @@ export class LiveModuleSupervisor {
     const dynamicModules = loaded.modules.filter(
       (module) => activation.activeModuleIds.has(module.id),
     );
-    const family = Object.freeze({
+    const familyInput: LiveModuleFamilyInput = Object.freeze({
       registryRevision: desired.registryRevision,
       modules: Object.freeze([...this.#staticModules, ...dynamicModules]),
       activationContextsByModule: new Map([
@@ -375,6 +392,17 @@ export class LiveModuleSupervisor {
       artifactDescriptorsByModule: descriptorsByModule,
       inspection: combineInspection(this.#staticInspection, activation.inspect()),
     });
+    let family: LiveModuleFamily;
+    try {
+      const workspaceContributions = this.#options.createWorkspaceContributions?.(familyInput);
+      family = Object.freeze({
+        ...familyInput,
+        ...(workspaceContributions === undefined ? {} : { workspaceContributions }),
+      });
+    } catch (error) {
+      await activation.deactivate().catch(() => undefined);
+      throw error;
+    }
     let disposed = false;
     return {
       desired,
@@ -433,9 +461,12 @@ export class LiveModuleSupervisor {
     accepted: AcceptedRuntime<LiveModuleFamily>,
     desired: DesiredPluginSnapshot,
   ): AcceptedRuntime<LiveModuleFamily> {
-    const family = Object.freeze({
+    const workspaceContributions = accepted.publicFamily.workspaceContributions
+      ?.withRegistryRevision(desired.registryRevision);
+    const family: LiveModuleFamily = Object.freeze({
       ...accepted.publicFamily,
       registryRevision: desired.registryRevision,
+      ...(workspaceContributions === undefined ? {} : { workspaceContributions }),
     });
     this.#notifyPublished(family);
     return { desired, publicFamily: family, dispose: accepted.dispose };

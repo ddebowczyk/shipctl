@@ -67,7 +67,8 @@ import { getErrorMessage } from "../platform/index.ts";
 import { useNoticeStore } from "../shared/index.ts";
 import {
   bindTerminalSessionDimensions,
-  createEnabledCanvasSurfaceCatalog,
+  BUILTIN_GLOBAL_NAVIGATION,
+  createBuiltinGlobalSurfaceContributions,
   MODULE_HOST_SERVICES,
   ENABLED_MODULES,
   notifyModulesBeforeShutdown,
@@ -78,6 +79,8 @@ import {
   LiveModuleSupervisor,
   publishFrontendRuntimeSnapshot,
   type ShipctlModule,
+  type LiveModuleFamily,
+  WorkspaceContributionCatalog,
 } from "../host/index.ts";
 import {
   matchesPanelShortcut,
@@ -140,6 +143,36 @@ function fallbackWorkspaceName(repoPath: string) {
   return repoPath.split("/").filter(Boolean).pop() ?? "Project";
 }
 
+/**
+ * Build the host's private renderer catalog from an already activated runtime
+ * family. The resulting semantic catalog contains only data; React loaders
+ * remain behind this host boundary.
+ */
+function createWorkspaceContributions(
+  family: Pick<
+    LiveModuleFamily,
+    "registryRevision" | "modules" | "activationContextsByModule"
+  >,
+): WorkspaceContributionCatalog {
+  return WorkspaceContributionCatalog.create({
+    registryRevision: family.registryRevision,
+    modules: family.modules,
+    activationContextsByModule: family.activationContextsByModule,
+    hostContributions: [{
+      moduleId: "core",
+      activation: CORE_ACTIVATION,
+      globalSurfaces: createBuiltinGlobalSurfaceContributions(BUILTIN_GLOBAL_SURFACE_LOADERS),
+      globalNavigation: BUILTIN_GLOBAL_NAVIGATION,
+    }],
+  });
+}
+
+const INITIAL_WORKSPACE_CONTRIBUTIONS = createWorkspaceContributions({
+  registryRevision: 0,
+  modules: [],
+  activationContextsByModule: new Map<ModuleId, ModuleActivationContext>(),
+});
+
 export interface AppShellProps {
   /** Resolved once by bootstrap before terminal registry work can start. */
   readonly canvasAdapter: CanvasAdapterView;
@@ -159,15 +192,13 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
   const [moduleRuntime, setModuleRuntime] = useState({
     moduleActivations: CORE_MODULE_ACTIVATIONS,
-    activeModules: ENABLED_MODULES as readonly ShipctlModule[],
+    activeModules: [] as readonly ShipctlModule[],
+    workspaceContributions: INITIAL_WORKSPACE_CONTRIBUTIONS,
   });
   const { moduleActivations, activeModules } = moduleRuntime;
   const lastTabCycleAtRef = useRef(0);
 
-  const canvasSurfaceCatalog = useMemo(
-    () => createEnabledCanvasSurfaceCatalog(BUILTIN_GLOBAL_SURFACE_LOADERS, activeModules),
-    [activeModules],
-  );
+  const canvasSurfaceCatalog = moduleRuntime.workspaceContributions.canvasSurfaceCatalog;
   const modulePanelContributions = useMemo(
     () => canvasSurfaceCatalog.panels().filter((panel) => panel.moduleId !== "core"),
     [canvasSurfaceCatalog],
@@ -320,11 +351,22 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
           runtime: ACTIVATION_TERMINAL_SESSIONS,
         }),
       ]),
+      createWorkspaceContributions,
       publish: (family) => {
         if (disposed) return;
+        const workspaceContributions = family.workspaceContributions;
+        if (workspaceContributions === undefined) {
+          pushNotice({
+            tone: "error",
+            title: "Workspace contributions were not published",
+            message: "The accepted runtime family has no canvas contribution catalog.",
+          });
+          return;
+        }
         setModuleRuntime({
           activeModules: family.modules,
           moduleActivations: withCoreActivation(family.activationContextsByModule),
+          workspaceContributions,
         });
       },
       reportApplied: async (family) => {

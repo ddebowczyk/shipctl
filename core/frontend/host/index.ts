@@ -27,6 +27,20 @@ export type {
   CanvasSurfaceLoadKind,
 } from "./canvasSurfaceCatalog.ts";
 export {
+  WorkspaceContributionCatalog,
+  WorkspaceContributionCatalogError,
+} from "./workspaceContributionCatalog.ts";
+export type {
+  ActivatedWorkspaceContribution,
+  WorkspaceContributionCatalogInput,
+  WorkspaceContributionCatalogInspection,
+  WorkspaceContributionFamily,
+  WorkspaceContributionOwner,
+  WorkspaceContributionRecord,
+  WorkspaceContributionSource,
+  WorkspaceRendererEntry,
+} from "./workspaceContributionCatalog.ts";
+export {
   BUILTIN_GLOBAL_NAVIGATION,
   createBuiltinGlobalSurfaceContributions,
 } from "./builtinGlobalSurfaceAdapters.ts";

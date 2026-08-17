@@ -101,7 +101,10 @@ function definition(value: unknown): WorkspaceViewDefinition {
   ]);
   if (
     !hasWorkspaceName(candidate.viewTypeId)
-    || !hasWorkspaceName(candidate.ownerModuleId)
+    // Module IDs originate in the runtime contract. The host is currently
+    // identified as `core`, while installed artifacts use scoped IDs. A view
+    // type remains scoped; its owner must only be a stable, inspectable ID.
+    || !hasIdentity(candidate.ownerModuleId)
     || !hasIdentity(candidate.ownerActivationId)
     || !hasIdentity(candidate.label)
   ) invalid("Workspace view identity is invalid.");

@@ -24,11 +24,34 @@ compare-and-save persistence, and a public semantic service with structured
 inspection and observations. The authority accepts only an already admitted
 catalog snapshot. It does not discover, load, authorize, or activate plugins.
 
-The current canvas remains unchanged. It is deliberately not a second source
-of workspace state. The next integration step will make the existing and
-Layman canvas adapters project this document through a private renderer bridge.
-That step must also supply renderer parity, activation cleanup, and plug-out
-proofs before the Phase G closure conditions can pass.
+The first integration slice now compiles a `WorkspaceContributionCatalog` for
+each candidate runtime family before it is published. The compiler accepts
+only active module contexts, records the owner module and activation for every
+current UI contribution family, and produces two separate outputs:
+
+- a renderer-neutral `WorkspaceCatalogSnapshot` for panels and global
+  surfaces, which are current view-instance candidates; and
+- a private `CanvasSurfaceCatalog` and renderer lookup for the legacy canvas.
+
+`AppShell` now takes its current canvas surfaces from that accepted catalog,
+not from its own direct static module list. Navigation, sidebars, project
+layout, commands, project actions, and settings are also admitted with typed,
+activation-owned records. They are not falsely represented as workspace view
+definitions: each needs its own semantic descriptor and renderer projection.
+
+This slice deliberately does not reconcile the catalog into
+`WorkspaceAuthority` or persist a semantic workspace document. That operation
+must commit with message routes and declared schedules as one transaction with
+rollback. The candidate compiler is pure and runs before the existing runtime
+publication; it does not reorder that publication or introduce a durable side
+effect. The next integration slice will add that transaction, then project the
+document through legacy and Layman adapters with renderer parity, activation
+cleanup, and plug-out proofs.
+
+Panel migration aliases remain legacy tab-persistence kinds (for example,
+`git`) and are intentionally not admitted as semantic workspace aliases. A
+future persistence migration must convert them explicitly rather than mixing
+two identity systems.
 
 ## Normative semantics
 
@@ -94,6 +117,14 @@ user layout actions back as semantic commands.
    module-crate deletion gates.
 9. Make architecture, property, packaged-app, and control-plane proofs required
    release gates.
+
+### Current supporting proof
+
+`architecture.workspace-contribution-catalog.property` generates admitted
+plugin subsets, retains a family across a registry-only revision, replaces
+activation identities, and removes selected plugins. It proves catalog
+admission and ownership cleanup only; it is not evidence for full mounted
+component or stylesheet cleanup, which remains `PROP-G-CONTRIBUTION-CLEANUP-001`.
 
 ## Property cards
 
