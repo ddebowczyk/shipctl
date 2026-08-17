@@ -39,6 +39,9 @@ assistant-launch *args:
 plugin-data *args:
     node bin/run-plugin-data-properties.mjs {{args}}
 
+workspace *args:
+    node bin/run-workspace-properties.mjs {{args}}
+
 messages *args:
     node bin/run-messages-properties.mjs {{args}}
 

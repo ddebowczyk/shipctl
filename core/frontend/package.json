@@ -16,6 +16,7 @@
     "./settings": "./settings/index.ts",
     "./projects": "./projects/index.ts",
     "./runtime": "./runtime/index.ts",
+    "./workspace": "./workspace/index.ts",
     "./terminal-host/views": "./terminal-host/views.ts",
     "./shared/views": "./shared/views.ts",
     "./projects/views": "./projects/views.ts",

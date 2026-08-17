@@ -16,6 +16,20 @@ this phase. Compound plugins publish their optional presentation through this
 plane while their services and background effects remain owned by the same
 activation.
 
+## Delivered foundation
+
+The first vertical slice provides a renderer-neutral semantic workspace
+contract, a validated immutable contribution catalog, a versioned document,
+compare-and-save persistence, and a public semantic service with structured
+inspection and observations. The authority accepts only an already admitted
+catalog snapshot. It does not discover, load, authorize, or activate plugins.
+
+The current canvas remains unchanged. It is deliberately not a second source
+of workspace state. The next integration step will make the existing and
+Layman canvas adapters project this document through a private renderer bridge.
+That step must also supply renderer parity, activation cleanup, and plug-out
+proofs before the Phase G closure conditions can pass.
+
 ## Normative semantics
 
 - **SEM-G-001:** The workspace consumes only accepted catalog snapshots and

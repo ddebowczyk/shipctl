@@ -3,7 +3,7 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-g
 title: Workspace contributions and wall closure
-status: specified
+status: implementing
 source: >-
   docs/4-layer-architecture/12-phase-g-workspace-contributions-and-closure.md
 depends_on: [phase-a, phase-b, phase-c, phase-e, phase-f]
@@ -87,7 +87,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, nightly]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-RENDERER-001
     claim: >-
@@ -162,7 +162,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-CONTRIBUTION-CLEANUP-001
     claim: >-
@@ -283,7 +283,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: proposed
+    status: passing
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
 deliverables:
   - One activation-owned catalog family for all optional contributions.
