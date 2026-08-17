@@ -31,6 +31,13 @@ export type WorkspaceCanvasAction =
       readonly targetStackId: string;
       readonly position: "start" | "end" | "before" | "after";
       readonly relativeInstanceId: string | null;
+    }
+  | {
+      readonly kind: "split";
+      readonly instanceId: string;
+      readonly targetStackId: string;
+      readonly axis: "horizontal" | "vertical";
+      readonly position: "before" | "after";
     };
 
 /** A resolved, data-only view for one canvas projection. */
@@ -189,6 +196,16 @@ export class WorkspaceCanvasBridge {
             targetStackId: action.targetStackId,
             position: action.position,
             relativeInstanceId: action.relativeInstanceId,
+            expectedRevision,
+            originId: this.#originId,
+          });
+        case "split":
+          return this.#authority.mutate({
+            kind: "split",
+            instanceId: action.instanceId,
+            targetStackId: action.targetStackId,
+            axis: action.axis,
+            position: action.position,
             expectedRevision,
             originId: this.#originId,
           });

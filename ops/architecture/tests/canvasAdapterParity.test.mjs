@@ -281,3 +281,40 @@ test("architecture.layman-semantic-move.property", () => {
     assert.deepEqual(targetWindow?.tabs.map((tab) => tab.id), expectedTarget);
   }), propertyParameters());
 });
+
+test("architecture.layman-semantic-split.property", () => {
+  const placement = fc.constantFrom("left", "right", "top", "bottom");
+  fc.assert(fc.property(tiledMoveDocument, placement, (fixture, edge) => {
+    const projection = tiledMoveProjection(fixture);
+    const instanceId = `left-${fixture.sourceIndex}`;
+    const targetWindowId = "shipctl.workspace.stack:right";
+    const controller = createLaymanCanvasController(createLaymanWorkspaceState(projection));
+    const transition = controller.dispatch({
+      type: "tab.move",
+      tabId: instanceId,
+      target: { kind: "window", windowId: targetWindowId },
+      placement: edge,
+    }, { origin: "user" });
+
+    const expected = edge === "left"
+      ? { axis: "horizontal", position: "before" }
+      : edge === "right"
+        ? { axis: "horizontal", position: "after" }
+        : edge === "top"
+          ? { axis: "vertical", position: "before" }
+          : { axis: "vertical", position: "after" };
+    assert.equal(transition.status, "applied");
+    assert.deepEqual(laymanWorkspaceAction(transition), {
+      kind: "split",
+      instanceId,
+      targetStackId: "right",
+      ...expected,
+    });
+
+    const sourceWindow = controller.inspect().windows.find((window) => (
+      window.tabs.some((tab) => tab.id === instanceId)
+    ));
+    assert.ok(sourceWindow, "Layman keeps the moved tab in a temporary local window");
+    assert.equal(sourceWindow.id.startsWith("shipctl.workspace."), false);
+  }), propertyParameters());
+});

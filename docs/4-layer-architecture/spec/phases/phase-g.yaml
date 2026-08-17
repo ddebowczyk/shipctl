@@ -178,6 +178,69 @@ properties:
     tiers: [pr]
     status: passing
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
+  - id: PROP-G-LAYMAN-SPLIT-001
+    claim: >-
+      An eligible Layman edge drop emits the exact semantic split direction
+      without carrying a renderer-local window identity into the workspace
+      action or document.
+    shapes: [differential, safety]
+    evidence: [SEM-G-005]
+    domain:
+      generates: >-
+        Two-tiled-stack workspace documents, selected source tabs, all four
+        edge placements, and available and missing view placeholders.
+      excludes:
+        - root drops
+        - floating stacks
+        - floating movement
+        - resize
+        - maximize
+        - pixels
+      strategy: >-
+        Project one valid document through Layman, dispatch its real user
+        edge-drop gate, and compare the action with a pure edge-direction
+        table while inspecting the temporary renderer window identity.
+      classifications:
+        - two-tiled-stacks
+        - edge-split
+        - horizontal
+        - vertical
+        - before
+        - after
+        - semantic-action
+        - renderer-local-window
+    preconditions:
+      - The source workspace document passes schema validation.
+      - The source view permits splitting.
+      - Both tiled Layman window IDs derive from semantic stack IDs.
+    oracle:
+      primary:
+        kind: model
+        description: >-
+          Compare the emitted split axis and position with a pure edge
+          direction table, and reject a semantic-shaped temporary window ID.
+        independence: >-
+          The table imports neither Layman nor workspace implementation code.
+      alternative:
+        kind: reference
+        description: >-
+          Route an ID-free split through the public bridge, then validate the
+          authority-produced document identities and topology.
+        independence: >-
+          The bridge only carries semantic action fields; generated authority
+          histories validate document structure independently.
+    failure_value: >-
+      A renderer-created window identity becomes durable workspace state, or
+      an edge split is created on the wrong side of its target stack.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.layman-semantic-split.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-LAYOUT-001
     claim: >-
       Persistence and restore preserve semantic identity, topology, focus, and

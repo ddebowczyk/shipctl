@@ -224,8 +224,13 @@ export interface SplitWorkspaceViewCommand extends WorkspaceCommandBase {
   readonly kind: "split";
   readonly instanceId: string;
   readonly targetStackId: string;
-  readonly splitId: string;
-  readonly newStackId: string;
+  /**
+   * Optional caller-selected identities for deterministic replay. When both
+   * values are omitted, the workspace authority allocates opaque, unique
+   * document identities.
+   */
+  readonly splitId?: string;
+  readonly newStackId?: string;
   readonly axis: "horizontal" | "vertical";
   readonly position: "before" | "after";
 }

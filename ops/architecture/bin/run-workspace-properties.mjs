@@ -78,6 +78,15 @@ const properties = [
     },
   },
   {
+    propertyId: "PROP-G-LAYMAN-SPLIT-001",
+    testId: "architecture.layman-semantic-split.property",
+    classifications: {
+      topology: ["two-tiled-stacks"],
+      action: ["edge-split", "horizontal", "vertical", "before", "after"],
+      identity: ["semantic-action", "renderer-local-window"],
+    },
+  },
+  {
     propertyId: "PROP-G-LAYOUT-001",
     testId: "architecture.workspace-roundtrip.property",
     classifications: {

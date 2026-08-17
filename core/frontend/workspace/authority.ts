@@ -284,11 +284,16 @@ export function parseWorkspaceCommand(value: unknown): WorkspaceCommand {
       });
     case "split":
       exactCommand(candidate, "Split", ["instanceId", "targetStackId", "splitId", "newStackId", "axis", "position"]);
+      const splitId = candidate.splitId === undefined
+        ? undefined
+        : assertIdentity(candidate.splitId, "Workspace split ID");
+      const newStackId = candidate.newStackId === undefined
+        ? undefined
+        : assertIdentity(candidate.newStackId, "Workspace stack ID");
       if (
         !hasIdentity(candidate.instanceId)
         || !hasIdentity(candidate.targetStackId)
-        || !hasIdentity(candidate.splitId)
-        || !hasIdentity(candidate.newStackId)
+        || (splitId === undefined) !== (newStackId === undefined)
         || (candidate.axis !== "horizontal" && candidate.axis !== "vertical")
         || (candidate.position !== "before" && candidate.position !== "after")
       ) invalidRequest("Split workspace command is invalid.");
@@ -297,8 +302,7 @@ export function parseWorkspaceCommand(value: unknown): WorkspaceCommand {
         kind: "split" as const,
         instanceId: candidate.instanceId,
         targetStackId: candidate.targetStackId,
-        splitId: candidate.splitId,
-        newStackId: candidate.newStackId,
+        ...(splitId === undefined ? {} : { splitId, newStackId: newStackId! }),
         axis: candidate.axis,
         position: candidate.position,
       });
@@ -482,6 +486,40 @@ function moveInstance(
   }));
 }
 
+function workspaceNodeIds(document: UiWorkspaceDocument): ReadonlySet<string> {
+  const ids = new Set<string>();
+  const visit = (node: WorkspaceNode): void => {
+    if (node.kind === "stack") {
+      ids.add(node.stackId);
+      return;
+    }
+    ids.add(node.nodeId);
+    visit(node.first);
+    visit(node.second);
+  };
+  if (document.root !== null) visit(document.root);
+  for (const floating of document.floating) visit(floating.stack);
+  return ids;
+}
+
+/**
+ * Allocate semantic document identities without consulting a renderer. The
+ * sequence is derived only from the current document, so restart and retry
+ * cannot import transient canvas identifiers into persisted workspace state.
+ */
+function allocateWorkspaceSplitIdentity(
+  document: UiWorkspaceDocument,
+): Readonly<{ splitId: string; newStackId: string }> {
+  const used = workspaceNodeIds(document);
+  for (let suffix = 1; ; suffix += 1) {
+    const splitId = `shipctl.workspace.split.${suffix}`;
+    const newStackId = `shipctl.workspace.stack.${suffix}`;
+    if (!used.has(splitId) && !used.has(newStackId)) {
+      return Object.freeze({ splitId, newStackId });
+    }
+  }
+}
+
 function splitStack(
   document: UiWorkspaceDocument,
   instanceId: string,
@@ -493,7 +531,8 @@ function splitStack(
 ): UiWorkspaceDocument {
   const target = workspaceStack(document, targetStackId);
   if (!target) notFound(`Workspace stack ${targetStackId} does not exist.`);
-  if (workspaceStack(document, newStackId) || workspaceStacks(document).some((stack) => stack.stackId === splitId)) {
+  const existingIds = workspaceNodeIds(document);
+  if (splitId === newStackId || existingIds.has(splitId) || existingIds.has(newStackId)) {
     invalidRequest("Workspace split identity already exists.");
   }
   const source = workspaceStacks(document).find((stack) => stack.instanceIds.includes(instanceId));
@@ -857,17 +896,20 @@ export class WorkspaceAuthority {
         affectedStacks = [command.targetStackId];
         break;
       case "split":
+        const identity = command.splitId === undefined
+          ? allocateWorkspaceSplitIdentity(before)
+          : { splitId: command.splitId, newStackId: command.newStackId! };
         next = splitStack(
           before,
           command.instanceId,
           command.targetStackId,
-          command.splitId,
-          command.newStackId,
+          identity.splitId,
+          identity.newStackId,
           command.axis,
           command.position,
         );
         affectedInstances = [command.instanceId];
-        affectedStacks = [command.targetStackId, command.newStackId];
+        affectedStacks = [command.targetStackId, identity.newStackId];
         break;
       case "reset":
         if (command.profileId !== this.#state.document.profileId) {

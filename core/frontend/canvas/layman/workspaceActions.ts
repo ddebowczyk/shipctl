@@ -28,10 +28,9 @@ export function laymanWorkspaceAction(
   if (
     command?.type === "tab.move"
     && command.target.kind === "window"
-    && command.placement === "center"
   ) {
     const targetStackId = workspaceStackIdFromLaymanWindowId(command.target.windowId);
-    if (targetStackId !== null) {
+    if (targetStackId !== null && command.placement === "center") {
       return Object.freeze({
         kind: "move",
         instanceId: command.tabId,
@@ -39,6 +38,25 @@ export function laymanWorkspaceAction(
         position: "end",
         relativeInstanceId: null,
       });
+    }
+    if (targetStackId !== null) {
+      const split = command.placement === "left"
+        ? { axis: "horizontal" as const, position: "before" as const }
+        : command.placement === "right"
+          ? { axis: "horizontal" as const, position: "after" as const }
+          : command.placement === "top"
+            ? { axis: "vertical" as const, position: "before" as const }
+            : command.placement === "bottom"
+              ? { axis: "vertical" as const, position: "after" as const }
+              : null;
+      if (split !== null) {
+        return Object.freeze({
+          kind: "split",
+          instanceId: command.tabId,
+          targetStackId,
+          ...split,
+        });
+      }
     }
   }
   return null;

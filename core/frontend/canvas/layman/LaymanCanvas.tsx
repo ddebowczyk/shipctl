@@ -71,12 +71,7 @@ const LAYMAN_CANVAS_INTERACTION: LaymanInteractionPolicy<LaymanCanvasPaneData> =
         return { kind: "allow" };
       }
     }
-    if (
-      command.type === "tab.move"
-      && command.target.kind === "window"
-      && command.placement === "center"
-      && workspaceStackIdFromLaymanWindowId(command.target.windowId) !== null
-    ) {
+    if (command.type === "tab.move" && command.target.kind === "window") {
       const targetWindowId = command.target.windowId;
       const source = inspection.windows.find((window) => (
         window.tabs.some((tab) => tab.id === command.tabId)
@@ -87,8 +82,19 @@ const LAYMAN_CANVAS_INTERACTION: LaymanInteractionPolicy<LaymanCanvasPaneData> =
         source?.location === "tiled"
         && target?.location === "tiled"
         && sourceTab?.data.kind === "shipctl.workspace-view"
+        && workspaceStackIdFromLaymanWindowId(targetWindowId) !== null
       ) {
-        return { kind: "allow" };
+        if (command.placement === "center") return { kind: "allow" };
+        if (
+          sourceTab.data.splitAllowed
+          && (command.placement === "top"
+            || command.placement === "bottom"
+            || command.placement === "left"
+            || command.placement === "right")
+          && !(source.id === target.id && source.tabs.length === 1)
+        ) {
+          return { kind: "allow" };
+        }
       }
     }
     return {

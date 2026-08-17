@@ -249,6 +249,47 @@ test("canvas bridge moves semantic views through the authority", async () => {
   bridge.dispose();
 });
 
+test("canvas bridge allocates semantic split identities without a renderer", async () => {
+  const workspaceId = "fixture.workspace";
+  const authority = await WorkspaceAuthority.open({
+    workspaceId,
+    catalog: catalog(["fixture.first", "fixture.second"]),
+    persistence: new InMemoryWorkspacePersistence(),
+    defaultProfile: ({ workspaceId: id }) => profile(id),
+  });
+  const bridge = new WorkspaceCanvasBridge({ authority, originId: "fixture.canvas" });
+
+  const split = await bridge.snapshot().execute({
+    kind: "split",
+    instanceId: "first",
+    targetStackId: "fixture.primary",
+    axis: "horizontal",
+    position: "after",
+  });
+
+  assert.deepEqual(split.affectedStackIds, ["fixture.primary", "shipctl.workspace.stack.1"]);
+  assert.deepEqual(authority.inspect(true).document?.root, {
+    kind: "split",
+    nodeId: "shipctl.workspace.split.1",
+    axis: "horizontal",
+    firstShare: 0.5,
+    first: {
+      kind: "stack",
+      stackId: "fixture.primary",
+      instanceIds: ["second"],
+      selectedInstanceId: "second",
+    },
+    second: {
+      kind: "stack",
+      stackId: "shipctl.workspace.stack.1",
+      instanceIds: ["first"],
+      selectedInstanceId: "first",
+    },
+  });
+
+  bridge.dispose();
+});
+
 test("canvas bridge keeps removed definitions recoverable and closeable", async () => {
   const workspaceId = "fixture.workspace";
   const authority = await WorkspaceAuthority.open({

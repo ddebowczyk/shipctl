@@ -161,6 +161,16 @@ function tabInteractionProjection(): WorkspaceCanvasProjection {
   };
 }
 
+function splitInteractionProjection(): WorkspaceCanvasProjection {
+  const source = fixtureProjection();
+  return {
+    ...source,
+    views: source.views.map((view) => (
+      view.instance.instanceId === "left" ? { ...view, splitAllowed: true } : view
+    )),
+  };
+}
+
 test("Layman projection preserves semantic stacks, tabs, split shares, and floating geometry", () => {
   const state = createLaymanWorkspaceState(fixtureProjection());
   assert.deepEqual(state, {
@@ -179,6 +189,7 @@ test("Layman projection preserves semantic stacks, tabs, split shares, and float
               viewTypeId: "fixture.left",
               availability: "available",
               closeable: false,
+              splitAllowed: false,
             },
           }],
           selectedTabId: "left",
@@ -195,6 +206,7 @@ test("Layman projection preserves semantic stacks, tabs, split shares, and float
               viewTypeId: "fixture.right",
               availability: "missing-definition",
               closeable: true,
+              splitAllowed: false,
             },
           }],
           selectedTabId: "right",
@@ -213,6 +225,7 @@ test("Layman projection preserves semantic stacks, tabs, split shares, and float
           viewTypeId: "fixture.floating",
           availability: "available",
           closeable: true,
+          splitAllowed: true,
         },
       }],
       selectedTabId: "floating",
@@ -302,4 +315,26 @@ test("Layman maps a tiled semantic tab centre-drop to a workspace move", () => {
   }, { origin: "user" });
   assert.equal(sameStack.status, "noop");
   assert.equal(laymanWorkspaceAction(sameStack), null);
+});
+
+test("Layman maps an allowed tiled edge-drop to a semantic split without a renderer identity", () => {
+  const controller = createLaymanCanvasController(
+    createLaymanWorkspaceState(splitInteractionProjection()),
+  );
+  const transition = controller.dispatch({
+    type: "tab.move",
+    tabId: "left",
+    target: { kind: "window", windowId: "shipctl.workspace.stack:right-stack" },
+    placement: "right",
+  }, { origin: "user" });
+
+  assert.equal(transition.status, "applied");
+  assert.deepEqual(laymanWorkspaceAction(transition), {
+    kind: "split",
+    instanceId: "left",
+    targetStackId: "right-stack",
+    axis: "horizontal",
+    position: "after",
+  });
+  assert.equal("windowId" in (laymanWorkspaceAction(transition) ?? {}), false);
 });

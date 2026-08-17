@@ -22,6 +22,7 @@ export interface LaymanWorkspaceViewPaneData {
   readonly viewTypeId: string;
   readonly availability: "available" | "missing-definition";
   readonly closeable: boolean;
+  readonly splitAllowed: boolean;
 }
 
 export type LaymanCanvasPaneData =
@@ -55,6 +56,7 @@ function tabFor(
       viewTypeId: view.instance.viewTypeId,
       availability: view.instance.availability.kind,
       closeable: view.closeable,
+      splitAllowed: view.splitAllowed,
     },
     view.instance.instanceId,
   );

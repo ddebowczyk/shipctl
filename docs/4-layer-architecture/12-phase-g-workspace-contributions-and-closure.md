@@ -60,7 +60,7 @@ submitted.
 
 The first renderer bridge is delivered. `AppShell` gives the selected canvas a
 `WorkspaceCanvasBridge`: a renderer-neutral projection of the authority's
-current document plus serialized `open`, `select`, `close`, and `move`
+current document plus serialized `open`, `select`, `close`, `move`, and `split`
 commands. The
 accepted catalog always includes the host compatibility definition, so a new
 workspace has a valid root view even before optional module views are opened.
@@ -84,17 +84,28 @@ document; the old UI-store route is only a startup fallback before the
 workspace bridge exists. A Fast Check differential property proves the shared
 adapter subset against Layman's real command gate.
 
-Layman now accepts one structural user action with an exact semantic mapping:
-a workspace tab can be dropped into the centre of another existing tiled
-semantic stack. The adapter emits a `move` command that appends the instance to
-the target stack. The workspace authority remains responsible for canonical
-selection, document cleanup, persistence, and recovery after a failed save.
+Layman now accepts two structural user actions with exact semantic mappings.
+A workspace tab can be dropped into the centre of another existing tiled
+semantic stack; the adapter emits a `move` command that appends the instance to
+the target stack. An eligible edge drop between existing tiled semantic stacks
+emits a `split` command. Left and right map to the horizontal axis; top and
+bottom map to the vertical axis. The edge determines whether the new stack is
+before or after the target.
+
+Layman can create a temporary local window while it applies an edge drop. That
+window identity is renderer state only: the adapter discards it and sends only
+the source instance, semantic target stack, axis, and position through the
+bridge. The workspace authority allocates unused semantic split and stack
+identities from the current document, then canonical projection replaces the
+temporary renderer state. The authority remains responsible for selection,
+document cleanup, persistence, and recovery after a failed save.
 
 This is not full renderer-parity closure. The legacy adapter deliberately
 rejects splits, floating stacks, and maximized stacks instead of flattening
-them. Layman rejects edge drops that would create a split, drops into the root
-or a floating stack, floating-window movement, resize, and maximize operations.
-Those layouts and interactions remain open under SEM-G-004 and SEM-G-005.
+them. Layman permits only eligible edge drops between semantic tiled stacks;
+it still rejects root and floating targets, floating-window movement, resize,
+and maximize operations. Those layouts and interactions remain open under
+SEM-G-004 and SEM-G-005.
 
 Panel migration aliases remain legacy tab-persistence kinds (for example,
 `git`) and are intentionally not admitted as semantic workspace aliases. A
@@ -175,8 +186,9 @@ serial semantic workspace reconciliation and durable CAS
    view instances, splits, tabs, floating windows, and focus operations as
    supported by the workspace document. **Started:** both adapters share a
    single-stack projection and select/close mapping; Layman also maps a tiled
-   centre-drop between existing stacks to the semantic move command. The live
-   legacy route renders selected global and panel views and uses semantic close.
+   centre-drop between existing stacks to the semantic move command and an
+   eligible tiled edge drop to the semantic split command. The live legacy
+   route renders selected global and panel views and uses semantic close.
    Complete the semantic tab strip, layout rendering, and command support
    before removing the compatibility pane.
 5. Keep the legacy canvas as a differential reference until the semantic
@@ -266,6 +278,33 @@ and storage failure does not reject the accepted runtime family.
   `architecture.layman-semantic-move.property`. This is intentionally limited
   to existing tiled stacks; it is not evidence for split creation or floating
   movement.
+
+### PROP-G-LAYMAN-SPLIT-001
+
+- **Claim:** An eligible Layman edge drop between existing tiled semantic
+  stacks emits exactly the semantic split direction for its edge. No temporary
+  Layman window identity enters the semantic action or persisted document.
+- **Shape:** differential and safety.
+- **Evidence:** SEM-G-005.
+- **Domain:** generated two-tiled-stack documents, selected source tabs, all
+  four edge placements, and available or missing view placeholders. Exclude
+  root and floating targets, floating-window movement, resizing, and pixels.
+- **Preconditions:** the workspace document passes schema validation; the
+  source view allows splitting; both stack IDs are renderer-derived semantic
+  IDs.
+- **Oracle:** compare the emitted action with a pure edge-to-axis-and-position
+  table and assert the temporary Layman window has no semantic workspace ID.
+  The table imports neither Layman nor workspace implementation code.
+- **Alternative oracle:** route an ID-free split through the public bridge and
+  require the workspace authority to allocate unique document identities;
+  generated workspace histories validate the resulting tree independently.
+- **Failure value:** a renderer-generated window ID becomes durable workspace
+  state, or an edge creates a split on the wrong side of the target.
+- **Tier:** pull request.
+- **Current status/test ID:** passing /
+  `architecture.layman-semantic-split.property`. It proves the declared tiled
+  edge-drop subset only; it is not evidence for root, floating, resize, or
+  maximize interactions.
 
 ### PROP-G-LAYOUT-001
 

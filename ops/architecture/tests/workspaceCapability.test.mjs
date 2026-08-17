@@ -265,22 +265,23 @@ async function applyHistoryStep(fixture, step, index) {
     });
     return;
   }
-  if (step === "split-terminal-2") {
+  if (step === "split-terminal-2" || step === "split-terminal-2-auto") {
     const terminalOneStack = stackFor("terminal-instance-1");
     const terminalTwoStack = stackFor("terminal-instance-2");
     if (!terminalOneStack || !terminalTwoStack) return;
     if (terminalOneStack.stackId === terminalTwoStack.stackId && terminalOneStack.instanceIds.length < 2) return;
-    await fixture.authority.mutate({
+    const command = {
       kind: "split",
       expectedRevision: revision,
       originId,
       instanceId: "terminal-instance-2",
       targetStackId: terminalOneStack.stackId,
-      splitId: `split-${index}`,
-      newStackId: `stack-${index}`,
       axis: "horizontal",
       position: "after",
-    });
+    };
+    await fixture.authority.mutate(step === "split-terminal-2"
+      ? { ...command, splitId: `split-${index}`, newStackId: `stack-${index}` }
+      : command);
     return;
   }
   if (step === "move-terminal-2") {
@@ -310,6 +311,7 @@ test("architecture.workspace-reconcile.property", async () => {
     "restore-usage",
     "replace-usage",
     "split-terminal-2",
+    "split-terminal-2-auto",
     "move-terminal-2",
   );
   await fc.assert(fc.asyncProperty(fc.boolean(), fc.array(action, { maxLength: 40 }), async (initialUsage, history) => {
