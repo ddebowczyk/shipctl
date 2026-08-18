@@ -1,116 +1,182 @@
 <!-- markdownlint-disable MD013 -->
 
-# Step 07 — Make layout, frame, and navigation composable
+# Step 07 — Dissolve the compatibility canvas into contributed views
 
 ## Outcome
 
-Use the workspace semantic service to compose Shipctl's main canvas from
-plugin-owned views inside a standard, renderer-owned frame. Layman becomes the
-first controlled renderer for the semantic layout, rather than a static wrapper
-around today’s hardwired screen. Menus, sidebar/navigation placement, panes,
-tabs, popups, and notifications become contribution or workspace-profile
-concerns, not AppShell constants.
+Today Layman renders **one compatibility tab containing the entire legacy
+canvas**, plus real workspace-view tabs beside it. This step empties that
+compatibility tab by converting its contents into contributed workspace views,
+then deletes it and the imperative canvas contract it exists to serve.
 
-## Renderer ownership model
+The renderer-neutral projection, the gesture gate, and the semantic document are
+already built. What remains is a feature-specific model that outlives them.
 
-    accepted plugin contributions
-                 |
-    workspace service: semantic document + profile + actions
-                 |
-    canvas adapter: projection + intent translation
-                 |
-    Layman renderer: controlled visual tree
-                 |
-    React view bodies supplied by plugins
+## What already exists
 
-The persistent source of truth is the workspace document. Layman rendering
-output and transient drag state are not persisted. User gestures are translated
-to semantic workspace intents, validated by the workspace service, then
-projected back into the renderer.
+| Already built | Evidence |
+| --- | --- |
+| Layman renders the semantic document as windows/tabs | `core/frontend/canvas/layman/workspaceProjection.ts` (`createLaymanWorkspaceState`, `workspaceStackIdFromLaymanWindowId`) |
+| User gestures are gated before becoming semantic intents | `LaymanCanvas.tsx:62-80` — `LaymanInteractionPolicy.canExecute` allows `tab.select`, conditionally `tab.remove` and `tab.move`, and rejects the rest when `origin === "user"` |
+| Gestures translate to workspace commands | `core/frontend/canvas/layman/workspaceActions.ts` (`laymanWorkspaceAction`) |
+| Two renderers project the same document | `canvas/layman/workspaceProjection.ts` and `canvas/legacy/workspaceProjection.ts` |
+| Renderer selection is resolvable in TypeScript | `canvas/canvasAdapterResolver.tsx`, `canvas/views.ts` |
+| No renderer type leaks into the contract | `WorkspaceViewPresentationRef { loaderId, exportName }` |
 
-This lets Shipctl switch canvas implementations or render the same semantic
-workspace differently without a data migration.
+The draft's "minimum useful first increment" — render one compatibility view as a
+Layman window, project semantic tabs, permit only supported operations — is
+**already delivered**. Do not re-plan it.
 
-## Standard frame versus plugin views
+## The actual blocker: a second, feature-shaped workspace model
 
-The trusted renderer provides a small standard WorkspaceFrame:
+`core/frontend/canvas/types.ts` defines a parallel model that the semantic
+document was supposed to replace:
 
-- accessible window chrome and safe focus routing;
+- `CanvasModelInput` / `CanvasModel` (lines 61-100): a `sidebar` holding
+  `repos`, `groups`, `activeProjectPath`, `tabDropProjectPath`; a `tabBar`
+  holding `panels`; `terminalSlots`; a `trailingLayout` with a `project`. Every
+  one of these is a specific feature named in the host frame.
+- `CanvasActions` (lines 103-125): **22 imperative operations** —
+  `selectRepo`, `addProject`, `removeProject`, `newModuleSession`,
+  `openInEditor`, `newDefaultTerminal`, `newTerminal`, `openPanel`,
+  `renameGroup`, `deleteGroup`, `moveToGroup`, `toggleGlobalSurface`, and
+  tab-level `selectTab`/`closeTab`/`moveTab`/`reorderTab`/`renameTab`/
+  `setTabTitle`. These bypass `WorkspaceCommand` entirely: they are not
+  revision-checked, not validated by the workspace authority, and not
+  persisted as semantic operations.
+- `CanvasPorts` (lines 128-142): hands the renderer `moduleHostServices` (the
+  bag Step 02 deletes) and `moduleActivations` — a map of **every activation
+  context** to the renderer.
+
+`LaymanCanvas.tsx:23-28` imports `LegacyCanvas` and
+`CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID`, so the whole of the above renders
+inside one tab of the semantic workspace. That tab is the half-transition: it
+looks like progress and can persist indefinitely.
+
+Three consequences to state plainly:
+
+1. Tab operations exist in two places with different guarantees — `CanvasActions.closeTab`
+   and `CloseWorkspaceViewCommand`. Which one a gesture reaches depends on which
+   tab it lands on.
+2. `CanvasPorts.moduleActivations` gives the renderer authority the plugin
+   contract deliberately withholds. This must be removed regardless of the rest
+   of the step.
+3. Terminal presentation is mounted by the frame (`terminalSlots`,
+   "Visibility never changes its mount"), so terminals cannot become ordinary
+   contributed views until mount-stability is preserved by the view host.
+
+## The work
+
+Convert each `CanvasModel` region into contributed workspace views, one at a
+time, deleting its `CanvasModel` field and its `CanvasActions` members in the
+same commit:
+
+| Region | Becomes | Notes |
+| --- | --- | --- |
+| `sidebar` (repos, groups, navigation) | a navigation contribution rendered by the frame, plus a projects view | `renameGroup`/`deleteGroup`/`moveToGroup` become project-service operations, not canvas actions |
+| `tabBar.panels` | workspace view definitions in the catalogue | `openPanel`/`toggleGlobalSurface` become `open`/`focus` commands |
+| `terminalSlots` | terminal views with a mount-stable view host | the last to move; requires the host to guarantee mount stability across hide/show |
+| `trailingLayout` | a contributed view or a profile preference | decide which; it is currently a boolean plus a project |
+| `content: CanvasContentTarget` | the semantic document's focused instance | delete the union |
+
+`CanvasActions` members with no semantic equivalent (`newModuleSession`,
+`openInEditor`, `addProject`) are not layout operations at all — they route to
+the projects and desktop services (Step 04).
+
+## Standard frame
+
+What the trusted renderer keeps after the conversion:
+
+- window chrome, focus routing, and accessibility;
 - content regions for a primary canvas and optional navigation;
-- routing for global keyboard shortcuts and notices;
-- a stable place to attach native window behavior when explicitly requested;
+- global shortcut and notice routing;
+- an attachment point for native window behavior requested through a grant;
 - renderer diagnostics for projection failures.
 
-The frame does not hardcode a project list, usage panel, terminal tabs,
-assistant sessions, or a left navigation bar. Those are plugin contributions
-and workspace profile selections.
+It keeps no feature name. A projection failure for one view renders a
+diagnosable placeholder in that view's region; it never blanks the canvas.
+
+## Contribution split
 
 | Contribution family | Plugin declares | Workspace/profile decides |
 | --- | --- | --- |
-| View | stable id, title/icon metadata, view body, singleton/multiplicity and availability | open instance, group, split/stack/floating position, focus |
-| Navigation item | stable id, label/icon, target action/view, capability requirements | visibility, ordering, side, collapsed behavior |
-| Menu item/menu group | placement target, command id, enablement predicate | which menus exist and user/profile ordering where allowed |
-| Command palette action | semantic command and argument schema | discoverability and shortcut binding |
-| Overlay/popover | trigger contract and content | whether an overlay is currently open; no durable renderer snapshot |
-| Notification | structured event and severity | rendering and user acknowledgement policy |
+| View | stable id, label/icon, body ref, cardinality, availability | open instance, stack/split/floating placement, focus |
+| Navigation item | stable id, label/icon, target command or view, capability requirements | visibility, ordering, side, collapse |
+| Menu item / group | placement target, command id, enablement predicate | which menus exist and their ordering |
+| Command palette action | semantic command and argument schema | discoverability, shortcut binding |
+| Overlay / popover | trigger contract and content | whether one is open; never persisted |
+| Notification | structured event and severity | rendering and acknowledgement policy |
 
-## Minimum useful first increment
+Adding any of these families requires the taxonomy decision from Step 02 —
+`RuntimeContributionFamily` in Rust is the gate. Do not introduce a new family
+here without resolving that first.
 
-Do not wait for every IDE behavior. The first Layman-backed workspace should:
+## Native windows and menus
 
-1. render a single compatibility view as one Layman window;
-2. project semantic tabs/splits from the workspace document;
-3. permit open, focus, close, and move/split only where the semantic service
-   supports them;
-4. persist and validate a workspace profile through TypeScript configuration;
-5. expose inspect/validate/plan/apply to agents;
-6. offer reset to a safe default profile.
+A browser-like floating pane is a workspace semantic feature, rendered by
+Layman, described by `WorkspaceFloatingStack` — which needs the float/dock
+operations from Step 06 before any control emits it.
 
-The next increments add resize, user-driven docking, floating windows,
-maximize/restore, configurable navigation side, and profile management. Each
-visual affordance arrives only after its semantic operation and recovery rule
-are defined in Step 06.
+A real operating-system window is different: the workspace plugin emits a typed
+window intent, the runtime checks a grant, and the desktop port owns creation
+and lifetime. The document stores semantic placement and identity, never a
+native handle. Menus follow the same rule — plugins contribute semantic items; a
+renderer or desktop menu adapter projects accepted items.
 
-## Native windows and popups
+## Legacy canvas retirement
 
-Browser-like floating panes are a workspace semantic feature and can be
-implemented by Layman. A true operating-system window is different: the
-workspace plugin emits a typed window intent, the runtime checks a grant, and
-the desktop port owns native window creation/lifetime. The workspace document
-stores semantic placement/identity where useful, never a raw native handle.
+`docs/4-layer-architecture/spec/phases/phase-h.yaml:21` states the legacy canvas
+is removed "only after a separate product decision authorizes it". That decision
+does not exist yet (Step 00, owner decision 3).
 
-Menus follow the same rule. Plugins contribute semantic menu items. A renderer
-or desktop menu adapter projects accepted items into a visual/native menu. No
-feature calls a native menu API directly.
+Therefore this step's deletion gate is conditional, and must be written as a
+`deletion_gates` entry naming:
+
+- the artifacts deleted together — `canvas/legacy/*` (~1 100 lines across
+  `LegacyCanvas.tsx`, `LegacyTabBar.tsx`, `LegacySidebar.tsx`,
+  `LegacySidebarFooter.tsx`, `useSidebarSettingsStore.ts`,
+  `workspaceProjection.ts`), `CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID`, the
+  `CanvasModel`/`CanvasActions`/`CanvasPorts` types, and
+  `canvas/tests/legacyCanvas.test.ts` + `legacyWorkspaceProjection.test.ts`;
+- the parity evidence required before deletion;
+- the owner and the date the product decision was recorded.
+
+Until that decision exists, the legacy canvas stays — but `CanvasActions` must
+still shrink with every converted region. Retirement of the *renderer* and
+dissolution of the *model* are separate gates; conflating them is what would
+make this permanent.
 
 ## Refactoring actions
 
-1. Define view, navigation, menu, overlay, and notification contribution
-   contracts in the public plugin API.
-2. Introduce WorkspaceFrame with slots and accessible focus rules, keeping it
-   renderer-specific but feature-neutral.
-3. Make LaymanCanvas a controlled adapter over WorkspaceCanvasBridge rather
-   than a source of layout state.
-4. Remove legacy sidebar/tab-bar placement decisions from AppShell as their
-   equivalent contributions migrate.
-5. Add semantic renderer fallbacks for unavailable view bodies and projection
-   errors so a single bad plugin cannot blank the canvas.
-6. Add profile configuration for navigation side/order and standard-frame
-   appearance only after the schema is agent-operable.
-7. Keep the old canvas adapter as an explicit compatibility renderer until
-   parity tests and migration telemetry permit its removal.
+1. Remove `moduleActivations` and `moduleHostServices` from `CanvasPorts` first;
+   it is independent of the rest and closes an authority leak.
+2. Convert regions in the order: `tabBar.panels` → `sidebar` → `trailingLayout`
+   → `terminalSlots`. Delete the matching `CanvasActions` members in the same
+   commit as each conversion.
+3. Route the non-layout `CanvasActions` members to their owning services.
+4. Add the mount-stability guarantee to the view host before converting
+   terminals.
+5. Add renderer fallbacks for unavailable view bodies and projection errors.
+6. Add navigation/frame profile preferences only after the schema is
+   agent-operable (Step 06).
+7. Write the conditional `deletion_gates` entry for the legacy canvas.
 
 ## Validation and exit criteria
 
-- A fixture profile can place two declared views in a stack and split them
-  without any feature-specific code in AppShell.
-- The same workspace document projects to a deterministic canvas model in
-  renderer tests.
-- A user resize or drag is either reflected as a valid semantic operation or
-  visibly rejected; it never produces untracked transient state.
-- An agent can inspect a profile, make a validated offline change, and reset it
-  to a known default.
-- Navigation and menu contents are derived from accepted contributions and
-  profile policy, not a static feature list.
-- Layman is replaceable: no Layman snapshot or type appears in the public
-  workspace document or a plugin contract.
+- A fixture profile places two declared views in a stack and splits them with no
+  feature-specific code in `AppShell` or the frame.
+- `CanvasActions` has zero members that mutate layout; every layout change goes
+  through `WorkspaceCommand` and is revision-checked.
+- `CanvasPorts` exposes no activation context and no host-services bag.
+- The same document projects deterministically in both renderer test suites
+  (`canvas/tests/workspaceProjection.test.ts`,
+  `canvas/tests/laymanCanvas.test.ts`).
+- A user gesture is either a valid semantic operation or is visibly rejected by
+  `canExecute`; it never produces untracked transient state.
+- No `react-layman` type appears in the workspace document or any plugin
+  contract; `canvas-tauri-import`, `canvas-feature-module-import`, and the new
+  `canvas-persistence-import` rules all pass.
+- Navigation and menu contents derive from accepted contributions and profile
+  policy, not a static list.
+- The legacy canvas either is deleted with its recorded product decision, or its
+  `deletion_gates` entry states what is still missing.

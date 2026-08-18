@@ -1,131 +1,162 @@
 <!-- markdownlint-disable MD013 -->
 
-# Step 06 — Make workspace management a Cordis service
+# Step 06 — Give the workspace an owner, and close its operation gaps
 
 ## Outcome
 
-Turn workspace management into a bundled TypeScript Cordis application plugin
-that owns semantic workspace state, profiles, view-instance policy, layout
-operations, persistence, recovery, and agent-facing operations. The renderer
-continues to project that semantic state, but it is no longer its owner.
+The semantic workspace already exists and is already renderer-neutral. Two
+things are missing, and they are the whole of this step:
 
-This is the central refactoring for a configurable Shipctl canvas. It enables
-terminal, assistant, usage, projects, and future features to contribute views
-without AppShell or Rust needing feature-specific placement logic.
+1. The workspace has **no owner** — `WorkspaceAuthority`, `WorkspaceCanvasBridge`,
+   and `AcceptedWorkspaceCatalogController` are constructed by `AppShell.tsx`
+   (Step 03 relocates that) and belong to nobody afterwards.
+2. The document can **represent states no public operation can reach or leave**.
 
-## Reuse the existing semantic core
+This step assigns ownership to a bundled workspace plugin and closes the
+operation gap. It does not redesign the document.
 
-The current module-api workspace document and core/frontend/workspace authority
-already contain the right conceptual starting point:
+## What already exists — do not restate it as work
 
-- UiWorkspaceDocument has workspace/profile identity, view instances, split and
-  stack roots, floating state, and maximized stack state;
-- WorkspaceAuthority validates, reduces, reconciles, and persists revisions;
-- WorkspaceCanvasBridge creates renderer-neutral projections;
-- workspace profiles currently provide a compatibility profile around the
-  legacy canvas;
-- the contribution catalogue converts legacy panels and global surfaces to
-  workspace definitions.
+`module-api/frontend/src/protocol/workspace.ts` (352 lines) is a complete
+renderer-neutral contract:
 
-Do not replace these with a Layman-owned model. Move their lifecycle and
-catalogue ownership into the workspace plugin, evolve their public semantic
-contract, and eventually delete the legacy conversion layer.
+| Concern | Already contract |
+| --- | --- |
+| Document grammar | `UiWorkspaceDocument`: `instances`, `root` (`WorkspaceStackNode` \| `WorkspaceSplitNode`), `floating`, `maximizedStackId`, `profileId` |
+| View catalogue | `WorkspaceViewDefinition` with `scope`, `cardinality`, `closeBehavior`, `requiredCapabilityIds`, `placement`, `state`, `migrationAliases` |
+| Renderer indirection | `WorkspaceViewPresentationRef { loaderId, exportName }` — no React type in the contract |
+| Unavailable views | `WorkspaceViewAvailability` `missing-definition` with `lastKnownViewTypeId` + `catalogRevision`; `WorkspaceResourceReference` `unavailable` variant |
+| Revision safety | `WorkspaceCommandBase.expectedRevision` + `originId`; `workspace.conflict` |
+| Agent inspection | `WorkspaceInspection` with opt-in `document`, plus `WorkspaceObservation` (`workspace-changed` / `catalog-reconciled`) |
+| Structured failure | 10-member `WorkspaceErrorCode` |
+| Host-only catalogue | documented on `WorkspaceService`: a plugin "cannot discover, authorize, or activate other plugins" |
 
-## Workspace plugin responsibilities
+The earlier draft's "reuse the existing semantic core" section listed these as
+if they were a starting point to be evolved. They are shipped contract. What
+follows is only what is genuinely absent.
 
-| Responsibility | Workspace plugin owns | Other plugins own |
-| --- | --- | --- |
-| View definition catalogue | validates stable ids, availability, singleton/multiplicity and capability requirements | declares view definitions and view bodies |
-| Instances and layout | instance ids, split/stack/floating/maximized semantic document, focus and recovery policy | view-local state under its own namespace |
-| Profile and frame preference | selected profile, semantic frame/navigation preferences, reset policy | optional profile and menu contributions |
-| Commands and operations | inspect, validate, plan, apply, open/close/focus/move/split and future layout intents | requests to open/focus their declared views |
-| Persistence | configuration document selection and revision-aware writes | their own configuration data |
-| Rendering boundary | renderer-neutral projection and accepted catalogue snapshot | renderer implementation and view content |
+## Gap 1 — representable but unreachable states
 
-The workspace plugin is a trusted bundled TypeScript plugin in the first
-increment. That makes it upgradeable and inspectable through the same runtime
-as other plugins while acknowledging that it has host-level responsibility.
+`WorkspaceCommand` has exactly seven members: `open`, `close`, `focus`,
+`select`, `move`, `split`, `reset`. Compare against what the document can hold:
 
-## Evolve semantic operations before adding gestures
+| Representable in the document | Reachable / leavable by a public command? |
+| --- | --- |
+| `WorkspaceSplitNode.firstShare: number` | **No.** Set implicitly at `split`; no resize command exists. Every non-default ratio is unreachable. |
+| `floating: WorkspaceFloatingStack[]` with `x`, `y`, `width`, `height` | **No.** No float, move-float, resize-float, or dock command exists. A floating stack cannot be created or dismissed. |
+| `maximizedStackId: string \| null` | **No.** No maximize or restore command exists. |
+| `profileId` | **Partially.** `reset` names a `profileId`, but no command creates, switches, or deletes a profile. |
+| `WorkspaceViewInstance.label` | **No.** Set at `open`; no rename. |
+| `WorkspaceViewInstance.stateRef` + `WorkspaceViewStatePolicy {kind:"json"}` | **No.** Set at `open`; no update command, so declared view state is write-once. This is the most consequential of the five — decide whether view state belongs in the workspace document at all, or in the view's own plugin-data namespace. |
 
-The present command surface supports opening, closing, focusing, selecting,
-moving, splitting, and reset. The configurable-workspace target requires
-additional semantic operations, designed and validated before a renderer emits
-them:
+This is proof obligation 7 from Step 00, and it is a correctness problem, not a
+feature wish-list: a renderer that offers drag-resize, float, or maximize today
+must either mutate outside the document or silently lose the change on reload.
 
-- resize a split using normalized or bounded ratios;
-- float a view with a semantic rectangle and monitor/viewport policy;
-- dock a floating view into a target region;
-- maximize and restore an instance or stack;
-- create/remove named workspace profiles;
-- change semantic frame and navigation preferences;
-- recover unavailable, disabled, or replaced view definitions;
-- reset one profile without deleting unrelated plugin state.
+Required work: for each row, either add the semantic operation or remove the
+field from the document. Do not add operations for fields the product does not
+want. A field with no operation is a lie in the schema.
 
-Every operation needs a precondition, deterministic result, revision behavior,
-and a recovery policy. A move that would orphan an instance, create an invalid
-tree, or target an unavailable view must fail without persisting a partial
-document.
+Each new operation needs: precondition, deterministic outcome, revision
+behavior, failure code from the existing `WorkspaceErrorCode` union, and a
+property test. An operation that would orphan an instance, produce an invalid
+tree, or target an unavailable definition must fail with the document unchanged.
 
-## Catalogue and unavailable-view handling
+## Gap 2 — no plan/apply transaction
 
-The workspace plugin consumes the accepted contribution catalogue from the
-ApplicationRuntime, not speculative artifacts. When an accepted runtime graph
-changes, it reconciles the workspace document:
+`mutateWorkspace` accepts **one command** per call, each advancing the revision.
+An agent-facing `plan`/`apply` over N commands is therefore not atomic today:
+a failure at command 3 of 5 leaves a half-applied document at revision +2.
 
-- retain data for a temporarily unavailable view;
-- render a recoverable unavailable-view placeholder with diagnostics;
-- never silently repurpose an instance id to a different plugin;
-- provide explicit replacement/remove/retry operations;
-- maintain a valid focus target and layout tree.
+Two admissible resolutions:
 
-This is particularly important when an extension is disabled, an artifact is
-rejected, or a candidate activation rolls back.
+1. Add a batch command carrying an ordered command list, one `expectedRevision`,
+   and all-or-nothing semantics — validated against the reducer before any
+   revision advances.
+2. Restrict agent apply to single commands and state that multi-step layout
+   changes are not transactional.
 
-## Agent-operable contract
+Option 1 is required if `workspace plan`/`apply` is to mean anything. It is a
+contract change to `shipctl.workspace@1`; version it accordingly.
 
-Expose stable operations such as:
+## Gap 3 — ownership and commit scope
 
-    workspace inspect
-    workspace validate --document <path-or-id>
-    workspace plan --input <document-or-patch> --expected-revision <n>
-    workspace apply --plan <id> --expected-revision <n>
-    workspace reset --profile <id>
+The workspace becomes a bundled trusted plugin with its own module identity.
+That identity is what gives it a `plugin-data` namespace (Step 05, Option B) and
+what makes it upgradeable and inspectable through the same runtime as every
+other plugin.
 
-The first delivery may require restart/reload after apply. Live application of
-layout changes is optional; semantic inspection, validation, planning, and
-revision-safe persistence are not optional.
+**Unresolved and blocking (Step 00, owner decision 2):**
+`docs/4-layer-architecture/12-phase-g-workspace-contributions-and-closure.md:44-51`
+deliberately places workspace catalogue reconciliation *after* the activation
+transaction, accepting a workspace diagnostic rather than a distributed commit.
+This step and Step 11 have been written assuming atomicity across activation and
+workspace reconciliation. Those cannot both stand.
 
-Responses should include current revision, profile, view definitions, instances,
-layout summary, unavailable contributions, diagnostics, and any activation
-consequence. They must be machine-readable first, with human rendering at the
-CLI edge.
+Until the owner decides, implement the recorded behavior: catalogue
+reconciliation is a post-commit reaction observable as `catalog-reconciled`, and
+a reconciliation failure is a diagnostic, not an activation rollback. Do not
+write property tests that assume the stronger guarantee.
+
+## Catalogue reconciliation invariants
+
+These already have an implementation (`AcceptedWorkspaceCatalogController`);
+this step makes them contract-level invariants of the owning plugin:
+
+- data for a temporarily unavailable view is retained, not discarded;
+- an instance id is never repurposed to a different plugin — `ownerModuleId` and
+  `ownerActivationId` on the instance already make this checkable;
+- `missing-definition` carries `lastKnownViewTypeId` and the `catalogRevision`
+  at which it went missing, so recovery is diagnosable;
+- `migrationAliases` are the only mechanism by which a renamed view type
+  reclaims its instances;
+- focus and the layout tree remain valid after any reconciliation.
+
+## Agent-operable surface
+
+`WorkspaceInspection` already answers inspect. Missing: validate, plan, apply,
+and profile operations. Note that `cli/src/args.rs:37-91` has **no `workspace`
+subcommand**; the agent surface reaches the workspace through the existing
+capability-call and operations plane, which is Step 10's delivery. Do not add a
+bespoke workspace CLI path here.
+
+Responses stay machine-readable first, with human rendering only at the CLI
+edge. The first delivery may require reload after apply; semantic inspection,
+validation, and revision-safe persistence may not be deferred.
 
 ## Refactoring actions
 
-1. Package workspace authority, document validation, profile semantics, service,
-   and canvas bridge behind a workspace plugin activation entrypoint.
-2. Replace AppShell ownership with a workspace semantic service resolved from
-   ApplicationRuntime.
-3. Move compatibility profile selection into TypeScript configuration.
-4. Replace the legacy contribution-catalogue adapter with direct view
-   contributions as each module migrates.
-5. Add semantic resize/float/dock/maximize/frame operations with property tests
-   before implementing UI controls.
-6. Add recoverable unavailable-view states and activation-revision
-   reconciliation.
-7. Provide inspect/validate/plan/apply operations through the runtime registry.
-8. Retire workspace-specific native configuration and persistence commands
-   after generic document ports are in use.
+1. Decide, per row of the Gap 1 table, add-operation or remove-field. Write the
+   decision down before implementing.
+2. Resolve the `stateRef` question first — it determines whether the workspace
+   document is a layout document or a layout-plus-state document.
+3. Add the batch/atomic mutation form, or record that apply is single-command.
+4. Package the workspace authority, document validation, catalogue controller,
+   and canvas bridge behind a bundled plugin activation entrypoint with its own
+   module id.
+5. Resolve the workspace record onto that plugin's `plugin-data` namespace, or
+   record the bootstrap-ordering exception (Step 05).
+6. Add property tests for each new operation before any UI control emits it.
+7. Replace the legacy contribution-catalogue conversion with direct view
+   contributions as each artifact migrates (Step 08).
+8. Delete `load_workspace_document` / `save_workspace_document` once the record
+   moves, per the Step 05 decision.
 
 ## Validation and exit criteria
 
-- The workspace service can run in an in-memory headless runtime.
-- No React component or Layman object mutates the canonical workspace document.
-- A malformed or stale workspace apply leaves the durable document unchanged.
-- Deactivation/rejection of a plugin leaves a valid workspace tree and a
-  diagnosable unavailable view rather than a broken canvas.
-- The compatibility legacy-canvas profile works as a migration bridge, but no
-  longer requires Rust canvas selection.
-- A fixture can create, inspect, validate, and reset a workspace using only the
-  public TypeScript runtime API.
+- The workspace service activates and mutates in a headless `node --test`
+  runtime with no DOM and no renderer.
+- Every field of `UiWorkspaceDocument` is reachable and leavable through a
+  public command, or has been removed. This is a checked enumeration, not a
+  claim.
+- No React component and no Layman object mutates the canonical document; the
+  `canvas-persistence-import` rule (Step 01) holds.
+- A stale `expectedRevision` yields `workspace.conflict` with the document and
+  revision unchanged.
+- A rejected candidate graph leaves a valid tree and a diagnosable
+  `missing-definition` instance rather than a broken canvas — consistent with
+  the recorded post-commit reconciliation decision.
+- A batch apply either lands entirely or advances no revision (if Option 1).
+- A fixture creates, inspects, validates, and resets a workspace using only the
+  public TypeScript API.
+- Renderer selection no longer comes from Rust (Step 05 dependency).
