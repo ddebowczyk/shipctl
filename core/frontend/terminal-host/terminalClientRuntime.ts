@@ -5,6 +5,7 @@ import {
   getErrorCode,
   getErrorMessage,
   listTerminals,
+  reportTerminalDiagnostic,
   resizeTerminal,
   spawnTerminal,
   subscribeTerminalRegistry,
@@ -13,7 +14,6 @@ import {
   type RawTerminalAttachmentHandle,
   type TerminalRegistrySubscription,
 } from "@shipctl/core/platform";
-import { reportTerminalDiagnostic } from "@shipctl/core/shared";
 import { useTerminalStore } from "./useTerminalStore.ts";
 import {
   publishTerminalClosed,

@@ -3,7 +3,7 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-e
 title: Immutable TypeScript application artifacts
-status: implementing
+status: complete
 source: docs/4-layer-architecture/10-phase-e-immutable-plugin-artifacts.md
 depends_on: [phase-a, phase-b, phase-c]
 semantics:

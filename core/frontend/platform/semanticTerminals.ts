@@ -29,7 +29,6 @@ import {
   type SemanticTerminalsErrorCode,
   type SemanticTerminalsService,
 } from "@shipctl/module-api";
-import type { ActivationTerminalSessionsRuntime } from "@shipctl/core/terminal-host";
 
 import {
   createSemanticRequestAdapter,
@@ -133,7 +132,9 @@ export interface SemanticTerminalsNativeTransport {
 
 export interface SemanticTerminalsServiceProviderOptions {
   readonly bindingsByActivation: ReadonlyMap<string, SemanticTerminalsTransportBinding>;
-  readonly runtime: ActivationTerminalSessionsRuntime;
+  // This browser adapter owns only activation and attachment leases. Terminal
+  // ownership remains lifecycle attribution; native authority admits the
+  // semantic-terminal driver selected for the terminal.
   readonly transport?: SemanticTerminalsNativeTransport;
   readonly correlationId?: () => SemanticCorrelationId;
   readonly observeRequest?: (
@@ -618,19 +619,7 @@ export function createSemanticTerminalsServiceProvider(
       }
       const attachments = new Map<string, { readonly terminalId: string; readonly claimsResize: boolean }>();
       const active = () => context.active;
-      const ownTerminal = (terminalId: string) => {
-        const owned = options.runtime.list(binding.moduleId).some(
-          (session) => session.terminalId === terminalId,
-        );
-        if (!owned) {
-          throw new SemanticTerminalsFailure(
-            SEMANTIC_TERMINALS_ERROR_CODES.denied,
-            "The semantic terminal is not owned by this activation",
-          );
-        }
-      };
       const ownAttachedTerminal = (terminalId: string) => {
-        ownTerminal(terminalId);
         if (![...attachments.values()].some((owner) => owner.terminalId === terminalId)) {
           throw new SemanticTerminalsFailure(
             SEMANTIC_TERMINALS_ERROR_CODES.denied,
@@ -652,8 +641,7 @@ export function createSemanticTerminalsServiceProvider(
       return Object.freeze({
         snapshot: request<InspectSemanticTerminalSnapshotInput, ReturnType<typeof decodeSemanticTerminalScreenState>>(
           "snapshot", binding, active, SEMANTIC_TERMINAL_GRANTS.inspect,
-          createCorrelationId, options.observeRequest, async ({ terminalId }, envelope) => {
-            ownTerminal(terminalId);
+          createCorrelationId, options.observeRequest, async (_input, envelope) => {
             return decodeSemanticTerminalScreenState(await transport.snapshot(envelope));
           }),
         input: request<InputSemanticTerminalInput, { readonly encodedBytes: number }>(
@@ -665,7 +653,6 @@ export function createSemanticTerminalsServiceProvider(
         resize: request<ResizeSemanticTerminalInput, Readonly<Record<never, never>>>(
           "resize", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
           createCorrelationId, options.observeRequest, async (input, envelope) => {
-            ownTerminal(input.terminalId);
             const owner = attachments.get(input.attachmentId);
             if (!owner || owner.terminalId !== input.terminalId || !owner.claimsResize) {
               throw new SemanticTerminalsFailure(
@@ -684,7 +671,6 @@ export function createSemanticTerminalsServiceProvider(
         history: request<ReadSemanticTerminalHistoryInput, ReturnType<typeof decodeSemanticTerminalHistory>>(
           "history", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
           createCorrelationId, options.observeRequest, async (input, envelope) => {
-            ownTerminal(input.terminalId);
             const startRow = validNativeCount(input.startRow, "startRow", true, 4_294_967_295);
             const rows = validNativeCount(input.rows, "rows", true, 4_294_967_295);
             return decodeSemanticTerminalHistory(
@@ -696,24 +682,21 @@ export function createSemanticTerminalsServiceProvider(
           }),
         createAnchor: request<CreateSemanticTerminalAnchorInput, ReturnType<typeof decodeSemanticTerminalAnchor>>(
           "create-anchor", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input, envelope) => {
-            ownTerminal(input.terminalId);
+          createCorrelationId, options.observeRequest, async (_input, envelope) => {
             return decodeSemanticTerminalAnchor(
               await transport.anchor(envelope),
             );
           }),
         resolveAnchor: request<ResolveSemanticTerminalAnchorInput, ReturnType<typeof decodeResolvedSemanticTerminalAnchor>>(
           "resolve-anchor", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input, envelope) => {
-            ownTerminal(input.terminalId);
+          createCorrelationId, options.observeRequest, async (_input, envelope) => {
             return decodeResolvedSemanticTerminalAnchor(
               await transport.resolveAnchor(envelope),
             );
           }),
         releaseAnchor: request<ReleaseSemanticTerminalAnchorInput, { readonly released: boolean }>(
           "release-anchor", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input, envelope) => {
-            ownTerminal(input.terminalId);
+          createCorrelationId, options.observeRequest, async (_input, envelope) => {
             return {
               released: decodeBoolean(
                 await transport.releaseAnchor(envelope),
@@ -723,8 +706,7 @@ export function createSemanticTerminalsServiceProvider(
           }),
         select: request<SelectSemanticTerminalInput, ReturnType<typeof decodeSemanticTerminalSelection>>(
           "select", binding, active, SEMANTIC_TERMINAL_GRANTS.attach,
-          createCorrelationId, options.observeRequest, async (input, envelope) => {
-            ownTerminal(input.terminalId);
+          createCorrelationId, options.observeRequest, async (_input, envelope) => {
             return decodeSemanticTerminalSelection(
               await transport.select(envelope),
             );
@@ -736,8 +718,7 @@ export function createSemanticTerminalsServiceProvider(
           })),
         publicationStats: request<InspectSemanticTerminalPublicationInput, ReturnType<typeof decodeSemanticTerminalPublicationStats>>(
           "publication-stats", binding, active, SEMANTIC_TERMINAL_GRANTS.inspect,
-          createCorrelationId, options.observeRequest, async ({ terminalId }, envelope) => {
-            ownTerminal(terminalId);
+          createCorrelationId, options.observeRequest, async (_input, envelope) => {
             return decodeSemanticTerminalPublicationStats(
               await transport.publicationStats(envelope),
             );
@@ -753,7 +734,6 @@ export function createSemanticTerminalsServiceProvider(
           ) {
             requireGrant(binding, SEMANTIC_TERMINAL_GRANTS.attach);
             if (!context.active) throw new Error(DISPOSED.message);
-            ownTerminal(streamRequest.terminalId);
             validSafeInteger(streamRequest.initialCredit, "initialCredit", true);
             if (
               streamRequest.afterSequence !== null

@@ -4,7 +4,7 @@ schema_version: capability/v1
 id: project-documents
 version: 1.0.0
 title: Scoped project document access
-status: implementing
+status: implemented
 layer: native-kernel
 consumers: [todos]
 current_implementations:

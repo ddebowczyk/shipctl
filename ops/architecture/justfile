@@ -15,6 +15,11 @@ test:
     # WebSocket port across parallel Node test workers, so this lane is serial.
     node --test --test-concurrency=1 tests/*.test.mjs
 
+evidence *args:
+    # Run every property proof from one source identity and require fresh and
+    # replay evidence. Use --campaign=fresh or --campaign=replay for one lane.
+    node bin/property-evidence-campaign.mjs {{args}}
+
 graph:
     node bin/check-spec.mjs --graph
 
@@ -44,6 +49,9 @@ workspace *args:
 
 messages *args:
     node bin/run-messages-properties.mjs {{args}}
+
+processes *args:
+    node bin/run-processes-properties.mjs {{args}}
 
 scheduler *args:
     node bin/run-scheduler-properties.mjs {{args}}

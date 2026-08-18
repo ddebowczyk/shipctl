@@ -1,10 +1,12 @@
 import { useEffect } from "react";
-import { getCurrentWindow, Effect, EffectState } from "@tauri-apps/api/window";
 import { useThemeStore } from "../appearance/index.ts";
 import { hexLuminance } from "../appearance/index.ts";
 import type { ShipctlTheme } from "../appearance/index.ts";
 import { toTerminalColorTheme } from "../terminal-host/index.ts";
-import { updateTerminalColorTheme } from "../platform/index.ts";
+import {
+  applyTransparentWindowEffects,
+  updateTerminalColorTheme,
+} from "../platform/index.ts";
 
 const CSS_VAR_MAP: [keyof ShipctlTheme, string][] = [
   ["appBg", "--app-bg"],
@@ -54,16 +56,11 @@ export function useThemeApplicator(): void {
 
     updateTerminalColorTheme(toTerminalColorTheme(theme)).catch(() => {});
 
-    const win = getCurrentWindow();
     if (theme.isTransparent) {
       document.body.classList.add("theme-clear");
-      win.setEffects({
-        effects: [Effect.HudWindow],
-        state: EffectState.Active,
-      });
     } else {
       document.body.classList.remove("theme-clear");
-      win.clearEffects();
     }
+    applyTransparentWindowEffects(theme.isTransparent);
   }, [theme]);
 }

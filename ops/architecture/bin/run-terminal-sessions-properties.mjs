@@ -70,10 +70,27 @@ const properties = [
   },
   {
     propertyId: "PROP-B-REQUEST-001",
+    testId: "terminal-session adapter preserves attribution, request order, and cancellation",
+    classifications: {
+      operations: ["focus", "key-input", "paste-input", "resize", "stop"],
+      outcomes: ["cancelled", "ordered", "typed-error"],
+      ownership: ["activation", "attachment"],
+    },
+  },
+  {
+    propertyId: "PROP-B-ACTIVATION-001",
+    testId: "architecture.terminal-sessions-activation-ownership.property",
+    classifications: {
+      attribution: ["activation-owned", "disposed-rejected"],
+      resources: ["attachment-disposal", "resize-authority"],
+    },
+  },
+  {
+    propertyId: "PROP-B-FAKE-001",
     testId: "architecture.terminal-sessions-service-fake.property",
     classifications: {
-      operations: ["focus", "key-input", "paste-input", "resize"],
-      ownership: ["activation", "attachment"],
+      operations: ["focus", "input", "resize", "exit"],
+      transport: ["headless", "tauri-free"],
     },
   },
   {

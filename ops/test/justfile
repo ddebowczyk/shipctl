@@ -6,7 +6,6 @@ fast:
     cd ../.. && pnpm exec node --test ops/check/tests/*.test.mjs
     cd ../.. && pnpm exec node --test ops/repository/tests/*.test.mjs
     cd ../.. && pnpm exec node --test ops/version/tests/*.test.mjs
-    cd ../.. && pnpm exec node --test ops/upstream/tests/*.test.mjs
     cd ../.. && pnpm exec node --test core/frontend/host/tests/moduleComposition.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/moduleRuntimeSnapshot.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/moduleArtifactLoader.test.ts
@@ -21,7 +20,6 @@ fast:
     cd ../.. && pnpm exec node --test core/frontend/host/tests/panelPersistence.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/panelRegistry.test.ts core/frontend/host/tests/panelPersistence.test.ts core/frontend/terminal-host/tests/panelTabs.test.ts
     cd ../.. && pnpm exec node --test modules/ports/frontend/tests/*.test.ts
-    cd ../.. && pnpm exec node --test core/frontend/host/tests/projectCapabilityData.test.ts core/frontend/host/tests/globalCapabilityData.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/terminal-host/tests/*.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/semantic-terminal/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test modules/thin-terminal/frontend/tests/*.test.ts

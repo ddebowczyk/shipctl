@@ -11,6 +11,7 @@ import { createServer, type ViteDevServer } from "vite";
 
 type ProjectFactsModule = typeof import("../projectFacts.ts");
 type ModuleComposition = typeof import("../moduleComposition.ts");
+type GitModule = typeof import("../../../../modules/git/frontend/src/index.ts");
 type GitStoreModule = typeof import("../../../../modules/git/frontend/src/store.ts");
 
 let vite: ViteDevServer;
@@ -18,6 +19,7 @@ let refreshProjectFacts: ProjectFactsModule["refreshProjectFacts"];
 let resolveProjectFacts: ProjectFactsModule["resolveProjectFacts"];
 let subscribeProjectFacts: ProjectFactsModule["subscribeProjectFacts"];
 let enabledProjectFactsProvider: ModuleComposition["enabledProjectFactsProvider"];
+let gitModule: GitModule["gitModule"];
 let useGitStore: GitStoreModule["useGitStore"];
 
 before(async () => {
@@ -37,6 +39,9 @@ before(async () => {
   ({ enabledProjectFactsProvider } = await vite.ssrLoadModule(
     "/core/frontend/host/moduleComposition.ts",
   ) as ModuleComposition);
+  ({ gitModule } = await vite.ssrLoadModule(
+    "/modules/git/frontend/src/index.ts",
+  ) as GitModule);
   ({ useGitStore } = await vite.ssrLoadModule(
     "/modules/git/frontend/src/store.ts",
   ) as GitStoreModule);
@@ -162,7 +167,7 @@ test("refresh and subscription failures do not escape into host lifecycle", asyn
   assert.doesNotThrow(cleanup);
 });
 
-test("the Git module maps revision and lineage into stable generic facts", () => {
+test("an admitted Git module maps revision and lineage into stable generic facts", () => {
   useGitStore.setState({
     projectGitStatus: {
       [project.path]: {
@@ -178,7 +183,7 @@ test("the Git module maps revision and lineage into stable generic facts", () =>
       },
     },
   });
-  const provider = enabledProjectFactsProvider();
+  const provider = enabledProjectFactsProvider([gitModule]);
   const first = resolveProjectFacts(project, services, provider);
   const second = resolveProjectFacts(project, services, provider);
 

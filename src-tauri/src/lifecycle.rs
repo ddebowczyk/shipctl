@@ -18,10 +18,12 @@ use shipctl_core::state::archive::{StateArchiveInspection, StateArchiveService};
 use shipctl_core::terminal_host::{
     TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachmentId, TerminalCloseResult,
     TerminalDescriptor, TerminalEventSink, TerminalId, TerminalRawAttachment, TerminalService,
+    TerminalShellSpawnRequest,
 };
 use shipctl_tauri_adapter::{GitWatcher, MessageBusBridgeService};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
 pub struct TauriControlHandler {
@@ -217,6 +219,47 @@ impl ControlHandler for TauriControlHandler {
 
     fn terminal_list(&self) -> Result<Vec<TerminalDescriptor>, ControlError> {
         Ok(self.app.state::<TerminalService>().list())
+    }
+
+    fn terminal_spawn(
+        &self,
+        request: TerminalShellSpawnRequest,
+    ) -> Result<TerminalDescriptor, ControlError> {
+        let project_paths = self
+            .app
+            .state::<shipctl_core::workspace::manager::WorkspaceManager>()
+            .list_repos()
+            .map_err(|error| {
+                ControlError::new(
+                    "terminal.request.invalid",
+                    format!("Could not inspect registered projects: {error}"),
+                )
+            })?
+            .into_iter()
+            .map(|repo| PathBuf::from(repo.path));
+        let created_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| {
+                ControlError::new(
+                    "terminal.request.invalid",
+                    format!("Could not read the system clock: {error}"),
+                )
+            })?
+            .as_millis()
+            .try_into()
+            .map_err(|_| {
+                ControlError::new(
+                    "terminal.request.invalid",
+                    "The system clock cannot be represented as milliseconds",
+                )
+            })?;
+        let launch = request
+            .into_launch_request(project_paths, created_at_ms)
+            .map_err(terminal_control_error)?;
+        self.app
+            .state::<TerminalService>()
+            .spawn(launch)
+            .map_err(terminal_control_error)
     }
 
     fn terminal_get(&self, id: TerminalId) -> Result<TerminalDescriptor, ControlError> {

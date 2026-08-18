@@ -4,7 +4,7 @@ schema_version: capability/v1
 id: workspace
 version: 1.0.0
 title: Semantic workspace and contribution catalog
-status: implementing
+status: implemented
 layer: application-runtime
 consumers: [commands, assistants, git, ports, skills, todos, usage]
 current_implementations:

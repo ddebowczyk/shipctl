@@ -78,7 +78,7 @@ export function configuredCampaign({
   return requested;
 }
 
-function campaignEvidenceFile(file, kind) {
+export function propertyEvidenceCampaignFile(file, kind) {
   const suffix = ".evidence.json";
   if (!file.endsWith(suffix)) {
     throw new Error(`property evidence file must end with ${suffix}: ${file}`);
@@ -135,7 +135,7 @@ export function propertyEvidence({
 export async function writePropertyEvidence({ repositoryRoot, file, evidence }) {
   await mkdir(path.dirname(file), { recursive: true });
   const body = `${JSON.stringify(evidence, null, 2)}\n`;
-  const campaignFile = campaignEvidenceFile(file, evidence.campaign.kind);
+  const campaignFile = propertyEvidenceCampaignFile(file, evidence.campaign.kind);
   const schema = path.join(
     repositoryRoot,
     "docs/4-layer-architecture/spec/schema/property-evidence.v1.schema.yaml",

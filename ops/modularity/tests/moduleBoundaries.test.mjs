@@ -170,7 +170,7 @@ test("rejects capability code in src and application imports into ops", async (t
   );
 });
 
-test("freezes classified legacy listeners and rejects new direct event imports", async (t) => {
+test("rejects direct module event and native imports", async (t) => {
   const root = await fixture({
     "modules/git/frontend/src/index.ts": "import { emit, listen } from '@tauri-apps/api/event'; listen('git-fs-changed', () => undefined); emit('module-escape');",
     "modules/alpha/frontend/src/index.ts": "import { listen } from '@tauri-apps/api/event'; listen('usage-ingest-complete', () => undefined);",

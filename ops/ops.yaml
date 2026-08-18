@@ -11,5 +11,4 @@ active:
   message-bus: message-bus
   module-control: module-control
   repository: repository
-  upstream: upstream
   version: version

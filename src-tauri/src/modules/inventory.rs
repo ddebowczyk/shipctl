@@ -104,6 +104,8 @@ mod tests {
 
         let frontend_profile = include_str!("../../../core/frontend/host/enabledModules.ts");
         assert!(frontend_profile.contains("ENABLED_MODULES = []"));
-        assert!(!frontend_profile.contains("@shipctl/module-"));
+        assert!(frontend_profile.lines().all(|line| {
+            !line.contains("@shipctl/module-") || line.contains("@shipctl/module-api")
+        }));
     }
 }

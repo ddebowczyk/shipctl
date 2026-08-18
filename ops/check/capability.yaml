@@ -23,7 +23,6 @@ reads:
   - ops/ops.yaml
   - ops/schema/**
   - ops/*/capability.yaml
-  - ops/upstream/**
   - ops/version/current.yaml
   - ops/version/justfile
   - ops/version/schema/**

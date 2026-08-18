@@ -1,5 +1,4 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ACTIVATION_TERMINAL_SESSIONS,
   terminalHostAdapter,
@@ -48,8 +47,6 @@ import { useShallow } from "zustand/shallow";
 import { useTerminalActions } from "../terminal-host/index.ts";
 import { useThemeApplicator } from "./useThemeApplicator.ts";
 import { useProjectWatcher } from "../projects/index.ts";
-import { listen } from "@tauri-apps/api/event";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { BUILTIN_GLOBAL_SURFACE_LOADERS } from "./builtinGlobalSurfaceLoaders.ts";
 import {
   getUsername,
@@ -71,6 +68,12 @@ import {
   createSemanticTerminalsServiceProvider,
   createTerminalSessionsServiceProvider,
   createTauriWorkspacePersistencePort,
+  confirmApplicationQuit,
+  confirmGroupRemoval,
+  confirmProjectRemoval,
+  handleTitleBarPrimaryPress,
+  observeNativeMenuCommands,
+  observeQuitRequests,
   reportModuleReconciliationFailure,
 } from "../platform/index.ts";
 import { useThemeStore } from "../appearance/index.ts";
@@ -503,7 +506,6 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
           }),
           createSemanticTerminalsServiceProvider({
             bindingsByActivation: bindings.terminalBindingsByActivation,
-            runtime: ACTIVATION_TERMINAL_SESSIONS,
           }),
         ]),
         createWorkspaceContributions,
@@ -696,10 +698,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   const handleRemoveProject = useCallback(
     async (repoPath: string) => {
       const repoName = repoPath.split("/").filter(Boolean).pop() ?? "this project";
-      const confirmed = await ask(
-        `Remove "${repoName}" from Shipctl? The files on disk will not be deleted.`,
-        { title: "Remove project", kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" },
-      );
+      const confirmed = await confirmProjectRemoval(repoName);
       if (!confirmed) return;
       try {
         await closeProjectTerminals(repoPath);
@@ -741,10 +740,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     async (groupId: string) => {
       const group = groups.find((g) => g.id === groupId);
       const groupName = group?.name ?? "this group";
-      const confirmed = await ask(
-        `Remove group "${groupName}"? Projects in this group will become ungrouped.`,
-        { title: "Remove group", kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" },
-      );
+      const confirmed = await confirmGroupRemoval(groupName);
       if (!confirmed) return;
       try {
         await deleteGroup(groupId);
@@ -1014,17 +1010,11 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   // All native exit routes are confirmed, including Cmd+Q with no active PTYs.
   const quitDialogOpenRef = useRef(false);
   useEffect(() => {
-    const unlisten = listen<number>("quit-requested", async (event) => {
+    const unlisten = observeQuitRequests(async (count) => {
       if (quitDialogOpenRef.current) return;
       quitDialogOpenRef.current = true;
       try {
-        const count = event.payload;
-        const confirmed = await ask(
-          count > 0
-            ? `Quit Shipctl and stop ${count} running session${count === 1 ? "" : "s"}?`
-            : "Quit Shipctl?",
-          { title: "Quit Shipctl", kind: "warning", okLabel: "Quit", cancelLabel: "Cancel" },
-        );
+        const confirmed = await confirmApplicationQuit(count);
         if (confirmed) {
           try {
             await notifyModulesBeforeShutdown(
@@ -1051,8 +1041,8 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   // The native menu emits stable command IDs. The registry owns their static
   // dispatch, so this listener stays a transport edge instead of a command switch.
   useEffect(() => {
-    const unlisten = listen<string>("menu-event", (event) => {
-      dispatchNativeCommand(event.payload);
+    const unlisten = observeNativeMenuCommands((commandId) => {
+      dispatchNativeCommand(commandId);
     });
     return () => { unlisten.then((f) => f()); };
   }, [dispatchNativeCommand]);
@@ -1194,9 +1184,9 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
             onMouseDown={(e) => {
               if (e.buttons === 1) {
                 if (e.detail === 2) {
-                  getCurrentWindow().toggleMaximize();
+                  handleTitleBarPrimaryPress(2);
                 } else {
-                  getCurrentWindow().startDragging();
+                  handleTitleBarPrimaryPress(1);
                 }
               }
             }}

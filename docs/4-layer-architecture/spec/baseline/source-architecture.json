@@ -11,7 +11,6 @@
         "frontend": {
           "package": "@shipctl/module-assistants",
           "path": "modules/assistants/frontend",
-          "composition_symbol": "assistantsModule",
           "delivery": "runtime-artifact",
           "artifact": "modules/assistants/artifact"
         },

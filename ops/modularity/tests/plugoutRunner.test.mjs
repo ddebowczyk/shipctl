@@ -51,7 +51,7 @@ test("profile runner can check only the source-absent contract without a copy", 
   assert.deepEqual(calls, ["source-absent"]);
 });
 
-test("public profile commands use manifest and composition contracts without builds", () => {
+test("public profile commands use manifest delivery contracts without builds", () => {
   plugout(repositoryRoot, "commands");
   frontendDisabled(repositoryRoot, "usage");
 });

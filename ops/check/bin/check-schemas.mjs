@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -34,12 +33,6 @@ export async function validateYaml(file, schema) {
   await exec("ys", ["-f", schema, file]);
 }
 
-function frontmatter(markdown, file) {
-  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!match) throw new Error(`${file}: missing YAML frontmatter`);
-  return `---\n${match[1]}\n`;
-}
-
 async function schemaTargets(root) {
   const capabilitySchema = path.join(root, "ops/schema/capability.schema.yaml");
   const targets = [];
@@ -50,8 +43,6 @@ async function schemaTargets(root) {
     path.join(root, "ops/version/current.yaml"),
     path.join(root, "ops/version/schema/current.v1.schema.yaml"),
   ]);
-  targets.push([path.join(root, "ops/upstream/state.yaml"), path.join(root, "ops/upstream/schema/state.schema.yaml")]);
-  targets.push([path.join(root, "ops/upstream/path-map.yaml"), path.join(root, "ops/upstream/schema/path-map.schema.yaml")]);
   targets.push([
     path.join(root, "ops/repository/root-map.yaml"),
     path.join(root, "ops/repository/schema/root-map.schema.yaml"),
@@ -78,19 +69,6 @@ export async function checkSchemas(root = defaultRoot) {
   ];
   if (yamlFiles.length) await exec("yamllint", yamlFiles);
 
-  const temporary = await mkdtemp(path.join(tmpdir(), "shipctl-ledger-schema-"));
-  try {
-    const entrySchema = path.join(root, "ops/upstream/schema/entry.schema.yaml");
-    const entries = await filesUnder(path.join(root, "ops/upstream/log"), (file) => file.endsWith(".md"));
-    for (const entry of entries) {
-      const extracted = path.join(temporary, path.basename(entry, ".md") + ".yaml");
-      await writeFile(extracted, frontmatter(await readFile(entry, "utf8"), entry));
-      await validateYaml(extracted, entrySchema);
-      await exec("yamllint", [extracted]);
-    }
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
-  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

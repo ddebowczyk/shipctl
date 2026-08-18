@@ -16,7 +16,6 @@ const HOST_PACKAGE = "@shipctl/core";
 const HOST_ROOTS = ["src", "core/frontend"];
 const CANVAS_ROOT = "core/frontend/canvas";
 const PLATFORM_ROOT = "core/frontend/platform";
-const LEGACY_TAURI_IMPORTS = "ops/modularity/legacy-tauri-imports.json";
 const COMPOSITION_FILES = new Set([
   "core/frontend/host/enabledModules.ts",
 ]);
@@ -496,40 +495,6 @@ function packageMatch(specifier, packages) {
   return packages.find(({ name }) => specifier === name || specifier.startsWith(`${name}/`));
 }
 
-function legacyImportKey(file, specifier) {
-  return `${file}->${specifier}`;
-}
-
-async function legacyTauriImports(root) {
-  try {
-    const document = JSON.parse(
-      await readFile(path.join(root, LEGACY_TAURI_IMPORTS), "utf8"),
-    );
-    if (document.schema_version !== 1 || !Array.isArray(document.imports)) {
-      throw new Error(`${LEGACY_TAURI_IMPORTS} must use schema version 1`);
-    }
-    const entries = new Map();
-    for (const item of document.imports) {
-      if (
-        typeof item?.file !== "string"
-        || typeof item?.specifier !== "string"
-        || !Number.isSafeInteger(item?.count)
-        || item.count < 1
-        || !item.specifier.startsWith("@tauri-apps/")
-      ) {
-        throw new Error(`${LEGACY_TAURI_IMPORTS} contains an invalid import entry`);
-      }
-      const key = legacyImportKey(item.file, item.specifier);
-      if (entries.has(key)) throw new Error(`${LEGACY_TAURI_IMPORTS} repeats ${key}`);
-      entries.set(key, { ...item, seen: 0 });
-    }
-    return entries;
-  } catch (error) {
-    if (error?.code === "ENOENT") return new Map();
-    throw error;
-  }
-}
-
 function diagnostic(file, entry, rule, message, root) {
   return {
     file: path.relative(root, file),
@@ -569,7 +534,6 @@ export async function checkModuleBoundaries(root = process.cwd()) {
   const coreRoot = path.join(absoluteRoot, "core/frontend");
   const platformRoot = path.join(absoluteRoot, PLATFORM_ROOT);
   const opsRoot = path.join(absoluteRoot, "ops");
-  const tauriDebt = await legacyTauriImports(absoluteRoot);
   const coreEntries = await coreEntrypoints(absoluteRoot);
   const hostFiles = (await Promise.all(
     HOST_ROOTS.map(async (hostRoot) => {
@@ -662,18 +626,14 @@ export async function checkModuleBoundaries(root = process.cwd()) {
       const isTauriImport = entry.specifier.startsWith("@tauri-apps/");
 
       if (isTauriImport && !isWithin(platformRoot, file)) {
-        const debt = tauriDebt.get(legacyImportKey(relativeFile, entry.specifier));
-        if (!debt || debt.seen >= debt.count) {
-          diagnostics.push(diagnostic(
-            file,
-            entry,
-            "tauri-import-outside-platform",
-            "frontend Tauri imports belong in core/frontend/platform; modules use semantic services",
-            absoluteRoot,
-          ));
-          continue;
-        }
-        debt.seen += 1;
+        diagnostics.push(diagnostic(
+          file,
+          entry,
+          "tauri-import-outside-platform",
+          "frontend Tauri imports belong in core/frontend/platform; modules use semantic services",
+          absoluteRoot,
+        ));
+        continue;
       }
 
       if (isCanvas && entry.specifier.startsWith("@tauri-apps/")) {
@@ -836,18 +796,6 @@ export async function checkModuleBoundaries(root = process.cwd()) {
         }
       }
     }
-  }
-
-  for (const debt of tauriDebt.values()) {
-    if (debt.seen === debt.count) continue;
-    diagnostics.push({
-      file: LEGACY_TAURI_IMPORTS,
-      line: 1,
-      column: 1,
-      specifier: legacyImportKey(debt.file, debt.specifier),
-      rule: "legacy-tauri-import-stale",
-      message: `legacy Tauri debt records ${debt.count} import(s), found ${debt.seen}`,
-    });
   }
 
   return diagnostics.sort((left, right) =>

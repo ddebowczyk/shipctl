@@ -3,7 +3,7 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-b
 title: Semantic TypeScript service wall
-status: implementing
+status: complete
 source: docs/4-layer-architecture/07-phase-b-semantic-service-wall.md
 depends_on: [phase-a]
 semantics:
@@ -100,7 +100,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: implemented
+    status: passing
     deletion_gates: [DELETE-B-TAURI-EDGES]
   - id: PROP-B-ADAPTER-001
     claim: >-
@@ -140,7 +140,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: generator-ready
+    status: passing
     deletion_gates: [DELETE-B-TAURI-EDGES]
   - id: PROP-B-FAKE-001
     claim: >-
@@ -178,7 +178,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: generator-ready
+    status: passing
     deletion_gates: [DELETE-B-TAURI-EDGES]
   - id: PROP-B-ACTIVATION-001
     claim: >-
@@ -215,7 +215,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: implemented
+    status: passing
     deletion_gates: [DELETE-B-TAURI-EDGES]
   - id: PROP-B-REQUEST-001
     claim: >-
@@ -252,7 +252,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: generator-ready
+    status: passing
     deletion_gates: [DELETE-B-TAURI-EDGES]
   - id: PROP-B-EVENT-001
     claim: >-
@@ -289,7 +289,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: generator-ready
+    status: passing
     deletion_gates: [DELETE-B-TAURI-EDGES]
   - id: PROP-B-STREAM-001
     claim: >-
@@ -327,7 +327,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: generator-ready
+    status: passing
     deletion_gates: [DELETE-B-TAURI-EDGES]
 deliverables:
   - Versioned semantic services with fake and trusted adapter implementations.

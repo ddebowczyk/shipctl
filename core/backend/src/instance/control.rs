@@ -46,7 +46,7 @@ use crate::state::archive::StateArchiveInspection;
 use crate::terminal_host::{
     TerminalAgentActivity, TerminalAgentReportRequest, TerminalAttachmentId, TerminalDescriptor,
     TerminalError, TerminalErrorCode, TerminalEvent, TerminalEventSink, TerminalId,
-    TerminalRawAttachment,
+    TerminalRawAttachment, TerminalShellSpawnRequest,
 };
 
 const DESCRIPTOR_SCHEMA_VERSION: u32 = 1;
@@ -116,6 +116,14 @@ pub trait ControlHandler: Send + Sync + 'static {
         ))
     }
     fn terminal_list(&self) -> Result<Vec<TerminalDescriptor>, ControlError> {
+        Err(terminal_control_unavailable())
+    }
+    /// Spawn is intentionally shell-only and workspace-scoped. The concrete
+    /// host constructs its private process-launch request after validation.
+    fn terminal_spawn(
+        &self,
+        _request: TerminalShellSpawnRequest,
+    ) -> Result<TerminalDescriptor, ControlError> {
         Err(terminal_control_unavailable())
     }
     fn terminal_get(&self, _id: TerminalId) -> Result<TerminalDescriptor, ControlError> {
@@ -744,6 +752,9 @@ fn dispatch_terminal_request(
                 terminals,
             })
         }),
+        TerminalCommand::Spawn { request } => handler
+            .terminal_spawn(request)
+            .map(ControlResponseResult::TerminalDescriptor),
         TerminalCommand::Get { terminal_id } => handler
             .terminal_get(terminal_id)
             .map(ControlResponseResult::TerminalDescriptor),
@@ -1397,6 +1408,24 @@ impl InstanceDirectory {
             },
         )
         .and_then(expect_terminal_list_result)
+    }
+
+    pub fn spawn_terminal(
+        &self,
+        selector: &str,
+        request_value: TerminalShellSpawnRequest,
+    ) -> Result<TerminalDescriptor, ControlError> {
+        let (instances, _) = self.scan();
+        let descriptor = select_instance(instances, Some(selector))?;
+        request(
+            &descriptor,
+            ControlOperation::Terminals {
+                command: TerminalCommand::Spawn {
+                    request: request_value,
+                },
+            },
+        )
+        .and_then(expect_terminal_descriptor_result)
     }
 
     pub fn get_terminal(
@@ -2642,7 +2671,7 @@ mod tests {
     use crate::terminal_host::TerminalColorTheme;
     use crate::terminal_host::{
         TerminalLaunchRequest, TerminalLaunchTarget, TerminalMetadata, TerminalOwner,
-        TerminalService,
+        TerminalService, TerminalShellSpawnRequest,
     };
     use std::collections::HashMap;
     use std::sync::atomic::AtomicUsize;
@@ -2698,6 +2727,17 @@ mod tests {
 
         fn terminal_list(&self) -> Result<Vec<TerminalDescriptor>, ControlError> {
             Ok(self.terminals.list())
+        }
+
+        fn terminal_spawn(
+            &self,
+            request: TerminalShellSpawnRequest,
+        ) -> Result<TerminalDescriptor, ControlError> {
+            let project = std::env::temp_dir();
+            let launch = request
+                .into_launch_request([project], 1)
+                .map_err(terminal_control_error)?;
+            self.terminals.spawn(launch).map_err(terminal_control_error)
         }
 
         fn terminal_get(&self, id: TerminalId) -> Result<TerminalDescriptor, ControlError> {
@@ -3147,6 +3187,57 @@ mod tests {
                 command: ScheduleCommand::List {},
             },
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_spawn_control_creates_only_workspace_scoped_shells() {
+        let (context, root) = fixture("terminal-spawn");
+        let leases = Arc::new(InstanceLeases::acquire(&context).unwrap());
+        let handler = fake_handler("terminal-spawn", 0);
+        let server = ControlServer::start(context.clone(), leases, handler.clone()).unwrap();
+        let directory = InstanceDirectory::new(context.runtime_root.clone(), context.build.clone());
+        let project = std::env::temp_dir().canonicalize().unwrap();
+
+        let descriptor = directory
+            .spawn_terminal(
+                "terminal-spawn",
+                TerminalShellSpawnRequest {
+                    driver_id: crate::terminal_host::default_terminal_driver_id(),
+                    project_path: project.clone(),
+                    cwd: None,
+                    columns: 80,
+                    rows: 24,
+                },
+            )
+            .unwrap();
+        assert_eq!(descriptor.metadata.project_path, Some(project.clone()));
+        assert_eq!(descriptor.metadata.cwd, project);
+        assert_eq!(descriptor.metadata.owner, TerminalOwner::Core);
+        assert_eq!(descriptor.metadata.display_command, "shell");
+
+        let error = directory
+            .spawn_terminal(
+                "terminal-spawn",
+                TerminalShellSpawnRequest {
+                    driver_id: crate::terminal_host::default_terminal_driver_id(),
+                    project_path: std::env::temp_dir(),
+                    cwd: Some(PathBuf::from("/")),
+                    columns: 80,
+                    rows: 24,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), "terminal.request.invalid");
+
+        assert!(
+            directory
+                .close_terminal("terminal-spawn", descriptor.id)
+                .unwrap()
+                .existed
+        );
+        drop(server);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

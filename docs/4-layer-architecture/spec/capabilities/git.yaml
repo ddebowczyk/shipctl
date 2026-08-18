@@ -4,7 +4,7 @@ schema_version: capability/v1
 id: git
 version: 1.0.0
 title: Scoped Git operations and repository observation
-status: implementing
+status: implemented
 layer: native-kernel
 consumers: [git]
 current_implementations:

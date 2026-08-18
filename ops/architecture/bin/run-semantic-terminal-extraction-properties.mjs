@@ -97,7 +97,7 @@ const properties = [
     version: "1.11.0",
     classifications: {
       capability: ["semantic-terminal"],
-      authorization: ["allowed", "unknown", "disposed", "terminal-owner-denied"],
+      authorization: ["allowed", "unknown", "disposed", "terminal-driver-denied"],
     },
   },
   {

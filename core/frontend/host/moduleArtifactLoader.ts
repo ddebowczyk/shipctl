@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import * as PluginApi from "@shipctl/module-api";
 import {
   parseMessageDeclarations,
@@ -11,6 +10,8 @@ import * as ReactDom from "react-dom";
 import * as ReactDomClient from "react-dom/client";
 import * as ReactJsxDevRuntime from "react/jsx-dev-runtime";
 import * as ReactJsxRuntime from "react/jsx-runtime";
+
+import { moduleArtifactAssetUrl } from "@shipctl/core/platform";
 
 import { messageDeclarations } from "./moduleMessageContext.ts";
 import {
@@ -113,7 +114,7 @@ export function assertDigestQualifiedArtifactUrl(entryUrl: string, digest: strin
 export function moduleArtifactUrl(
   entryPath: string,
   digest: string,
-  toUrl: (path: string) => string = convertFileSrc,
+  toUrl: (path: string) => string = moduleArtifactAssetUrl,
 ): string {
   const entryUrl = toUrl(entryPath);
   assertDigestQualifiedArtifactUrl(entryUrl, digest);

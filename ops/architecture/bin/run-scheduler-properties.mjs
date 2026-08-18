@@ -74,9 +74,9 @@ const properties = [
   },
   {
     propertyId: "PROP-B-FAKE-001",
-    testId: "architecture.scheduler-adapter-parity.property",
+    testId: "architecture.scheduler-service-fake.property",
     classifications: {
-      parity: ["tauri-free-fake", "current-adapter"],
+      transport: ["tauri-free-fake"],
       operations: ["register", "inspect", "dispose"],
     },
   },

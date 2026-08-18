@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use shipctl_core::instance::DEFAULT_INSTANCE_NAME;
 use shipctl_core::semantic_terminal::projection::ProjectedSpace;
-use shipctl_core::terminal_host::{TerminalAgentReportKind, TerminalId};
+use shipctl_core::terminal_host::{TerminalAgentReportKind, TerminalDriverId, TerminalId};
 use uuid::Uuid;
 
 use crate::output::OutputFormat;
@@ -66,7 +66,7 @@ pub enum Command {
         #[command(subcommand)]
         command: CapabilitiesCommand,
     },
-    /// List, inspect, attach to, write to, report activity for, or close host-owned terminals.
+    /// Start, list, inspect, attach to, write to, report activity for, or close host-owned terminals.
     Terminals {
         #[command(subcommand)]
         command: TerminalsCommand,
@@ -94,6 +94,8 @@ pub enum Command {
 pub enum TerminalsCommand {
     /// List terminals owned by one running instance.
     List(TerminalTargetArgs),
+    /// Start an interactive shell in a registered project through the running host.
+    Spawn(TerminalSpawnArgs),
     /// Get the complete redacted descriptor for one terminal.
     Get(TerminalIdArgs),
     /// Print what the host believes about one terminal: cells, cursor, modes,
@@ -176,6 +178,32 @@ pub struct TerminalTargetArgs {
 
     #[command(flatten)]
     pub runtime: RuntimeRootArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct TerminalSpawnArgs {
+    /// Installed terminal driver to use for this shell.
+    #[arg(long, value_name = "DRIVER")]
+    pub driver: TerminalDriverId,
+
+    /// Registered project that owns the terminal.
+    #[arg(long, value_name = "PATH")]
+    pub project: PathBuf,
+
+    /// Project-local working directory. Defaults to --project.
+    #[arg(long, value_name = "PATH")]
+    pub cwd: Option<PathBuf>,
+
+    /// Initial terminal width in columns.
+    #[arg(long, value_name = "COLUMNS")]
+    pub columns: u16,
+
+    /// Initial terminal height in rows.
+    #[arg(long, value_name = "ROWS")]
+    pub rows: u16,
+
+    #[command(flatten)]
+    pub target: TerminalTargetArgs,
 }
 
 #[derive(Debug, Args)]

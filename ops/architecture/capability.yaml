@@ -16,7 +16,6 @@ reads:
   - module-api/**
   - modules/**
   - ops/modularity/lib/module-boundaries.mjs
-  - ops/modularity/legacy-tauri-imports.json
 generates: []
 commands:
   - name: validate
@@ -24,9 +23,14 @@ commands:
     lane: fast
     aggregate: check
   - name: test
-    summary: Run generated architecture properties and replay proofs.
+    summary: Run the serialized source-level architecture property suite.
     lane: fast
     aggregate: test
+  - name: evidence
+    summary: >-
+      Run controlled fresh and replay campaigns and reject missing, stale, or
+      mixed-source property evidence.
+    lane: slow
   - name: inspect
     summary: Emit the current source and legacy-composition snapshot as JSON.
     lane: fast
@@ -43,6 +47,9 @@ commands:
     lane: fast
   - name: messages
     summary: Run the seeded Messages semantic-service property suite.
+    lane: fast
+  - name: processes
+    summary: Run the seeded Processes semantic-service property suite.
     lane: fast
   - name: cordis
     summary: Run the seeded Cordis static-composition property suite.

@@ -78,7 +78,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: implemented
+    status: passing
     deletion_gates: []
   - id: PROP-A-IMPORT-001
     claim: >-
@@ -118,7 +118,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: implemented
+    status: passing
     deletion_gates: []
   - id: PROP-A-COMPOSITION-001
     claim: >-
@@ -158,7 +158,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: implemented
+    status: passing
     deletion_gates: []
   - id: PROP-A-REPLAY-001
     claim: >-
@@ -198,7 +198,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: implemented
+    status: passing
     deletion_gates: []
 deliverables:
   - Closed schemas and records for the approved migration program.

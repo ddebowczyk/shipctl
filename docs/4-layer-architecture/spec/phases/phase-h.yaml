@@ -3,7 +3,7 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-h
 title: Architecture closure
-status: specified
+status: implementing
 source: docs/4-layer-architecture/13-verification-cutover-and-rollback.md
 depends_on: [phase-d, phase-f, phase-g]
 semantics: []

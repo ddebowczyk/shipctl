@@ -19,12 +19,13 @@ requires:
     - yamllint
     - yq
     - ys
-  capabilities: [check, modularity, version]
+  capabilities: [architecture, check, modularity, version]
 owns: [ops/build/**]
 reads:
   - core/**
   - examples/module-fixture/**
   - modules/**
+  - ops/architecture/lib/plugin-artifact-build.mjs
   - src/**
   - src-tauri/**
 generates: [dist/**, builds/**, target/**]

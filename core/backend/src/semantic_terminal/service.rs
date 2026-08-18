@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
 use crate::terminal_host::{
-    TerminalAttachmentId, TerminalDriverEventSink, TerminalError, TerminalErrorCode, TerminalId,
-    TerminalOwner, TerminalService,
+    TerminalAttachmentId, TerminalDriverEventSink, TerminalDriverId, TerminalError,
+    TerminalErrorCode, TerminalId, TerminalService,
 };
 
 use super::input;
@@ -79,9 +79,11 @@ pub type SemanticTerminalEventSink = Arc<dyn Fn(JsonValue) -> Result<(), String>
 /// Native terminal operations required by the semantic provider.
 ///
 /// This fixed interface prevents the provider from gaining general PTY or
-/// process authority. Tests replace it with an in-memory authority model.
+/// process authority. A terminal's selected driver, rather than its lifecycle
+/// owner, gates semantic presentation access. Tests replace it with an
+/// in-memory authority model.
 pub trait SemanticTerminalAuthority: Send + Sync {
-    fn owner_module_id(&self, terminal_id: TerminalId) -> Result<Option<String>, TerminalError>;
+    fn driver_id(&self, terminal_id: TerminalId) -> Result<TerminalDriverId, TerminalError>;
     fn request(
         &self,
         terminal_id: TerminalId,
@@ -137,11 +139,8 @@ impl TerminalServiceAuthority {
 }
 
 impl SemanticTerminalAuthority for TerminalServiceAuthority {
-    fn owner_module_id(&self, terminal_id: TerminalId) -> Result<Option<String>, TerminalError> {
-        Ok(match self.terminals.get(terminal_id)?.metadata.owner {
-            TerminalOwner::Core => None,
-            TerminalOwner::Module { module_id, .. } => Some(module_id),
-        })
+    fn driver_id(&self, terminal_id: TerminalId) -> Result<TerminalDriverId, TerminalError> {
+        Ok(self.terminals.get(terminal_id)?.driver_id)
     }
 
     fn request(
@@ -574,14 +573,14 @@ impl SemanticTerminalService {
     ) -> Result<TerminalId, SemanticTerminalError> {
         self.authorize(actor, grant)?;
         let terminal_id = parse_terminal_id(terminal_id)?;
-        let owner = self
+        let driver_id = self
             .inner
             .authority
-            .owner_module_id(terminal_id)
+            .driver_id(terminal_id)
             .map_err(SemanticTerminalError::from)?;
-        if owner.as_deref() != Some(actor.module_id.as_str()) {
+        if driver_id != super::driver_id() {
             return Err(SemanticTerminalError::denied(
-                "The semantic terminal is not owned by this module",
+                "The terminal does not use the semantic terminal driver",
             ));
         }
         Ok(terminal_id)
@@ -666,7 +665,8 @@ mod tests {
 
     #[derive(Default)]
     struct ModelAuthority {
-        owners: Mutex<HashMap<TerminalId, String>>,
+        drivers: Mutex<HashMap<TerminalId, TerminalDriverId>>,
+        lifecycle_owners: Mutex<HashMap<TerminalId, String>>,
         detached: Mutex<Vec<TerminalAttachmentId>>,
         fail_detach_once: Mutex<HashSet<TerminalAttachmentId>>,
         next_attachment: AtomicUsize,
@@ -674,13 +674,30 @@ mod tests {
     }
 
     impl ModelAuthority {
-        fn own(&self, terminal_id: TerminalId, module_id: &str) {
-            self.owners().insert(terminal_id, module_id.to_string());
+        fn register(&self, terminal_id: TerminalId, driver_id: TerminalDriverId) {
+            self.register_with_owner(terminal_id, driver_id, "shipctl.semantic-terminal");
+        }
+
+        fn register_with_owner(
+            &self,
+            terminal_id: TerminalId,
+            driver_id: TerminalDriverId,
+            lifecycle_owner: &str,
+        ) {
+            self.drivers().insert(terminal_id, driver_id);
+            self.lifecycle_owners()
+                .insert(terminal_id, lifecycle_owner.to_string());
             self.terminal_count.fetch_add(1, Ordering::Relaxed);
         }
 
-        fn owners(&self) -> std::sync::MutexGuard<'_, HashMap<TerminalId, String>> {
-            self.owners
+        fn drivers(&self) -> std::sync::MutexGuard<'_, HashMap<TerminalId, TerminalDriverId>> {
+            self.drivers
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+        }
+
+        fn lifecycle_owners(&self) -> std::sync::MutexGuard<'_, HashMap<TerminalId, String>> {
+            self.lifecycle_owners
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
         }
@@ -694,11 +711,13 @@ mod tests {
     }
 
     impl SemanticTerminalAuthority for ModelAuthority {
-        fn owner_module_id(
-            &self,
-            terminal_id: TerminalId,
-        ) -> Result<Option<String>, TerminalError> {
-            Ok(self.owners().get(&terminal_id).cloned())
+        fn driver_id(&self, terminal_id: TerminalId) -> Result<TerminalDriverId, TerminalError> {
+            self.drivers().get(&terminal_id).cloned().ok_or_else(|| {
+                TerminalError::new(
+                    TerminalErrorCode::NotFound,
+                    "generated terminal is unavailable",
+                )
+            })
         }
 
         fn request(
@@ -787,7 +806,7 @@ mod tests {
         fn architecture_provider_semantic_terminal_parity_property(text in ".{0,128}") {
             let authority = Arc::new(ModelAuthority::default());
             let terminal_id = TerminalId::new();
-            authority.own(terminal_id, "shipctl.semantic-terminal");
+            authority.register(terminal_id, crate::semantic_terminal::driver_id());
             let service = SemanticTerminalService::with_authority(authority.clone());
             let actor = actor("shipctl.semantic-terminal", "activation-parity");
             service.attach(&actor, &terminal_id.to_string(), false, sink()).unwrap();
@@ -804,16 +823,25 @@ mod tests {
         #[test]
         fn architecture_provider_semantic_terminal_authority_property(
             admitted in any::<bool>(),
-            owns_terminal in any::<bool>(),
+            uses_semantic_driver in any::<bool>(),
             released in any::<bool>(),
+            lifecycle_owner in (prop_oneof![
+                Just("shipctl.semantic-terminal"),
+                Just("shipctl.assistants"),
+            ]),
         ) {
             const INSPECT: &[SemanticTerminalGrant] = &[SemanticTerminalGrant::Inspect];
             const NONE: &[SemanticTerminalGrant] = &[];
             let authority = Arc::new(ModelAuthority::default());
             let terminal_id = TerminalId::new();
-            authority.own(
+            authority.register_with_owner(
                 terminal_id,
-                if owns_terminal { "candidate" } else { "different" },
+                if uses_semantic_driver {
+                    crate::semantic_terminal::driver_id()
+                } else {
+                    TerminalDriverId::new("thin-terminal").unwrap()
+                },
+                lifecycle_owner,
             );
             let policies = vec![SemanticTerminalPolicy {
                 module_id: "candidate",
@@ -826,7 +854,7 @@ mod tests {
             }
 
             let result = service.snapshot(&actor, &terminal_id.to_string());
-            prop_assert_eq!(result.is_ok(), admitted && owns_terminal && !released);
+            prop_assert_eq!(result.is_ok(), admitted && uses_semantic_driver && !released);
         }
 
         #[test]
@@ -836,7 +864,7 @@ mod tests {
         ) {
             let authority = Arc::new(ModelAuthority::default());
             let terminal_id = TerminalId::new();
-            authority.own(terminal_id, "shipctl.semantic-terminal");
+            authority.register(terminal_id, crate::semantic_terminal::driver_id());
             let service = SemanticTerminalService::with_authority(authority.clone());
             let actor = actor("shipctl.semantic-terminal", "activation-owner");
             let mut attachment_ids = Vec::new();
@@ -876,5 +904,29 @@ mod tests {
                 SEMANTIC_TERMINALS_ACTIVATION_DISPOSED,
             );
         }
+    }
+
+    #[test]
+    fn semantic_driver_authorizes_an_assistant_owned_terminal() {
+        let authority = Arc::new(ModelAuthority::default());
+        let terminal_id = TerminalId::new();
+        authority.register_with_owner(
+            terminal_id,
+            crate::semantic_terminal::driver_id(),
+            "shipctl.assistants",
+        );
+        assert_eq!(
+            authority
+                .lifecycle_owners()
+                .get(&terminal_id)
+                .map(String::as_str),
+            Some("shipctl.assistants"),
+        );
+
+        let service = SemanticTerminalService::with_authority(authority);
+        let actor = actor("shipctl.semantic-terminal", "activation-assistant-owned");
+        assert!(service
+            .attach(&actor, &terminal_id.to_string(), false, sink())
+            .is_ok());
     }
 }

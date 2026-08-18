@@ -68,6 +68,36 @@ test("architecture.spec.rejects-unknown-deletion-proof", () => {
   expectCode(spec, "architecture.module.proof.unknown");
 });
 
+test("architecture.spec.rejects-complete-statuses-without-passing-proofs", () => {
+  const phaseSpec = structuredClone(liveSpec);
+  phaseSpec.phases.find(({ id }) => id === "phase-a").properties[0].status = "implemented";
+  expectCode(phaseSpec, "architecture.phase.status.property-not-passing");
+
+  const capabilitySpec = structuredClone(liveSpec);
+  capabilitySpec.phases.find(({ id }) => id === "phase-b").properties.find(
+    ({ id }) => id === "PROP-B-ADAPTER-001",
+  ).status = "implemented";
+  expectCode(capabilitySpec, "architecture.capability.status.property-not-passing");
+
+  const moduleSpec = structuredClone(liveSpec);
+  moduleSpec.phases.find(({ id }) => id === "phase-d").properties.find(
+    ({ id }) => id === "PROP-D-PARITY-001",
+  ).status = "implemented";
+  expectCode(moduleSpec, "architecture.module.status.proof-not-passing");
+});
+
+test("architecture.spec.rejects-complete-dependencies-that-are-not-complete", () => {
+  const spec = structuredClone(liveSpec);
+  spec.phases.find(({ id }) => id === "phase-b").status = "implementing";
+  expectCode(spec, "architecture.phase.status.dependency-incomplete");
+  expectCode(spec, "architecture.module.status.phase-incomplete");
+
+  const capability = spec.capabilities.find(({ id }) => id === "processes");
+  capability.status = "implementing";
+  expectCode(spec, "architecture.capability.status.dependency-incomplete");
+  expectCode(spec, "architecture.module.status.capability-incomplete");
+});
+
 test("architecture.spec.graph.property", () => {
   const ids = liveSpec.phases.map((phase) => phase.id);
   const dagArbitrary = fc.tuple(...ids.map((_, index) => (

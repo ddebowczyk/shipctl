@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -84,53 +84,29 @@ async function waitForInstanceAbsent(cli, environment, instanceName, runtimeRoot
   }
 }
 
-async function terminalList(cli, environment, instanceName, runtimeRoot) {
-  return runJson(cli, ["terminals", "list", ...targetArgs(instanceName, runtimeRoot)], {
-    env: environment,
-  });
-}
-
-async function clickTerminalMenu(processId, menuItemLabel) {
-  const script = `
-tell application "System Events"
-  repeat with applicationProcess in application processes
-    if unix id of applicationProcess is ${processId} then
-      tell applicationProcess to click menu item "${menuItemLabel}" of menu 1 of menu bar item "File" of menu bar 1
-      return "clicked"
-    end if
-  end repeat
-  error "Shipctl application process ${processId} is unavailable"
-end tell`;
-  const result = await run("osascript", ["-e", script]);
-  assert.equal(result.trim(), "clicked");
-}
-
 async function createTerminal(
   cli,
   environment,
   instanceName,
   runtimeRoot,
-  processId,
-  menuItemLabel,
+  projectPath,
   driverId,
 ) {
-  const before = await terminalList(cli, environment, instanceName, runtimeRoot);
-  const existingIds = new Set(before.data.terminals.map(({ id }) => id));
-  await clickTerminalMenu(processId, menuItemLabel);
-  for (;;) {
-    const listed = await terminalList(cli, environment, instanceName, runtimeRoot);
-    const created = listed.data.terminals.filter(({ id }) => !existingIds.has(id));
-    for (const terminal of created) {
-      const descriptor = await terminalGet(
-        cli,
-        environment,
-        instanceName,
-        runtimeRoot,
-        terminal.id,
-      );
-      if (descriptor.driverId === driverId) return descriptor.id;
-    }
-  }
+  const spawned = await runJson(cli, [
+    "terminals",
+    "spawn",
+    "--driver",
+    driverId,
+    "--project",
+    projectPath,
+    "--columns",
+    "80",
+    "--rows",
+    "24",
+    ...targetArgs(instanceName, runtimeRoot),
+  ], { env: environment });
+  assert.equal(spawned.data.driverId, driverId);
+  return spawned.data.id;
 }
 
 async function terminalGet(cli, environment, instanceName, runtimeRoot, terminalId) {
@@ -206,7 +182,7 @@ async function waitForAppliedRevision(
   }
 }
 
-async function inspectActiveBundledModule(
+async function inspectActiveModule(
   cli,
   environment,
   instanceName,
@@ -228,6 +204,24 @@ async function inspectActiveBundledModule(
     `${moduleId} did not publish an active artifact observation`,
   );
   return report.data;
+}
+
+async function inspectRemovedModule(
+  cli,
+  environment,
+  instanceName,
+  runtimeRoot,
+  moduleId,
+) {
+  const report = await runOutcomeJson(cli, [
+    "modules",
+    "inspect",
+    moduleId,
+    ...targetArgs(instanceName, runtimeRoot),
+  ], { env: environment });
+  assert.equal(report.status, "error");
+  assert.equal(report.code, "module.registry.desired_state.absent");
+  return report;
 }
 
 function stableTerminalIdentity(descriptor) {
@@ -258,7 +252,8 @@ const home = path.join(testRoot, "home");
 const stateRoot = path.join(testRoot, "state");
 const runtimeRoot = path.join(testRoot, "runtime");
 const repository = path.join(testRoot, "repo");
-const archive = path.join(testRoot, "headless-service.tar");
+const headlessArchive = path.join(testRoot, "headless-service.tar");
+const compoundArchive = path.join(testRoot, "compound-service.tar");
 const instanceName = `phase-f-package-${path.basename(testRoot)}`;
 const environment = { ...process.env, HOME: home };
 let thinTerminalId;
@@ -272,6 +267,7 @@ try {
     mkdir(repository, { recursive: true }),
   ]);
   await run("git", ["init", "-q", repository]);
+  const canonicalRepository = await realpath(repository);
   await writeFile(path.join(stateRoot, "config.yml"), `version: 1
 repos:
   - path: ${repository}
@@ -307,7 +303,16 @@ ui:
   await run(process.execPath, [
     "ops/architecture/bin/build-plugin-artifact.mjs",
     "--to",
-    archive,
+    headlessArchive,
+    "--shipctl",
+    cli,
+  ], { env: environment });
+  await run(process.execPath, [
+    "ops/architecture/bin/build-plugin-artifact.mjs",
+    "--source",
+    "ops/architecture/fixtures/plugin-artifacts/compound-service",
+    "--to",
+    compoundArchive,
     "--shipctl",
     cli,
   ], { env: environment });
@@ -346,7 +351,7 @@ ui:
       "shipctl.usage",
     ].map(async (moduleId) => [
       moduleId,
-      await inspectActiveBundledModule(
+      await inspectActiveModule(
         cli,
         environment,
         instanceName,
@@ -373,6 +378,15 @@ ui:
       "project_layout:git.diff-summary",
       "project_navigation:git.project-navigation",
       "settings:git.settings",
+    ],
+  );
+  assert.deepEqual(
+    bundledModules["shipctl.commands"].contributions
+      .map(({ kind, id }) => `${kind}:${id}`)
+      .sort(),
+    [
+      "panel:core.commands",
+      "project_navigation:commands.project-navigation",
     ],
   );
   assert.deepEqual(
@@ -437,8 +451,7 @@ ui:
     environment,
     instanceName,
     runtimeRoot,
-    initialInstance.processId,
-    "New Thin Terminal",
+    canonicalRepository,
     "thin-terminal",
   );
   const initialTerminal = await terminalGet(
@@ -450,7 +463,7 @@ ui:
   );
   assert.equal(initialTerminal.lifecycle, "running");
   assert.equal(initialTerminal.driverId, "thin-terminal");
-  assert.equal(initialTerminal.metadata.cwd, repository);
+  assert.equal(initialTerminal.metadata.cwd, canonicalRepository);
   const beforeTransition = await writeCanary(
     cli,
     environment,
@@ -464,8 +477,7 @@ ui:
     environment,
     instanceName,
     runtimeRoot,
-    initialInstance.processId,
-    "New Semantic Terminal",
+    canonicalRepository,
     "semantic-terminal",
   );
   const initialSemanticTerminal = await terminalGet(
@@ -477,7 +489,7 @@ ui:
   );
   assert.equal(initialSemanticTerminal.lifecycle, "running");
   assert.equal(initialSemanticTerminal.driverId, "semantic-terminal");
-  assert.equal(initialSemanticTerminal.metadata.cwd, repository);
+  assert.equal(initialSemanticTerminal.metadata.cwd, canonicalRepository);
   const semanticBeforeTransition = await writeCanary(
     cli,
     environment,
@@ -487,11 +499,106 @@ ui:
     "__PHASE_F_SEMANTIC_BEFORE__",
   );
 
+  // This unique artifact is installed only after the packaged app has started.
+  // It proves that the product admits and activates a React/CSS compound
+  // module through the external path, rather than merely re-selecting a
+  // byte-identical bundled artifact.
+  const compoundAdded = await runJson(cli, [
+    "modules",
+    "add",
+    "--offline",
+    compoundArchive,
+    "--state-root",
+    stateRoot,
+    "--output",
+    "json",
+    "--full",
+  ], { env: environment });
+  const compoundManifest = compoundAdded.data.artifact.canonical.manifest;
+  assert.equal(compoundManifest.application.role, "compound");
+  assert.ok(compoundManifest.styles.length > 0, "Compound artifact must carry CSS");
+  assert.ok(
+    compoundManifest.assets.includes("assets/compound-proof.txt"),
+    "Compound artifact must carry its declared supplemental asset",
+  );
+  assert.ok(
+    compoundManifest.assets.includes("schemas/compound-proof.schema.json"),
+    "Compound artifact must carry its declared supplemental schema",
+  );
+  assert.deepEqual(compoundManifest.application.contributions, [{
+    family: "global-surface",
+    id: "fixture.compound-service.surface",
+    schemaVersion: 1,
+  }]);
+  const compoundAddRevision = compoundAdded.data.receipt.registryRevision;
+  assert.equal(compoundAddRevision, initialInstance.moduleControl.registryRevision + 1);
+  await waitForAppliedRevision(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    compoundAddRevision,
+  );
+  const compoundDigest = compoundAdded.data.receipt.artifact.contentDigest;
+  const compoundEnableRevision = compoundAddRevision + 1;
+  const compoundEnabled = await runJson(cli, [
+    "modules",
+    "enable",
+    "fixture.compound-service",
+    "--target-revision",
+    String(compoundEnableRevision),
+    ...targetArgs(instanceName, runtimeRoot),
+  ], { env: environment });
+  const compoundInstance = await waitForAppliedRevision(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    compoundEnableRevision,
+  );
+  const compoundOperation = await runJson(cli, [
+    "operations",
+    "inspect",
+    compoundEnabled.data.requestId,
+    ...targetArgs(instanceName, runtimeRoot),
+  ], { env: environment });
+  assert.equal(compoundOperation.data.result, "succeeded");
+  const activeCompound = await inspectActiveModule(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    "fixture.compound-service",
+  );
+  assert.equal(activeCompound.manifest.contentDigest, compoundDigest);
+  assert.deepEqual(
+    activeCompound.contributions
+      .map(({ kind, id }) => `${kind}:${id}`)
+      .sort(),
+    ["global_surface:fixture.compound-service.surface"],
+  );
+  const afterCompoundEnable = await writeCanary(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    thinTerminalId,
+    "__PHASE_F_AFTER_COMPOUND_ENABLE__",
+  );
+  const semanticAfterCompoundEnable = await writeCanary(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    semanticTerminalId,
+    "__PHASE_F_SEMANTIC_AFTER_COMPOUND_ENABLE__",
+  );
+
   const added = await runJson(cli, [
     "modules",
     "add",
     "--offline",
-    archive,
+    headlessArchive,
     "--state-root",
     stateRoot,
     "--output",
@@ -499,6 +606,7 @@ ui:
     "--full",
   ], { env: environment });
   const addRevision = added.data.receipt.registryRevision;
+  assert.equal(addRevision, compoundEnableRevision + 1);
   await waitForAppliedRevision(cli, environment, instanceName, runtimeRoot, addRevision);
 
   const enableRevision = addRevision + 1;
@@ -524,21 +632,32 @@ ui:
     ...targetArgs(instanceName, runtimeRoot),
   ], { env: environment });
   assert.equal(enableOperation.data.result, "succeeded");
-  const afterEnable = await writeCanary(
+  const activeHeadless = await inspectActiveModule(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    "fixture.headless-service",
+  );
+  assert.equal(
+    activeHeadless.manifest.contentDigest,
+    added.data.receipt.artifact.contentDigest,
+  );
+  const afterHeadlessEnable = await writeCanary(
     cli,
     environment,
     instanceName,
     runtimeRoot,
     thinTerminalId,
-    "__PHASE_F_AFTER_ENABLE__",
+    "__PHASE_F_AFTER_HEADLESS_ENABLE__",
   );
-  const semanticAfterEnable = await writeCanary(
+  const semanticAfterHeadlessEnable = await writeCanary(
     cli,
     environment,
     instanceName,
     runtimeRoot,
     semanticTerminalId,
-    "__PHASE_F_SEMANTIC_AFTER_ENABLE__",
+    "__PHASE_F_SEMANTIC_AFTER_HEADLESS_ENABLE__",
   );
 
   const removeRevision = enableRevision + 1;
@@ -564,24 +683,70 @@ ui:
     ...targetArgs(instanceName, runtimeRoot),
   ], { env: environment });
   assert.equal(removeOperation.data.result, "succeeded");
-  const afterRemove = await writeCanary(
+  const afterHeadlessRemove = await writeCanary(
     cli,
     environment,
     instanceName,
     runtimeRoot,
     thinTerminalId,
-    "__PHASE_F_AFTER_REMOVE__",
+    "__PHASE_F_AFTER_HEADLESS_REMOVE__",
   );
-  const semanticAfterRemove = await writeCanary(
+  const semanticAfterHeadlessRemove = await writeCanary(
     cli,
     environment,
     instanceName,
     runtimeRoot,
     semanticTerminalId,
-    "__PHASE_F_SEMANTIC_AFTER_REMOVE__",
+    "__PHASE_F_SEMANTIC_AFTER_HEADLESS_REMOVE__",
   );
-  const finalTerminal = afterRemove.after;
-  const finalSemanticTerminal = semanticAfterRemove.after;
+  const compoundRemoveRevision = removeRevision + 1;
+  const compoundRemoved = await runJson(cli, [
+    "modules",
+    "remove",
+    "fixture.compound-service",
+    "--target-revision",
+    String(compoundRemoveRevision),
+    ...targetArgs(instanceName, runtimeRoot),
+  ], { env: environment });
+  const compoundRemovedInstance = await waitForAppliedRevision(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    compoundRemoveRevision,
+  );
+  const compoundRemoveOperation = await runJson(cli, [
+    "operations",
+    "inspect",
+    compoundRemoved.data.requestId,
+    ...targetArgs(instanceName, runtimeRoot),
+  ], { env: environment });
+  assert.equal(compoundRemoveOperation.data.result, "succeeded");
+  const removedCompound = await inspectRemovedModule(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    "fixture.compound-service",
+  );
+  const afterCompoundRemove = await writeCanary(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    thinTerminalId,
+    "__PHASE_F_AFTER_COMPOUND_REMOVE__",
+  );
+  const semanticAfterCompoundRemove = await writeCanary(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    semanticTerminalId,
+    "__PHASE_F_SEMANTIC_AFTER_COMPOUND_REMOVE__",
+  );
+  const finalTerminal = afterCompoundRemove.after;
+  const finalSemanticTerminal = semanticAfterCompoundRemove.after;
 
   assert.deepEqual(
     stableTerminalIdentity(finalTerminal),
@@ -593,8 +758,12 @@ ui:
   );
   assert.equal(enabledInstance.instanceId, initialInstance.instanceId);
   assert.equal(removedInstance.instanceId, initialInstance.instanceId);
+  assert.equal(compoundInstance.instanceId, initialInstance.instanceId);
+  assert.equal(compoundRemovedInstance.instanceId, initialInstance.instanceId);
   assert.equal(enabledInstance.processId, initialInstance.processId);
   assert.equal(removedInstance.processId, initialInstance.processId);
+  assert.equal(compoundInstance.processId, initialInstance.processId);
+  assert.equal(compoundRemovedInstance.processId, initialInstance.processId);
 
   await runJson(cli, [
     "terminals",
@@ -640,11 +809,22 @@ ui:
     environment,
     instanceName,
     runtimeRoot,
-    removeRevision,
+    compoundRemoveRevision,
   );
   assert.notEqual(restartedInstance.instanceId, initialInstance.instanceId);
   assert.equal(restartedInstance.processId, restarted.data.processId);
-  const restartInspection = await runJson(cli, [
+  const restartedCommands = await inspectActiveModule(
+    cli,
+    environment,
+    instanceName,
+    runtimeRoot,
+    "shipctl.commands",
+  );
+  assert.equal(
+    restartedCommands.manifest.contentDigest,
+    bundledModules["shipctl.commands"].manifest.contentDigest,
+  );
+  const headlessRestartInspection = await runJson(cli, [
     "modules",
     "inspect",
     "fixture.headless-service",
@@ -655,11 +835,27 @@ ui:
     "json",
     "--full",
   ], { env: environment });
-  assert.equal(restartInspection.data.registryRevision, removeRevision);
-  assert.equal(restartInspection.data.runtimeAvailable, false);
-  assert.equal(restartInspection.data.callable, false);
-  assert.equal(restartInspection.data.desired.enabled, false);
-  assert.equal(restartInspection.data.desired.selectedArtifact, null);
+  assert.equal(headlessRestartInspection.data.registryRevision, compoundRemoveRevision);
+  assert.equal(headlessRestartInspection.data.runtimeAvailable, false);
+  assert.equal(headlessRestartInspection.data.callable, false);
+  assert.equal(headlessRestartInspection.data.desired.enabled, false);
+  assert.equal(headlessRestartInspection.data.desired.selectedArtifact, null);
+  const compoundRestartInspection = await runJson(cli, [
+    "modules",
+    "inspect",
+    "fixture.compound-service",
+    "--offline",
+    "--state-root",
+    stateRoot,
+    "--output",
+    "json",
+    "--full",
+  ], { env: environment });
+  assert.equal(compoundRestartInspection.data.registryRevision, compoundRemoveRevision);
+  assert.equal(compoundRestartInspection.data.runtimeAvailable, false);
+  assert.equal(compoundRestartInspection.data.callable, false);
+  assert.equal(compoundRestartInspection.data.desired.enabled, false);
+  assert.equal(compoundRestartInspection.data.desired.selectedArtifact, null);
 
   const evidence = {
     schemaVersion: 1,
@@ -676,9 +872,12 @@ ui:
       instanceId: initialInstance.instanceId,
       processId: initialInstance.processId,
       initialRevision: initialInstance.moduleControl.registryRevision,
+      compoundAddRevision,
+      compoundEnableRevision,
       addRevision,
       enableRevision,
       removeRevision,
+      compoundRemoveRevision,
       restart: {
         instanceId: restartedInstance.instanceId,
         processId: restartedInstance.processId,
@@ -692,23 +891,44 @@ ui:
       identity: stableTerminalIdentity(initialTerminal),
       writes: {
         beforeTransition,
-        afterEnable,
-        afterRemove,
+        afterCompoundEnable,
+        afterHeadlessEnable,
+        afterHeadlessRemove,
+        afterCompoundRemove,
       },
     },
     semanticTerminal: {
       identity: stableTerminalIdentity(initialSemanticTerminal),
       writes: {
         beforeTransition: semanticBeforeTransition,
-        afterEnable: semanticAfterEnable,
-        afterRemove: semanticAfterRemove,
+        afterCompoundEnable: semanticAfterCompoundEnable,
+        afterHeadlessEnable: semanticAfterHeadlessEnable,
+        afterHeadlessRemove: semanticAfterHeadlessRemove,
+        afterCompoundRemove: semanticAfterCompoundRemove,
       },
     },
     operations: {
+      compoundEnable: compoundOperation.data,
       enable: enableOperation.data,
       remove: removeOperation.data,
+      compoundRemove: compoundRemoveOperation.data,
     },
-    restartInspection: restartInspection.data,
+    compoundArtifact: {
+      identity: compoundAdded.data.receipt.artifact,
+      manifest: compoundManifest,
+      activated: {
+        instanceId: compoundInstance.instanceId,
+        processId: compoundInstance.processId,
+        module: activeCompound,
+      },
+      removed: removedCompound,
+      restart: compoundRestartInspection.data,
+    },
+    headlessArtifact: {
+      identity: added.data.receipt.artifact,
+      activated: activeHeadless,
+      restart: headlessRestartInspection.data,
+    },
   };
   const evidenceFile = path.join(
     repositoryRoot,

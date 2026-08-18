@@ -74,15 +74,15 @@ const properties = [
   },
   {
     propertyId: "PROP-B-FAKE-001",
-    testId: "architecture.messages-bridge-parity.property",
+    testId: "architecture.messages-service-fake.property",
     classifications: {
       routing: ["send", "publish", "request"],
-      parity: ["tauri-free-fake", "current-bridge-client"],
+      transport: ["tauri-free-fake"],
     },
   },
   {
     propertyId: "PROP-B-EVENT-001",
-    testId: "architecture.messages-service-fake.property",
+    testId: "architecture.service-event.messages.property",
     classifications: {
       delivery: ["ordered", "all-live-subscribers"],
       lifecycle: ["subscription-disposed", "owner-disposed"],
@@ -102,7 +102,7 @@ const evidenceFiles = [];
 for (const property of properties) {
   const evidence = propertyEvidence({
     ...property,
-    phaseId: "phase-b",
+    phaseId: property.propertyId.startsWith("PROP-C-") ? "phase-c" : "phase-b",
     language: "typescript",
     library: "fast-check",
     version: fastCheckVersion,

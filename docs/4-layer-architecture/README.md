@@ -6,14 +6,16 @@ The architecture is approved and implementation is in progress under epic
 `shep-vut`. The executable authority is
 [`spec/program.yaml`](spec/program.yaml). Its indexed phase, capability, and
 module-disposition records are schema-validated before implementation work.
-Phase A is complete: the repository has passive entrypoint enforcement, a
-reviewed source and legacy-composition baseline, and replayable TypeScript and
-Rust property evidence. The Phase B foundation is implemented: public semantic
-service and activation contracts, a trusted lifecycle registry, a Tauri-free
-test host, request/event/stream test controls, and an import ratchet now exist.
-Capability migrations are in progress. An exact ledger contains the existing
-non-platform Tauri imports; any new non-platform Tauri import fails the boundary
-check. Ports, Todos, Git, Skills, Semantic Terminal, Usage, and Assistants have
+Phases A through G are source-complete: the repository has passive entrypoint
+enforcement, a reviewed source and legacy-composition baseline, a semantic
+service wall, Tauri-free native providers, immutable artifacts, live
+reconciliation, and workspace contributions with replayable TypeScript and Rust
+property evidence. Phase H is the final architecture closure: it reruns the
+source, package, and live-control proofs against a fresh candidate, then leaves
+the deliberately interactive terminal and assistant-session acceptance run for
+the packaged app. The temporary non-platform Tauri-import
+ledger is gone: the boundary checker now rejects every Tauri import outside
+`core/frontend/platform`. Ports, Todos, Git, Skills, Semantic Terminal, Usage, and Assistants have
 completed native provider extraction: their Rust module crates, Cargo features,
 plugin registrations, and ACL projections are deleted, while their TypeScript
 feature modules use permanent native core providers through private adapters.
@@ -30,8 +32,8 @@ the Plugin Data service. The native Usage host reads its owned settings through
 the same durable store. The former broad global and project data host ports are
 deleted. Typed Messages now resolves through `shipctl.messages@1`; the optional
 parallel `ModuleHost.messages` path is deleted, and activation disposal removes
-frontend handlers immediately. The legacy-import ledger has fallen from 24
-entries to 16. Scheduler is now exposed as `shipctl.scheduler@1`: Usage declares
+frontend handlers immediately. The former 24-entry legacy-import ledger has
+been eliminated. Scheduler is now exposed as `shipctl.scheduler@1`: Usage declares
 a typed cron target, while the native host owns clocks, persistence, target
 preflight, delivery observations, cancellation, and activation cleanup. The
 old browser interval scheduler is deleted.
@@ -70,7 +72,19 @@ drive private Cordis candidates, atomic publication, last-good recovery,
 structured operation inspection, and ordered disposal without a webview
 restart. A packaged proof preserves running Thin and Semantic terminals across
 live enable and remove, then confirms cold-start parity from the durable removal
-tombstone. Phase G workspace closure remains.
+tombstone. Phase G workspace closure is complete; Phase H retains final package
+and interactive acceptance responsibility.
+
+### Status contract
+
+`passing` means the declared property participates in the controlled fresh and
+replay campaign. A `complete` phase requires passing local properties and
+complete phase dependencies; an `implemented` capability requires passing
+linked properties and implemented capability dependencies; a `complete` module
+requires complete named phases, implemented capabilities, and passing deletion
+proofs. `just architecture validate` enforces those source-record relations.
+It does not convert the remaining packaged interactive acceptance exercise into
+a source-only claim.
 
 The source architecture decision is the ignored working note at
 `docs/plans/terget-4-layered-architecture.md`. This tracked document set is

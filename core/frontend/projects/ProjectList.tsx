@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import type { RepoInfo, RepoGroup, TerminalTabData } from "@shipctl/core/platform";
-import { open } from "@tauri-apps/plugin-dialog";
 import { SquareTerminal } from "lucide-react";
 import { tabKindMeta } from "@shipctl/core/shared/views";
 import { useTerminalStore } from "@shipctl/core/terminal-host";
 import { useRepoStore } from "./useRepoStore.ts";
 import { useNoticeStore } from "@shipctl/core/shared";
-import { getErrorMessage } from "@shipctl/core/platform";
+import { getErrorMessage, selectProjectDirectory } from "@shipctl/core/platform";
 import ProjectItem from "./ProjectItem.tsx";
 import GroupHeader from "./GroupHeader.tsx";
 import { CollapsibleSection } from "@shipctl/core/shared/views";
@@ -141,11 +140,7 @@ export default function ProjectList({
   }, []);
 
   const handleAddClick = async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Select project folder",
-    });
+    const selected = await selectProjectDirectory();
     if (selected) {
       onAddProject(selected);
     }

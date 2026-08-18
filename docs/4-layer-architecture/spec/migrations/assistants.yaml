@@ -2,7 +2,7 @@
 $schema: ../schema/module-disposition.v1.schema.yaml
 schema_version: module-disposition/v1
 id: assistants
-status: migrating
+status: complete
 source_manifest: modules/assistants/module.yaml
 current:
   frontend: modules/assistants/frontend

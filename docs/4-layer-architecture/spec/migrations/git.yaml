@@ -2,7 +2,7 @@
 $schema: ../schema/module-disposition.v1.schema.yaml
 schema_version: module-disposition/v1
 id: git
-status: migrating
+status: complete
 source_manifest: modules/git/module.yaml
 current:
   frontend: modules/git/frontend

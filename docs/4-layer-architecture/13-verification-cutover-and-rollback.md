@@ -106,6 +106,14 @@ Every gate records the evidence fields defined in
 The repository keeps minimized counterexamples and their deterministic replay
 commands. CI run logs are not the only copy of a known failure.
 
+`just architecture evidence --seed=<seed>` is the release-facing controlled
+campaign. It runs every declared property and each native-extraction slice
+serially, then requires both fresh and replay evidence to identify the same
+repository state and seed. It deletes only the exact ignored evidence files it
+will regenerate, so a stale passing record cannot mask a runner that did not
+execute. `--campaign=fresh` and `--campaign=replay` run one lane when a CI
+policy schedules them separately.
+
 Fresh campaigns use lane settings derived from measured execution time and CI
 policy. This plan does not define arbitrary case counts or durations. A gate
 fails if the run cannot show which operation classes it exercised.

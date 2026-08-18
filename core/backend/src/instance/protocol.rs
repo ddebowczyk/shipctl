@@ -18,6 +18,7 @@ use crate::state::archive::StateArchiveInspection;
 use crate::terminal_host::{
     TerminalAgentActivity, TerminalAgentReportKind, TerminalAgentReportSource,
     TerminalAttachmentId, TerminalDescriptor, TerminalExit, TerminalId, TerminalRevision,
+    TerminalShellSpawnRequest,
 };
 
 /// The JSON-line envelope version for the authenticated local endpoint.
@@ -266,6 +267,12 @@ pub enum ControlOperation {
 )]
 pub enum TerminalCommand {
     List {},
+    /// Start an interactive shell in a registered workspace. The request is
+    /// intentionally narrower than a private process launch: callers cannot
+    /// choose executable, argv, environment, ownership, or theme.
+    Spawn {
+        request: TerminalShellSpawnRequest,
+    },
     Get {
         terminal_id: TerminalId,
     },
@@ -601,7 +608,10 @@ mod tests {
         ControlOperation, ControlResponseResult, MessageCommand, ScheduleCommand, TerminalCommand,
     };
     use crate::scheduler::{ScheduleInspection, SCHEDULE_INSPECTION_SCHEMA_VERSION};
-    use crate::terminal_host::{TerminalAgentReportKind, TerminalAgentReportSource, TerminalId};
+    use crate::terminal_host::{
+        TerminalAgentReportKind, TerminalAgentReportSource, TerminalId, TerminalShellSpawnRequest,
+    };
+    use std::path::PathBuf;
     use std::str::FromStr;
 
     fn schedule_inspection() -> ScheduleInspection {
@@ -641,6 +651,15 @@ mod tests {
         let terminal_id = TerminalId::from_str("01234567-89ab-4def-8123-456789abcdef").unwrap();
         for command in [
             TerminalCommand::List {},
+            TerminalCommand::Spawn {
+                request: TerminalShellSpawnRequest {
+                    driver_id: crate::terminal_host::default_terminal_driver_id(),
+                    project_path: PathBuf::from("/workspace"),
+                    cwd: Some(PathBuf::from("/workspace/nested")),
+                    columns: 80,
+                    rows: 24,
+                },
+            },
             TerminalCommand::Get { terminal_id },
             TerminalCommand::Attach { terminal_id },
             TerminalCommand::Write {
@@ -685,6 +704,20 @@ mod tests {
                 "dataBase64": "AA=="
             }))
             .is_err()
+        );
+        assert!(
+            serde_json::from_value::<TerminalCommand>(serde_json::json!({
+                "type": "spawn",
+                "request": {
+                    "driverId": "semantic-terminal",
+                    "projectPath": "/workspace",
+                    "columns": 80,
+                    "rows": 24,
+                    "environment": { "TOKEN": "must-not-be-accepted" }
+                }
+            }))
+            .is_err(),
+            "public shell spawn never grows private launch authority"
         );
     }
 

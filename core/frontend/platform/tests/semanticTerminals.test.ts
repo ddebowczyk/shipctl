@@ -3,7 +3,6 @@ import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import type {
-  ModuleTerminalSession,
   SemanticTerminalScreenState,
   SemanticTerminalsService,
 } from "@shipctl/module-api";
@@ -12,7 +11,6 @@ import type {
   createFakeSemanticTerminalScreenState as CreateFakeSemanticTerminalScreenState,
   createTestActivationIdentity as CreateTestActivationIdentity,
 } from "@shipctl/module-api/testing";
-import type { ActivationTerminalSessionsRuntime } from "@shipctl/core/terminal-host";
 import { createServer, type ViteDevServer } from "vite";
 
 import type {
@@ -58,17 +56,6 @@ after(async () => {
 const MODULE_ID = "fixture.semantic-terminal";
 const ACTIVATION_ID = "fixture.semantic-terminal@1#active";
 const TERMINAL_ID = "semantic-terminal-one";
-
-function session(): ModuleTerminalSession {
-  return {
-    id: "session-one" as never,
-    terminalId: TERMINAL_ID as never,
-    moduleId: MODULE_ID,
-    projectPath: "/workspace",
-    ownerKey: "fixture:semantic-terminal",
-    label: "Semantic terminal",
-  };
-}
 
 function publicationStats() {
   return {
@@ -155,15 +142,6 @@ function fixture(options: {
     appMemory: async () => ({ appRss: 4096 }),
     releaseActivation: async () => 0,
   };
-  const runtime: ActivationTerminalSessionsRuntime = {
-    getDimensions: () => ({ columns: 80, rows: 24 }),
-    list: (moduleId) => moduleId === MODULE_ID ? [session()] : [],
-    launch: async () => session(),
-    update: async () => session(),
-    focus: async () => session(),
-    stop: async () => session(),
-    subscribe: () => () => undefined,
-  };
   const identity = createTestActivationIdentity(MODULE_ID, ACTIVATION_ID);
   const bindingsByActivation: SemanticTerminalsServiceProviderOptions["bindingsByActivation"] =
     new Map([[ACTIVATION_ID, {
@@ -177,7 +155,6 @@ function fixture(options: {
     }]]);
   const provider = createSemanticTerminalsServiceProvider({
     bindingsByActivation,
-    runtime,
     transport,
     observeRequest: (operation, envelope) => {
       requests.push({ operation, activationId: envelope.activation.activationId });
@@ -204,7 +181,7 @@ function settle(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-test("semantic-terminal adapter preserves attributed semantic requests", async () => {
+test("semantic-terminal adapter attaches without owning the original terminal session", async () => {
   const current = fixture();
   const delivery = [];
   const attachment = await current.service.screens.attach({

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { reportNoticeDiagnostic, type NoticeDiagnostic } from "./runtimeDiagnostics.ts";
+import { reportNoticeDiagnostic } from "@shipctl/core/platform";
+import type { NoticeDiagnostic } from "./runtimeDiagnostics.ts";
 
 export type NoticeTone = "info" | "success" | "error";
 

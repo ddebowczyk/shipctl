@@ -61,11 +61,9 @@ test("host snapshot contains only module identity and declared contribution fact
   });
 });
 
-test("default snapshot reports the actual compiled frontend profile", () => {
+test("default snapshot excludes runtime artifacts until they are admitted", () => {
   const snapshot = buildFrontendRuntimeSnapshot({ registryRevision: 0 });
-  assert(snapshot.modules.length > 0);
-  assert(snapshot.modules.every((entry) => entry.moduleId.startsWith("shipctl.")));
-  assert(snapshot.modules.some((entry) => entry.contributions.length > 0));
+  assert.deepEqual(snapshot.modules, []);
 });
 
 test("host snapshot exposes declarative message contributions", () => {

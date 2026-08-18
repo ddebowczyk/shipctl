@@ -49,7 +49,7 @@ commands:
     args: [module]
   - name: frontend-disabled
     summary: >-
-      Verify a module's frontend-disabled composition contract without
+      Verify a module is excluded from static frontend composition without
       rebuilding.
     lane: fast
     args: [module]

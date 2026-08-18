@@ -94,7 +94,7 @@ const evidenceFiles = [];
 for (const property of properties) {
   const evidence = propertyEvidence({
     ...property,
-    phaseId: "phase-b",
+    phaseId: property.propertyId.startsWith("PROP-D-") ? "phase-d" : "phase-b",
     language: "typescript",
     library: "fast-check",
     version: fastCheckVersion,

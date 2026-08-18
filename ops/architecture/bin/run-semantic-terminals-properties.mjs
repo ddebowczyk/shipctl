@@ -62,10 +62,18 @@ const fastCheckVersion = require("fast-check/package.json").version;
 const properties = [
   {
     propertyId: "PROP-B-ADAPTER-001",
-    testId: "semantic-terminal adapter preserves attributed semantic requests",
+    testId: "semantic-terminal adapter attaches without owning the original terminal session",
     classifications: {
-      adapter: ["trusted-native-transport", "wire-validation"],
+      adapter: ["trusted-native-transport", "wire-validation", "cross-owner-attachment"],
       values: ["history", "selection", "anchors", "paste-safety"],
+    },
+  },
+  {
+    propertyId: "PROP-B-REQUEST-001",
+    testId: "architecture.semantic-terminal-service-fake.property",
+    classifications: {
+      operations: ["input", "resize", "history", "anchors", "selection", "paste-safety"],
+      outcomes: ["typed-success", "activation-attributed"],
     },
   },
   {

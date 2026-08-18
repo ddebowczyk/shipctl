@@ -16,6 +16,10 @@ groups:
   - id: unknown
     description: Explicit temporary classification awaiting a human or agent decision.
 entries:
+  - path: .brooks-lint-history.json
+    kind: file
+    group: local-artifacts
+    description: Ignored local history emitted by the Brooks lint tooling.
   - path: .beads
     kind: directory
     group: repository-control
@@ -144,6 +148,10 @@ entries:
     kind: file
     group: application
     description: Root TypeScript compiler configuration.
+  - path: tsconfig.tsbuildinfo
+    kind: file
+    group: local-artifacts
+    description: Ignored incremental TypeScript compiler build information.
   - path: vite.config.ts
     kind: file
     group: application

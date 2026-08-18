@@ -1404,6 +1404,46 @@ mod tests {
         let parsed = Cli::try_parse_from([
             "shipctl",
             "terminals",
+            "spawn",
+            "--driver=semantic-terminal",
+            "--project=/workspace",
+            "--cwd=/workspace/nested",
+            "--columns=80",
+            "--rows=24",
+            "--instance=alpha",
+        ])
+        .unwrap();
+        let Some(CliCommand::Terminals {
+            command: args::TerminalsCommand::Spawn(spawn),
+        }) = parsed.command
+        else {
+            panic!("expected terminal spawn")
+        };
+        assert_eq!(spawn.driver.as_str(), "semantic-terminal");
+        assert_eq!(spawn.project, PathBuf::from("/workspace"));
+        assert_eq!(spawn.cwd, Some(PathBuf::from("/workspace/nested")));
+        assert_eq!(spawn.columns, 80);
+        assert_eq!(spawn.rows, 24);
+        assert_eq!(spawn.target.instance, "alpha");
+        assert!(
+            Cli::try_parse_from([
+                "shipctl",
+                "terminals",
+                "spawn",
+                "--driver=semantic-terminal",
+                "--project=/workspace",
+                "--columns=80",
+                "--rows=24",
+                "--instance=alpha",
+                "--environment=TOKEN=must-not-be-accepted",
+            ])
+            .is_err(),
+            "the CLI must not grow private process-launch authority"
+        );
+
+        let parsed = Cli::try_parse_from([
+            "shipctl",
+            "terminals",
             "attach",
             terminal_id,
             "--instance",

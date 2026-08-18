@@ -4,7 +4,7 @@ schema_version: capability/v1
 id: scheduler
 version: 1.0.0
 title: Activation-owned schedule delivery
-status: implementing
+status: implemented
 layer: application-runtime
 consumers: [usage]
 current_implementations:

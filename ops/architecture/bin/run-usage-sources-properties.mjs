@@ -73,6 +73,61 @@ const repository = await repositoryIdentity(repositoryRoot);
 const fastCheckVersion = require("fast-check/package.json").version;
 const properties = [
   {
+    propertyId: "PROP-B-ADAPTER-001",
+    testId: "architecture.usage-sources-authority.property",
+    language: "typescript",
+    library: "fast-check",
+    version: fastCheckVersion,
+    classifications: {
+      operations: ["inspect-source", "refresh-sources"],
+      outcomes: ["success", "stable-redacted-error", "invalid-request"],
+    },
+  },
+  {
+    propertyId: "PROP-B-REQUEST-001",
+    testId: "architecture.usage-sources-authority.property",
+    language: "typescript",
+    library: "fast-check",
+    version: fastCheckVersion,
+    classifications: {
+      outcomes: ["success", "invalid-request", "transport-failed"],
+      dispatch: ["scoped", "suppressed"],
+    },
+  },
+  {
+    propertyId: "PROP-B-ACTIVATION-001",
+    testId: "architecture.usage-sources-authority.property",
+    language: "typescript",
+    library: "fast-check",
+    version: fastCheckVersion,
+    classifications: {
+      activation: ["exact", "released-on-disposal"],
+      correlation: ["exact"],
+    },
+  },
+  {
+    propertyId: "PROP-B-EVENT-001",
+    testId: "architecture.usage-sources-ownership.property",
+    language: "typescript",
+    library: "fast-check",
+    version: fastCheckVersion,
+    classifications: {
+      delivery: ["activation-leased", "subscription-disposed"],
+      scope: ["approved-source"],
+    },
+  },
+  {
+    propertyId: "PROP-B-FAKE-001",
+    testId: "architecture.usage-sources-ownership.property",
+    language: "typescript",
+    library: "fast-check",
+    version: fastCheckVersion,
+    classifications: {
+      implementation: ["headless", "tauri-free"],
+      workflow: ["inspect", "refresh", "subscribe"],
+    },
+  },
+  {
     propertyId: "PROP-D-PARITY-001",
     testId: "architecture.provider.usage-sources.parity.property",
     language: "rust",
@@ -122,7 +177,7 @@ const evidenceFiles = [];
 for (const property of properties) {
   const evidence = propertyEvidence({
     ...property,
-    phaseId: "phase-d",
+    phaseId: property.propertyId.startsWith("PROP-B-") ? "phase-b" : "phase-d",
     repository,
     seed,
     replayCommand,

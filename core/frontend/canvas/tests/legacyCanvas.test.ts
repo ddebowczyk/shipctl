@@ -402,6 +402,6 @@ test("the shell reaches the canvas host instead of concrete canvas renderers", a
   assert.match(source, /from "@shipctl\/core\/canvas\/views"/);
   assert.doesNotMatch(source, /from "\.\/Sidebar\.tsx"/);
   assert.doesNotMatch(source, /from "\.\/TabBar\.tsx"/);
-  assert.doesNotMatch(source, /from "\.\.\/host\/views\.ts"/);
+  assert.match(source, /AcceptedWorkspaceContributionRuntimeProvider[\s\S]*from "\.\.\/host\/views\.ts"/);
   assert.doesNotMatch(source, /Terminal(?:ErrorBoundary|Slot).*from "\.\.\/terminal-host\/views\.ts"/);
 });

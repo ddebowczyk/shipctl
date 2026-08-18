@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { watchRepo, unwatchRepo } from "@shipctl/core/platform";
+import {
+  observeGitFilesystemChanges,
+  watchRepo,
+  unwatchRepo,
+} from "@shipctl/core/platform";
 import type {
   ModuleActivationContext,
   ModuleId,
@@ -11,10 +14,6 @@ import {
   notifyModulesFilesystemChanged,
   notifyModulesProjectsChanged,
 } from "@shipctl/core/host";
-
-interface FsChangedPayload {
-  paths: string[];
-}
 
 /**
  * Watches project paths and forwards file-system events to module lifecycles.
@@ -28,9 +27,9 @@ export function useProjectWatcher(
   const watchedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const unlisten = listen<FsChangedPayload>("git-fs-changed", (event) => {
+    const unlisten = observeGitFilesystemChanges((paths) => {
       void notifyModulesFilesystemChanged(
-        event.payload.paths,
+        paths,
         MODULE_HOST_SERVICES,
         moduleActivations,
         modules,

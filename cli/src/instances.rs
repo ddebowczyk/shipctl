@@ -29,7 +29,7 @@ use shipctl_core::scheduler::{
 };
 use shipctl_core::state::archive::inspect_archive;
 use shipctl_core::state::archive::StateArchiveInspection;
-use shipctl_core::terminal_host::{TerminalDescriptor, TerminalId};
+use shipctl_core::terminal_host::{TerminalDescriptor, TerminalId, TerminalShellSpawnRequest};
 use uuid::Uuid;
 
 use crate::APP_VERSION;
@@ -618,6 +618,16 @@ pub fn list_terminals(
     let (runtime_root, _) = resolve_runtime_root(runtime_root)
         .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
     directory(runtime_root).list_terminals(selector)
+}
+
+pub fn spawn_terminal(
+    runtime_root: Option<&Path>,
+    selector: &str,
+    request: TerminalShellSpawnRequest,
+) -> Result<TerminalDescriptor, ControlError> {
+    let (runtime_root, _) = resolve_runtime_root(runtime_root)
+        .map_err(|error| operational_error("control.instance.invalid_runtime_root", error))?;
+    directory(runtime_root).spawn_terminal(selector, request)
 }
 
 pub fn get_terminal(

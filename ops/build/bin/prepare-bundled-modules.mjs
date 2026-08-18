@@ -2,11 +2,14 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+
+import { buildPluginArtifactStaging } from "../../architecture/lib/plugin-artifact-build.mjs";
 
 const exec = promisify(execFile);
 const repositoryRoot = path.resolve(fileURLToPath(new URL("../../../", import.meta.url)));
@@ -19,6 +22,29 @@ async function manifest(relativePath) {
     cwd: repositoryRoot,
   });
   return JSON.parse(stdout);
+}
+
+async function packageArtifact({ sourceDirectory, outputPath, shipctlPath }) {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "shipctl-plugin-artifact-"));
+  try {
+    const stagingDirectory = path.join(temporaryRoot, "staging");
+    await buildPluginArtifactStaging({ sourceDirectory, stagingDirectory });
+    const packaged = await exec(shipctlPath, [
+      "modules",
+      "pack",
+      stagingDirectory,
+      "--to",
+      outputPath,
+      "--output",
+      "json",
+    ], { cwd: repositoryRoot });
+    assert.equal(packaged.stderr, "", "Artifact pack diagnostics must use structured stdout");
+    const packageReport = JSON.parse(packaged.stdout);
+    assert.equal(packageReport.status, "success");
+    assert.equal(packageReport.code, "module.artifact.packed");
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
 }
 
 const moduleNames = (await readdir(path.join(repositoryRoot, "modules"), { withFileTypes: true }))
@@ -50,12 +76,11 @@ for (const { declaration, manifestPath } of runtimeModules) {
     "utf8",
   ));
   const archiveName = `${template.id}.shipctl-module`;
-  await exec(process.execPath, [
-    "ops/architecture/bin/build-plugin-artifact.mjs",
-    "--source", artifactSource,
-    "--to", path.join(archiveRoot, archiveName),
-    "--shipctl", "target/debug/shipctl",
-  ], { cwd: repositoryRoot });
+  await packageArtifact({
+    sourceDirectory: path.join(repositoryRoot, artifactSource),
+    outputPath: path.join(archiveRoot, archiveName),
+    shipctlPath: path.join(repositoryRoot, "target/debug/shipctl"),
+  });
   rows.push({ id: template.id, archiveName });
 }
 

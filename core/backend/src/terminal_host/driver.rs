@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -9,6 +10,37 @@ pub struct TerminalColorTheme {
     pub foreground: String,
     pub background: String,
     pub palette: Vec<String>,
+}
+
+/// Native fallback for a terminal launched through the local control endpoint.
+/// UI-created terminals apply the selected product theme directly. A control
+/// caller never supplies colours: terminal appearance remains a host/UI concern
+/// rather than an agent-controlled launch input.
+impl Default for TerminalColorTheme {
+    fn default() -> Self {
+        Self {
+            foreground: "#e6e6e6".to_string(),
+            background: "#101010".to_string(),
+            palette: vec![
+                "#000000".to_string(),
+                "#cc0000".to_string(),
+                "#00cc00".to_string(),
+                "#cccc00".to_string(),
+                "#0000cc".to_string(),
+                "#cc00cc".to_string(),
+                "#00cccc".to_string(),
+                "#cccccc".to_string(),
+                "#666666".to_string(),
+                "#ff0000".to_string(),
+                "#00ff00".to_string(),
+                "#ffff00".to_string(),
+                "#0000ff".to_string(),
+                "#ff00ff".to_string(),
+                "#00ffff".to_string(),
+                "#ffffff".to_string(),
+            ],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
@@ -38,6 +70,14 @@ impl TerminalDriverId {
 impl fmt::Display for TerminalDriverId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(formatter)
+    }
+}
+
+impl FromStr for TerminalDriverId {
+    type Err = TerminalDriverError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
     }
 }
 

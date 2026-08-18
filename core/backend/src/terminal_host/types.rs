@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -358,6 +358,105 @@ pub enum TerminalLaunchTarget {
     },
 }
 
+/// Agent-operable, shell-only terminal creation request carried by the local
+/// control endpoint.
+///
+/// This is deliberately not the internal [`TerminalLaunchRequest`]: callers
+/// choose an installed driver and a workspace-scoped directory, while the host
+/// retains process target, environment, terminal ownership, metadata, and
+/// colour-theme authority.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalShellSpawnRequest {
+    pub driver_id: TerminalDriverId,
+    pub project_path: PathBuf,
+    #[serde(default)]
+    pub cwd: Option<PathBuf>,
+    pub columns: u16,
+    pub rows: u16,
+}
+
+impl TerminalShellSpawnRequest {
+    /// Resolve an agent request into the host's private launch representation.
+    ///
+    /// Both paths are canonicalized before the containment check, so a
+    /// symlink cannot turn an apparently project-local cwd into an arbitrary
+    /// launch directory.
+    pub fn into_launch_request(
+        self,
+        registered_project_paths: impl IntoIterator<Item = PathBuf>,
+        created_at_ms: u64,
+    ) -> Result<TerminalLaunchRequest, TerminalError> {
+        if self.columns == 0 || self.rows == 0 {
+            return Err(TerminalError::new(
+                TerminalErrorCode::InvalidRequest,
+                "Terminal dimensions must be greater than zero",
+            ));
+        }
+
+        let project_path = canonical_directory(&self.project_path, "The requested project")?;
+        let registered = registered_project_paths
+            .into_iter()
+            .filter_map(|path| path.canonicalize().ok())
+            .any(|path| path == project_path);
+        if !registered {
+            return Err(TerminalError::new(
+                TerminalErrorCode::InvalidRequest,
+                "The requested project is not registered in this Shipctl instance",
+            ));
+        }
+
+        let cwd = self
+            .cwd
+            .as_deref()
+            .map(|path| canonical_directory(path, "The requested working directory"))
+            .transpose()?
+            .unwrap_or_else(|| project_path.clone());
+        if !cwd.starts_with(&project_path) {
+            return Err(TerminalError::new(
+                TerminalErrorCode::InvalidRequest,
+                "The requested working directory is outside the registered project",
+            ));
+        }
+
+        Ok(TerminalLaunchRequest {
+            driver_id: self.driver_id,
+            target: TerminalLaunchTarget::Shell { executable: None },
+            cwd: cwd.clone(),
+            environment: HashMap::new(),
+            columns: self.columns,
+            rows: self.rows,
+            color_theme: TerminalColorTheme::default(),
+            metadata: TerminalMetadata {
+                label: "Terminal".to_string(),
+                cwd,
+                project_path: Some(project_path),
+                display_command: "shell".to_string(),
+                created_at_ms,
+                owner: TerminalOwner::Core,
+                owner_metadata: None,
+                presentation: None,
+            },
+        })
+    }
+}
+
+fn canonical_directory(path: &Path, label: &str) -> Result<PathBuf, TerminalError> {
+    let path = path.canonicalize().map_err(|_| {
+        TerminalError::new(
+            TerminalErrorCode::InvalidRequest,
+            format!("{label} does not exist or cannot be resolved"),
+        )
+    })?;
+    if !path.is_dir() {
+        return Err(TerminalError::new(
+            TerminalErrorCode::InvalidRequest,
+            format!("{label} must be a directory"),
+        ));
+    }
+    Ok(path)
+}
+
 /// Private spawn input. This type deliberately has no `Serialize` derive so
 /// secrets cannot accidentally become part of list/get responses.
 #[derive(Clone, Deserialize)]
@@ -452,5 +551,74 @@ mod tests {
         assert_eq!(json["owner"]["type"], "module");
         assert_eq!(json["owner"]["moduleId"], "assistants");
         assert_eq!(json["ownerMetadata"]["model"], "example");
+    }
+
+    #[test]
+    fn shell_spawn_request_is_workspace_scoped_and_keeps_launch_authority_private() {
+        let root = std::env::temp_dir().join(format!("shipctl-terminal-spawn-{}", Uuid::new_v4()));
+        let nested = root.join("nested");
+        let outside = root.with_extension("outside");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let request = TerminalShellSpawnRequest {
+            driver_id: default_terminal_driver_id(),
+            project_path: root.clone(),
+            cwd: Some(nested.clone()),
+            columns: 80,
+            rows: 24,
+        };
+        let encoded = serde_json::to_value(&request).unwrap();
+        assert_eq!(encoded["driverId"], "semantic-terminal");
+        assert!(encoded.get("target").is_none());
+        assert!(encoded.get("environment").is_none());
+        assert!(encoded.get("metadata").is_none());
+        assert!(encoded.get("colorTheme").is_none());
+
+        let launch = request.into_launch_request([root.clone()], 42).unwrap();
+        assert!(matches!(
+            &launch.target,
+            TerminalLaunchTarget::Shell { executable: None }
+        ));
+        assert!(launch.environment.is_empty());
+        assert_eq!(launch.cwd, nested.canonicalize().unwrap());
+        assert_eq!(
+            launch.metadata.project_path,
+            Some(root.canonicalize().unwrap())
+        );
+        assert_eq!(launch.metadata.owner, TerminalOwner::Core);
+        assert_eq!(launch.metadata.created_at_ms, 42);
+        assert_eq!(launch.color_theme.palette.len(), 16);
+
+        let outside_request = TerminalShellSpawnRequest {
+            driver_id: default_terminal_driver_id(),
+            project_path: root.clone(),
+            cwd: Some(outside.clone()),
+            columns: 80,
+            rows: 24,
+        };
+        let error = match outside_request.into_launch_request([root.clone()], 42) {
+            Err(error) => error,
+            Ok(_) => panic!("a cwd outside the registered project must be rejected"),
+        };
+        assert_eq!(error.code, TerminalErrorCode::InvalidRequest);
+        assert!(error.message.contains("outside the registered project"));
+
+        let unregistered_request = TerminalShellSpawnRequest {
+            driver_id: default_terminal_driver_id(),
+            project_path: outside.clone(),
+            cwd: None,
+            columns: 80,
+            rows: 24,
+        };
+        let error = match unregistered_request.into_launch_request([root.clone()], 42) {
+            Err(error) => error,
+            Ok(_) => panic!("an unregistered project must be rejected"),
+        };
+        assert_eq!(error.code, TerminalErrorCode::InvalidRequest);
+        assert!(error.message.contains("not registered"));
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
     }
 }

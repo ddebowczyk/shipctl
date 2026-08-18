@@ -356,8 +356,15 @@ function assertManifestContract(root, manifest) {
 }
 
 function frontendDisabledContract(root, manifest) {
-  const envName = `VITE_SHIPCTL_${manifest.id.toUpperCase().replaceAll("-", "_")}_MODULE`;
   const composition = readFileSync(path.join(root, "core/frontend/host/enabledModules.ts"), "utf8");
+  if (manifest.frontend.delivery === "runtime-artifact") {
+    if (composition.includes(manifest.frontend.package)) {
+      throw new Error(`${manifest.id} runtime artifact must not be statically composed`);
+    }
+    return "runtime-artifact";
+  }
+
+  const envName = `VITE_SHIPCTL_${manifest.id.toUpperCase().replaceAll("-", "_")}_MODULE`;
   if (!composition.includes(`import.meta.env.${envName}`)) {
     throw new Error(`${manifest.id} has no frontend-disabled composition contract`);
   }
@@ -368,13 +375,14 @@ function frontendDisabledContract(root, manifest) {
   if (!contract.test(composition)) {
     throw new Error(`${manifest.id} frontend-disabled composition must omit ${manifest.frontend.composition_symbol}`);
   }
+  return "static-bundle";
 }
 
 export function frontendDisabled(root, id) {
   const manifest = readManifest(root, id);
   assertManifestContract(root, manifest);
-  frontendDisabledContract(root, manifest);
-  process.stdout.write(`\n${id} frontend-disabled static contract: OK (no rebuild)\n`);
+  const delivery = frontendDisabledContract(root, manifest);
+  process.stdout.write(`\n${id} frontend-disabled ${delivery} contract: OK (no rebuild)\n`);
 }
 
 export function nativeDisabled(root, id) {

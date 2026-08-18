@@ -139,6 +139,7 @@ export function validateArchitectureRecords(spec) {
 
   const semanticOwners = new Map();
   const propertyOwners = new Map();
+  const propertiesById = new Map();
   const deletionGates = new Map();
 
   for (const phase of phases) {
@@ -162,6 +163,7 @@ export function validateArchitectureRecords(spec) {
         ));
       } else {
         propertyOwners.set(property.id, phase.id);
+        propertiesById.set(property.id, property);
       }
     }
     for (const gate of phase.deletion_gates ?? []) {
@@ -230,6 +232,35 @@ export function validateArchitectureRecords(spec) {
 
   const phaseIds = new Set(phases.map((phase) => phase.id));
   const capabilityIds = new Set(capabilities.map((capability) => capability.id));
+  const phasesById = new Map(phases.map((phase) => [phase.id, phase]));
+  const capabilitiesById = new Map(
+    capabilities.map((capability) => [capability.id, capability]),
+  );
+
+  for (const phase of phases) {
+    if (phase.status !== "complete") continue;
+    const incompleteDependencies = (phase.depends_on ?? []).filter((id) => (
+      phasesById.get(id)?.status !== "complete"
+    ));
+    if (incompleteDependencies.length > 0) {
+      diagnostics.push(diagnostic(
+        "architecture.phase.status.dependency-incomplete",
+        `phases/${phase.id}`,
+        `complete phase depends on non-complete phases: ${incompleteDependencies.join(", ")}`,
+      ));
+    }
+    const notPassing = (phase.properties ?? []).filter((property) => (
+      property.status !== "passing"
+    )).map((property) => property.id);
+    if (notPassing.length > 0) {
+      diagnostics.push(diagnostic(
+        "architecture.phase.status.property-not-passing",
+        `phases/${phase.id}`,
+        `complete phase has properties without current passing status: ${notPassing.join(", ")}`,
+      ));
+    }
+  }
+
   for (const capability of capabilities) {
     for (const propertyId of capability.property_ids ?? []) {
       if (!propertyOwners.has(propertyId)) {
@@ -237,6 +268,28 @@ export function validateArchitectureRecords(spec) {
           "architecture.capability.property.unknown",
           `capabilities/${capability.id}`,
           `unknown property: ${propertyId}`,
+        ));
+      }
+    }
+    if (capability.status === "implemented") {
+      const incompleteDependencies = (capability.depends_on ?? []).filter((id) => (
+        capabilitiesById.get(id)?.status !== "implemented"
+      ));
+      if (incompleteDependencies.length > 0) {
+        diagnostics.push(diagnostic(
+          "architecture.capability.status.dependency-incomplete",
+          `capabilities/${capability.id}`,
+          `implemented capability depends on non-implemented capabilities: ${incompleteDependencies.join(", ")}`,
+        ));
+      }
+      const notPassing = (capability.property_ids ?? []).filter((propertyId) => (
+        propertiesById.get(propertyId)?.status !== "passing"
+      ));
+      if (notPassing.length > 0) {
+        diagnostics.push(diagnostic(
+          "architecture.capability.status.property-not-passing",
+          `capabilities/${capability.id}`,
+          `implemented capability has properties without current passing status: ${notPassing.join(", ")}`,
         ));
       }
     }
@@ -277,6 +330,40 @@ export function validateArchitectureRecords(spec) {
             `unknown property proof: ${propertyId}`,
           ));
         }
+      }
+    }
+    if (module.status === "complete") {
+      const incompletePhases = (module.phases ?? []).filter((phaseId) => (
+        phasesById.get(phaseId)?.status !== "complete"
+      ));
+      if (incompletePhases.length > 0) {
+        diagnostics.push(diagnostic(
+          "architecture.module.status.phase-incomplete",
+          `migrations/${module.id}`,
+          `complete module depends on non-complete phases: ${incompletePhases.join(", ")}`,
+        ));
+      }
+      const incompleteCapabilities = (module.target?.capabilities ?? []).filter((capabilityId) => (
+        capabilitiesById.get(capabilityId)?.status !== "implemented"
+      ));
+      if (incompleteCapabilities.length > 0) {
+        diagnostics.push(diagnostic(
+          "architecture.module.status.capability-incomplete",
+          `migrations/${module.id}`,
+          `complete module depends on non-implemented capabilities: ${incompleteCapabilities.join(", ")}`,
+        ));
+      }
+      const notPassing = (module.deletion_gates ?? []).flatMap((gate) => (
+        (gate.proof_ids ?? []).filter((propertyId) => (
+          propertiesById.get(propertyId)?.status !== "passing"
+        ))
+      ));
+      if (notPassing.length > 0) {
+        diagnostics.push(diagnostic(
+          "architecture.module.status.proof-not-passing",
+          `migrations/${module.id}`,
+          `complete module has deletion proofs without current passing status: ${notPassing.join(", ")}`,
+        ));
       }
     }
   }

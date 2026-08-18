@@ -28,14 +28,14 @@ The shared foundation is present before the first capability migration:
   string or generic invoke method;
 - the module message bridge and service registry use the same logical
   activation ID;
-- `ops/modularity/legacy-tauri-imports.json` records every current direct Tauri
-  import outside `core/frontend/platform`. The boundary checker accepts only
-  those exact existing edges and rejects additions or stale ledger entries.
+- `ops/modularity/lib/module-boundaries.mjs` rejects every direct Tauri import
+  outside `core/frontend/platform`; there is no compatibility ledger or
+  exception mechanism for permanent frontend source.
 
-This foundation does not satisfy the Phase B exit. The ledger currently holds
-17 imports. Each capability task must add its semantic adapter and conformance
-proof, migrate consumers, then remove its import and ledger entry. The ledger
-is a deletion queue, not an approved target boundary.
+The original migration ledger was a deletion queue, not an approved target
+boundary. Its final entries were moved behind named platform adapters and the
+ledger implementation was deleted. Remaining Phase B closure is proof quality,
+not a permitted native-import exception.
 
 ## Implemented capability slice: Processes for Ports
 

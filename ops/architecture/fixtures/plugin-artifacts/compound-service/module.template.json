@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 2,
+  "id": "fixture.compound-service",
+  "name": "Phase H compound service fixture",
+  "version": "1.0.0",
+  "apiRange": "^1.0.0",
+  "runtimeKind": "frontend_esm",
+  "entry": "dist/plugin.mjs",
+  "styles": [],
+  "assets": [
+    "assets/compound-proof.txt",
+    "schemas/compound-proof.schema.json"
+  ],
+  "messages": {
+    "schemaVersion": 1,
+    "provides": [],
+    "handles": [],
+    "publishes": [],
+    "subscribes": [],
+    "ports": []
+  },
+  "capabilities": {
+    "schemaVersion": 1,
+    "definitions": [],
+    "providers": [],
+    "consumers": []
+  },
+  "application": {
+    "schemaVersion": 1,
+    "role": "compound",
+    "requiredServices": [],
+    "providedServices": [],
+    "backgroundEffects": [
+      "fixture.compound-service.heartbeat"
+    ],
+    "contributions": [
+      {
+        "family": "global-surface",
+        "id": "fixture.compound-service.surface",
+        "schemaVersion": 1
+      }
+    ]
+  },
+  "uiContributions": [],
+  "requestedGrants": [],
+  "nativeAdapters": [],
+  "secretReferences": [],
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "supportedScopes": [
+    "instance"
+  ],
+  "lifecycle": "live",
+  "sourceProvenance": {
+    "builder": "ops/architecture/bin/build-plugin-artifact.mjs",
+    "fixture": "phase-h-compound-service"
+  }
+}

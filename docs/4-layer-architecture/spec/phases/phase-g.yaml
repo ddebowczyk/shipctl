@@ -3,7 +3,7 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-g
 title: Workspace contributions and wall closure
-status: implementing
+status: complete
 source: >-
   docs/4-layer-architecture/12-phase-g-workspace-contributions-and-closure.md
 depends_on: [phase-a, phase-b, phase-c, phase-e, phase-f]

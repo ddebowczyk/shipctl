@@ -128,7 +128,12 @@ app_name="$(jq -r '.appName' <<<"$flavor_json")"
 app_bundle_name="$(jq -r '.appBundleName' <<<"$flavor_json")"
 bundle_identifier="$(jq -r '.bundleIdentifier' <<<"$flavor_json")"
 tauri_build_config="$(jq -c '.tauriConfig' <<<"$flavor_json")"
-build_command=(pnpm tauri build --target "$target" --bundles app,dmg --config "$tauri_build_config")
+# Tauri's DMG bundler intentionally skips Finder automation under CI.  macOS
+# 26 can leave that cosmetic AppleScript waiting until it times out, even
+# though the signed app itself is complete.  A local archive must remain
+# reproducible, so use the headless-safe DMG path; it retains the app and
+# Applications link, but does not depend on Finder icon positioning.
+build_command=(env CI=true pnpm tauri build --target "$target" --bundles app,dmg --config "$tauri_build_config")
 printf 'build_id: %s\n' "$build_id" >&2
 printf 'flavor: %s\n' "$flavor" >&2
 printf 'build: %s\n' "${build_command[*]}" >&2
@@ -218,7 +223,7 @@ jq -n \
     target: $target,
     mode: "build",
     source: $source,
-    command: ["pnpm", "tauri", "build", "--target", $target, "--bundles", "app,dmg", "--config", $tauri_build_config],
+    command: ["env", "CI=true", "pnpm", "tauri", "build", "--target", $target, "--bundles", "app,dmg", "--config", $tauri_build_config],
     toolchain: { rustc: $rustc, pnpm: $pnpm, tauri_cli: $tauri_cli },
     artifacts: [
       { kind: "app-bundle", path: $app_bundle_name, digest: { algorithm: "sha256", scope: "tree", value: $app_sha256 } },

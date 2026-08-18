@@ -3,7 +3,7 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-d
 title: Native provider extraction
-status: implementing
+status: complete
 source: docs/4-layer-architecture/09-phase-d-native-provider-extraction.md
 depends_on: [phase-a, phase-b]
 semantics:
@@ -82,7 +82,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: implemented
+    status: passing
     deletion_gates: [DELETE-D-NATIVE-MODULE]
   - id: PROP-D-AUTHORITY-001
     claim: >-
@@ -119,7 +119,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr]
-    status: implemented
+    status: passing
     deletion_gates: [DELETE-D-NATIVE-MODULE]
   - id: PROP-D-OWNERSHIP-001
     claim: >-
@@ -156,7 +156,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: implemented
+    status: passing
     deletion_gates: [DELETE-D-NATIVE-MODULE]
   - id: PROP-D-CLOSURE-001
     claim: >-
@@ -203,7 +203,7 @@ properties:
       shrink: required
       replay: required
     tiers: [pr, release]
-    status: implemented
+    status: passing
     deletion_gates:
       - DELETE-D-NATIVE-MODULE
       - DELETE-D-MODULE-API-BACKEND

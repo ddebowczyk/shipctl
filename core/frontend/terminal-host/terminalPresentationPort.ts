@@ -3,8 +3,7 @@ import type {
   ModuleTerminalPresentationSnapshot,
 } from "@shipctl/module-api";
 import { buildCSSFontFamily, TERMINAL_LINE_HEIGHT, useThemeStore } from "@shipctl/core/appearance";
-import { getErrorCode } from "@shipctl/core/platform";
-import { reportTerminalDiagnostic } from "@shipctl/core/shared";
+import { getErrorCode, reportTerminalDiagnostic } from "@shipctl/core/platform";
 
 import { notifyAgent } from "./notifications.ts";
 import { useKeybindingStore } from "./useKeybindingStore.ts";

@@ -17,17 +17,18 @@ use shipctl_core::semantic_terminal::wire::{ProjectedRunRow, TerminalScreenSnaps
 use shipctl_core::semantic_terminal::SemanticDriverRequest;
 use shipctl_core::terminal_host::{
     TerminalAgentReportRequest, TerminalAgentReportSource, TerminalDescriptor, TerminalId,
-    TerminalLifecycle,
+    TerminalLifecycle, TerminalShellSpawnRequest,
 };
 
 use crate::args::{
     TerminalAnchorArgs, TerminalAnchorIdArgs, TerminalAttachArgs, TerminalHistoryArgs,
-    TerminalInputArgs, TerminalInspectArgs, TerminalReportArgs, TerminalWriteArgs,
-    TerminalsCommand,
+    TerminalInputArgs, TerminalInspectArgs, TerminalReportArgs, TerminalSpawnArgs,
+    TerminalWriteArgs, TerminalsCommand,
 };
 use crate::output::OutputFormat;
 
 const TERMINALS_LISTED: &str = "terminal.control.listed";
+const TERMINAL_SPAWNED: &str = "terminal.control.spawned";
 const TERMINAL_INSPECTED: &str = "terminal.control.inspected";
 const TERMINAL_PROJECTED: &str = "terminal.control.projected";
 const TERMINAL_HISTORY_READ: &str = "terminal.control.history_read";
@@ -128,6 +129,7 @@ pub fn run(command: TerminalsCommand, output: OutputFormat) -> ExitCode {
                 Err(error) => crate::emit_failure(output, operation, &error, false),
             }
         }
+        TerminalsCommand::Spawn(args) => run_spawn(args, output),
         TerminalsCommand::Get(args) => {
             let operation = "terminals.get";
             match crate::instances::get_terminal(
@@ -169,6 +171,28 @@ pub fn run(command: TerminalsCommand, output: OutputFormat) -> ExitCode {
             }
         }
         TerminalsCommand::Attach(args) => run_attach(args),
+    }
+}
+
+fn run_spawn(args: TerminalSpawnArgs, output: OutputFormat) -> ExitCode {
+    let operation = "terminals.spawn";
+    let request = TerminalShellSpawnRequest {
+        driver_id: args.driver,
+        project_path: args.project,
+        cwd: args.cwd,
+        columns: args.columns,
+        rows: args.rows,
+    };
+    match crate::instances::spawn_terminal(
+        args.target.runtime.runtime_root.as_deref(),
+        &args.target.instance,
+        request,
+    ) {
+        Ok(descriptor) => {
+            crate::emit_success(output, operation, TERMINAL_SPAWNED, false, descriptor)
+                .unwrap_or_else(|message| crate::emit_render_failure(output, operation, message))
+        }
+        Err(error) => crate::emit_failure(output, operation, &error, false),
     }
 }
 

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getIdentifier, getName, getTauriVersion, getVersion } from "@tauri-apps/api/app";
 import { Upload, ChevronDown, Check } from "lucide-react";
 import { EDITOR_OPTIONS } from "../settings/index.ts";
 import { DARK_THEMES, LIGHT_THEMES, TRANSPARENT_THEMES } from "../appearance/index.ts";
@@ -20,7 +19,7 @@ import {
   TERMINAL_FONT_FAMILY,
 } from "../appearance/index.ts";
 import type { CursorStyle, FontFamily } from "../platform/index.ts";
-import { getErrorMessage } from "../platform/index.ts";
+import { getDesktopAppMetadata, getErrorMessage } from "../platform/index.ts";
 import { listMonospaceFamilies } from "../platform/index.ts";
 import {
   ModuleSettingsSurfaces,
@@ -105,15 +104,10 @@ export default function SettingsPanel() {
 
     (async () => {
       try {
-        const [name, version, identifier, tauriVersion] = await Promise.all([
-          getName(),
-          getVersion(),
-          getIdentifier(),
-          getTauriVersion(),
-        ]);
+        const metadata = await getDesktopAppMetadata();
 
         if (!cancelled) {
-          setAppMeta({ name, version, identifier, tauriVersion });
+          setAppMeta(metadata);
           setAppMetaError(null);
         }
       } catch (error) {

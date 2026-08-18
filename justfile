@@ -9,7 +9,6 @@ mod modularity 'ops/modularity/justfile'
 mod ops 'ops/justfile'
 mod repository 'ops/repository/justfile'
 mod test 'ops/test/justfile'
-mod upstream 'ops/upstream/justfile'
 mod version 'ops/version/justfile'
 
 default:
