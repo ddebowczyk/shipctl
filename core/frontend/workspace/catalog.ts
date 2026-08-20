@@ -6,7 +6,6 @@ import {
   type WorkspaceViewCardinality,
   type WorkspaceViewDefinition,
   type WorkspaceViewScope,
-  type WorkspaceViewStatePolicy,
 } from "@shipctl/module-api";
 
 import {
@@ -73,19 +72,26 @@ function closeBehavior(value: unknown): WorkspaceCloseBehavior {
   return value;
 }
 
-function statePolicy(value: unknown): WorkspaceViewStatePolicy {
+const LEGACY_WORKSPACE_CATALOG_SCHEMA_VERSION = 1;
+
+/**
+ * Version-one catalog records declared workspace-owned view-state metadata.
+ * That metadata was never wired to an owning plugin namespace, so migration
+ * verifies its old shape and intentionally drops it.
+ */
+function legacyStatePolicy(value: unknown): void {
   const candidate = record(value, "Workspace view state", ["kind", "schemaVersion"]);
   if (candidate.kind === "none") {
     if (Object.keys(candidate).length !== 1) invalid("Workspace view state is invalid.");
-    return Object.freeze({ kind: "none" });
+    return;
   }
   if (candidate.kind === "json" && hasSafePositiveInteger(candidate.schemaVersion)) {
-    return Object.freeze({ kind: "json", schemaVersion: candidate.schemaVersion });
+    return;
   }
-  return invalid("Workspace view state is invalid.");
+  invalid("Workspace view state is invalid.");
 }
 
-function definition(value: unknown): WorkspaceViewDefinition {
+function definition(value: unknown, legacy: boolean): WorkspaceViewDefinition {
   const candidate = record(value, "Workspace view definition", [
     "viewTypeId",
     "ownerModuleId",
@@ -96,9 +102,9 @@ function definition(value: unknown): WorkspaceViewDefinition {
     "closeBehavior",
     "requiredCapabilityIds",
     "placement",
-    "state",
     "presentation",
     "migrationAliases",
+    ...(legacy ? ["state"] : []),
   ]);
   if (
     !hasWorkspaceName(candidate.viewTypeId)
@@ -126,6 +132,7 @@ function definition(value: unknown): WorkspaceViewDefinition {
   if (!hasIdentity(presentation.loaderId) || !hasIdentity(presentation.exportName)) {
     invalid("Workspace view presentation is invalid.");
   }
+  if (legacy) legacyStatePolicy(candidate.state);
 
   return cloneAndFreeze({
     viewTypeId: candidate.viewTypeId,
@@ -144,7 +151,6 @@ function definition(value: unknown): WorkspaceViewDefinition {
       defaultRegion: placement.defaultRegion,
       allowSplit: placement.allowSplit,
     },
-    state: statePolicy(candidate.state),
     presentation: {
       loaderId: presentation.loaderId,
       exportName: presentation.exportName,
@@ -169,7 +175,10 @@ export function parseWorkspaceCatalogSnapshot(value: unknown): WorkspaceCatalogS
     "revision",
     "definitions",
   ]);
-  if (candidate.schemaVersion !== WORKSPACE_CATALOG_SCHEMA_VERSION) {
+  if (
+    candidate.schemaVersion !== WORKSPACE_CATALOG_SCHEMA_VERSION
+    && candidate.schemaVersion !== LEGACY_WORKSPACE_CATALOG_SCHEMA_VERSION
+  ) {
     invalid("Workspace catalog schema version is unsupported.");
   }
   // Revision zero is the explicit host bootstrap catalog. It has no runtime
@@ -179,7 +188,10 @@ export function parseWorkspaceCatalogSnapshot(value: unknown): WorkspaceCatalogS
     invalid("Workspace catalog revision or definitions are invalid.");
   }
 
-  const definitions = candidate.definitions.map(definition)
+  const definitions = candidate.definitions.map((item) => definition(
+    item,
+    candidate.schemaVersion === LEGACY_WORKSPACE_CATALOG_SCHEMA_VERSION,
+  ))
     .sort((left, right) => left.viewTypeId.localeCompare(right.viewTypeId));
   const ids = new Set<string>();
   for (const item of definitions) {

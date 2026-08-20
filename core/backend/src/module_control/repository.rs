@@ -46,9 +46,12 @@ pub const ARTIFACT_REPOSITORY_INCONSISTENT: &str = "module.artifact.repository.i
 
 const STAGING_DIRECTORY: &str = ".staging";
 const REPOSITORY_LOCK_FILE: &str = ".module-artifact.lock";
-const HOST_SUPPORTED_ARTIFACT_GRANTS: [&str; 20] = [
+const HOST_SUPPORTED_ARTIFACT_GRANTS: [&str; 26] = [
     "assistant.launch",
     "assistant.session-record",
+    "assistant.resource.read",
+    "assistant.resource.write",
+    "assistant.resource.execute",
     "credential.inspect",
     "credential.write",
     "terminal.start",
@@ -63,9 +66,12 @@ const HOST_SUPPORTED_ARTIFACT_GRANTS: [&str; 20] = [
     "usage-source.observe",
     "plugin-data.read",
     "plugin-data.write",
+    "plugin-data.migrate",
     "message.send.usage.refresh-request",
     "message.publish.usage.ingest-completed",
     "message.subscribe.usage.ingest-completed",
+    "message.request.shipctl.workspace.execute",
+    "message.request.shipctl.configuration.execute",
     "schedule.register",
 ];
 
@@ -385,40 +391,6 @@ impl ArtifactRepository {
                 ("react".to_string(), "19.2.8".to_string()),
                 ("react-dom".to_string(), "19.2.8".to_string()),
             ]),
-            service_versions: BTreeMap::from([
-                ("shipctl.assistant-launch".to_string(), 1),
-                ("shipctl.credential-store".to_string(), 1),
-                ("shipctl.git".to_string(), 1),
-                ("shipctl.plugin-data".to_string(), 1),
-                ("shipctl.processes".to_string(), 1),
-                ("shipctl.project-documents".to_string(), 1),
-                ("shipctl.skill-installation".to_string(), 2),
-                ("shipctl.semantic-terminals".to_string(), 1),
-                ("shipctl.terminal-sessions".to_string(), 1),
-                ("shipctl.usage-sources".to_string(), 2),
-                ("shipctl.messages".to_string(), 1),
-                ("shipctl.scheduler".to_string(), 1),
-            ]),
-            contribution_schema_versions: [
-                "command",
-                "global-navigation",
-                "global-surface",
-                "message-graph",
-                "panel",
-                "project-action",
-                "project-facts",
-                "project-import",
-                "project-layout",
-                "project-navigation",
-                "scheduled-task",
-                "settings",
-                "sidebar",
-                "skills-provider",
-                "terminal-presentation",
-            ]
-            .into_iter()
-            .map(|family| (family.to_string(), 1))
-            .collect(),
             allowed_grants: HOST_SUPPORTED_ARTIFACT_GRANTS
                 .into_iter()
                 .map(str::to_string)
@@ -1680,7 +1652,6 @@ mod tests {
                 "backgroundEffects": [],
                 "contributions": []
             },
-            "uiContributions": [],
             "requestedGrants": requested_grants,
             "nativeAdapters": [],
             "peerDependencies": {},

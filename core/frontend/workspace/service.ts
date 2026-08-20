@@ -1,6 +1,8 @@
 import {
+  type ApplyWorkspaceInput,
   type InspectWorkspaceInput,
   type MutateWorkspaceInput,
+  type PlanWorkspaceInput,
   type SemanticCorrelationId,
   type SemanticEventLease,
   type SemanticEventRecord,
@@ -18,6 +20,9 @@ import {
   type WorkspaceObservation,
   type WorkspaceObservationScope,
   type WorkspaceService,
+  type WorkspacePlan,
+  type WorkspaceValidation,
+  type ValidateWorkspaceInput,
   workspaceService,
 } from "@shipctl/module-api";
 
@@ -68,10 +73,10 @@ function sameWorkspace(scope: WorkspaceObservationScope, workspaceId: string): b
 
 class AuthorityEventSource implements SemanticEventSource<WorkspaceObservationScope, WorkspaceObservation> {
   readonly #context: SemanticServiceProviderContext;
-  readonly #authority: WorkspaceAuthority;
+  readonly #authority: () => WorkspaceAuthority;
   #sequence = 0;
 
-  constructor(context: SemanticServiceProviderContext, authority: WorkspaceAuthority) {
+  constructor(context: SemanticServiceProviderContext, authority: () => WorkspaceAuthority) {
     this.#context = context;
     this.#authority = authority;
   }
@@ -81,11 +86,12 @@ class AuthorityEventSource implements SemanticEventSource<WorkspaceObservationSc
     listener: (event: SemanticEventRecord<WorkspaceObservation>) => void | Promise<void>,
   ): Promise<SemanticEventLease> {
     if (!this.#context.active) throw new Error("Cannot observe from a disposed workspace activation.");
-    if (!sameWorkspace(scope, this.#authority.workspaceId)) {
+    const authority = this.#authority();
+    if (!sameWorkspace(scope, authority.workspaceId)) {
       throw new Error("Workspace observation requested another workspace.");
     }
     let disposed = false;
-    const unsubscribe = this.#authority.subscribe(async (value) => {
+    const unsubscribe = authority.subscribe(async (value) => {
       if (disposed) return;
       this.#sequence += 1;
       await listener({ sourceId: "shipctl.workspace", sequence: this.#sequence, value });
@@ -149,18 +155,32 @@ function inspectInput(input: InspectWorkspaceInput, workspaceId: string): Inspec
   return input;
 }
 
-function mutationInput(input: MutateWorkspaceInput, workspaceId: string): MutateWorkspaceInput {
+interface WorkspaceCommandRequest {
+  readonly workspaceId: string;
+  readonly command: unknown;
+}
+
+function commandInput<Input extends WorkspaceCommandRequest>(input: Input, workspaceId: string): Input {
   if (!isPlainRecord(input) || !hasIdentity(input.workspaceId)) {
     throw new WorkspaceAuthorityError("workspace.invalid-request", "Workspace mutation request is invalid.");
   }
   if (input.workspaceId !== workspaceId) {
     throw new WorkspaceAuthorityError("workspace.not-found", "Workspace mutation requested another workspace.");
   }
-  return { workspaceId: input.workspaceId, command: parseWorkspaceCommand(input.command) };
+  return { ...input, command: parseWorkspaceCommand(input.command) } as Input;
 }
 
 export interface WorkspaceServiceProviderOptions {
-  readonly authority: WorkspaceAuthority;
+  /** Eager authority for simple hosts and focused tests. */
+  readonly authority?: WorkspaceAuthority;
+  /** Lazy authority owned by a direct workspace plugin during its activation. */
+  readonly getAuthority?: () => WorkspaceAuthority;
+}
+
+function authorityFor(options: WorkspaceServiceProviderOptions): WorkspaceAuthority {
+  if (options.authority !== undefined) return options.authority;
+  if (options.getAuthority !== undefined) return options.getAuthority();
+  throw new WorkspaceAuthorityError("workspace.persistence-failed", "Workspace authority is unavailable.");
 }
 
 /**
@@ -174,15 +194,42 @@ export function createWorkspaceServiceProvider(
   return {
     service: workspaceService,
     bind(context) {
-      const authority = options.authority;
+      const authority = () => authorityFor(options);
       return Object.freeze({
+        validateWorkspace: request<ValidateWorkspaceInput, WorkspaceValidation>(
+          context,
+          async (input) => {
+            const current = authority();
+            return current.validate(commandInput(input, current.workspaceId).command);
+          },
+        ),
+        planWorkspace: request<PlanWorkspaceInput, WorkspacePlan>(
+          context,
+          async (input) => {
+            const current = authority();
+            return current.plan(commandInput(input, current.workspaceId).command);
+          },
+        ),
+        applyWorkspace: request<ApplyWorkspaceInput, WorkspaceMutationResult>(
+          context,
+          async (input) => {
+            const current = authority();
+            return current.apply(commandInput(input, current.workspaceId).command);
+          },
+        ),
         mutateWorkspace: request<MutateWorkspaceInput, WorkspaceMutationResult>(
           context,
-          async (input) => authority.mutate(mutationInput(input, authority.workspaceId).command),
+          async (input) => {
+            const current = authority();
+            return current.mutate(commandInput(input, current.workspaceId).command);
+          },
         ),
         inspectWorkspace: request<InspectWorkspaceInput, WorkspaceInspection>(
           context,
-          async (input) => authority.inspect(inspectInput(input, authority.workspaceId).includeDocument),
+          async (input) => {
+            const current = authority();
+            return current.inspect(inspectInput(input, current.workspaceId).includeDocument);
+          },
         ),
         observeWorkspace: new AuthorityEventSource(context, authority),
       });

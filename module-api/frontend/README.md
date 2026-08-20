@@ -47,8 +47,9 @@ host internals ─────────────────────�
 - Owner requests are awaited in registration order. A rejected request stops
   the host mutation, while process-started and process-exited notifications are
   best-effort because the process event cannot be rolled back.
-- `beforeShutdown` hooks run sequentially before native PTYs are signalled. A
-  failure aborts shutdown so a module can protect continuity data.
+- A direct plugin can declare an optional `beforeShutdown` hook. Hooks run
+  sequentially before native PTYs are signalled; a failure aborts shutdown so a
+  module can protect continuity data.
 - Module activation owns runtime subscriptions, and project-lifecycle callbacks
   receive project paths after host state changes. Notices may include bounded
   actions so retry and recovery policy can stay inside the module.

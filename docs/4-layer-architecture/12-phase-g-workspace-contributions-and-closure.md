@@ -31,7 +31,8 @@ current UI contribution family, and produces two separate outputs:
 
 - a renderer-neutral `WorkspaceCatalogSnapshot` for panels and global
   surfaces, which are current view-instance candidates; and
-- a private `CanvasSurfaceCatalog` and renderer lookup for the legacy canvas.
+- a private `CanvasSurfaceCatalog` and renderer lookup for the selected canvas
+  adapter.
 
 `AppShell` now takes its current canvas surfaces from that accepted catalog,
 not from its own direct static module list. Navigation, sidebars, project
@@ -49,40 +50,70 @@ transaction would create a distributed commit across independent durable
 authorities. A workspace persistence failure produces a workspace diagnostic;
 it does not roll back routes, schedules, services, or the accepted family.
 
-Semantic workspace documents now use a separate
-`workspace-documents.json` store and Tauri load/save port. The store preserves
-an opaque JSON-object document envelope with compare-and-save. TypeScript
-continues to validate the document grammar. It does not share Layman's raw
-`workspace-layouts.json` snapshots, their workspace ID, or their revision
-stream. Bootstrap catalog revision zero is an explicit pre-runtime state; a
-restored document is held unchanged until the first actual accepted catalog is
-submitted.
+## Owner decision — 2026-08-19
 
-The first renderer bridge is delivered. `AppShell` gives the selected canvas a
+**Owner:** Dariusz Debowczyk. **Selected policy:** retain the post-commit,
+diagnostic-only workspace reconciliation model.
+
+Activation succeeds when the native route and declared-schedule transaction
+commits and the accepted runtime family is published. Workspace catalogue
+reconciliation runs afterward, serially, and is not a veto point for that
+success. If reconciliation or its durable compare-and-save fails, the host must
+surface a structured workspace diagnostic while the accepted family, its
+routes, schedules, and services remain active. Runtime inspection therefore
+continues to show the accepted family; workspace inspection retains the last
+successfully reconciled document (or bootstrap state) until a later accepted
+catalogue can reconcile it. There is no activation rollback, unpublication, or
+distributed recovery transaction.
+
+This boundary keeps runtime publication and workspace persistence as separate
+commit scopes. The workspace has one canonical durable authority: its own
+generic plugin-data record. A `workspace plan`/`apply` batch is all-or-nothing
+*within one workspace-document mutation*, but it neither participates in
+activation nor changes the diagnostic-only result of catalogue reconciliation.
+
+**Owner decision — view-local state (2026-08-19).** Dariusz Debowczyk selected
+a layout-and-open-views-only shared workspace. View-local state, including
+filters and drafts, belongs in the corresponding plugin's own plugin-data
+namespace. The workspace document therefore removes the write-once `stateRef`
+placeholder and view-state policy; legacy document-schema-v1 `stateRef` values
+normalize away because no owning plugin key/schema/update path ever existed.
+
+Semantic workspace documents are now schema-2 opaque values in the trusted
+`shipctl.workspace` global plugin-data namespace, keyed as
+`workspace-document:<workspaceId>`. Their `catalogRevision` stays inside that
+owner value. The retired `workspace-documents.json` file is a read-only generic
+legacy-record-map import source only: when no canonical record exists, the
+workspace plugin migrates its v1 value once through plugin-data provenance, and
+the resulting canonical record shadows the source thereafter. The former native
+workspace document store and load/save commands are deleted. TypeScript
+continues to validate the document grammar; it does not share Layman's raw
+`workspace-layouts.json` snapshots, workspace IDs, or revision stream.
+
+The shell activates the bundled workspace plugin, which owns its
 `WorkspaceCanvasBridge`: a renderer-neutral projection of the authority's
-current document plus serialized `open`, `select`, `close`, `move`, and `split`
-commands. The
-accepted catalog always includes the host compatibility definition, so a new
-workspace has a valid root view even before optional module views are opened.
+current document plus serialized semantic commands. The default workspace
+catalog intentionally contains no private host compatibility definition: a new
+empty workspace renders the terminal state, and admitted panels or surfaces
+enter only through semantic workspace commands.
 
 The selected Layman adapter now projects semantic stacks, split shares, tabs,
 floating windows, selected tabs, and recoverable missing views. It sends user
 tab selection and permitted close actions back through the bridge. It does not
-read or save `workspace-layouts.json`; the former raw Layman snapshot bridge is
-retained only as an inactive migration and rollback artifact. The semantic
-`workspace-documents.json` record remains the sole durable workspace state.
+read or save `workspace-layouts.json`; the former raw Layman snapshot bridge
+has been deleted, and no rollback path consumes it. The canonical
+`shipctl.workspace` plugin-data record is the sole durable workspace state.
 
-The legacy canvas is still the compatibility content and differential
-reference. Its data adapter now projects and maps the same representable
-semantic subset as Layman: one root tab stack, its order and selection,
-missing-view state, and permitted select and close commands. In the live legacy
-UI, the selected semantic global or panel view renders through the host ports
-and a permitted close is forwarded through the bridge. Its existing tab strip
-is not yet a semantic workspace tab strip, so live semantic selection remains
-open. `AppShell` opens and closes global surfaces by using the semantic
-document; the old UI-store route is only a startup fallback before the
-workspace bridge exists. A Fast Check differential property proves the shared
-adapter subset against Layman's real command gate.
+The standard and Layman adapters now project the same semantic workspace
+authority directly. `StandardWorkspaceCanvas` renders the representable root
+stack, preserves tab selection and permitted close actions, shows a mounted
+terminal state for an empty document, and makes unsupported layouts explicit
+instead of flattening them. Layman additionally projects its supported split
+and floating layouts. Both adapters use the bridge and accepted contribution
+catalog; neither reads raw renderer persistence. The legacy canvas and its
+compatibility profile were retired through the separately authorized Phase H
+parity gate. A Fast Check differential property continues to prove their
+shared semantic subset.
 
 Layman now accepts two structural user actions with exact semantic mappings.
 A workspace tab can be dropped into the centre of another existing tiled
@@ -147,7 +178,7 @@ workspace reconcile command
         v
 versioned semantic workspace document
         |
-        +--> legacy canvas adapter
+        +--> standard canvas adapter
         |
         +--> Layman canvas adapter
 ```
@@ -171,7 +202,7 @@ host service-family publication
         v
 serial semantic workspace reconciliation and durable CAS
         |
-        +--> later legacy projection
+        +--> later standard projection
         +--> later Layman projection
 ```
 
@@ -182,23 +213,22 @@ serial semantic workspace reconciliation and durable CAS
    registries to one activation-owned catalog family while preserving distinct
    typed subregistries.
 3. Reconcile catalog revisions into the semantic workspace service. **Delivered
-   for accepted runtime families. The first Layman and legacy semantic
-   single-stack projections are also delivered; wider layout parity remains.**
-4. Replace the current one-window `LegacyCanvas` pane with projected semantic
-   view instances, splits, tabs, floating windows, and focus operations as
-   supported by the workspace document. **Started:** both adapters share a
-   single-stack projection and select/close mapping; Layman also maps a tiled
-   centre-drop between existing stacks to the semantic move command and an
-   eligible tiled edge drop to the semantic split command. The live legacy
-   route renders selected global and panel views and uses semantic close.
-   Complete the semantic tab strip, layout rendering, and command support
-   before removing the compatibility pane.
+   for accepted runtime families. Standard and Layman share a semantic
+   single-stack projection; Layman also maps a tiled centre-drop between
+   existing stacks to the semantic move command and an eligible tiled edge
+   drop to the semantic split command.**
+4. Replace the one-window compatibility renderer with projected semantic view
+   instances, tabs, and terminal state. **Delivered:** the standard adapter is
+   the default renderer, rejects layouts it cannot represent, and delegates
+   semantic selection and close gestures through the bridge.
 5. Keep the legacy canvas as a differential reference until the semantic
-   projection is stable.
-6. Persist the semantic workspace document through a separate Tauri port.
-   **Delivered.** The selected Layman runtime no longer starts raw snapshot
-   persistence. Keep the old snapshot conversion private and inactive until a
-   tested migration or deletion decision removes it.
+   projection is stable. **Completed:** the authorized Phase H parity gate
+   retired the legacy renderer and its profile after standard/Layman evidence
+   passed.
+6. Persist the semantic workspace document in the bundled workspace plugin's
+   generic plugin-data namespace. **Delivered.** One-way legacy import, replay,
+   and stale-conflict proof now precede removal of the old native store and
+   commands; the selected Layman runtime never starts raw snapshot persistence.
 7. Consume the completed immutable-artifact catalog as the only feature-module
    source for workspace definitions and instances.
 8. Keep compile-time feature membership empty and preserve the completed native
@@ -218,6 +248,10 @@ component or stylesheet cleanup, which remains `PROP-G-CONTRIBUTION-CLEANUP-001`
 accepted catalogs persist, stale submissions do not regress the local runtime
 stream, a matching restored catalog is not degraded by bootstrap revision zero,
 and storage failure does not reject the accepted runtime family.
+
+`pluginDataPersistence.test.ts` and the native legacy-record-map test prove the
+one-way v1 workspace import, exact migration replay, and stale conflict behavior
+of the canonical plugin-data record.
 
 ## Property cards
 
@@ -316,7 +350,7 @@ and storage failure does not reject the accepted runtime family.
 - **Shape:** roundtrip.
 - **Evidence:** SEM-G-005.
 - **Domain:** generated splits, tabs, optional floating windows, sizes within
-  schema bounds, plugin view state, and missing definitions. Exclude physical
+  schema bounds, open-view state, and missing definitions. Exclude physical
   monitor coordinates that migration policy normalizes.
 - **Preconditions:** the source document is valid for its schema version.
 - **Oracle:** retain the semantic source document and compare it with restored
@@ -324,7 +358,25 @@ and storage failure does not reject the accepted runtime family.
 - **Failure value:** a restart changes project/terminal identity because the
   renderer tree was persisted as domain state.
 - **Tier:** pull request.
-- **Initial status/test ID:** proposed / `architecture.workspace-roundtrip.property`.
+- **Current status/test ID:** passing /
+  `architecture.workspace-roundtrip.property`.
+
+### PROP-G-WORKSPACE-OPERATIONS-001
+
+- **Claim:** The rendererless public workspace service validates and plans
+  without writes, exposes every retained semantic layout operation, and applies
+  an ordered batch in one revision or leaves the document unchanged.
+- **Shape:** safety and metamorphic.
+- **Evidence:** SEM-G-005.
+- **Domain:** validate, plan, apply, open, close, focus, select, move, split,
+  rename, resize, float, dock, maximize, restore, reset, and stale-revision
+  requests. Exclude renderer interaction and view-local plugin data.
+- **Oracle:** compare dry-run output and revision with the later public apply;
+  make a later batch step invalid and verify the earlier step was not committed.
+- **Failure value:** an agent can partially save a planned layout.
+- **Tier:** pull request.
+- **Current status/test ID:** passing /
+  `architecture.workspace-public-operations.property`.
 
 ### PROP-G-CONTRIBUTION-CLEANUP-001
 
@@ -409,8 +461,8 @@ The final architecture graph must prove:
 
 ## Deletion gate
 
-Remove the legacy canvas only by a separate product decision after Layman has
-the required behavior and rollback is no longer needed. Remove static module
-composition, legacy activation, restart-only loading, native module crates,
-and raw shims as part of this architecture closure because their replacements
-are direct end-state requirements.
+The legacy canvas was retired by the separate product decision recorded in
+`DELETE-H-LEGACY-CANVAS`, after its standard/Layman parity evidence passed.
+Remove static module composition, legacy activation, restart-only loading,
+native module crates, and raw shims as part of this architecture closure
+because their replacements are direct end-state requirements.

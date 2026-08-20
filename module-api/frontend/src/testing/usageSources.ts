@@ -2,12 +2,12 @@ import {
   usageSourcesService,
   type InspectUsageSourceInput,
   type RefreshUsageSourcesInput,
-  type UsageProvider,
   type UsageSourceDataset,
-  type UsageSourceDescriptor,
-  type UsageSourceInspection,
+  type UsageSourceId,
   type UsageSourceObservationScope,
   type UsageSourceRefreshReceipt,
+  type UsageSourceResourceReadInput,
+  type UsageSourceResourceResult,
   type UsageSourcesChanged,
   type UsageSourcesErrorCode,
   type UsageSourcesGrant,
@@ -26,28 +26,29 @@ import {
   type FakeRequestTrace,
 } from "./semanticServices";
 
-const PROVIDERS = [
-  "claude",
-  "codex",
-  "antigravity",
-  "gemini",
-  "opencode",
-  "pi",
-] as const satisfies readonly UsageProvider[];
+export type FakeUsageSourcesOperation =
+  | "inspect-source"
+  | "refresh-sources"
+  | "read-resource";
 
-export type FakeUsageSourcesOperation = "inspect-source" | "refresh-sources";
+type FakeUsageSourcesInput =
+  | InspectUsageSourceInput
+  | RefreshUsageSourcesInput
+  | UsageSourceResourceReadInput;
 
 export interface FakeUsageSourcesTrace {
   readonly operation: FakeUsageSourcesOperation;
-  readonly request: FakeRequestTrace<InspectUsageSourceInput | RefreshUsageSourcesInput>;
+  readonly request: FakeRequestTrace<FakeUsageSourcesInput>;
 }
 
 export interface FakeUsageSourcesProviderOptions {
-  readonly descriptors?: readonly UsageSourceDescriptor[];
   readonly dataset?: UsageSourceDataset;
   readonly deniedGrants?: readonly UsageSourcesGrant[];
   readonly trace?: FakeUsageSourcesTrace[];
   readonly changes?: FakeUsageSourceChangeController;
+  readonly readResource?: (
+    input: UsageSourceResourceReadInput,
+  ) => UsageSourceResourceResult | Promise<UsageSourceResourceResult>;
 }
 
 class FakeUsageSourcesFailure extends Error {
@@ -79,7 +80,6 @@ const DISPOSED = {
 const EMPTY_DATASET: UsageSourceDataset = Object.freeze({
   capturedAt: "1970-01-01T00:00:00Z",
   records: Object.freeze([]),
-  providerObservations: Object.freeze([]),
 });
 
 function failedError(error: unknown): SemanticServiceError<UsageSourcesErrorCode> {
@@ -105,24 +105,26 @@ function requireGrant(
   }
 }
 
-function isProvider(value: string): value is UsageProvider {
-  return (PROVIDERS as readonly string[]).includes(value);
+function validSourceId(value: unknown): value is UsageSourceId {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(value);
 }
 
-function normalizedSourceIds(
-  sourceIds: readonly UsageProvider[] | undefined,
-): readonly UsageProvider[] {
-  const values = sourceIds ?? PROVIDERS;
-  if (values.length === 0 || !values.every(isProvider)) {
+function normalizedSourceIds(sourceIds: readonly UsageSourceId[]): readonly UsageSourceId[] {
+  if (
+    sourceIds.length === 0
+    || sourceIds.length > 64
+    || !sourceIds.every(validSourceId)
+    || new Set(sourceIds).size !== sourceIds.length
+  ) {
     throw new FakeUsageSourcesFailure(
       "usage-sources.invalid-request",
       "Usage source identity is invalid",
     );
   }
-  return [...new Set(values)];
+  return [...sourceIds];
 }
 
-function operation<Input, Output>(
+function operation<Input extends FakeUsageSourcesInput, Output>(
   context: SemanticServiceProviderContext,
   name: FakeUsageSourcesOperation,
   options: FakeUsageSourcesProviderOptions,
@@ -148,7 +150,7 @@ function operation<Input, Output>(
       if (captured) {
         options.trace?.push({
           operation: name,
-          request: captured as FakeRequestTrace<InspectUsageSourceInput | RefreshUsageSourcesInput>,
+          request: captured as FakeRequestTrace<FakeUsageSourcesInput>,
         });
       }
       return outcome;
@@ -156,32 +158,32 @@ function operation<Input, Output>(
   });
 }
 
-function defaultDescriptors(): readonly UsageSourceDescriptor[] {
-  return PROVIDERS.map((sourceId) => ({
-    sourceId,
-    kinds: sourceId === "opencode" || sourceId === "pi"
-      ? ["local-transcript"]
-      : ["provider-quota", "local-transcript"],
-    authority: "host-managed",
-  }));
-}
-
 function filterDataset(
   dataset: UsageSourceDataset,
-  sourceIds: readonly UsageProvider[],
+  sourceIds: readonly UsageSourceId[],
 ): UsageSourceDataset {
   return {
     capturedAt: dataset.capturedAt,
-    records: dataset.records.filter(({ provider }) => sourceIds.includes(provider)),
-    providerObservations: dataset.providerObservations.filter(
-      ({ provider }) => sourceIds.includes(provider),
-    ),
+    records: dataset.records.filter(({ sourceId }) => sourceIds.includes(sourceId)),
   };
+}
+
+function emptyResourceResult(input: UsageSourceResourceReadInput): UsageSourceResourceResult {
+  const { request } = input;
+  switch (request.kind) {
+    case "file": return { kind: "file", resourceId: request.resourceId, content: "" };
+    case "tree": return { kind: "tree", resourceId: request.resourceId, files: [] };
+    case "sqlite": return { kind: "sqlite", resourceId: request.resourceId, rows: [] };
+    case "processes": return { kind: "processes", resourceId: request.resourceId, output: "" };
+    case "listening-ports": return { kind: "listening-ports", resourceId: request.resourceId, output: "" };
+    case "http": return { kind: "http", resourceId: request.resourceId, status: 200, body: "" };
+    case "keychain-password": return { kind: "keychain-password", resourceId: request.resourceId, secret: "" };
+  }
 }
 
 interface FakeUsageSourceSubscription {
   readonly context: SemanticServiceProviderContext;
-  readonly sourceIds: readonly UsageProvider[];
+  readonly sourceIds: readonly UsageSourceId[];
   readonly listener: (
     event: SemanticEventRecord<UsageSourcesChanged>,
   ) => void | Promise<void>;
@@ -197,7 +199,7 @@ export class FakeUsageSourceChangeController {
 
   subscribe(
     context: SemanticServiceProviderContext,
-    sourceIds: readonly UsageProvider[],
+    sourceIds: readonly UsageSourceId[],
     listener: FakeUsageSourceSubscription["listener"],
   ): SemanticEventLease {
     let subscription: FakeUsageSourceSubscription;
@@ -222,7 +224,7 @@ export class FakeUsageSourceChangeController {
     });
   }
 
-  async publish(sourceIds?: readonly UsageProvider[]): Promise<void> {
+  async publish(sourceIds: readonly UsageSourceId[]): Promise<void> {
     const normalized = normalizedSourceIds(sourceIds);
     const settlements: Promise<void>[] = [];
     for (const subscription of this.#subscriptions) {
@@ -245,7 +247,7 @@ export class FakeUsageSourceChangeController {
   }
 }
 
-/** Tauri-free Usage Sources provider for module workflows. */
+/** Tauri-free generic Usage Sources provider for artifact workflow tests. */
 export function createFakeUsageSourcesServiceProvider(
   options: FakeUsageSourcesProviderOptions = {},
 ): SemanticServiceProvider<UsageSourcesService> {
@@ -253,9 +255,9 @@ export function createFakeUsageSourcesServiceProvider(
     service: usageSourcesService,
     bind(context) {
       const changes = options.changes ?? new FakeUsageSourceChangeController();
-
+      let dataset = options.dataset ?? EMPTY_DATASET;
       return Object.freeze({
-        inspectSource: operation<InspectUsageSourceInput, UsageSourceInspection>(
+        inspectSource: operation<InspectUsageSourceInput, { readonly kind: "source-dataset"; readonly dataset: UsageSourceDataset }>(
           context,
           "inspect-source",
           options,
@@ -267,13 +269,9 @@ export function createFakeUsageSourcesServiceProvider(
                 "Usage source request is invalid",
               );
             }
-            const sourceIds = normalizedSourceIds(input.sourceIds);
             return {
               kind: "source-dataset",
-              sources: (options.descriptors ?? defaultDescriptors()).filter(
-                ({ sourceId }) => sourceIds.includes(sourceId),
-              ),
-              dataset: filterDataset(options.dataset ?? EMPTY_DATASET, sourceIds),
+              dataset: filterDataset(dataset, normalizedSourceIds(input.sourceIds)),
             };
           },
         ),
@@ -284,8 +282,39 @@ export function createFakeUsageSourcesServiceProvider(
           async (input) => {
             requireGrant(options, "usage-source.refresh");
             const acceptedSourceIds = normalizedSourceIds(input.sourceIds);
+            if (input.updates !== undefined) {
+              const updateIds = input.updates.map(({ sourceId }) => sourceId);
+              if (
+                updateIds.length !== acceptedSourceIds.length
+                || new Set(updateIds).size !== updateIds.length
+                || updateIds.some((sourceId) => !acceptedSourceIds.includes(sourceId))
+                || input.updates.some((update) => update.records.some((record) => record.sourceId !== update.sourceId))
+              ) {
+                throw new FakeUsageSourcesFailure(
+                  "usage-sources.invalid-request",
+                  "Usage source updates are invalid",
+                );
+              }
+              dataset = {
+                capturedAt: dataset.capturedAt,
+                records: [
+                  ...dataset.records.filter(({ sourceId }) => !acceptedSourceIds.includes(sourceId)),
+                  ...input.updates.flatMap(({ records }) => records),
+                ],
+              };
+            }
             await changes.publish(acceptedSourceIds);
             return { acceptedSourceIds };
+          },
+        ),
+        readResource: operation<UsageSourceResourceReadInput, UsageSourceResourceResult>(
+          context,
+          "read-resource",
+          options,
+          async (input) => {
+            requireGrant(options, "usage-source.read");
+            normalizedSourceIds([input.sourceId]);
+            return options.readResource?.(input) ?? emptyResourceResult(input);
           },
         ),
         observeSource: Object.freeze({

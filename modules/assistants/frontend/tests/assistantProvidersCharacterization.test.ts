@@ -1,12 +1,35 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
+import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { createServer, type ViteDevServer } from "vite";
+
+type ProviderPolicyModule = typeof import("../src/assistantProviderPolicy.ts");
+
+let vite: ViteDevServer;
+let policy: ProviderPolicyModule;
 
 const source = (path: string) => readFileSync(
   fileURLToPath(new URL(path, import.meta.url)),
   "utf8",
 );
+
+before(async () => {
+  vite = await createServer({
+    configFile: false,
+    optimizeDeps: { noDiscovery: true },
+    root: fileURLToPath(new URL("../../../..", import.meta.url)),
+    server: { hmr: false, middlewareMode: true },
+  });
+  policy = await vite.ssrLoadModule(
+    "/modules/assistants/frontend/src/assistantProviderPolicy.ts",
+  ) as ProviderPolicyModule;
+});
+
+after(async () => {
+  await vite.close();
+});
 
 test("the module owns the current five CLI providers and their exact flags", () => {
   const catalogue = source("../src/catalog.ts");
@@ -20,6 +43,145 @@ test("the module owns the current five CLI providers and their exact flags", () 
   assert.doesNotMatch(catalogue, /sdk|apiKey/i);
 });
 
+test("the artifact owns provider launch and recovery policy", () => {
+  const catalog = policy.createAssistantProviderPolicyCatalog();
+  const claude = catalog.get("claude");
+  const codex = catalog.get("codex");
+  const pi = catalog.get("pi");
+
+  assert.equal(claude?.restorable, true);
+  assert.equal(codex?.restorable, true);
+  assert.equal(pi?.restorable, false);
+  assert.equal(claude?.capture, undefined);
+  assert.equal(typeof codex?.capture?.snapshot, "function");
+
+  const claudeLaunch = claude?.prepareNew?.({ mode: "yolo", model: "sonnet" });
+  assert.equal(claudeLaunch?.launch.program, "claude");
+  assert.deepEqual(claudeLaunch?.launch.arguments.slice(0, -2), [
+    "--model",
+    "sonnet",
+    "--dangerously-skip-permissions",
+  ]);
+  assert.deepEqual(claudeLaunch?.launch.arguments.slice(-2), [
+    "--session-id",
+    claudeLaunch.initialSessionIdentity,
+  ]);
+
+  assert.deepEqual(codex?.prepareNew?.({ mode: "yolo", model: "gpt-5" }), {
+    launch: { program: "codex", arguments: ["--model", "gpt-5", "--yolo"] },
+  });
+  assert.deepEqual(codex?.prepareResume?.({
+    recordId: "record" as never,
+    provider: "codex" as never,
+    launchRepoPath: "/repo",
+    placementProjectPath: "/repo",
+    label: "Codex",
+    sessionMode: "yolo",
+    model: "gpt-5",
+    captureState: "ready",
+    restoreOnNextLaunch: true,
+    startedAt: 1,
+    updatedAt: 1,
+  }), {
+    program: "codex",
+    arguments: ["--model", "gpt-5", "--yolo", "resume", { kind: "captured-session-id" }],
+  });
+});
+
+test("Codex transcript capture is plugin-owned, exact, and refuses ambiguity", () => {
+  const known = new Set(["old.jsonl"]);
+  const files = [
+    { relativePath: "old.jsonl", content: '{"type":"session_meta","payload":{"id":"old","cwd":"/repo"}}' },
+    { relativePath: "new.jsonl", content: '{"type":"session_meta","payload":{"id":"new","cwd":"/repo"}}' },
+  ];
+  assert.equal(policy.selectCodexCaptureIdentity(known, "/repo", files), "new");
+  assert.equal(policy.selectCodexCaptureIdentity(known, "/other", files), null);
+  assert.throws(() => policy.selectCodexCaptureIdentity(new Set(), "/repo", [
+    ...files.slice(1),
+    { relativePath: "other.jsonl", content: '{"type":"session_meta","payload":{"id":"other","cwd":"/repo"}}' },
+  ]), /will not guess/);
+});
+
+test("an externally declared fixture policy can launch and capture through generic ports", async () => {
+  const defaultCatalog = policy.createAssistantProviderPolicyCatalog();
+  const reads: string[] = [];
+  const resources = {
+    async readResource(input: { request: { resourceId: string } }) {
+      reads.push(input.request.resourceId);
+      return {
+        kind: "tree" as const,
+        resourceId: input.request.resourceId,
+        files: [{ relativePath: "new.fixture", content: "fixture-session" }],
+      };
+    },
+    async writeResource() {},
+    async executeResource() {
+      return { resourceId: "fixture", stdout: "", stderr: "", status: 0 };
+    },
+  };
+  const fixture = {
+    id: "fixture-policy",
+    restorable: true as const,
+    prepareNew: () => ({
+      launch: { program: "fixture-cli", arguments: ["start"] },
+    }),
+    prepareResume: () => ({
+      program: "fixture-cli",
+      arguments: ["resume", { kind: "captured-session-id" as const }],
+    }),
+    capture: {
+      async snapshot(port: typeof resources) {
+        const result = await port.readResource({
+          request: { kind: "tree", resourceId: "fixture-transcripts", relativePath: ".fixture" },
+        });
+        return { knownTranscriptPaths: new Set(result.files.map((file) => file.relativePath)) };
+      },
+      async findIdentity(_record: unknown, _snapshot: unknown, port: typeof resources) {
+        const result = await port.readResource({
+          request: { kind: "tree", resourceId: "fixture-transcripts", relativePath: ".fixture" },
+        });
+        return result.files.find(({ relativePath }) => relativePath === "new.fixture")?.content ?? null;
+      },
+    },
+  };
+  const catalog = policy.createAssistantProviderPolicyCatalog([
+    ...defaultCatalog.policies,
+    fixture,
+  ]);
+  const declared = catalog.get("fixture-policy");
+  assert.deepEqual(declared?.prepareNew?.({ mode: "fixture" }), {
+    launch: { program: "fixture-cli", arguments: ["start"] },
+  });
+  const snapshot = await declared?.capture?.snapshot(resources);
+  const identity = await declared?.capture?.findIdentity({} as never, snapshot!, resources);
+  assert.equal(identity, "fixture-session");
+  assert.deepEqual(reads, ["fixture-transcripts", "fixture-transcripts"]);
+});
+
+test("resource, model, and Pi configuration policy stay in the artifact", () => {
+  const providerPolicy = source("../src/assistantProviderPolicy.ts");
+  const client = source("../src/assistantLaunchClient.ts");
+  const runtime = source("../src/runtime.ts");
+  const backend = source("../../../../core/backend/src/assistant_launch/mod.rs");
+  const resources = source("../../../../core/backend/src/assistant_launch/resources.rs");
+
+  assert.match(providerPolicy, /readResource[\s\S]*writeResource[\s\S]*executeResource/);
+  assert.match(providerPolicy, /codexModelsFromOutput/);
+  assert.match(providerPolicy, /jsonl-response-id/);
+  assert.match(providerPolicy, /readPiConfig[\s\S]*writePiSettings/);
+  assert.match(client, /service\.readResource/);
+  assert.match(client, /service\.writeResource/);
+  assert.match(client, /service\.executeResource/);
+  assert.match(runtime, /CAPTURE_RETRY_MS = 500/);
+  assert.match(runtime, /CAPTURE_MAX_ATTEMPTS = 20/);
+  assert.match(runtime, /client\.recordSessionIdentity/);
+  assert.match(runtime, /prepareAssistantsForShutdown/);
+  assert.doesNotMatch(providerPolicy, /@tauri-apps|invoke\(/);
+  assert.doesNotMatch(backend, /AssistantProvider|Claude|Codex|PiConfig|inspect_models|save_provider_configuration/);
+  assert.match(resources, /home_candidate/);
+  assert.match(resources, /validate_program/);
+});
+
 test("the module-owned launcher bounds unavailable, model, mode, and start behavior", () => {
   const launcher = source("../src/SessionLauncher.tsx");
 
@@ -29,179 +191,25 @@ test("the module-owned launcher bounds unavailable, model, mode, and start behav
   assert.match(launcher, /assistantClient\.getModelsForProvider\(assistant\.id\)/);
   assert.match(launcher, /supportsModelSelection = \(id: string\) => id !== "pi" && id !== "opencode"/);
   assert.match(launcher, /supportsMode = \(id: string\) => id !== "pi" && id !== "opencode"/);
-  assert.match(launcher, /const started = await launchAssistant\([\s\S]*selectedAssistant\.id,[\s\S]*mode,[\s\S]*selectedModel \?\? undefined,[\s\S]*services,[\s\S]*assistantClient/s);
+  assert.match(launcher, /const started = await launchAssistant\([\s\S]*selectedAssistant\.id,[\s\S]*mode,[\s\S]*selectedModel \?\? undefined,[\s\S]*activation,[\s\S]*assistantClient/s);
   assert.match(launcher, /if \(started\) close\(\);\s*else setLaunching\(false\);/);
 });
 
-test("only Claude and Codex enter durable provider-session capture", () => {
-  const catalogue = source("../src/catalog.ts");
+test("resume, close, startup recovery, and normal shutdown remain module-owned", () => {
   const runtime = source("../src/runtime.ts");
-
-  assert.match(catalogue, /return id === "claude" \|\| id === "codex" \? id : null/);
-  assert.match(runtime, /if \(!provider\) \{[\s\S]*terminalSessions\.launch\(\{/s);
-  assert.match(runtime, /terminalSessions\.launchManaged\(\{[\s\S]*client\.spawnAssistantSession\([\s\S]*provider,[\s\S]*launchRepoPath: projectPath,[\s\S]*placementProjectPath: projectPath/s);
-  assert.match(runtime, /captureCodexSession\(event\.session, metadata, services, client\)/);
-});
-
-test("Codex identity capture is bounded and fails without guessing", () => {
-  const runtime = source("../src/runtime.ts");
-  const registry = source("../../../../core/backend/src/assistant_launch/mod.rs");
-
-  assert.match(runtime, /CODEX_CAPTURE_RETRY_MS = 500/);
-  assert.match(runtime, /CODEX_CAPTURE_MAX_ATTEMPTS = 20/);
-  assert.match(runtime, /const failed = await client\.failSessionCapture\(record\.recordId\)/);
-  assert.match(runtime, /Shipctl could not identify this Codex session without guessing/);
-  assert.match(registry, /transcript must be both new since the[\s\S]*explicitly associated with this launch directory/);
-  assert.match(
-    registry,
-    /Found \{count\} new Codex sessions for this directory; restore was not enabled so Shipctl will not guess/,
-  );
-});
-
-test("resume preserves provider identity, placement, and quick-exit recovery", () => {
-  const runtime = source("../src/runtime.ts");
-  const providers = source("../../../../core/backend/src/assistant_launch/providers.rs");
+  const artifact = source("../../artifact/src/index.ts");
+  const shell = source("../../../../core/frontend/shell/AppShell.tsx");
+  const terminalActions = source("../../../../core/frontend/terminal-host/useTerminalActions.ts");
 
   assert.match(runtime, /RESTORE_PROBATION_MS = 5000/);
   assert.match(runtime, /projectPath: record\.placementProjectPath/);
   assert.match(runtime, /cwd: record\.launchRepoPath/);
   assert.match(runtime, /ownerKey: `\$\{OWNER_PREFIX\}\$\{record\.provider\}`/);
   assert.match(runtime, /if \(metadata\.restoring\) \{[\s\S]*await client\.rearmSession\(metadata\.record\.recordId\)/s);
-  assert.match(providers, /Claude => \{[\s\S]*"--resume"/);
-  assert.match(providers, /Codex => \{[\s\S]*args\.push\("resume"\.to_string\(\)\)/);
-  assert.match(providers, /failed resume must remain a failed[\s\S]*no fresh-session fallback/i);
-});
-
-test("tab close and natural exit retain the current restore-record semantics", () => {
-  const runtime = source("../src/runtime.ts");
-  const terminalActions = source("../../../../core/frontend/terminal-host/useTerminalActions.ts");
-
-  assert.match(runtime, /event\.type === "stop-requested"[\s\S]*if \(metadata\.record\) await client\.discardSession\(metadata\.record\.recordId\)/s);
-  assert.match(runtime, /event\.type === "closed"[\s\S]*metadataBySession\.delete\(event\.session\.id\)/s);
-  assert.match(runtime, /await client\.discardSession\(metadata\.record\.recordId\)\.catch/);
-  assert.match(
-    terminalActions,
-    /if \(session\) \{\s*await requestTerminalSessionOwnerAction\(\{[\s\S]*reason: "tab-close",[\s\S]*await TERMINAL_CLIENT_RUNTIME\.close\(tab\.terminalId\)/s,
-  );
-  assert.match(
-    terminalActions,
-    /if \(session\) \{\s*await requestTerminalSessionOwnerAction\(\{[\s\S]*reason: "project-removal",[\s\S]*await TERMINAL_CLIENT_RUNTIME\.close\(tab\.terminalId\)/s,
-  );
-  assert.match(terminalActions, /type: "stop-requested"/);
-  assert.doesNotMatch(terminalActions, /discardAssistantSession|rearmAssistantSession|failAssistantSessionCapture/);
-});
-
-test("startup restore and recovery are module-owned", () => {
-  const runtime = source("../src/runtime.ts");
-  const moduleEntry = source("../src/index.ts");
-  const shell = source("../../../../core/frontend/shell/AppShell.tsx");
-
+  assert.match(runtime, /event\.type === "stop-requested"[\s\S]*await client\.discardSession\(metadata\.record\.recordId\)/s);
   assert.match(runtime, /const records = await client\.listRestorableSessions\(\)/);
-  assert.match(runtime, /for \(const record of records\) await restoreRecord\(record, registered, services, client\)/);
-  assert.match(runtime, /Its placement project is no longer registered in Shipctl/);
-  assert.match(runtime, /The saved session was kept for a future retry/);
-  assert.match(runtime, /label: "Retry"/);
-  assert.match(runtime, /label: "Discard saved session"/);
-  assert.match(runtime, /client\.updateSessionPlacement\(metadata\.record\.recordId, event\.projectPath\)/);
-  assert.match(runtime, /client\.updateSessionLabel\(metadata\.record\.recordId, event\.label\)/);
-  assert.match(moduleEntry, /onProjectsChanged:[\s\S]*assistantLaunchClientFor\(activation\)/);
-  assert.match(shell, /notifyModulesProjectsChanged/);
-  assert.doesNotMatch(shell, /listRestorableAssistantSessions|resumeAssistantSession|AssistantSessionRecord/);
-});
-
-test("normal shutdown freezes ready records before terminals receive signals", () => {
-  const shell = source("../../../../core/frontend/shell/AppShell.tsx");
-  const moduleEntry = source("../src/index.ts");
-  const client = source("../src/assistantLaunchClient.ts");
-  const adapter = source("../../../../core/frontend/platform/assistantLaunch.ts");
-  const backend = source("../../../../core/backend/src/assistant_launch/mod.rs");
-  const commands = source("../../../../src-tauri/src/lifecycle.rs");
-
-  assert.match(
-    shell,
-    /await notifyModulesBeforeShutdown\(\s*MODULE_HOST_SERVICES,\s*moduleActivations,\s*activeModules,\s*\);\s*await shutdownAndQuit\(\)/,
-  );
-  assert.match(moduleEntry, /beforeShutdown:[\s\S]*beginAssistantSessionPreservingShutdown\(\)/);
-  assert.match(client, /service\.prepareForShutdown/);
-  assert.match(adapter, /prepare_assistant_sessions_for_shutdown/);
-  assert.match(backend, /self\.inner\.registry\.try_capture_pending_codex_sessions\(\);[\s\S]*self\.inner[\s\S]*\.registry[\s\S]*\.begin_preserving_shutdown\(\)/);
-  assert.match(backend, /retain\(\|record\| \{\s*record\.capture_state == CaptureState::Ready\s*&& record\.provider_session_id\.is_some\(\)/);
-  assert.match(backend, /record\.restore_on_next_launch = true/);
-  assert.match(backend, /state\.preserving_shutdown = true/);
-  assert.match(commands, /terminals\.shutdown_all\(\)/);
-  assert.doesNotMatch(commands, /AssistantSessionRegistry|try_capture_pending_codex_sessions|begin_preserving_shutdown/);
-});
-
-test("the restore manifest persists identity metadata, not transcripts or commands", () => {
-  const manifest = source("../../../../core/backend/src/assistant_launch/manifest.rs");
-  const registry = source("../../../../core/backend/src/assistant_launch/mod.rs");
-  const snapshot = source("../../../../core/backend/src/assistant_launch/snapshot.rs");
-  const nativeComposition = source("../../../../src-tauri/src/lib.rs");
-
-  assert.match(registry, /pub fn new\(path: PathBuf\) -> Self/);
-  assert.match(registry, /manifest_path: PathBuf/);
-  assert.match(nativeComposition, /paths\.assistant_sessions\.clone\(\)/);
-  assert.match(manifest, /options\.mode\(0o600\)/);
-  assert.match(manifest, /let mode = if path\.is_dir\(\) \{ 0o700 \} else \{ 0o600 \}/);
-  assert.match(manifest, /atomically replace restore manifest/);
-  assert.doesNotMatch(manifest, /transcript_content|prompt|credential|command_args/);
-  assert.match(
-    snapshot,
-    /id: "provider_credentials",\s*classification: SnapshotClassification::Secret,\s*source_paths: Vec::new\(\),\s*target_path: None,/,
-  );
-  assert.match(snapshot, /excluded\("provider_credentials"\)/);
-});
-
-test("Assistant policy remains module-owned behind permanent native providers", () => {
-  const moduleEntry = source("../src/index.ts");
-  const composition = source("../../../../core/frontend/host/enabledModules.ts");
-  const shell = source("../../../../core/frontend/shell/AppShell.tsx");
-  const terminalActions = source("../../../../core/frontend/terminal-host/useTerminalActions.ts");
-  const nativeHost = source("../../../../src-tauri/src/lib.rs");
-  const nativeComposition = source("../../../../src-tauri/src/modules/mod.rs");
-  const terminalAdapter = source("../../../../core/tauri/src/assistant_launch.rs");
-  const piConfig = source("../../../../core/backend/src/assistant_launch/pi_config.rs");
-  const backend = source("../../../../core/backend/src/assistant_launch/mod.rs");
-  const credentialBackend = source("../../../../core/backend/src/credentials/mod.rs");
-  const client = source("../src/assistantLaunchClient.ts");
-  const assistantAdapter = source("../../../../core/frontend/platform/assistantLaunch.ts");
-  const publicContract = source("../../../../module-api/frontend/src/protocol/assistantLaunch.ts");
-  const credentialClient = source("../src/credentialStoreClient.ts");
-  const credentialAdapter = source("../../../../core/frontend/platform/credentials.ts");
-
-  assert.match(moduleEntry, /id: "shipctl\.assistants"/);
-  assert.match(moduleEntry, /load: \(\) => import\("\.\/SessionLauncher"\)/);
-  assert.match(moduleEntry, /activateAssistantRuntime/);
-  assert.doesNotMatch(composition, /module-assistants|assistantsModule/);
-  assert.match(source("../../module.yaml"), /delivery: runtime-artifact/);
-  assert.doesNotMatch(shell, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|listRestorableAssistantSessions/);
-  assert.doesNotMatch(terminalActions, /spawnAssistantSession|resumeAssistantSession|tryCaptureCodex|CODEX_CAPTURE_RETRY_MS|RESTORE_PROBATION_MS/);
-  assert.match(nativeHost, /AssistantLaunchService::new\(/);
-  assert.match(nativeHost, /CredentialStoreService::new\(\)/);
-  assert.doesNotMatch(nativeComposition, /shipctl_module_assistants|assistants-module/);
-  assert.match(terminalAdapter, /PrivateAssistantLaunchRequest/);
-  assert.match(terminalAdapter, /service\.start_session\(&request\.activation, request\.input\)/);
-  assert.doesNotMatch(terminalAdapter, /SessionLauncher|CODING_ASSISTANTS|assistantLogo/);
-  assert.doesNotMatch(backend, /Channel<TerminalOutput>|on_data/);
-  assert.doesNotMatch(terminalAdapter, /Keychain|add-generic-password/);
-  assert.doesNotMatch(backend, /trait PiConfigAuthority/);
-  assert.match(backend, /pi_config::get_pi_config\(\)/);
-  assert.match(piConfig, /\.join\("\.pi"\)\s*\.join\("agent"\)/);
-  assert.doesNotMatch(piConfig, /"add-generic-password"/);
-  assert.match(credentialBackend, /"add-generic-password"/);
-  assert.doesNotMatch(piConfig, /get_pi_config\(\)[\s\S]*migrate_legacy_api_key/);
-  assert.doesNotMatch(backend, /tauri::|TauriPlugin|AssistantPluginState/);
-  assert.match(client, /assistantLaunchService/);
-  assert.match(client, /processesService/);
-  assert.doesNotMatch(client, /@tauri-apps|invoke|plugin:shipctl-assistants/);
-  assert.match(assistantAdapter, /start_assistant_session/);
-  assert.match(assistantAdapter, /release_assistant_launch_activation/);
-  assert.doesNotMatch(publicContract, /providerSessionId|plugin:shipctl-assistants|invoke/);
-  assert.match(credentialClient, /credentialStoreService/);
-  assert.doesNotMatch(credentialClient, /@tauri-apps|invoke|Keychain|security/);
-  assert.match(credentialAdapter, /inspect_credential/);
-  assert.match(credentialAdapter, /release_credential_store_activation/);
-  assert.match(credentialAdapter, /activation\.moduleId === "shipctl\.assistants"/);
-  assert.match(credentialAdapter, /credential\.inspect/);
-  assert.match(credentialAdapter, /credential\.write/);
+  assert.match(runtime, /for \(const record of records\) await restoreRecord\(record, registered, activation, client\)/);
+  assert.match(artifact, /beforeShutdown\(context\)[\s\S]*prepareAssistantsForShutdown/);
+  assert.match(shell, /await beforeShutdown\(\);\s*await shutdownAndQuit\(\)/);
+  assert.doesNotMatch(terminalActions, /discardAssistantSession|rearmAssistantSession|failAssistantSessionCapture/);
 });

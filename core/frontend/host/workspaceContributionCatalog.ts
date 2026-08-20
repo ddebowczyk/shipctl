@@ -69,6 +69,8 @@ export interface WorkspaceContributionCatalogInput {
   /** Activated feature definitions from one complete runtime family. */
   readonly modules: readonly ShipctlModule[];
   readonly activationContextsByModule: ReadonlyMap<ModuleId, ModuleActivationContext>;
+  /** Direct artifact registrations from an already accepted runtime family. */
+  readonly runtimeContributions?: readonly WorkspaceContributionSource[];
   /** Host-owned built-ins, such as Settings, use the same ownership rule. */
   readonly hostContributions?: readonly WorkspaceContributionSource[];
 }
@@ -222,6 +224,14 @@ function sourcesFor(input: WorkspaceContributionCatalogInput): readonly Workspac
     });
   }
 
+  for (const source of input.runtimeContributions ?? []) {
+    if (moduleIds.has(source.moduleId)) {
+      fail("duplicate-module-id", `Contribution source ${source.moduleId} appears more than once.`);
+    }
+    moduleIds.add(source.moduleId);
+    sources.push(source);
+  }
+
   for (const source of input.hostContributions ?? []) {
     if (moduleIds.has(source.moduleId)) {
       fail("duplicate-module-id", `Contribution source ${source.moduleId} appears more than once.`);
@@ -340,7 +350,6 @@ function panelDefinition(
     closeBehavior: "dispose",
     requiredCapabilityIds: Object.freeze([...(panel.requiredCapabilities ?? [])]),
     placement: Object.freeze({ defaultRegion: "primary", allowSplit: true }),
-    state: Object.freeze({ kind: "none" }),
     presentation: Object.freeze({
       loaderId: `shipctl.canvas.panel.${panel.id}`,
       exportName: "default",
@@ -368,7 +377,6 @@ function globalSurfaceDefinition(
     closeBehavior: "hide",
     requiredCapabilityIds: Object.freeze([]),
     placement: Object.freeze({ defaultRegion: "primary", allowSplit: true }),
-    state: Object.freeze({ kind: "none" }),
     presentation: Object.freeze({
       loaderId: `shipctl.canvas.global-surface.${surface.id}`,
       exportName: "default",

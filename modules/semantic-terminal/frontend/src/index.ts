@@ -1,13 +1,11 @@
-import { createElement, lazy } from "react";
-import {
-  SEMANTIC_TERMINAL_GRANTS,
-  TERMINAL_SESSION_GRANTS,
-  semanticTerminalsService,
-  terminalDriverId,
-  terminalSessionsService,
-  type ShipctlModule,
-  type TerminalPresentationProps,
-} from "@shipctl/module-api";
+export {
+  SEMANTIC_TERMINAL_DRIVER_ID,
+  SEMANTIC_TERMINAL_MODULE_ID,
+  SEMANTIC_TERMINAL_PLUGIN_VERSION,
+  SEMANTIC_TERMINAL_REQUIRED_GRANTS,
+  semanticTerminalContributions,
+  SemanticTerminalPresentation,
+} from "./pluginContributions.ts";
 
 export {
   createTerminalImeLifecycle,
@@ -58,39 +56,3 @@ export * from "./scenarios/scenarioRunner.ts";
 export * from "./scenarios/scenarioCatalog.ts";
 export * from "./scenarios/semanticTerminalScenarioEntry.ts";
 export * from "./terminalPerformanceMetrics.ts";
-
-/** The stable id shared by the native factory and the semantic presentation. */
-export const SEMANTIC_TERMINAL_DRIVER_ID = terminalDriverId("semantic-terminal");
-
-const SemanticTerminalPresentationView = lazy(async () => {
-  const module = await import("./presentation/SemanticTerminalPresentation.tsx");
-  return { default: module.SemanticTerminalPresentation };
-});
-
-function SemanticTerminalProvider(props: TerminalPresentationProps) {
-  return createElement(SemanticTerminalPresentationView, props);
-}
-
-/**
- * Build-installed semantic terminal implementation and presentation.
- */
-export const semanticTerminalModule = {
-  id: "shipctl.semantic-terminal",
-  version: "0.0.0",
-  requiredGrants: [
-    TERMINAL_SESSION_GRANTS.attach,
-    TERMINAL_SESSION_GRANTS.input,
-    TERMINAL_SESSION_GRANTS.resize,
-    SEMANTIC_TERMINAL_GRANTS.attach,
-    SEMANTIC_TERMINAL_GRANTS.input,
-    SEMANTIC_TERMINAL_GRANTS.inspect,
-  ],
-  terminalPresentations: [{
-    moduleId: "shipctl.semantic-terminal",
-    driverId: SEMANTIC_TERMINAL_DRIVER_ID,
-    requiredServices: [terminalSessionsService, semanticTerminalsService],
-    Presentation: SemanticTerminalProvider,
-  }],
-} as const satisfies ShipctlModule;
-
-export { SemanticTerminalProvider as SemanticTerminalPresentation };

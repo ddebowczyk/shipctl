@@ -3,6 +3,8 @@ use rusqlite::Connection;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+const GENERIC_SCHEMA_VERSION: i64 = 12;
+
 #[derive(Clone)]
 pub struct UsageDb {
     pub conn: Arc<Mutex<Connection>>,
@@ -55,253 +57,119 @@ impl UsageDb {
     }
 }
 
+/// Upgrade historic usage databases to one generic source-record schema.
+///
+/// Earlier migrations embedded individual source repair rules in the host.
+/// Those repairs now belong to the owning artifact. This migration deliberately
+/// preserves every existing source namespace and makes only schema-level,
+/// source-agnostic repairs.
 fn migrate(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);")
-        .map_err(|e| format!("Failed to create schema_version table: {e}"))?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS usage_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            project TEXT,
+            model TEXT,
+            timestamp INTEGER NOT NULL,
+            tokens_input INTEGER NOT NULL DEFAULT 0,
+            tokens_output INTEGER NOT NULL DEFAULT 0,
+            tokens_cache_write INTEGER NOT NULL DEFAULT 0,
+            tokens_cache_read INTEGER NOT NULL DEFAULT 0,
+            tokens_thoughts INTEGER NOT NULL DEFAULT 0,
+            tokens_total INTEGER NOT NULL DEFAULT 0,
+            pricing_provider TEXT,
+            recorded_cost REAL
+         );
+         CREATE TABLE IF NOT EXISTS usage_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,
+            date TEXT NOT NULL,
+            model TEXT,
+            project TEXT,
+            tokens_input INTEGER NOT NULL DEFAULT 0,
+            tokens_output INTEGER NOT NULL DEFAULT 0,
+            tokens_cache_write INTEGER NOT NULL DEFAULT 0,
+            tokens_cache_read INTEGER NOT NULL DEFAULT 0,
+            tokens_thoughts INTEGER NOT NULL DEFAULT 0,
+            tokens_total INTEGER NOT NULL DEFAULT 0,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            pricing_provider TEXT,
+            recorded_cost REAL,
+            UNIQUE(provider, date, model, project)
+         );",
+    )
+    .map_err(|e| format!("Failed to initialize generic usage schema: {e}"))?;
+
+    ensure_columns(
+        conn,
+        "usage_messages",
+        &[
+            ("id", "INTEGER"),
+            ("provider", "TEXT NOT NULL DEFAULT ''"),
+            ("session_id", "TEXT NOT NULL DEFAULT ''"),
+            ("project", "TEXT"),
+            ("model", "TEXT"),
+            ("timestamp", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_input", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_output", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_cache_write", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_cache_read", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_thoughts", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_total", "INTEGER NOT NULL DEFAULT 0"),
+            ("pricing_provider", "TEXT"),
+            ("recorded_cost", "REAL"),
+        ],
+    )?;
+    ensure_columns(
+        conn,
+        "usage_daily",
+        &[
+            ("id", "INTEGER"),
+            ("provider", "TEXT NOT NULL DEFAULT ''"),
+            ("date", "TEXT NOT NULL DEFAULT ''"),
+            ("model", "TEXT"),
+            ("project", "TEXT"),
+            ("tokens_input", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_output", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_cache_write", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_cache_read", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_thoughts", "INTEGER NOT NULL DEFAULT 0"),
+            ("tokens_total", "INTEGER NOT NULL DEFAULT 0"),
+            ("message_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("pricing_provider", "TEXT"),
+            ("recorded_cost", "REAL"),
+        ],
+    )?;
+
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_msg_provider_ts ON usage_messages(provider, timestamp);
+         CREATE INDEX IF NOT EXISTS idx_msg_session ON usage_messages(provider, session_id);",
+    )
+    .map_err(|e| format!("Failed to initialize generic usage indexes: {e}"))?;
 
     let version: i64 = conn
         .query_row(
             "SELECT COALESCE(MAX(version), 0) FROM schema_version",
             [],
-            |r| r.get(0),
+            |row| row.get(0),
         )
         .unwrap_or(0);
-
-    if version < 1 {
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS usage_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider TEXT NOT NULL,
-                session_id TEXT NOT NULL,
-                project TEXT,
-                model TEXT,
-                timestamp INTEGER NOT NULL,
-                tokens_input INTEGER NOT NULL DEFAULT 0,
-                tokens_output INTEGER NOT NULL DEFAULT 0,
-                tokens_cache_write INTEGER NOT NULL DEFAULT 0,
-                tokens_cache_read INTEGER NOT NULL DEFAULT 0,
-                tokens_thoughts INTEGER NOT NULL DEFAULT 0,
-                tokens_total INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE INDEX IF NOT EXISTS idx_msg_provider_ts ON usage_messages(provider, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_msg_session ON usage_messages(provider, session_id);
-
-            CREATE TABLE IF NOT EXISTS usage_daily (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider TEXT NOT NULL,
-                date TEXT NOT NULL,
-                model TEXT,
-                project TEXT,
-                tokens_input INTEGER NOT NULL DEFAULT 0,
-                tokens_output INTEGER NOT NULL DEFAULT 0,
-                tokens_cache_write INTEGER NOT NULL DEFAULT 0,
-                tokens_cache_read INTEGER NOT NULL DEFAULT 0,
-                tokens_thoughts INTEGER NOT NULL DEFAULT 0,
-                tokens_total INTEGER NOT NULL DEFAULT 0,
-                message_count INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(provider, date, model, project)
-            );
-
-            CREATE TABLE IF NOT EXISTS ingest_cursors (
-                file_path TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                file_size INTEGER NOT NULL,
-                byte_offset INTEGER NOT NULL,
-                last_modified INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-
-            INSERT INTO schema_version (version) VALUES (1);",
+    if version < GENERIC_SCHEMA_VERSION {
+        conn.execute(
+            "INSERT INTO schema_version (version) VALUES (?1)",
+            [GENERIC_SCHEMA_VERSION],
         )
-        .map_err(|e| format!("Failed to run migration v1: {e}"))?;
+        .map_err(|e| format!("Failed to record generic usage schema version: {e}"))?;
     }
+    Ok(())
+}
 
-    if version < 2 {
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS model_pricing (
-                model_pattern TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                input_per_m REAL NOT NULL DEFAULT 0,
-                output_per_m REAL NOT NULL DEFAULT 0,
-                cache_read_per_m REAL NOT NULL DEFAULT 0,
-                cache_write_per_m REAL NOT NULL DEFAULT 0,
-                thoughts_per_m REAL NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );",
-        )
-        .map_err(|e| format!("Failed to create model_pricing table: {e}"))?;
-
-        // Clear old codex data so it re-ingests from JSONL with full token breakdown
-        conn.execute_batch(
-            "DELETE FROM usage_messages WHERE provider = 'codex';
-             DELETE FROM ingest_cursors WHERE provider = 'codex';
-             INSERT INTO schema_version (version) VALUES (2);",
-        )
-        .map_err(|e| format!("Failed to run migration v2: {e}"))?;
+fn ensure_columns(conn: &Connection, table: &str, columns: &[(&str, &str)]) -> Result<(), String> {
+    for (column, definition) in columns {
+        ensure_column(conn, table, column, definition)?;
     }
-
-    let needs_v3 = version < 3
-        || !column_exists(conn, "usage_messages", "pricing_provider")
-        || !column_exists(conn, "usage_messages", "recorded_cost")
-        || !column_exists(conn, "usage_daily", "pricing_provider")
-        || !column_exists(conn, "usage_daily", "recorded_cost");
-
-    if needs_v3 {
-        ensure_column(conn, "usage_messages", "pricing_provider", "TEXT")?;
-        ensure_column(conn, "usage_messages", "recorded_cost", "REAL")?;
-        ensure_column(conn, "usage_daily", "pricing_provider", "TEXT")?;
-        ensure_column(conn, "usage_daily", "recorded_cost", "REAL")?;
-
-        conn.execute_batch(
-            "UPDATE usage_messages
-             SET pricing_provider = provider
-             WHERE pricing_provider IS NULL OR pricing_provider = '';
-             UPDATE usage_daily
-             SET pricing_provider = provider
-             WHERE pricing_provider IS NULL OR pricing_provider = '';
-             INSERT INTO schema_version (version)
-             SELECT 3
-             WHERE COALESCE((SELECT MAX(version) FROM schema_version), 0) < 3;",
-        )
-        .map_err(|e| format!("Failed to run migration v3 data backfill: {e}"))?;
-    }
-
-    if version < 4 {
-        conn.execute_batch(
-            "DELETE FROM usage_messages WHERE provider = 'pi';
-             DELETE FROM usage_daily WHERE provider = 'pi';
-             DELETE FROM ingest_cursors WHERE provider = 'pi';
-             INSERT INTO schema_version (version) VALUES (4);",
-        )
-        .map_err(|e| format!("Failed to run migration v4: {e}"))?;
-    }
-
-    if version < 5 {
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS usage_projects (
-                canonical_id TEXT PRIMARY KEY,
-                display_name TEXT NOT NULL,
-                canonical_path TEXT,
-                repo_root TEXT,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS project_aliases (
-                raw_label TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                canonical_id TEXT NOT NULL,
-                confidence REAL NOT NULL,
-                reviewed INTEGER NOT NULL DEFAULT 0,
-                reason TEXT,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                PRIMARY KEY (raw_label, provider)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_project_aliases_canonical
-                ON project_aliases(canonical_id);
-
-            INSERT INTO schema_version (version) VALUES (5);",
-        )
-        .map_err(|e| format!("Failed to run migration v5: {e}"))?;
-    }
-
-    if version < 6 {
-        conn.execute_batch(
-            "UPDATE usage_messages SET pricing_provider = 'anthropic' WHERE pricing_provider = 'claude';
-             UPDATE usage_messages SET pricing_provider = 'openai'    WHERE pricing_provider = 'codex';
-             UPDATE usage_messages SET pricing_provider = 'google'    WHERE pricing_provider = 'gemini';
-             UPDATE usage_daily   SET pricing_provider = 'anthropic' WHERE pricing_provider = 'claude';
-             UPDATE usage_daily   SET pricing_provider = 'openai'    WHERE pricing_provider = 'codex';
-             UPDATE usage_daily   SET pricing_provider = 'google'    WHERE pricing_provider = 'gemini';
-             INSERT INTO schema_version (version) VALUES (6);"
-        ).map_err(|e| format!("Failed to run migration v6: {e}"))?;
-    }
-
-    if version < 7 {
-        conn.execute_batch(
-            "DROP TABLE IF EXISTS model_pricing;
-             CREATE TABLE model_pricing (
-                provider TEXT NOT NULL,
-                model_pattern TEXT NOT NULL,
-                input_per_m REAL NOT NULL DEFAULT 0,
-                output_per_m REAL NOT NULL DEFAULT 0,
-                cache_read_per_m REAL NOT NULL DEFAULT 0,
-                cache_write_per_m REAL NOT NULL DEFAULT 0,
-                thoughts_per_m REAL NOT NULL DEFAULT 0,
-                release_date TEXT,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (provider, model_pattern)
-             );
-             INSERT INTO schema_version (version) VALUES (7);",
-        )
-        .map_err(|e| format!("Failed to run migration v7: {e}"))?;
-    }
-
-    if version < 8 {
-        conn.execute_batch(
-            "UPDATE usage_messages SET pricing_provider = 'anthropic' WHERE pricing_provider = 'claude';
-             UPDATE usage_messages SET pricing_provider = 'openai'    WHERE pricing_provider = 'codex';
-             UPDATE usage_messages SET pricing_provider = 'google'    WHERE pricing_provider = 'gemini';
-             UPDATE usage_daily   SET pricing_provider = 'anthropic' WHERE pricing_provider = 'claude';
-             UPDATE usage_daily   SET pricing_provider = 'openai'    WHERE pricing_provider = 'codex';
-             UPDATE usage_daily   SET pricing_provider = 'google'    WHERE pricing_provider = 'gemini';
-             INSERT INTO schema_version (version) VALUES (8);"
-        ).map_err(|e| format!("Failed to run migration v8: {e}"))?;
-    }
-
-    if version < 9 {
-        conn.execute_batch(
-            "DELETE FROM usage_messages WHERE provider = 'codex';
-             DELETE FROM usage_daily WHERE provider = 'codex';
-             DELETE FROM ingest_cursors WHERE provider = 'codex';
-             INSERT INTO schema_version (version) VALUES (9);",
-        )
-        .map_err(|e| format!("Failed to run migration v9: {e}"))?;
-    }
-
-    if version < 10 {
-        conn.execute_batch(
-            "DELETE FROM usage_messages WHERE provider = 'antigravity';
-             DELETE FROM usage_daily WHERE provider = 'antigravity';
-             DELETE FROM ingest_cursors WHERE provider = 'antigravity';
-             INSERT INTO schema_version (version) VALUES (10);",
-        )
-        .map_err(|e| format!("Failed to run migration v10: {e}"))?;
-    }
-
-    if version < 11 {
-        if column_exists(conn, "usage_messages", "pricing_provider")
-            && column_exists(conn, "usage_messages", "model")
-        {
-            conn.execute_batch(
-                "UPDATE usage_messages
-                 SET pricing_provider = 'google'
-                 WHERE provider = 'antigravity' AND lower(COALESCE(model, '')) LIKE '%gemini%';
-                 UPDATE usage_messages
-                 SET pricing_provider = 'anthropic'
-                 WHERE provider = 'antigravity' AND lower(COALESCE(model, '')) LIKE '%claude%';",
-            )
-            .map_err(|e| format!("Failed to run migration v11 usage_messages update: {e}"))?;
-        }
-        if column_exists(conn, "usage_daily", "pricing_provider")
-            && column_exists(conn, "usage_daily", "model")
-        {
-            conn.execute_batch(
-                "UPDATE usage_daily
-                 SET pricing_provider = 'google'
-                 WHERE provider = 'antigravity' AND lower(COALESCE(model, '')) LIKE '%gemini%';
-                 UPDATE usage_daily
-                 SET pricing_provider = 'anthropic'
-                 WHERE provider = 'antigravity' AND lower(COALESCE(model, '')) LIKE '%claude%';",
-            )
-            .map_err(|e| format!("Failed to run migration v11 usage_daily update: {e}"))?;
-        }
-        conn.execute("INSERT INTO schema_version (version) VALUES (11)", [])
-            .map_err(|e| format!("Failed to run migration v11: {e}"))?;
-    }
-
     Ok(())
 }
 
@@ -330,7 +198,6 @@ fn ensure_column(
     if column_exists(conn, table, column) {
         return Ok(());
     }
-
     let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
     conn.execute(&sql, [])
         .map_err(|e| format!("Failed adding column {table}.{column}: {e}"))?;
@@ -342,216 +209,75 @@ mod tests {
     use super::*;
 
     #[test]
-    fn v8_normalizes_stale_pricing_provider_keys() {
+    fn upgrades_legacy_source_rows_without_source_specific_rewrites() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE schema_version (version INTEGER NOT NULL);
              INSERT INTO schema_version (version) VALUES (7);
-             CREATE TABLE usage_messages (provider TEXT, pricing_provider TEXT, recorded_cost REAL);
-             CREATE TABLE usage_daily (provider TEXT, pricing_provider TEXT, recorded_cost REAL);
-             CREATE TABLE ingest_cursors (provider TEXT);
-             INSERT INTO usage_messages (provider, pricing_provider) VALUES ('claude', 'claude'), ('codex', 'codex'), ('gemini', 'gemini'), ('claude', 'anthropic');
-             INSERT INTO usage_daily (provider, pricing_provider) VALUES ('claude', 'claude'), ('codex', 'codex'), ('gemini', 'gemini'), ('gemini', 'google');"
-        ).unwrap();
-
-        migrate(&conn).unwrap();
-
-        let stale_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM (
-                    SELECT pricing_provider FROM usage_messages
-                    UNION ALL
-                    SELECT pricing_provider FROM usage_daily
-                 ) WHERE pricing_provider IN ('claude', 'codex', 'gemini')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let version: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        assert_eq!(stale_count, 0);
-        assert_eq!(version, 11);
-    }
-
-    #[test]
-    fn v9_clears_codex_usage_for_timestamp_reingest() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE schema_version (version INTEGER NOT NULL);
-             INSERT INTO schema_version (version) VALUES (8);
-             CREATE TABLE usage_messages (provider TEXT);
-             CREATE TABLE usage_daily (provider TEXT);
-             CREATE TABLE ingest_cursors (provider TEXT);
-             INSERT INTO usage_messages (provider) VALUES ('codex'), ('claude');
-             INSERT INTO usage_daily (provider) VALUES ('codex'), ('claude');
-             INSERT INTO ingest_cursors (provider) VALUES ('codex'), ('claude');",
+             CREATE TABLE usage_messages (provider TEXT, pricing_provider TEXT);
+             CREATE TABLE usage_daily (provider TEXT, pricing_provider TEXT);
+             INSERT INTO usage_messages (provider, pricing_provider) VALUES ('fixture-old', '');
+             INSERT INTO usage_daily (provider, pricing_provider) VALUES ('fixture-old', NULL);",
         )
         .unwrap();
 
         migrate(&conn).unwrap();
 
-        let codex_rows: i64 = conn
+        let message: (String, Option<String>, i64, String) = conn
             .query_row(
-                "SELECT COUNT(*) FROM (
-                    SELECT provider FROM usage_messages
-                    UNION ALL
-                    SELECT provider FROM usage_daily
-                    UNION ALL
-                    SELECT provider FROM ingest_cursors
-                 ) WHERE provider = 'codex'",
+                "SELECT provider, pricing_provider, tokens_total, session_id FROM usage_messages",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        let claude_rows: i64 = conn
+        let daily: (String, Option<String>, i64, String) = conn
             .query_row(
-                "SELECT COUNT(*) FROM (
-                    SELECT provider FROM usage_messages
-                    UNION ALL
-                    SELECT provider FROM usage_daily
-                    UNION ALL
-                    SELECT provider FROM ingest_cursors
-                 ) WHERE provider = 'claude'",
+                "SELECT provider, pricing_provider, tokens_total, date FROM usage_daily",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         let version: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
             .unwrap();
 
-        assert_eq!(codex_rows, 0);
-        assert_eq!(claude_rows, 3);
-        assert_eq!(version, 11);
+        assert_eq!(
+            message,
+            (
+                "fixture-old".to_string(),
+                Some("".to_string()),
+                0,
+                "".to_string(),
+            ),
+        );
+        assert_eq!(daily, ("fixture-old".to_string(), None, 0, "".to_string(),),);
+        assert_eq!(version, GENERIC_SCHEMA_VERSION);
     }
 
     #[test]
-    fn v10_clears_antigravity_usage_for_model_reingest() {
+    fn migration_is_idempotent_for_a_generic_database() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE schema_version (version INTEGER NOT NULL);
-             INSERT INTO schema_version (version) VALUES (9);
-             CREATE TABLE usage_messages (provider TEXT);
-             CREATE TABLE usage_daily (provider TEXT);
-             CREATE TABLE ingest_cursors (provider TEXT);
-             INSERT INTO usage_messages (provider) VALUES ('antigravity'), ('claude');
-             INSERT INTO usage_daily (provider) VALUES ('antigravity'), ('claude');
-             INSERT INTO ingest_cursors (provider) VALUES ('antigravity'), ('claude');",
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO usage_messages (provider, session_id, timestamp, tokens_total, pricing_provider)
+             VALUES ('fixture-source', 'fixture-session', 42, 9, 'fixture-pricing')",
+            [],
         )
         .unwrap();
 
         migrate(&conn).unwrap();
 
-        let antigravity_rows: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM (
-                    SELECT provider FROM usage_messages
-                    UNION ALL
-                    SELECT provider FROM usage_daily
-                    UNION ALL
-                    SELECT provider FROM ingest_cursors
-                 ) WHERE provider = 'antigravity'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let claude_rows: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM (
-                    SELECT provider FROM usage_messages
-                    UNION ALL
-                    SELECT provider FROM usage_daily
-                    UNION ALL
-                    SELECT provider FROM ingest_cursors
-                 ) WHERE provider = 'claude'",
-                [],
-                |row| row.get(0),
-            )
+        let records: i64 = conn
+            .query_row("SELECT COUNT(*) FROM usage_messages", [], |row| row.get(0))
             .unwrap();
         let version: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
             .unwrap();
-
-        assert_eq!(antigravity_rows, 0);
-        assert_eq!(claude_rows, 3);
-        assert_eq!(version, 11);
-    }
-
-    #[test]
-    fn v11_maps_antigravity_pricing_to_underlying_provider() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE schema_version (version INTEGER NOT NULL);
-             INSERT INTO schema_version (version) VALUES (10);
-             CREATE TABLE usage_messages (provider TEXT, model TEXT, pricing_provider TEXT);
-             CREATE TABLE usage_daily (provider TEXT, model TEXT, pricing_provider TEXT);
-             INSERT INTO usage_messages (provider, model, pricing_provider) VALUES
-                ('antigravity', 'Gemini 3.5 Flash (Medium)', 'antigravity'),
-                ('antigravity', 'Claude Sonnet 4.6 (Thinking)', 'antigravity'),
-                ('antigravity', 'GPT-OSS 120B', 'antigravity');
-             INSERT INTO usage_daily (provider, model, pricing_provider) VALUES
-                ('antigravity', 'Gemini 3.5 Flash (Medium)', 'antigravity'),
-                ('antigravity', 'Claude Sonnet 4.6 (Thinking)', 'antigravity');",
-        )
-        .unwrap();
-
-        migrate(&conn).unwrap();
-
-        let google_rows: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM (
-                    SELECT pricing_provider FROM usage_messages
-                    UNION ALL
-                    SELECT pricing_provider FROM usage_daily
-                 ) WHERE pricing_provider = 'google'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let anthropic_rows: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM (
-                    SELECT pricing_provider FROM usage_messages
-                    UNION ALL
-                    SELECT pricing_provider FROM usage_daily
-                 ) WHERE pricing_provider = 'anthropic'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let unknown_rows: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM usage_messages
-                 WHERE model = 'GPT-OSS 120B' AND pricing_provider = 'antigravity'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let version: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        assert_eq!(google_rows, 2);
-        assert_eq!(anthropic_rows, 2);
-        assert_eq!(unknown_rows, 1);
-        assert_eq!(version, 11);
+        assert_eq!(records, 1);
+        assert_eq!(version, GENERIC_SCHEMA_VERSION);
     }
 }

@@ -32,10 +32,11 @@ compatibility_paths:
     Parser state and activation-scoped native authority are permanent,
     Tauri-free core capabilities; presentation policy remains in TypeScript.
   - >-
-    Phase E packages Semantic Terminal as an immutable presentation artifact.
-    It declares Terminal Sessions and Semantic Terminals directly. Workspace
-    remains a Phase G target capability; the current host presentation contract
-    supplies terminal identity and visibility.
+    Phase E packages Semantic Terminal as a direct immutable presentation
+    artifact. Its activation declares Terminal Sessions and Semantic Terminals,
+    then registers the terminal presentation. Workspace remains a Phase G
+    target capability; the current host presentation contract supplies terminal
+    identity and visibility.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE
     proof_ids:

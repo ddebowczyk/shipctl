@@ -1,5 +1,6 @@
 import type {
   ModuleTerminalDimensions,
+  ModuleManagedTerminalSessionLaunchRequest,
   ModuleTerminalId,
   ModuleTerminalSession,
   ModuleTerminalSessionExitReason,
@@ -29,6 +30,10 @@ export interface ActivationTerminalSessionsRuntime {
   launch(
     moduleId: string,
     request: ModuleTerminalSessionLaunchRequest,
+  ): Promise<ModuleTerminalSession>;
+  launchManaged(
+    moduleId: string,
+    request: ModuleManagedTerminalSessionLaunchRequest,
   ): Promise<ModuleTerminalSession>;
   update(
     moduleId: string,
@@ -228,6 +233,13 @@ export const ACTIVATION_TERMINAL_SESSIONS: ActivationTerminalSessionsRuntime = {
   getDimensions: () => dimensionsProvider(),
   list: (moduleId) => getRuntime().list().filter((session) => session.moduleId === moduleId),
   launch: (moduleId, request) => getRuntime().launchForModule(moduleId, request),
+  async launchManaged(moduleId, request) {
+    const session = await getRuntime().launchManaged(request);
+    if (session.moduleId !== moduleId) {
+      throw new Error(`Managed terminal ${session.id} was not attributed to ${moduleId}`);
+    }
+    return session;
+  },
   async update(moduleId, sessionId, patch) {
     ownedSession(moduleId, sessionId);
     return getRuntime().update(sessionId, patch);

@@ -4,53 +4,24 @@ import type {
   SemanticRequestOperation,
 } from "./semanticServices";
 
-export type UsageProvider =
-  | "claude"
-  | "codex"
-  | "antigravity"
-  | "gemini"
-  | "opencode"
-  | "pi";
+/**
+ * An opaque plugin-declared source identity.
+ *
+ * The native capability validates its syntax and resource bounds, but never
+ * owns a closed product-provider list. A Usage artifact can therefore add a
+ * source after the host has shipped, provided it uses the existing grant.
+ */
+export type UsageSourceId = string;
 
-export type UsageSourceKind = "provider-quota" | "local-transcript";
 export type UsageSourcesGrant =
   | "usage-source.read"
   | "usage-source.refresh"
   | "usage-source.observe";
-export type UsageSourceType = "provider" | "local";
-export type UsageConfidence = "official" | "observed" | "estimated";
-export type UsageCostKind = "recorded" | "estimated" | "included" | "free" | "mixed" | "unknown";
-
-/** Reviewed source identity. Native paths and credential bytes are not public data. */
-export interface UsageSourceDescriptor {
-  readonly sourceId: UsageProvider;
-  readonly kinds: readonly UsageSourceKind[];
-  readonly authority: "host-managed";
-}
-
-/** Provider quota fact produced inside the credential boundary. */
-export interface UsageProviderWindow {
-  provider: UsageProvider;
-  windowId: string;
-  window: string;
-  label: string;
-  scope: "session" | "plan" | "billing" | "reporting";
-  limit: number | null;
-  used: number | null;
-  sourceType: UsageSourceType;
-  confidence: UsageConfidence;
-  costKind: UsageCostKind;
-  usedPercent: number | null;
-  remainingPercent: number | null;
-  resetAt: string | null;
-  tokenTotal: number | null;
-  paceStatus: string | null;
-}
 
 /** Normalized transcript event or durable daily rollup. */
 export interface UsageSourceRecord {
   readonly grain: "message" | "daily";
-  readonly provider: UsageProvider;
+  readonly sourceId: UsageSourceId;
   readonly sessionId: string | null;
   readonly date: string | null;
   readonly project: string | null;
@@ -67,47 +38,133 @@ export interface UsageSourceRecord {
   readonly recordedCost: number | null;
 }
 
-/** Redacted state of one credential-bound provider quota source. */
-export interface UsageProviderObservation {
-  readonly provider: UsageProvider;
-  readonly available: boolean;
-  readonly fetchedAt: string | null;
-  readonly summaryWindows: readonly UsageProviderWindow[];
-  readonly extraWindows: readonly UsageProviderWindow[];
-}
-
-/** Raw semantic facts. It contains no pricing, aliases, totals, or UI projections. */
+/** Raw semantic facts. It contains no source policy, quota cache, or UI projection. */
 export interface UsageSourceDataset {
   readonly capturedAt: string;
   readonly records: readonly UsageSourceRecord[];
-  readonly providerObservations: readonly UsageProviderObservation[];
 }
 
 export interface InspectUsageSourceInput {
   readonly kind: "source-dataset";
-  readonly sourceIds?: readonly UsageProvider[];
+  readonly sourceIds: readonly UsageSourceId[];
 }
 
 export interface UsageSourceInspection {
   readonly kind: "source-dataset";
-  readonly sources: readonly UsageSourceDescriptor[];
   readonly dataset: UsageSourceDataset;
 }
 
 export interface RefreshUsageSourcesInput {
-  readonly sourceIds?: readonly UsageProvider[];
+  readonly sourceIds: readonly UsageSourceId[];
+  /**
+   * Normalized policy output supplied by the trusted Usage plugin after it
+   * has collected and parsed its own described resources. The host stores
+   * opaque source facts; it does not parse provider formats or cache shapes.
+   */
+  readonly updates?: readonly UsageSourceUpdate[];
 }
 
 export interface UsageSourceRefreshReceipt {
-  readonly acceptedSourceIds: readonly UsageProvider[];
+  readonly acceptedSourceIds: readonly UsageSourceId[];
 }
 
 export interface UsageSourceObservationScope {
-  readonly sourceIds?: readonly UsageProvider[];
+  readonly sourceIds: readonly UsageSourceId[];
 }
 
 export interface UsageSourcesChanged {
-  readonly sourceIds: readonly UsageProvider[];
+  readonly sourceIds: readonly UsageSourceId[];
+}
+
+/** A bounded, generic native resource read used by a plugin-owned collector. */
+export type UsageSourceResourceRequest =
+  | {
+    readonly kind: "file";
+    readonly resourceId: string;
+    readonly relativePath: string;
+    readonly maxBytes?: number;
+  }
+  | {
+    readonly kind: "tree";
+    readonly resourceId: string;
+    readonly relativePath: string;
+    readonly maxFiles?: number;
+    readonly maxBytesPerFile?: number;
+    readonly extensions?: readonly string[];
+  }
+  | {
+    readonly kind: "sqlite";
+    readonly resourceId: string;
+    readonly relativePath: string;
+    readonly query: string;
+    readonly maxRows?: number;
+  }
+  | {
+    readonly kind: "processes";
+    readonly resourceId: string;
+  }
+  | {
+    readonly kind: "listening-ports";
+    readonly resourceId: string;
+  }
+  | {
+    readonly kind: "http";
+    readonly resourceId: string;
+    readonly url: string;
+    readonly method: "GET" | "POST";
+    readonly headers?: readonly { readonly name: string; readonly value: string }[];
+    readonly body?: string;
+    readonly maxBytes?: number;
+  }
+  | {
+    readonly kind: "keychain-password";
+    readonly resourceId: string;
+    readonly service: string;
+    readonly account?: string;
+  };
+
+export interface UsageSourceResourceReadInput {
+  readonly sourceId: UsageSourceId;
+  readonly request: UsageSourceResourceRequest;
+}
+
+export type UsageSourceResourceResult =
+  | {
+    readonly kind: "file";
+    readonly resourceId: string;
+    readonly content: string;
+  }
+  | {
+    readonly kind: "tree";
+    readonly resourceId: string;
+    readonly files: readonly { readonly relativePath: string; readonly content: string }[];
+  }
+  | {
+    readonly kind: "sqlite";
+    readonly resourceId: string;
+    readonly rows: readonly Readonly<Record<string, string | number | boolean | null>>[];
+  }
+  | {
+    readonly kind: "processes" | "listening-ports";
+    readonly resourceId: string;
+    readonly output: string;
+  }
+  | {
+    readonly kind: "http";
+    readonly resourceId: string;
+    readonly status: number;
+    readonly body: string;
+  }
+  | {
+    readonly kind: "keychain-password";
+    readonly resourceId: string;
+    readonly secret: string;
+  };
+
+/** One plugin-owned replacement for a source's normalized durable facts. */
+export interface UsageSourceUpdate {
+  readonly sourceId: UsageSourceId;
+  readonly records: readonly UsageSourceRecord[];
 }
 
 export type UsageSourcesErrorCode =
@@ -129,6 +186,16 @@ export interface UsageSourcesService {
     UsageSourceRefreshReceipt,
     UsageSourcesErrorCode
   >;
+  /**
+   * Executes one bounded native resource read. Paths, network destinations,
+   * process inspection, and keychain lookups are validated by resource kind;
+   * provider selection and response parsing remain in the artifact.
+   */
+  readonly readResource: SemanticRequestOperation<
+    UsageSourceResourceReadInput,
+    UsageSourceResourceResult,
+    UsageSourcesErrorCode
+  >;
   readonly observeSource: SemanticEventSource<
     UsageSourceObservationScope,
     UsageSourcesChanged
@@ -137,5 +204,5 @@ export interface UsageSourcesService {
 
 export const usageSourcesService = defineSemanticService<UsageSourcesService>(
   "shipctl.usage-sources",
-  2,
+  3,
 );

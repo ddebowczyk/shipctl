@@ -282,23 +282,28 @@ properties:
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-TODOS-PARITY-001
     claim: >-
-      Todos through built-in artifact and static reference paths produce equal
-      contributions, project lifecycle requests, service traces, and disposal.
+      Todos through its direct source definition and built-in artifact produce
+      equal contributions, project lifecycle requests, service traces, and
+      disposal.
     shapes: [differential]
     evidence: [SEM-E-007]
     domain:
       generates: >-
-        Enabled and disabled settings, project sets, discovered TODO documents,
-        and permitted or denied document discovery.
+        Persisted preferences, project catalogs and lifecycle changes,
+        discovered TODO documents, and permitted or denied document discovery.
       excludes: [pixel rendering, native filesystem access]
-      strategy: Run each case against isolated fake project-document hosts.
+      strategy: >-
+        Run each case against isolated fake project-document, project-catalog,
+        and plugin-data hosts.
       classifications:
         - enabled
         - disabled
         - discovery-success
         - discovery-denied
     preconditions:
-      - Both paths receive equivalent in-memory project-document services.
+      - >-
+        Both paths receive equivalent in-memory project-document,
+        project-catalog, and plugin-data services.
     oracle:
       primary:
         kind: reference
@@ -325,14 +330,15 @@ properties:
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-GIT-PARITY-001
     claim: >-
-      Git through built-in artifact and static reference paths produces equal
-      contributions, refresh requests, facts, worktree expansion, and disposal.
+      Git through built-in artifact and direct source-definition paths produces
+      equal contributions, refresh requests, facts, worktree expansion, and
+      disposal.
     shapes: [differential]
     evidence: [SEM-E-007]
     domain:
       generates: >-
-        Repository identities, branches, clean and dirty status, worktree
-        settings, expansion requests, and permitted or denied status reads.
+        Repository identities, branches, clean and dirty status, stored worktree
+        preferences, expansion requests, and permitted or denied status reads.
       excludes: [pixel rendering, native Git execution]
       strategy: Run each case against isolated fake Git service hosts.
       classifications:
@@ -341,8 +347,13 @@ properties:
         - refresh-success
         - refresh-denied
         - related-worktree
+        - catalog-lifecycle
+        - repository-change
+        - stored-preference
     preconditions:
-      - Both paths receive equivalent in-memory Git services.
+      - >-
+        Both paths receive equivalent in-memory Git, project-catalog, and
+        plugin-data services.
     oracle:
       primary:
         kind: reference
@@ -360,7 +371,7 @@ properties:
         independence: The retained manifest exists before artifact loading.
     failure_value: >-
       The artifact refreshes repository state or expands related worktrees
-      differently from the source module.
+      differently from the direct source definition.
     runner:
       language: typescript
       library: fast-check
@@ -372,7 +383,7 @@ properties:
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-SKILLS-PARITY-001
     claim: >-
-      Skills through built-in artifact and static reference paths produces
+      Skills through its direct source definition and built-in artifact produce
       equal contributions, project lifecycle requests, catalog projections,
       install and remove behavior, notices, service traces, and disposal.
     shapes: [differential]
@@ -382,10 +393,20 @@ properties:
         Project identities, installed states, refreshes, provider and action
         calls, and permitted or denied inspection, installation, and removal.
       excludes: [native filesystem access]
-      strategy: Run each case against isolated fake Skill Installation hosts.
-      classifications: [inspect, install, remove, denied, notice]
+      strategy: >-
+        Run each case against isolated fake Skill Installation and
+        project-catalog hosts.
+      classifications:
+        - inspect
+        - install
+        - remove
+        - denied
+        - notice
+        - catalog-lifecycle
     preconditions:
-      - Both paths receive equivalent in-memory Skill Installation services.
+      - >-
+        Both paths receive equivalent in-memory Skill Installation and
+        project-catalog services.
     oracle:
       primary:
         kind: reference
@@ -414,7 +435,7 @@ properties:
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-THIN-TERMINAL-PARITY-001
     claim: >-
-      Thin Terminal through built-in artifact and static reference paths
+      Thin Terminal through built-in and source direct artifact definitions
       produces equal presentation identity, required grants, service binding,
       React wrapper props, focus helpers, raw-byte helpers, and disposal.
     shapes: [differential]
@@ -460,7 +481,7 @@ properties:
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-SEMANTIC-TERMINAL-PARITY-001
     claim: >-
-      Semantic Terminal through built-in artifact and static reference paths
+      Semantic Terminal through source direct artifact and admitted built paths
       produces equal presentation identity, required grants, service binding,
       React wrapper props, attachment behavior, and disposal.
     shapes: [differential]
@@ -515,8 +536,8 @@ properties:
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-ASSISTANTS-PARITY-001
     claim: >-
-      Assistants through built-in artifact and static reference paths produces
-      equal panel identity, grants, semantic service access, restore and
+      Assistants through built-in artifact and source direct-definition paths
+      produce equal panel identity, grants, semantic service access, restore and
       shutdown behavior, activation subscriptions, and disposal.
     shapes: [differential]
     evidence: [SEM-E-007, SEM-E-009]
@@ -530,9 +551,9 @@ properties:
         - native credential access
       strategy: >-
         Compare source and admitted artifact declarations; compose both with
-        deterministic Assistant Launch, Credential Store, Processes, and
-        Terminal Sessions fakes; exercise restore, shutdown, service use, panel
-        loading, activation subscription, and repeated disposal.
+        deterministic Assistant Launch, Credential Store, Processes, Terminal
+        Sessions, and Projects fakes; exercise restore, shutdown, service use,
+        panel loading, activation subscription, and repeated disposal.
       classifications:
         - command-inspection
         - model-catalog
@@ -577,9 +598,10 @@ properties:
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-USAGE-PARITY-001
     claim: >-
-      Usage through built-in artifact and static reference paths produces equal
-      settings access, source ingestion and observation, directed refresh,
-      scheduled work, presentation catalogs, activation ledgers, and disposal.
+      Usage through its direct source definition and admitted built artifact
+      produces equal settings access, source ingestion and observation,
+      directed refresh, scheduled work, presentation catalogs, activation
+      ledgers, and disposal.
     shapes: [differential]
     evidence: [SEM-E-007, SEM-E-009]
     domain:
@@ -591,16 +613,18 @@ properties:
         - native provider subprocess execution
         - native credential access
       strategy: >-
-        Compare source and admitted artifact declarations; compose both with
-        deterministic Usage Sources, Plugin Data, Messages, and Scheduler
+        Compare source direct and admitted artifact declarations; compose both
+        with deterministic Usage Sources, Plugin Data, Messages, and Scheduler
         fakes; exercise startup ingestion, the directed refresh channel,
-        source-change observation, presentation loading, and repeated disposal.
+        scheduled message delivery, source-change observation, denied observer
+        access, presentation loading, and repeated disposal.
       classifications:
         - settings-load
         - source-ingestion
         - refresh-message
         - source-observation
         - schedule-registration
+        - denied-observation
         - presentation-load
         - teardown
     preconditions:
@@ -639,23 +663,20 @@ properties:
     deletion_gates: [DELETE-E-STATIC-IMPORT]
   - id: PROP-E-COMPATIBILITY-001
     claim: >-
-      Admission accepts exactly the host and artifact version tuples allowed by
-      an independent compatibility model.
+      Admission accepts exactly the generic artifact protocol and host API
+      version tuples allowed by an independent compatibility model.
     shapes: [differential]
     evidence: [SEM-E-006, SEM-E-008]
     domain:
       generates: >-
-        API ranges, prereleases, schema versions, required and optional service
-        versions, contribution versions, absent requirements, and malformed
-        ranges.
+        API ranges, prereleases, artifact schema versions, absent host API
+        requirements, and malformed ranges.
       excludes: []
       strategy: Generate each compatibility dimension independently.
       classifications:
         - compatible
         - api
-        - manifest
-        - service
-        - contribution
+        - artifact-protocol
         - malformed
     preconditions:
       - Version values are valid or explicit malformed generator cases.
@@ -672,7 +693,8 @@ properties:
           Compare with a separate standards library and reviewed boundary cases.
         independence: The reference library is not a runtime dependency.
     failure_value: >-
-      A newer terminal stream contract activates on an older unsafe host.
+      An artifact with an unsupported protocol or newer API contract activates
+      on an older unsafe host.
     runner:
       language: rust
       library: proptest

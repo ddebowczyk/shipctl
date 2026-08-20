@@ -17,7 +17,10 @@ export type AssistantSessionId = string & {
   readonly [assistantSessionIdBrand]: true;
 };
 
-/** Semantic provider identity. It is not an executable or command name. */
+/**
+ * A plugin-owned semantic label for a launch policy. It is data persisted with
+ * a recovery record, never an executable allowlist owned by the native host.
+ */
 export type AssistantProviderId = string & {
   readonly [assistantProviderIdBrand]: true;
 };
@@ -36,8 +39,23 @@ export function assistantProviderId(value: string): AssistantProviderId {
   return normalized as AssistantProviderId;
 }
 
-export type AssistantSessionMode = "standard" | "yolo";
+/** Opaque plugin policy data, validated only as bounded durable text by the host. */
+export type AssistantSessionMode = string;
 export type AssistantIdentityState = "pending" | "ready" | "failed";
+
+/**
+ * A generic launch description. A captured-session-id placeholder is resolved
+ * only by the host during resume, so a plugin never receives a persisted
+ * private provider identity back from the recovery manifest.
+ */
+export type AssistantProcessArgument = string | {
+  readonly kind: "captured-session-id";
+};
+
+export interface AssistantProcessLaunch {
+  readonly program: string;
+  readonly arguments: readonly AssistantProcessArgument[];
+}
 
 /**
  * Host-owned recovery metadata. The provider's private session identifier is
@@ -73,11 +91,19 @@ export interface StartAssistantSessionInput {
   readonly label: string;
   readonly sessionMode: AssistantSessionMode;
   readonly model?: string;
+  readonly launch: AssistantProcessLaunch;
+  /**
+   * A plugin may assign identity before process start when its own policy
+   * supports it. The host stores it as opaque bounded text and marks the
+   * record ready without special-casing a provider.
+   */
+  readonly initialSessionIdentity?: string;
   readonly terminal: AssistantTerminalStartContext;
 }
 
 export interface ResumeAssistantSessionInput {
   readonly recordId: AssistantSessionId;
+  readonly launch: AssistantProcessLaunch;
   readonly terminal: AssistantTerminalStartContext;
 }
 
@@ -90,6 +116,10 @@ export interface AssistantSessionInput {
   readonly recordId: AssistantSessionId;
 }
 
+export interface RecordAssistantSessionIdentityInput extends AssistantSessionInput {
+  readonly providerSessionId: string;
+}
+
 export interface RecordAssistantPlacementInput extends AssistantSessionInput {
   readonly placementProjectPath: string;
 }
@@ -98,35 +128,76 @@ export interface RecordAssistantLabelInput extends AssistantSessionInput {
   readonly label: string;
 }
 
-export interface InspectAssistantModelsInput {
-  readonly provider: AssistantProviderId;
+/** A bounded read rooted at the current user's home directory. */
+export type AssistantResourceReadRequest =
+  | {
+    readonly kind: "file";
+    readonly resourceId: string;
+    readonly relativePath: string;
+    readonly maxBytes?: number;
+  }
+  | {
+    readonly kind: "tree";
+    readonly resourceId: string;
+    readonly relativePath: string;
+    readonly maxFiles?: number;
+    readonly maxBytesPerFile?: number;
+    readonly extensions?: readonly string[];
+  };
+
+export interface AssistantResourceReadInput {
+  readonly request: AssistantResourceReadRequest;
 }
 
-export interface AssistantModelCatalog {
-  readonly provider: AssistantProviderId;
-  readonly models: readonly string[];
+export interface AssistantResourceFile {
+  readonly relativePath: string;
+  readonly content: string;
 }
 
-export interface AssistantProviderSettings {
-  readonly defaultProvider: string | null;
-  readonly defaultModel: string | null;
-  readonly defaultThinkingLevel: string | null;
+export type AssistantResourceReadResult =
+  | {
+    readonly kind: "file";
+    readonly resourceId: string;
+    readonly content: string;
+  }
+  | {
+    readonly kind: "tree";
+    readonly resourceId: string;
+    readonly files: readonly AssistantResourceFile[];
+  };
+
+/** A bounded UTF-8 write rooted at the current user's home directory. */
+export interface AssistantResourceWriteInput {
+  readonly resourceId: string;
+  readonly relativePath: string;
+  readonly content: string;
 }
 
-export interface AssistantProviderConfiguration {
-  readonly provider: AssistantProviderId;
-  readonly settings: AssistantProviderSettings;
-  /** Credential namespaces only. Secret values never enter this service. */
-  readonly configuredCredentialProviders: readonly string[];
+/**
+ * A generic bounded request/response completion condition for a process that
+ * stays alive after emitting its response. The host recognizes only a JSONL
+ * correlation id; interpretation of the matched response remains plugin code.
+ */
+export type AssistantResourceExecuteCompletion = {
+  readonly kind: "jsonl-response-id";
+  readonly id: string | number;
+};
+
+export interface AssistantResourceExecuteInput {
+  readonly resourceId: string;
+  readonly program: string;
+  readonly arguments: readonly string[];
+  readonly stdin?: string;
+  readonly timeoutMs?: number;
+  readonly maxOutputBytes?: number;
+  readonly completion?: AssistantResourceExecuteCompletion;
 }
 
-export interface InspectAssistantProviderConfigurationInput {
-  readonly provider: AssistantProviderId;
-}
-
-export interface SaveAssistantProviderConfigurationInput {
-  readonly provider: AssistantProviderId;
-  readonly settings: AssistantProviderSettings;
+export interface AssistantResourceExecuteResult {
+  readonly resourceId: string;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly status: number;
 }
 
 export interface AssistantSessionObservationScope {
@@ -151,11 +222,19 @@ export interface AssistantSessionChanged {
   readonly record: AssistantRecoveryRecord | null;
 }
 
-export type AssistantLaunchGrant = "assistant.launch" | "assistant.session-record";
+export type AssistantLaunchGrant =
+  | "assistant.launch"
+  | "assistant.session-record"
+  | "assistant.resource.read"
+  | "assistant.resource.write"
+  | "assistant.resource.execute";
 
 export const ASSISTANT_LAUNCH_GRANTS = Object.freeze({
   launch: "assistant.launch",
   sessionRecord: "assistant.session-record",
+  resourceRead: "assistant.resource.read",
+  resourceWrite: "assistant.resource.write",
+  resourceExecute: "assistant.resource.execute",
 } as const satisfies Readonly<Record<string, AssistantLaunchGrant>>);
 
 export type AssistantLaunchErrorCode =
@@ -181,9 +260,9 @@ export interface AssistantLaunchService {
     StartedAssistantSession,
     AssistantLaunchErrorCode
   >;
-  readonly refreshSessionIdentity: SemanticRequestOperation<
-    AssistantSessionInput,
-    AssistantRecoveryRecord | null,
+  readonly recordSessionIdentity: SemanticRequestOperation<
+    RecordAssistantSessionIdentityInput,
+    AssistantRecoveryRecord,
     AssistantLaunchErrorCode
   >;
   readonly markSessionIdentityFailed: SemanticRequestOperation<
@@ -226,19 +305,19 @@ export interface AssistantLaunchService {
     void,
     AssistantLaunchErrorCode
   >;
-  readonly inspectModels: SemanticRequestOperation<
-    InspectAssistantModelsInput,
-    AssistantModelCatalog,
+  readonly readResource: SemanticRequestOperation<
+    AssistantResourceReadInput,
+    AssistantResourceReadResult,
     AssistantLaunchErrorCode
   >;
-  readonly inspectProviderConfiguration: SemanticRequestOperation<
-    InspectAssistantProviderConfigurationInput,
-    AssistantProviderConfiguration,
-    AssistantLaunchErrorCode
-  >;
-  readonly saveProviderConfiguration: SemanticRequestOperation<
-    SaveAssistantProviderConfigurationInput,
+  readonly writeResource: SemanticRequestOperation<
+    AssistantResourceWriteInput,
     void,
+    AssistantLaunchErrorCode
+  >;
+  readonly executeResource: SemanticRequestOperation<
+    AssistantResourceExecuteInput,
+    AssistantResourceExecuteResult,
     AssistantLaunchErrorCode
   >;
   readonly observeSessions: SemanticEventSource<
@@ -249,5 +328,5 @@ export interface AssistantLaunchService {
 
 export const assistantLaunchService = defineSemanticService<AssistantLaunchService>(
   "shipctl.assistant-launch",
-  1,
+  2,
 );

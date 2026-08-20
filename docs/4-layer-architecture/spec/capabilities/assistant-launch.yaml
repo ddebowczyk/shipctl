@@ -2,7 +2,7 @@
 $schema: ../schema/capability.v1.schema.yaml
 schema_version: capability/v1
 id: assistant-launch
-version: 1.0.0
+version: 2.0.0
 title: Assistant process and session launch
 status: implemented
 layer: native-kernel
@@ -12,6 +12,8 @@ current_implementations:
   - module-api/frontend/src/testing/assistantLaunch.ts
   - core/frontend/platform/assistantLaunch.ts
   - modules/assistants/frontend/src/assistantLaunchClient.ts
+  - modules/assistants/frontend/src/assistantProviderPolicy.ts
+  - modules/assistants/frontend/src/runtime.ts
   - core/backend/src/assistant_launch
   - core/tauri/src/assistant_launch.rs
 target_owners:
@@ -21,14 +23,19 @@ target_owners:
 operations:
   - id: startSession
     kind: request
-    contract: Start an approved provider through a host terminal transaction.
+    contract: >-
+      Start a plugin-declared process launch through a host terminal
+      transaction and create a host-owned recovery record.
   - id: resumeSession
     kind: request
-    contract: Resume a recoverable assistant by its stable host record identity.
-  - id: refreshSessionIdentity
+    contract: >-
+      Resume a recoverable session with a plugin-declared process launch;
+      only the host substitutes a captured private session identity.
+  - id: recordSessionIdentity
     kind: request
     contract: >-
-      Refresh provider-specific capture through a provider-neutral host record.
+      Persist a plugin-discovered private session identity against a pending
+      host record without returning that identity through the public contract.
   - id: recordPlacement
     kind: request
     contract: Persist host-owned recovery placement by stable session identity.
@@ -39,24 +46,32 @@ operations:
     kind: request
     contract: >-
       Inspect, rearm, discard, and preserve host-owned recovery records.
-  - id: inspectProvider
+  - id: accessResource
     kind: request
     contract: >-
-      Inspect provider models and non-secret configuration; save closed
-      settings.
+      Read, write, or execute a bounded plugin-declared resource rooted at
+      the current user's home or executable path; the host does not interpret
+      product files, command arguments, or response content beyond an optional
+      plugin-declared generic JSONL response correlation boundary.
   - id: observeSessions
     kind: event
     contract: Observe host session lifecycle through an activation lease.
 required_grants:
   - assistant.launch
   - assistant.session-record
+  - assistant.resource.read
+  - assistant.resource.write
+  - assistant.resource.execute
 ownership:
   authority: >-
-    The host owns process launch, session identity, and recovery records.
-  resources: Assistant sessions survive presentation replacement by policy.
+    The host owns generic process launch, private session identity, durable
+    recovery records, and bounded local-resource safety. The plugin owns
+    provider names, launch flags, transcript parsing, models, and settings.
+  resources: >-
+    Assistant sessions survive presentation replacement by plugin policy.
   activation_scope: >-
-    Every request carries the exact activation; launch and observation add
-    explicit provider, project, or stable record scope.
+    Every request carries the exact activation and its accepted artifact
+    grants; the host never admits policy based on a hard-coded module ID.
 depends_on: [processes, terminal-sessions, credential-store, plugin-data]
 property_ids:
   - PROP-B-ADAPTER-001

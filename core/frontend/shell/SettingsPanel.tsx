@@ -18,7 +18,8 @@ import {
   FONT_SIZE_OPTIONS,
   TERMINAL_FONT_FAMILY,
 } from "../appearance/index.ts";
-import type { CursorStyle, FontFamily } from "../platform/index.ts";
+import type { CursorStyle } from "@shipctl/core/configuration";
+import type { FontFamily } from "../platform/index.ts";
 import { getDesktopAppMetadata, getErrorMessage } from "../platform/index.ts";
 import { listMonospaceFamilies } from "../platform/index.ts";
 import {

@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 type Unsubscribe = () => void;
@@ -24,4 +25,14 @@ export function observeGitFilesystemChanges(
     const payload = readGitFilesystemChangePayload(event.payload);
     if (payload !== null) receive(payload.paths);
   });
+}
+
+/** Starts native observation for one registered project path. */
+export function watchRepo(path: string): Promise<void> {
+  return invoke("watch_repo", { path });
+}
+
+/** Stops native observation for one registered project path. */
+export function unwatchRepo(path: string): Promise<void> {
+  return invoke("unwatch_repo", { path });
 }

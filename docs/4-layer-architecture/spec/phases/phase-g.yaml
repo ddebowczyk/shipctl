@@ -26,7 +26,7 @@ semantics:
   - id: SEM-G-004
     kind: MUST
     rule: >-
-      Legacy and Layman adapters project one semantic workspace and invoke the
+      Standard and Layman adapters project one semantic workspace and invoke the
       same workspace actions.
   - id: SEM-G-005
     kind: MUST
@@ -93,7 +93,7 @@ properties:
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-RENDERER-001
     claim: >-
-      Legacy and Layman adapter projections expose equal semantic view IDs,
+      Standard and Layman adapter projections expose equal semantic view IDs,
       active view, tab order, and actions for every shared-subset document.
     shapes: [differential]
     evidence: [SEM-G-004]
@@ -245,17 +245,17 @@ properties:
     deletion_gates: [DELETE-G-STATIC-WORKSPACE]
   - id: PROP-G-LAYOUT-001
     claim: >-
-      Persistence and restore preserve semantic identity, topology, focus, and
-      restorable state after canonical normalization.
+      Persistence and restore preserve semantic identity, topology, focus, open
+      views, and missing definitions after canonical normalization.
     shapes: [roundtrip]
     evidence: [SEM-G-005]
     domain:
       generates: >-
-        Splits, tabs, optional floating windows, schema-valid sizes, plugin view
-        state, and missing definitions.
+        Splits, tabs, optional floating windows, schema-valid sizes, open views,
+        and missing definitions.
       excludes: [physical monitor coordinates normalized by migration policy]
       strategy: Construct valid workspace trees directly from schema rules.
-      classifications: [tabs, splits, floating, plugin-state, missing]
+      classifications: [tabs, splits, floating, open-views, missing]
     preconditions:
       - Source documents are valid for their schema version.
     oracle:
@@ -276,6 +276,54 @@ properties:
       language: typescript
       library: fast-check
       test_id: architecture.workspace-roundtrip.property
+      shrink: required
+      replay: required
+    tiers: [pr]
+    status: passing
+    deletion_gates: [DELETE-G-STATIC-WORKSPACE]
+  - id: PROP-G-WORKSPACE-OPERATIONS-001
+    claim: >-
+      The rendererless public workspace service validates and plans without
+      writing, applies every retained semantic layout operation, and commits an
+      ordered batch exactly once or leaves its document and revision unchanged.
+    shapes: [safety, metamorphic]
+    evidence: [SEM-G-005]
+    domain:
+      generates: >-
+        Public validate, plan, apply, open, close, focus, select, move, split,
+        rename, resize, float, dock, maximize, restore, reset, and
+        stale-revision requests.
+      excludes: [renderer interaction, view-local plugin data]
+      strategy: >-
+        Drive the public semantic service through a headless activation and
+        compare plans, committed documents, revisions, and structured failures.
+      classifications: [validate, plan, atomic-batch, one-revision, conflict]
+    preconditions:
+      - The bundled workspace plugin has an accepted catalog and plugin-data
+        grants.
+    oracle:
+      primary:
+        kind: invariant
+        description: >-
+          A rejected later batch step leaves the pre-batch document and revision
+          intact; a successful complete batch advances exactly one revision.
+        independence: >-
+          Service responses and authority inspection are compared at distinct
+          public boundaries.
+      alternative:
+        kind: metamorphic
+        description: >-
+          A validate or plan of a valid command produces the same next document
+          that apply commits, while neither dry-run changes the current
+          revision.
+        independence: Planning does not call the persistence commit path.
+    failure_value: >-
+      An agent observes a planned layout that cannot be applied atomically, or a
+      failed operation partially changes the saved workspace.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.workspace-public-operations.property
       shrink: required
       replay: required
     tiers: [pr]

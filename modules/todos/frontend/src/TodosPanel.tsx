@@ -11,6 +11,7 @@ import {
 
 import { renderInlineMarkdown } from "./inlineMarkdown";
 import { useTodoStore } from "./store";
+import { useTodoPreferencesStore } from "./todoPreferences.ts";
 import type { TodoFile, TodoItem, TodoSection } from "./types";
 
 function getErrorMessage(error: unknown): string {
@@ -257,7 +258,9 @@ export default function TodosPanel({ project, services, activation }: ModulePane
     services.settings.subscribe,
     services.settings.getSnapshot,
   );
-  const todoFileStyle = settings.values.todoFileStyle === "list" ? "list" : "kanban";
+  const preferences = useTodoPreferencesStore((state) => state.preferences);
+  const todoFileStyle = preferences?.todoFileStyle
+    ?? (settings.values.todoFileStyle === "list" ? "list" : "kanban");
   const pushNotice = services.notices.push;
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);

@@ -70,7 +70,6 @@ function viewDefinition({
     closeBehavior,
     requiredCapabilityIds: [],
     placement: { defaultRegion: "primary", allowSplit: true },
-    state: { kind: "json", schemaVersion: 1 },
     presentation: { loaderId: `${viewTypeId}.view`, exportName: "default" },
     migrationAliases: [],
   };
@@ -78,7 +77,7 @@ function viewDefinition({
 
 function catalog(revision, { usage = true, usageOwnerRevision = 1 } = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision,
     definitions: [
       viewDefinition({
@@ -99,9 +98,8 @@ function catalog(revision, { usage = true, usageOwnerRevision = 1 } = {}) {
 
 function emptyProfile({ workspaceId }) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspaceId,
-    profileId: "shipctl.test.empty",
     instances: [],
     root: null,
     floating: [],
@@ -212,7 +210,6 @@ async function applyHistoryStep(fixture, step, index) {
       resource: terminalResource(number),
       placement: { kind: "default" },
       label: null,
-      stateRef: { number },
     });
     return;
   }
@@ -227,7 +224,6 @@ async function applyHistoryStep(fixture, step, index) {
       resource: { kind: "global" },
       placement: { kind: "default" },
       label: null,
-      stateRef: null,
     });
     return;
   }
@@ -327,7 +323,7 @@ test("architecture.workspace-reconcile.property", async () => {
   }), propertyParameters());
 });
 
-function rawDocument({ count, split, floating, missing, state }) {
+function rawDocument({ count, split, floating, missing }) {
   const placedCount = floating ? count - 1 : count;
   const ids = Array.from({ length: count }, (_, index) => `instance-${index}`);
   const instance = (id, index, lifecycle = "placed") => ({
@@ -337,7 +333,6 @@ function rawDocument({ count, split, floating, missing, state }) {
     ownerActivationId: "shipctl.test@1#property",
     resource: { kind: "project", projectId: `project-${index}` },
     label: null,
-    stateRef: state,
     availability: missing && index === 0
       ? { kind: "missing-definition", lastKnownViewTypeId: "shipctl.test-view", catalogRevision: 2 }
       : { kind: "available" },
@@ -368,9 +363,8 @@ function rawDocument({ count, split, floating, missing, state }) {
     height: 480,
   }] : [];
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspaceId: "shipctl.test.workspace",
-    profileId: "shipctl.test.profile",
     instances: ids.map((id, index) => instance(id, index)),
     root,
     floating: floatingEntries,
@@ -384,9 +378,8 @@ test("architecture.workspace-roundtrip.property", async () => {
     fc.boolean(),
     fc.boolean(),
     fc.boolean(),
-    fc.jsonValue(),
-    async (count, split, floating, missing, state) => {
-      const source = parseUiWorkspaceDocument(rawDocument({ count, split, floating, missing, state }));
+    async (count, split, floating, missing) => {
+      const source = parseUiWorkspaceDocument(rawDocument({ count, split, floating, missing }));
       const record = {
         storageSchemaVersion: 2,
         workspaceId: source.workspaceId,
@@ -404,8 +397,8 @@ test("architecture.workspace-roundtrip.property", async () => {
         documentStacks(source).map((stack) => [stack.stackId, stack.instanceIds, stack.selectedInstanceId]),
       );
       assert.deepEqual(
-        restored.document.instances.map((item) => [item.instanceId, item.viewTypeId, item.resource, item.stateRef]),
-        source.instances.map((item) => [item.instanceId, item.viewTypeId, item.resource, item.stateRef]),
+        restored.document.instances.map((item) => [item.instanceId, item.viewTypeId, item.resource]),
+        source.instances.map((item) => [item.instanceId, item.viewTypeId, item.resource]),
       );
     },
   ), propertyParameters());
@@ -428,7 +421,6 @@ test("architecture.workspace-bootstrap-reconcile", async () => {
     resource: { kind: "global" },
     placement: { kind: "default" },
     label: null,
-    stateRef: null,
   });
 
   const restored = await WorkspaceAuthority.open({
@@ -455,7 +447,7 @@ test("architecture.workspace-contribution-schema.property", async () => {
   await fc.assert(fc.property(mutation, (kind) => {
     const valid = catalog(1).definitions[0];
     const accepted = parseWorkspaceCatalogSnapshot({
-      schemaVersion: 1,
+      schemaVersion: 2,
       revision: 1,
       definitions: [valid],
     });
@@ -470,7 +462,7 @@ test("architecture.workspace-contribution-schema.property", async () => {
             ? { ...valid, presentation: { loaderId: valid.presentation.loaderId, exportName: () => null } }
             : { ...valid, viewTypeId: "invalid" };
     assert.throws(() => parseWorkspaceCatalogSnapshot({
-      schemaVersion: 1,
+      schemaVersion: 2,
       revision: 1,
       definitions: [invalid],
     }), (error) => error instanceof WorkspaceCatalogParseError);
@@ -507,7 +499,6 @@ test("architecture.workspace-agent-inspection", async () => {
       resource: terminalResource("agent"),
       placement: { kind: "default" },
       label: null,
-      stateRef: null,
     },
   });
   assert.equal(mutation.result.ok, true);
@@ -527,4 +518,197 @@ test("architecture.workspace-agent-inspection", async () => {
   );
   await lease.dispose();
   await activation.dispose();
+});
+
+test("architecture.workspace-public-operations.property", async () => {
+  const fixture = await authorityFixture();
+  const host = new SemanticServiceTestHost([
+    createWorkspaceServiceProvider({ authority: fixture.authority }),
+  ]);
+  const activation = host.activate(createTestActivationIdentity("shipctl.usage"));
+  const service = activation.context.services.require(workspaceService);
+  const workspaceId = fixture.authority.workspaceId;
+  const apply = async (command) => {
+    const outcome = await service.applyWorkspace.execute({ workspaceId, command });
+    assert.equal(outcome.result.ok, true);
+    return outcome.result.value;
+  };
+
+  try {
+    const firstOpen = {
+      kind: "open",
+      expectedRevision: 0,
+      originId: "public-validate-open",
+      instanceId: "terminal-one",
+      viewTypeId: "shipctl.terminal",
+      resource: terminalResource("one"),
+      placement: { kind: "default" },
+      label: null,
+    };
+    const validation = await service.validateWorkspace.execute({ workspaceId, command: firstOpen });
+    assert.equal(validation.result.ok, true);
+    assert.equal(validation.result.value.status, "valid");
+    assert.equal(validation.result.value.revision, 0);
+    assert.equal(validation.result.value.nextRevision, 1);
+
+    const firstPlan = await service.planWorkspace.execute({ workspaceId, command: firstOpen });
+    assert.equal(firstPlan.result.ok, true);
+    assert.equal(firstPlan.result.value.document.root?.kind, "stack");
+    assert.equal(fixture.authority.revision, 0, "validate and plan do not commit");
+
+    const opened = await apply(firstOpen);
+    assert.equal(opened.revision, 1);
+
+    const rejectedBatch = await service.applyWorkspace.execute({
+      workspaceId,
+      command: {
+        kind: "apply",
+        expectedRevision: 1,
+        originId: "public-rejected-batch",
+        commands: [
+          { kind: "rename", instanceId: "terminal-one", label: "Must not persist" },
+          { kind: "resize-split", splitId: "missing-split", firstShare: 0.3 },
+        ],
+      },
+    });
+    assert.equal(rejectedBatch.result.ok, false);
+    assert.equal(rejectedBatch.result.error.code, "workspace.not-found");
+    const afterRejectedBatch = fixture.authority.inspect(true);
+    assert.equal(afterRejectedBatch.revision, 1, "a failed batch does not advance revision");
+    assert.equal(
+      afterRejectedBatch.document.instances.find((item) => item.instanceId === "terminal-one")?.label,
+      "shipctl.terminal",
+      "a failed later step leaves earlier batch steps uncommitted",
+    );
+
+    const atomicLayout = {
+      kind: "apply",
+      expectedRevision: 1,
+      originId: "public-atomic-layout",
+      commands: [
+        {
+          kind: "open",
+          instanceId: "terminal-two",
+          viewTypeId: "shipctl.terminal",
+          resource: terminalResource("two"),
+          placement: { kind: "default" },
+          label: null,
+        },
+        {
+          kind: "split",
+          instanceId: "terminal-two",
+          targetStackId: "workspace.stack.terminal-one",
+          splitId: "workspace.split.one",
+          newStackId: "workspace.stack.two",
+          axis: "horizontal",
+          position: "after",
+        },
+        { kind: "rename", instanceId: "terminal-one", label: "Renamed terminal" },
+        { kind: "resize-split", splitId: "workspace.split.one", firstShare: 0.3 },
+      ],
+    };
+    const layoutPlan = await service.planWorkspace.execute({ workspaceId, command: atomicLayout });
+    assert.equal(layoutPlan.result.ok, true);
+    assert.equal(layoutPlan.result.value.nextRevision, 2);
+    assert.equal(layoutPlan.result.value.document.root?.kind, "split");
+    assert.equal(layoutPlan.result.value.document.root?.firstShare, 0.3);
+    assert.equal(fixture.authority.revision, 1, "a batch plan does not commit");
+
+    const laidOut = await apply(atomicLayout);
+    assert.equal(laidOut.revision, 2, "a complete apply batch commits one revision");
+
+    const floated = await apply({
+      kind: "float",
+      expectedRevision: 2,
+      originId: "public-float",
+      instanceId: "terminal-one",
+      floatingId: "workspace.floating.one",
+      stackId: "workspace.stack.floating",
+      x: 12,
+      y: 24,
+      width: 640,
+      height: 480,
+    });
+    assert.equal(floated.revision, 3);
+    const repositioned = await apply({
+      kind: "update-floating",
+      expectedRevision: 3,
+      originId: "public-update-floating",
+      floatingId: "workspace.floating.one",
+      x: 36,
+      y: 48,
+      width: 800,
+      height: 600,
+    });
+    assert.equal(repositioned.revision, 4);
+    const docked = await apply({
+      kind: "dock",
+      expectedRevision: 4,
+      originId: "public-dock",
+      floatingId: "workspace.floating.one",
+      targetStackId: "workspace.stack.two",
+    });
+    assert.equal(docked.revision, 5);
+    const moved = await apply({
+      kind: "move",
+      expectedRevision: 5,
+      originId: "public-move",
+      instanceId: "terminal-one",
+      targetStackId: "workspace.stack.two",
+      position: "start",
+      relativeInstanceId: null,
+    });
+    assert.equal(moved.revision, 6);
+    const selected = await apply({
+      kind: "select",
+      expectedRevision: 6,
+      originId: "public-select",
+      instanceId: "terminal-two",
+    });
+    assert.equal(selected.revision, 7);
+    const maximized = await apply({
+      kind: "maximize",
+      expectedRevision: 7,
+      originId: "public-maximize",
+      stackId: "workspace.stack.two",
+    });
+    assert.equal(maximized.revision, 8);
+    const restored = await apply({
+      kind: "restore",
+      expectedRevision: 8,
+      originId: "public-restore",
+    });
+    assert.equal(restored.revision, 9);
+    const closed = await apply({
+      kind: "close",
+      expectedRevision: 9,
+      originId: "public-close",
+      instanceId: "terminal-one",
+    });
+    assert.equal(closed.revision, 10);
+    const focused = await apply({
+      kind: "focus",
+      expectedRevision: 10,
+      originId: "public-focus",
+      instanceId: "terminal-one",
+      placement: { kind: "default" },
+    });
+    assert.equal(focused.revision, 11);
+    const reset = await apply({
+      kind: "reset",
+      expectedRevision: 11,
+      originId: "public-reset",
+    });
+    assert.equal(reset.revision, 12);
+    assert.deepEqual(fixture.authority.inspect(true).document, emptyProfile({ workspaceId }));
+
+    const stale = await service.applyWorkspace.execute({
+      workspaceId,
+      command: { ...firstOpen, originId: "public-stale-open" },
+    });
+    assert.equal(stale.result.ok, false);
+    assert.equal(stale.result.error.code, "workspace.conflict");
+  } finally {
+    await activation.dispose();
+  }
 });

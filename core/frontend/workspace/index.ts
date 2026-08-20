@@ -2,6 +2,7 @@ export {
   WorkspaceAuthority,
   WorkspaceAuthorityError,
   parseWorkspaceCommand,
+  parseWorkspaceCommandStep,
 } from "./authority.ts";
 export type {
   ReconcileWorkspaceCatalogInput,
@@ -24,21 +25,43 @@ export {
 } from "./document.ts";
 export {
   InMemoryWorkspacePersistence,
+  UnavailableWorkspacePersistence,
+  WorkspacePersistenceUnavailableError,
 } from "./persistence.ts";
 export type { WorkspacePersistencePort } from "./persistence.ts";
 export {
-  CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
   CURRENT_CANVAS_WORKSPACE_ID,
-  CURRENT_CANVAS_WORKSPACE_PROFILE_ID,
-  createCurrentCanvasWorkspaceCatalog,
-  createCurrentCanvasWorkspaceProfile,
+  createDefaultWorkspaceCatalog,
+  createDefaultWorkspaceProfile,
 } from "./profiles.ts";
 export type { WorkspaceProfileFactory, WorkspaceProfileInput } from "./profiles.ts";
 export { createWorkspaceServiceProvider } from "./service.ts";
 export type { WorkspaceServiceProviderOptions } from "./service.ts";
+export { AcceptedWorkspaceCatalogController } from "./acceptedCatalogController.ts";
+export type {
+  AcceptedWorkspaceCatalogControllerOptions,
+  WorkspaceCatalogSynchronizationFailure,
+} from "./acceptedCatalogController.ts";
+export {
+  PluginDataWorkspacePersistence,
+  WorkspacePluginDataPersistenceError,
+  WORKSPACE_PLUGIN_DATA_KEY,
+  WORKSPACE_PLUGIN_MODULE_ID,
+} from "./pluginDataPersistence.ts";
+export {
+  WorkspacePluginRuntime,
+  WORKSPACE_PLUGIN_ADMISSION,
+} from "./pluginRuntime.ts";
+export type {
+  WorkspacePluginRuntimeOptions,
+  WorkspaceRuntimeDiagnostic,
+  WorkspaceRuntimeDiagnosticKind,
+  WorkspaceRuntimePersistence,
+} from "./pluginRuntime.ts";
 export {
   selectedWorkspaceInstanceIds,
   workspaceGlobalInstanceId,
+  workspaceProjectInstanceId,
 } from "./selection.ts";
 export {
   WorkspaceCanvasBridge,

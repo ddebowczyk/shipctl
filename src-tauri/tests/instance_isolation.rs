@@ -3,15 +3,12 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use shipctl_core::assistant_launch::{
-    AssistantProvider, AssistantSessionRegistry, PrepareAssistantSession, SessionMode,
-};
+use shipctl_core::assistant_launch::{AssistantSessionRegistry, PrepareAssistantSession};
 use shipctl_core::instance::{InstanceContext, InstanceLaunchOptions};
 use shipctl_core::state::ui::UiStateStore;
 use shipctl_core::terminal_host::retention::TerminalRetentionPolicy;
 use shipctl_core::terminal_host::{TerminalId, TerminalService};
 use shipctl_core::usage_sources::UsageDb;
-use shipctl_core::workspace::config::EditorSettings;
 use shipctl_core::workspace::manager::WorkspaceManager;
 fn test_root() -> PathBuf {
     let unique = SystemTime::now()
@@ -51,23 +48,23 @@ fn two_backend_compositions_isolate_every_registered_durable_source_and_terminal
     let first_workspace = WorkspaceManager::new(first_paths.clone());
     let second_workspace = WorkspaceManager::new(second_paths.clone());
     first_workspace
-        .save_editor_settings(&EditorSettings {
-            preferred_editor: Some("zed".into()),
-        })
+        .replace_global_capability_data("fixture.isolation", serde_json::json!({ "editor": "zed" }))
         .unwrap();
     assert_eq!(
         first_workspace
-            .load_editor_settings()
+            .load_global_capability_data("fixture.isolation")
             .unwrap()
-            .preferred_editor
-            .as_deref(),
-        Some("zed")
+            .as_ref()
+            .and_then(|value| value.get("editor"))
+            .and_then(serde_json::Value::as_str),
+        Some("zed"),
     );
     assert_eq!(
         second_workspace
-            .load_editor_settings()
+            .load_global_capability_data("fixture.isolation")
             .unwrap()
-            .preferred_editor,
+            .as_ref()
+            .and_then(|value| value.get("editor")),
         None
     );
 
@@ -82,12 +79,13 @@ fn two_backend_compositions_isolate_every_registered_durable_source_and_terminal
     let first_assistants = AssistantSessionRegistry::new(first_paths.assistant_sessions.clone());
     first_assistants
         .prepare(PrepareAssistantSession {
-            provider: AssistantProvider::Claude,
+            provider: "fixture".to_string(),
             launch_repo_path: repo.to_string_lossy().into_owned(),
             placement_project_path: repo.to_string_lossy().into_owned(),
             label: "isolated".into(),
-            session_mode: SessionMode::Standard,
+            session_mode: "fixture-mode".to_string(),
             model: None,
+            initial_session_identity: None,
         })
         .unwrap();
     assert!(fs::read_to_string(&first_paths.assistant_sessions)

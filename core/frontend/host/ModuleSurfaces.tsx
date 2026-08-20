@@ -6,16 +6,16 @@ import type {
   ModuleActivationContext,
   ModuleActivationId,
   ModuleId,
+  PanelContribution,
   ProjectActionSurfaceHost,
   ProjectActionSurfacePosition,
+  ProjectLayoutSlot,
   ProjectRef,
   ProjectSurfaceAction,
   SettingsContribution,
   SettingsSlot,
 } from "@shipctl/module-api";
 
-import { contributedPanelTabId } from "@shipctl/core/platform";
-import { useTerminalStore } from "@shipctl/core/terminal-host";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";
 import type {
   CanvasProjectLayoutSurface,
@@ -29,6 +29,7 @@ import {
   currentCanvasSurfaceActivation,
   currentModuleActivation,
 } from "./acceptedWorkspaceContributionEntries.ts";
+import { useModuleProjectActions } from "./projectActions.ts";
 
 class ModuleSurfaceBoundary extends Component<
   { readonly children: ReactNode },
@@ -77,14 +78,14 @@ function ProjectLayoutSurface({
 }
 
 export function ModuleProjectLayoutSurfaces({
-  contributions,
   project,
-  moduleActivations,
+  slot = "workspace.trailing",
 }: {
-  readonly contributions: readonly CanvasProjectLayoutSurface[];
   readonly project: ProjectRef;
-  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
+  readonly slot?: ProjectLayoutSlot;
 }) {
+  const { catalog, moduleActivations } = useAcceptedWorkspaceContributionRuntime();
+  const contributions = catalog.canvasSurfaceCatalog.projectLayout(slot);
   return contributions.map((contribution) => (
     <ProjectLayoutSurface
       key={canvasSurfaceComponentKey(contribution)}
@@ -103,7 +104,6 @@ export function ModuleProjectActionSurface({
   position,
   close,
   host,
-  moduleActivations,
 }: {
   readonly action: ProjectSurfaceAction;
   readonly moduleId: ModuleId;
@@ -112,8 +112,8 @@ export function ModuleProjectActionSurface({
   readonly position: ProjectActionSurfacePosition;
   readonly close: () => void;
   readonly host: ProjectActionSurfaceHost;
-  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
+  const { moduleActivations } = useAcceptedWorkspaceContributionRuntime();
   const Surface = useMemo(() => lazy(action.surface.load), [action]);
   const activation = currentModuleActivation(moduleId, activationId, moduleActivations);
   if (activation === undefined) return null;
@@ -134,23 +134,33 @@ export function ModuleProjectActionSurface({
   );
 }
 
+/** Project action state is an accepted-runtime concern, not a canvas port. */
+export function useAcceptedModuleProjectActions(project: ProjectRef) {
+  const { catalog, moduleActivations } = useAcceptedWorkspaceContributionRuntime();
+  return useModuleProjectActions(project, moduleActivations, catalog.projectActions());
+}
+
 function ProjectNavigationSurface({
   contribution,
   project,
-  activeTabId,
+  activePanelId,
+  activePanelProjectPath,
+  onOpenPanel,
   moduleActivations,
 }: {
   readonly contribution: CanvasProjectNavigationSurface;
   readonly project: ProjectRef;
-  readonly activeTabId: string | null;
+  readonly activePanelId: ContributionId | null;
+  readonly activePanelProjectPath: string | null;
+  readonly onOpenPanel: (panel: PanelContribution) => void | Promise<void>;
   readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
   const Surface = useMemo(() => lazy(contribution.load), [contribution]);
   const activation = currentCanvasSurfaceActivation(contribution, moduleActivations);
   if (activation === undefined) return null;
   const panel = contribution.panel;
-  const instanceId = contributedPanelTabId(contribution.panelId);
-  const active = activeTabId === instanceId;
+  const active = contribution.panelId === activePanelId
+    && (panel.scope === "global" || activePanelProjectPath === project.path);
 
   return (
     <ModuleSurfaceBoundary>
@@ -158,13 +168,7 @@ function ProjectNavigationSurface({
         <Surface
           project={project}
           active={active}
-          open={() => {
-            useTerminalStore.getState().addContributedPanelTab(
-              project.path,
-              contribution.panelId,
-              panel.label,
-            );
-          }}
+          open={() => { void onOpenPanel(panel); }}
           services={MODULE_HOST_SERVICES}
         />
       </Suspense>
@@ -173,22 +177,26 @@ function ProjectNavigationSurface({
 }
 
 export function ModuleProjectNavigationSurfaces({
-  contributions,
   project,
-  activeTabId,
-  moduleActivations,
+  activePanelId,
+  activePanelProjectPath,
+  onOpenPanel,
 }: {
-  readonly contributions: readonly CanvasProjectNavigationSurface[];
   readonly project: ProjectRef;
-  readonly activeTabId: string | null;
-  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
+  readonly activePanelId: ContributionId | null;
+  readonly activePanelProjectPath: string | null;
+  readonly onOpenPanel: (panel: PanelContribution) => void | Promise<void>;
 }) {
+  const { catalog, moduleActivations } = useAcceptedWorkspaceContributionRuntime();
+  const contributions = catalog.canvasSurfaceCatalog.projectNavigation();
   return contributions.map((contribution) => (
     <ProjectNavigationSurface
       key={canvasSurfaceComponentKey(contribution)}
       contribution={contribution}
       project={project}
-      activeTabId={activeTabId}
+      activePanelId={activePanelId}
+      activePanelProjectPath={activePanelProjectPath}
+      onOpenPanel={onOpenPanel}
       moduleActivations={moduleActivations}
     />
   ));
@@ -219,14 +227,12 @@ function SidebarSurface({
 }
 
 export function ModuleSidebarSurfaces({
-  contributions,
   onToggleGlobalSurface,
-  moduleActivations,
 }: {
-  readonly contributions: readonly CanvasSidebarSurface[];
   readonly onToggleGlobalSurface: (surfaceId: ContributionId) => void;
-  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }) {
+  const { catalog, moduleActivations } = useAcceptedWorkspaceContributionRuntime();
+  const contributions = catalog.canvasSurfaceCatalog.sidebar();
   return contributions.map((contribution) => (
     <SidebarSurface
       key={canvasSurfaceComponentKey(contribution)}

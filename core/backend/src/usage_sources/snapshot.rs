@@ -350,7 +350,14 @@ mod tests {
                 "INSERT INTO usage_messages (
                     provider, session_id, timestamp, tokens_input, tokens_output, tokens_total
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                ("codex", "snapshot-proof", 1_i64, 2_i64, 3_i64, 5_i64),
+                (
+                    "fixture-source",
+                    "snapshot-proof",
+                    1_i64,
+                    2_i64,
+                    3_i64,
+                    5_i64,
+                ),
             )
             .unwrap();
 

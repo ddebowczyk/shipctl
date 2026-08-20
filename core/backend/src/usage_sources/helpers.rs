@@ -1,6 +1,4 @@
-use serde_json::Value;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -86,30 +84,4 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d)
-}
-
-pub fn walk_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if let Ok(entries) = fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                } else {
-                    files.push(path);
-                }
-            }
-        }
-    }
-    files
-}
-
-pub fn as_u64(value: Option<&Value>) -> u64 {
-    match value {
-        Some(Value::Number(n)) => n.as_u64().unwrap_or_default(),
-        Some(Value::String(s)) => s.parse::<u64>().unwrap_or_default(),
-        _ => 0,
-    }
 }

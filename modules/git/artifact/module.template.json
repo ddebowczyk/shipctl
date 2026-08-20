@@ -29,11 +29,26 @@
       {
         "id": "shipctl.git",
         "version": 1
+      },
+      {
+        "id": "shipctl.projects",
+        "version": 1
+      },
+      {
+        "id": "shipctl.plugin-data",
+        "version": 1
       }
     ],
     "providedServices": [],
-    "backgroundEffects": [],
+    "backgroundEffects": [
+      "git.runtime"
+    ],
     "contributions": [
+      {
+        "family": "configuration",
+        "id": "git.preferences",
+        "schemaVersion": 1
+      },
       {
         "family": "panel",
         "id": "core.git",
@@ -71,8 +86,10 @@
       }
     ]
   },
-  "uiContributions": [],
-  "requestedGrants": [],
+  "requestedGrants": [
+    "plugin-data.read",
+    "plugin-data.write"
+  ],
   "nativeAdapters": [],
   "secretReferences": [],
   "peerDependencies": {

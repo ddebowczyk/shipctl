@@ -77,8 +77,8 @@ reopening the whole direction.
 | Final manifest compatibility negotiation | Phase E schema review | Version-range semantics, forward and backward fixtures, and admission policy |
 | Workspace missing-view policy by contribution kind | Phase G workspace record | Product review and generated reconciliation histories |
 | Live artifact discovery trigger | Phase F record | Control-plane and filesystem event behavior; no polling value is invented here |
-| Legacy canvas retirement | After Phase G acceptance | Product decision based on behavior and rollback need |
-| Dedicated TypeScript realm for headless work | When a plugin must survive webview loss or avoid its event loop | Measured continuity, isolation, and latency requirements plus broker proof |
+| Legacy canvas retirement | Phase H cutover | Dariusz Debowczyk authorized retirement on 2026-08-19 after the named semantic-workspace, admitted-contribution, and terminal parity evidence |
+| Dedicated TypeScript realm for headless work | Phase H delivery | The packaged Node sidecar preserves a narrow ABI and failure envelope; a compiled runner may replace it later only by preserving that contract and proving package parity |
 | Strong isolation for untrusted plugins | A later security program | Threat model and process or realm design |
 
 These choices do not block approval of the authority model. Their records must

@@ -1,7 +1,6 @@
 export {
   activatePluginDefinitionsObserved,
   activateStaticPluginsObserved,
-  adaptShipctlModule,
   CordisStaticPluginRuntime,
   inferShipctlPluginRole,
 } from "./staticPluginRuntime.ts";

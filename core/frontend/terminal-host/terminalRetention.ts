@@ -7,14 +7,15 @@
  * setting.
  */
 
-import type { TerminalSettings, TerminalSettingsCommit } from "@shipctl/core/platform";
+import type { TerminalSettings } from "@shipctl/core/configuration";
+import type { TerminalRetentionCommit } from "@shipctl/core/platform";
 
 const MIB = 1024 * 1024;
 
 /** Mirrors `RETENTION_DEFAULT_BYTES` in core/backend/src/terminal/retention.rs. */
 export const RETENTION_DEFAULT_BYTES = 16 * MIB;
 
-/** Mirrors `RETENTION_MAX_BYTES`. The backend clamps; this only shapes the UI. */
+/** Configuration validation owns the maximum; this constant shapes the UI. */
 export const RETENTION_MAX_BYTES = 256 * MIB;
 
 /** Budgets offered in the settings panel. */
@@ -38,11 +39,10 @@ export interface CommittedTerminalSettings {
  * the user has replaced, so it is discarded. Equal revisions are accepted
  * because a reload of the same commit is not a rollback.
  */
-export function applyTerminalSettingsCommit(
+export function applyTerminalRetentionCommit(
   held: CommittedTerminalSettings,
-  commit: TerminalSettingsCommit,
+  commit: TerminalRetentionCommit,
 ): CommittedTerminalSettings {
-  const { retentionRevision, ...settings } = commit;
-  if (retentionRevision < held.retentionRevision) return held;
-  return { settings, retentionRevision };
+  if (commit.retentionRevision < held.retentionRevision) return held;
+  return { ...held, retentionRevision: commit.retentionRevision };
 }

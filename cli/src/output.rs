@@ -144,7 +144,7 @@ fn render_lines(response: &ResponseEnvelope<'_>) -> Result<String, String> {
 mod tests {
     use super::*;
     use serde_json::json;
-    use shipctl_core::module_control::codes::{OPERATION_ACCEPTED, VERIFICATION_MISMATCH};
+    use shipctl_core::module_control::codes::{OPERATION_ACCEPTED, REGISTRY_DIAGNOSTICS_FAILED};
 
     /// A stream format drops the envelope, and an array becomes one line per
     /// element so `jq` can read it a record at a time.
@@ -275,19 +275,19 @@ mod tests {
     }
 
     #[test]
-    fn failed_verification_keeps_machine_readable_data_on_stdout() {
+    fn failed_outcome_keeps_machine_readable_data_on_stdout() {
         let rendered = outcome(
             OutputFormat::Json,
-            "modules.verify",
-            VERIFICATION_MISMATCH,
+            "modules.diagnose",
+            REGISTRY_DIAGNOSTICS_FAILED,
             false,
-            json!({"matched": false}),
+            json!({"healthy": false}),
         )
         .unwrap();
         let value: Value = serde_json::from_str(&rendered).unwrap();
 
         assert_eq!(value["status"], "error");
-        assert_eq!(value["data"]["matched"], false);
+        assert_eq!(value["data"]["healthy"], false);
         assert!(value.get("error").is_none());
     }
 }

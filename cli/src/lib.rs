@@ -1,8 +1,9 @@
 mod args;
+mod headless_kernel;
+mod headless_runner;
 mod instances;
 mod logs;
 mod module_watch;
-mod offline_modules;
 mod output;
 mod terminals;
 
@@ -13,7 +14,7 @@ use std::process::ExitCode;
 use clap::error::ErrorKind as ClapErrorKind;
 use clap::Parser;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use shipctl_core::build_info::BuildIdentity;
 use shipctl_core::instance::protocol::{DiscoveryProblemCategory, InstanceLifecycle};
 use shipctl_core::instance::ControlError;
@@ -24,8 +25,9 @@ use shipctl_core::module_control::agent::{
     CAPABILITY_RUNTIME_INSPECTED, CAPABILITY_RUNTIME_INVOKED, CAPABILITY_RUNTIME_LISTED,
 };
 use shipctl_core::module_control::codes::{
-    ARTIFACT_ADDED, ARTIFACT_PACKED, ARTIFACT_PREFLIGHTED, CAPABILITY_INSPECTED,
-    OPERATION_ACCEPTED, OPERATION_INSPECTED, REGISTRY_LISTED, RUNTIME_DIAGNOSED, RUNTIME_INSPECTED,
+    ARTIFACT_ADDED, ARTIFACT_DISABLED_INSPECTED, ARTIFACT_PACKED, ARTIFACT_PREFLIGHTED,
+    CAPABILITY_INSPECTED, OPERATION_ACCEPTED, OPERATION_INSPECTED, REGISTRY_DIAGNOSTICS_FAILED,
+    REGISTRY_HEALTHY, REGISTRY_LISTED, RUNTIME_DIAGNOSED, RUNTIME_INSPECTED,
 };
 use shipctl_core::module_control::ModuleOperationKind;
 use shipctl_core::scheduler::contracts::ScheduleDeliveryOutcome;
@@ -127,7 +129,26 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
             print_version(cli.output);
             ExitCode::SUCCESS
         }
+        Some(CliCommand::HeadlessRunnerProbe) => run_headless_runner_probe(),
+        Some(CliCommand::HeadlessKernel) => headless_kernel::run_stdio(),
         None => run_home(cli.output),
+    }
+}
+
+fn run_headless_runner_probe() -> ExitCode {
+    match headless_runner::probe() {
+        Ok(response) => match serde_json::to_string(&response) {
+            Ok(output) => {
+                println!("{output}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => emit_render_failure(
+                OutputFormat::Json,
+                "headless.runner.probe",
+                error.to_string(),
+            ),
+        },
+        Err(error) => emit_failure(OutputFormat::Json, "headless.runner.probe", &error, false),
     }
 }
 
@@ -350,13 +371,42 @@ fn run_capabilities(command: CapabilitiesCommand, output: OutputFormat) -> ExitC
                     );
                 }
             };
-            match instances::call_capability(
-                args.target.runtime.runtime_root.as_deref(),
-                &args.target.instance,
-                args.capability_id,
-                args.port_id,
-                payload,
-            ) {
+            let result = if args.offline {
+                invoke_headless_capability(
+                    args.state_root.as_deref(),
+                    args.capability_id,
+                    args.port_id,
+                    payload,
+                )
+            } else {
+                let Some(instance) = args.instance.as_deref() else {
+                    return emit_failure(
+                        output,
+                        operation,
+                        &ControlError::new(
+                            "capability.target.required",
+                            "A live capability invocation requires --instance",
+                        ),
+                        false,
+                    );
+                };
+                instances::call_capability(
+                    args.runtime_root.as_deref(),
+                    instance,
+                    args.capability_id,
+                    args.port_id,
+                    payload,
+                )
+                .and_then(|invocation| {
+                    serde_json::to_value(invocation).map_err(|error| {
+                        ControlError::new(
+                            "capability.response_encode_failed",
+                            format!("Could not encode capability invocation: {error}"),
+                        )
+                    })
+                })
+            };
+            match result {
                 Ok(data) => {
                     emit_success(output, operation, CAPABILITY_RUNTIME_INVOKED, false, data)
                         .unwrap_or_else(|message| emit_render_failure(output, operation, message))
@@ -364,6 +414,73 @@ fn run_capabilities(command: CapabilitiesCommand, output: OutputFormat) -> ExitC
                 Err(error) => emit_failure(output, operation, &error, false),
             }
         }
+    }
+}
+
+/// Invoke a product capability through the installed TypeScript runner. The
+/// CLI owns only its existing target taxonomy and response envelope; the
+/// runner owns all artifact admission and product semantics.
+fn invoke_headless_capability(
+    state_root: Option<&Path>,
+    capability_id: String,
+    port_id: String,
+    payload: Value,
+) -> Result<Value, ControlError> {
+    let mut input = Map::new();
+    input.insert("capabilityId".to_string(), Value::String(capability_id));
+    input.insert("portId".to_string(), Value::String(port_id));
+    input.insert("payload".to_string(), payload);
+    if let Some(state_root) = state_root {
+        input.insert(
+            "stateRoot".to_string(),
+            Value::String(state_root.display().to_string()),
+        );
+    }
+    let response = headless_runner::invoke(headless_runner::RunnerRequest::new(
+        "runtime.invoke",
+        Some(Value::Object(input)),
+    ))?;
+    if response.status == headless_runner::RunnerStatus::Failure {
+        return Err(headless_runner::response_error(&response));
+    }
+    response
+        .data
+        .and_then(|data| data.get("response").cloned())
+        .ok_or_else(|| {
+            ControlError::new(
+                "headless.runner.invalid_response",
+                "Packaged headless runner omitted its runtime operation response",
+            )
+        })
+}
+
+/// Invoke a generic native resource without restoring the retired offline
+/// module policy layer. Product capability behavior always crosses the
+/// installed TypeScript runner above.
+fn invoke_headless_resource(operation: &str, input: Value) -> Result<Value, ControlError> {
+    headless_kernel::invoke(operation, input)
+}
+
+fn state_root_value(state_root: Option<&Path>) -> Value {
+    state_root
+        .map(|state_root| Value::String(state_root.display().to_string()))
+        .unwrap_or(Value::Null)
+}
+
+fn resource_no_op(data: &Value) -> bool {
+    data.get("receipt")
+        .and_then(|receipt| receipt.get("changed"))
+        .or_else(|| data.get("changed"))
+        .and_then(Value::as_bool)
+        == Some(false)
+}
+
+fn resource_diagnostics_healthy(data: &Value) -> bool {
+    match data.get("diagnostics").and_then(Value::as_array) {
+        Some(diagnostics) => diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.get("severity").and_then(Value::as_str) != Some("error")),
+        None => false,
     }
 }
 
@@ -510,16 +627,21 @@ fn run_modules(
     format_was_requested: bool,
 ) -> ExitCode {
     match command {
-        ModulesCommand::Pack(args) => {
-            match offline_modules::pack(&args.source, &args.destination) {
-                Ok(data) => emit_success(output, "modules.pack", ARTIFACT_PACKED, false, data)
-                    .unwrap_or_else(|message| emit_render_failure(output, "modules.pack", message)),
-                Err(error) => emit_failure(output, "modules.pack", &error, false),
-            }
-        }
+        ModulesCommand::Pack(args) => match invoke_headless_resource(
+            "artifact.pack",
+            json!({"source": args.source, "destination": args.destination}),
+        ) {
+            Ok(data) => emit_success(output, "modules.pack", ARTIFACT_PACKED, false, data)
+                .unwrap_or_else(|message| emit_render_failure(output, "modules.pack", message)),
+            Err(error) => emit_failure(output, "modules.pack", &error, false),
+        },
         ModulesCommand::Preflight(args) => {
             debug_assert!(args.offline);
-            match offline_modules::preflight(args.state_root.as_deref(), &args.archive) {
+            let state_root = state_root_value(args.state_root.as_deref());
+            match invoke_headless_resource(
+                "artifact.preflight",
+                json!({"stateRoot": state_root, "archive": args.archive}),
+            ) {
                 Ok(data) => emit_success(
                     output,
                     "modules.preflight",
@@ -535,9 +657,13 @@ fn run_modules(
         }
         ModulesCommand::Add(args) => {
             debug_assert!(args.offline);
-            match offline_modules::add(args.state_root.as_deref(), &args.archive) {
+            let state_root = state_root_value(args.state_root.as_deref());
+            match invoke_headless_resource(
+                "artifact.add",
+                json!({"stateRoot": state_root, "archive": args.archive}),
+            ) {
                 Ok(data) => {
-                    let no_op = !data.receipt.changed;
+                    let no_op = resource_no_op(&data);
                     emit_success(output, "modules.add", ARTIFACT_ADDED, no_op, data).unwrap_or_else(
                         |message| emit_render_failure(output, "modules.add", message),
                     )
@@ -547,20 +673,27 @@ fn run_modules(
         }
         ModulesCommand::List(args) => {
             debug_assert!(args.offline);
-            match offline_modules::list(args.state_root.as_deref()) {
+            let state_root = state_root_value(args.state_root.as_deref());
+            match invoke_headless_resource("registry.snapshot", json!({"stateRoot": state_root})) {
                 Ok(data) => emit_success(output, "modules.list", REGISTRY_LISTED, false, data)
                     .unwrap_or_else(|message| emit_render_failure(output, "modules.list", message)),
                 Err(error) => emit_failure(output, "modules.list", &error, false),
             }
         }
         ModulesCommand::Inspect(args) if args.offline => {
-            match offline_modules::inspect(args.state_root.as_deref(), &args.module_id) {
-                Ok(data) => {
-                    let code = offline_modules::inspection_code(&data);
-                    emit_success(output, "modules.inspect", code, false, data).unwrap_or_else(
-                        |message| emit_render_failure(output, "modules.inspect", message),
-                    )
-                }
+            let state_root = state_root_value(args.state_root.as_deref());
+            match invoke_headless_resource(
+                "artifact.inspect",
+                json!({"stateRoot": state_root, "moduleId": args.module_id}),
+            ) {
+                Ok(data) => emit_success(
+                    output,
+                    "modules.inspect",
+                    ARTIFACT_DISABLED_INSPECTED,
+                    false,
+                    data,
+                )
+                .unwrap_or_else(|message| emit_render_failure(output, "modules.inspect", message)),
                 Err(error) => emit_failure(output, "modules.inspect", &error, false),
             }
         }
@@ -575,9 +708,10 @@ fn run_modules(
         },
         ModulesCommand::InspectCapability(args) => {
             debug_assert!(args.offline);
-            match offline_modules::inspect_capability(
-                args.state_root.as_deref(),
-                &args.capability_id,
+            let state_root = state_root_value(args.state_root.as_deref());
+            match invoke_headless_resource(
+                "artifact.inspect-capability",
+                json!({"stateRoot": state_root, "capabilityId": args.capability_id}),
             ) {
                 Ok(data) => emit_success(
                     output,
@@ -593,10 +727,27 @@ fn run_modules(
             }
         }
         ModulesCommand::Diagnose(args) if args.offline => {
-            match offline_modules::diagnose(args.state_root.as_deref(), args.module_id.as_deref()) {
+            if let Some(module_id) = args.module_id {
+                return emit_failure(
+                    output,
+                    "modules.diagnose",
+                    &ControlError::new(
+                        "headless.resource.scope_unsupported",
+                        "Offline module-specific diagnosis is unavailable from the generic registry resource.",
+                    )
+                    .with_selector(module_id),
+                    false,
+                );
+            }
+            let state_root = state_root_value(args.state_root.as_deref());
+            match invoke_headless_resource("registry.diagnose", json!({"stateRoot": state_root})) {
                 Ok(data) => {
-                    let succeeded = data.healthy;
-                    let code = offline_modules::diagnostics_code(&data);
+                    let succeeded = resource_diagnostics_healthy(&data);
+                    let code = if succeeded {
+                        REGISTRY_HEALTHY
+                    } else {
+                        REGISTRY_DIAGNOSTICS_FAILED
+                    };
                     emit_outcome(output, "modules.diagnose", code, succeeded, data).unwrap_or_else(
                         |message| emit_render_failure(output, "modules.diagnose", message),
                     )
@@ -614,23 +765,6 @@ fn run_modules(
                 .unwrap_or_else(|message| emit_render_failure(output, "modules.diagnose", message)),
             Err(error) => emit_failure(output, "modules.diagnose", &error, false),
         },
-        ModulesCommand::Verify(args) => {
-            debug_assert!(args.offline);
-            match offline_modules::verify(
-                args.state_root.as_deref(),
-                &args.module_id,
-                &args.expectation,
-            ) {
-                Ok(data) => {
-                    let succeeded = data.matched;
-                    let code = offline_modules::verification_code(&data);
-                    emit_outcome(output, "modules.verify", code, succeeded, data).unwrap_or_else(
-                        |message| emit_render_failure(output, "modules.verify", message),
-                    )
-                }
-                Err(error) => emit_failure(output, "modules.verify", &error, false),
-            }
-        }
         ModulesCommand::Enable(args) => run_module_transition(args, output, true),
         ModulesCommand::Disable(args) => run_module_transition(args, output, false),
         ModulesCommand::Replace(args) => match instances::transition_module(
@@ -672,13 +806,23 @@ fn run_module_transition(
         "modules.disable"
     };
     if args.offline {
-        return match offline_modules::set_enabled(
-            args.state_root.as_deref(),
-            &args.module_id,
-            enable,
+        let state_root = state_root_value(args.state_root.as_deref());
+        return match invoke_headless_resource(
+            "registry.set-enabled",
+            json!({
+                "stateRoot": state_root,
+                "moduleId": args.module_id,
+                "enabled": enable,
+            }),
         ) {
-            Ok(data) => emit_success(output, operation, OPERATION_ACCEPTED, false, data)
-                .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
+            Ok(data) => emit_success(
+                output,
+                operation,
+                OPERATION_ACCEPTED,
+                resource_no_op(&data),
+                data,
+            )
+            .unwrap_or_else(|message| emit_render_failure(output, operation, message)),
             Err(error) => emit_failure(output, operation, &error, false),
         };
     }
@@ -964,7 +1108,6 @@ fn operation_hint(args: &[OsString]) -> &str {
             ("modules", "inspect") => "modules.inspect",
             ("modules", "inspect-capability") => "modules.inspect_capability",
             ("modules", "diagnose") => "modules.diagnose",
-            ("modules", "verify") => "modules.verify",
             ("modules", "enable") => "modules.enable",
             ("modules", "disable") => "modules.disable",
             ("modules", "replace") => "modules.replace",

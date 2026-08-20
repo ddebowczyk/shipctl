@@ -1,5 +1,4 @@
 import type {
-  ModuleJsonValue,
   UiWorkspaceDocument,
   WorkspaceInspection,
   WorkspaceMutationResult,
@@ -21,10 +20,10 @@ export type WorkspaceCanvasAction =
       readonly resource: WorkspaceResourceReference;
       readonly placement?: WorkspacePlacementIntent;
       readonly label?: string | null;
-      readonly stateRef?: ModuleJsonValue | null;
     }
   | { readonly kind: "select"; readonly instanceId: string }
   | { readonly kind: "close"; readonly instanceId: string }
+  | { readonly kind: "rename"; readonly instanceId: string; readonly label: string | null }
   | {
       readonly kind: "move";
       readonly instanceId: string;
@@ -171,7 +170,6 @@ export class WorkspaceCanvasBridge {
             resource: action.resource,
             placement: action.placement ?? { kind: "default" },
             label: action.label ?? null,
-            stateRef: action.stateRef ?? null,
             expectedRevision,
             originId: this.#originId,
           });
@@ -186,6 +184,14 @@ export class WorkspaceCanvasBridge {
           return this.#authority.mutate({
             kind: "close",
             instanceId: action.instanceId,
+            expectedRevision,
+            originId: this.#originId,
+          });
+        case "rename":
+          return this.#authority.mutate({
+            kind: "rename",
+            instanceId: action.instanceId,
+            label: action.label,
             expectedRevision,
             originId: this.#originId,
           });

@@ -37,21 +37,6 @@ export function replaceOnce(root, relativePath, expected, replacement) {
   writeFileSync(file, source.replace(expected, replacement));
 }
 
-export function removeFrontendModuleComposition(root, packageName, variableName) {
-  replaceOnce(
-    root,
-    "core/frontend/host/enabledModules.ts",
-    `import { ${variableName} } from "${packageName}";\n`,
-    "",
-  );
-  replaceOnce(
-    root,
-    "core/frontend/host/enabledModules.ts",
-    `  ${variableName},\n`,
-    "",
-  );
-}
-
 export function removeCargoDefaultFeature(root, featureName) {
   const relativePath = "src-tauri/Cargo.toml";
   const file = path.join(root, relativePath);

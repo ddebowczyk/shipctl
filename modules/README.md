@@ -1,18 +1,12 @@
 # Modules
 
-`modules/` contains removable TypeScript features. A migrated module owns a
-public frontend package under `frontend/`, has no Rust crate, and imports no
-Tauri API. When it needs native authority, it uses a public semantic service;
-the permanent provider belongs to `core/backend/` and its private framework
-adapter belongs to `core/tauri/`.
-
-Some modules still have feature-gated Rust under `backend/` and a typed host
-adapter under `host/`. These directories are migration sources, not the target
-pattern. Ports, Todos, Git, Skills, and Semantic Terminal already use the
-frontend-only shape. Commands, Ports, Todos, Git, Skills, and Thin Terminal also
-declare `frontend.delivery: runtime-artifact`; the build embeds their immutable
-output, and the host activates it through the same loader used for installed
-plugins.
+`modules/` contains removable TypeScript features. Every shipping module owns
+a public frontend package under `frontend/`, imports no Tauri API, and declares
+`frontend.delivery: runtime-artifact`. The build embeds its immutable artifact,
+and the host activates it through the same admitted loader used for installed
+plugins. When a module needs native authority, it uses a public semantic
+service; the permanent provider belongs to `core/backend/` and its private
+framework adapter belongs to `core/tauri/`.
 
 Two repository locations are intentionally different from removable features:
 
@@ -25,8 +19,6 @@ Two repository locations are intentionally different from removable features:
 - `commands/` is frontend-only because it contributes saved-command UI and
   launches through host terminal services; it owns no native capability.
 
-Frontend modules import host services only through `@shipctl/module-api`.
-Transitional native modules can import the Rust compatibility API and expose a
-host entrypoint. The Tauri shell retains direct optional dependencies only for
-those remaining plugin ACL manifests; it does not implement module behavior or
-adapters.
+Frontend modules import host services only through `@shipctl/module-api`. The
+Tauri shell owns no module implementation or adapter; it only provides the
+platform services that admitted artifacts consume through semantic ports.

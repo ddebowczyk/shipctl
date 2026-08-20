@@ -40,7 +40,8 @@ unrelated command system.
 | D: provider extraction | Provider parity or explicit replacement semantics, authorization, ownership, package, and closure properties pass | That module's Rust crates, Cargo feature, ACL projection, and host adapter |
 | E: immutable artifacts | Roundtrip, digest, external-closure, manifest parity, headless artifact, and built-in compound parity properties pass | Direct source import of the migrated built-in implementation |
 | F: live reconciliation | State-model, service routing, revision, atomicity, failure, restart, and inspection properties pass | Restart-only activation and secondary lifecycle authority |
-| G: workspace and closure | Workspace, renderer, layout, cleanup, absence, package, and agent-control proofs pass | Static membership and remaining compatibility shims; the legacy canvas has its own product deletion decision |
+| G: workspace and closure | Workspace, renderer, layout, cleanup, absence, package, and agent-control proofs pass | Static membership and remaining compatibility shims; legacy-canvas retirement remains an explicitly delegated Phase H deletion gate |
+| H: architecture closure | Native opaque-payload and post-package loader properties pass fresh and replay, then an installed package accepts a newly built external artifact without changing host hashes | Typed native product semantics and the compatibility paths authorized by the recorded deletion gates |
 
 ## Characterize before change
 
@@ -181,6 +182,9 @@ source, built artifacts, and a running packaged app:
 14. Adding a new native privilege requires a reviewed permanent platform
     capability and a new Shipctl release; a plugin artifact cannot introduce
     native code or raw IPC.
+15. An artifact built after the host package resolves through the
+    digest-qualified production loader, activates through the public registry,
+    and leaves the packaged native and frontend hashes unchanged.
 
 ### Repository closure proofs
 
@@ -189,6 +193,7 @@ source, built artifacts, and a running packaged app:
 2. No Rust crate remains under `modules/` or `module-api/`, and removing any
     individual plugin leaves the host and unrelated plugins operable.
 
-Passing these proofs authorizes closure. It does not require deletion of the
-legacy canvas unless product review separately selects Layman as the sole
-renderer.
+Passing these proofs authorizes closure. Legacy-canvas retirement is a separate
+Phase H product decision, and it was completed only after its named parity and
+installed-package evidence passed; it is not retained as a hidden rollback
+mode.

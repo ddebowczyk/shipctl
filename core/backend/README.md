@@ -11,17 +11,16 @@ that expose these capabilities to the desktop app.
 
 | Directory | Owns | Tauri adapter commands |
 | --- | --- | --- |
-| `workspace/` | the on-disk config schema, its loader and the `WorkspaceManager` that guards it | `get_canvas_adapter` — the read-only host-composition selection used before frontend startup |
-| `platform/` | host-environment queries and OS handoffs | `get_username`, `get_home_directory`, `get_default_shell`, `get_computer_name`, `check_command_exists`, `reveal_in_finder`, `open_url` |
+| `workspace/` | project registry plus opaque legacy configuration/workspace bootstrap reads guarded by `WorkspaceManager` | `read_global_configuration_value`, `read_project_configuration_value` are compatibility-only imports; repo and group commands remain here |
+| `platform/` | host-environment queries and OS handoffs | `get_username`, `get_home_directory`, `get_default_shell`, `get_computer_name`, `check_command_exists`, `reveal_in_finder`, `open_in_editor`, `open_url` |
 | `appearance/` | font enumeration and loading (`fonts.rs`) | `list_monospace_families`, `load_font_family` |
 | `processes/` | scoped process inspection and authorized termination | process inspection, termination, and activation release |
 | `project_documents/` | registered-project document discovery, revision reads, and atomic writes | project document discovery, read, write, and activation release |
 | `git/` | scoped Git execution and activation-owned repository observation | Git requests, repository observation, and activation release |
 | `skill_installation/` | registered-project authorization and atomic skill publication and removal | skill installation inspection, install, removal, and activation release |
 | `semantic_terminal/` | Ghostty-backed screen interpretation and activation-scoped semantic terminal authority | semantic snapshot, attachment, input, resize, history, anchor, selection, diagnostics, and activation release |
-| `terminal/` | host-owned terminal registry, ordered runtimes, VT replay, attachments, lifecycle, exit and agent activity | `list_terminals`, `get_terminal`, `spawn_terminal`, `update_terminal_metadata`, `attach_terminal`, `detach_terminal`, `write_terminal`, `resize_terminal`, `close_terminal`, registry subscription, terminal settings |
+| `terminal/` | host-owned terminal registry, ordered runtimes, VT replay, attachments, lifecycle, exit and agent activity | `list_terminals`, `get_terminal`, `spawn_terminal`, `update_terminal_metadata`, `attach_terminal`, `detach_terminal`, `write_terminal`, `resize_terminal`, `close_terminal`, registry subscription, `set_terminal_retention` resource commit |
 | `projects/` | the repository list and groups | `list_repos`, `register_repo`, `unregister_repo`, `load_workspace`, `save_workspace`, `list_groups`, `create_group`, `rename_group`, `delete_group`, `move_repo_to_group`, `watch_repo`, `unwatch_repo` |
-| `settings/` | preferences no other capability owns: editor choice, project defaults, keybindings, sidebar state | `get_editor_settings`, `save_editor_settings`, `get_project_settings`, `save_project_settings`, `get_keybinding_settings`, `save_keybinding_settings`, `get_sidebar_settings`, `open_in_editor` |
 
 <!-- markdownlint-enable MD013 -->
 

@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
   SEMANTIC_TERMINAL_DRIVER_ID,
-  semanticTerminalModule,
+  SEMANTIC_TERMINAL_MODULE_ID,
+  SEMANTIC_TERMINAL_REQUIRED_GRANTS,
+  semanticTerminalContributions,
 } from "../src/index.ts";
 
-test("semantic terminal contributes exactly its semantic presentation", () => {
-  assert.equal(semanticTerminalModule.id, "shipctl.semantic-terminal");
-  assert.deepEqual(semanticTerminalModule.requiredGrants, [
+test("semantic terminal contributes exactly its direct semantic presentation", () => {
+  assert.equal(SEMANTIC_TERMINAL_MODULE_ID, "shipctl.semantic-terminal");
+  assert.deepEqual(SEMANTIC_TERMINAL_REQUIRED_GRANTS, [
     "terminal.attach",
     "terminal.input",
     "terminal.resize",
@@ -17,15 +20,15 @@ test("semantic terminal contributes exactly its semantic presentation", () => {
     "semantic-terminal.inspect",
   ]);
   assert.equal(
-    semanticTerminalModule.terminalPresentations[0]?.moduleId,
-    semanticTerminalModule.id,
+    semanticTerminalContributions.terminalPresentations[0]?.moduleId,
+    SEMANTIC_TERMINAL_MODULE_ID,
   );
   assert.deepEqual(
-    semanticTerminalModule.terminalPresentations.map((provider) => provider.driverId),
+    semanticTerminalContributions.terminalPresentations.map((provider) => provider.driverId),
     [SEMANTIC_TERMINAL_DRIVER_ID],
   );
   assert.deepEqual(
-    semanticTerminalModule.terminalPresentations[0]?.requiredServices.map(
+    semanticTerminalContributions.terminalPresentations[0]?.requiredServices.map(
       ({ id, version }) => ({ id, version }),
     ),
     [
@@ -33,4 +36,10 @@ test("semantic terminal contributes exactly its semantic presentation", () => {
       { id: "shipctl.semantic-terminals", version: 1 },
     ],
   );
+});
+
+test("semantic terminal source has no static ShipctlModule compatibility object", () => {
+  const source = readFileSync(new URL("../src/pluginContributions.ts", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /\bShipctlModule\b|\bsemanticTerminalModule\b/);
 });

@@ -3,12 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "sideEffects": [
-    "./appearance/globals.css",
-    "./canvas/legacy/legacyCanvas.css"
-  ],
+  "sideEffects": ["./appearance/globals.css"],
   "exports": {
     "./platform": "./platform/index.ts",
+    "./configuration": "./configuration/index.ts",
+    "./configuration/headless": "./configuration/headless.ts",
     "./appearance": "./appearance/index.ts",
     "./appearance/globals.css": "./appearance/globals.css",
     "./terminal-host": "./terminal-host/index.ts",
@@ -16,6 +15,7 @@
     "./settings": "./settings/index.ts",
     "./projects": "./projects/index.ts",
     "./runtime": "./runtime/index.ts",
+    "./runtime/headless": "./runtime/headless.ts",
     "./workspace": "./workspace/index.ts",
     "./terminal-host/views": "./terminal-host/views.ts",
     "./shared/views": "./shared/views.ts",

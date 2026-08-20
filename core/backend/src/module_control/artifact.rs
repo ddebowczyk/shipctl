@@ -21,7 +21,6 @@ pub const ARTIFACT_MANIFEST_PATH: &str = "module.yaml";
 pub const ARTIFACT_INTEGRITY_PATH: &str = "integrity.json";
 pub const ARTIFACT_CONTRACT_SCHEMA_VERSION: u32 = 2;
 pub const ARTIFACT_MINIMUM_SCHEMA_VERSION: u32 = 1;
-pub const APPLICATION_DECLARATION_SCHEMA_VERSION: u32 = 1;
 pub const PLUGIN_API_VERSION: &str = "1.0.0";
 pub const CAPABILITY_CONTRACT_SCHEMA_VERSION: u32 = 1;
 
@@ -34,8 +33,6 @@ pub const CAPABILITY_CONTRACT_INVALID: &str = "module.artifact.capability.invali
 pub const CAPABILITY_CONTRACT_CONFLICT: &str = "module.artifact.capability.conflict";
 pub const ARTIFACT_API_INCOMPATIBLE: &str = "module.artifact.api.incompatible";
 pub const ARTIFACT_PEER_INCOMPATIBLE: &str = "module.artifact.peer.incompatible";
-pub const ARTIFACT_SERVICE_INCOMPATIBLE: &str = "module.artifact.service.incompatible";
-pub const ARTIFACT_CONTRIBUTION_INCOMPATIBLE: &str = "module.artifact.contribution.incompatible";
 pub const ARTIFACT_GRANT_DENIED: &str = "module.artifact.grant.denied";
 pub const ARTIFACT_NATIVE_ADAPTER_UNAVAILABLE: &str = "module.artifact.native_adapter.unavailable";
 
@@ -478,131 +475,6 @@ impl CapabilityDefinitionIndex {
     }
 }
 
-/// A stable UI contribution declaration.  It is metadata only until the
-/// active catalog/supervisor phase decides whether to mount it.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RuntimeUiContribution {
-    pub id: String,
-    pub slot: String,
-    pub entry: String,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimePluginRole {
-    #[default]
-    Headless,
-    Presentation,
-    Compound,
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RuntimeServiceDeclaration {
-    pub id: String,
-    pub version: u32,
-}
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RuntimeContributionFamily {
-    Command,
-    GlobalNavigation,
-    GlobalSurface,
-    MessageGraph,
-    Panel,
-    ProjectAction,
-    ProjectFacts,
-    ProjectImport,
-    ProjectLayout,
-    ProjectNavigation,
-    ScheduledTask,
-    Settings,
-    Sidebar,
-    SkillsProvider,
-    TerminalPresentation,
-}
-
-impl RuntimeContributionFamily {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Command => "command",
-            Self::GlobalNavigation => "global-navigation",
-            Self::GlobalSurface => "global-surface",
-            Self::MessageGraph => "message-graph",
-            Self::Panel => "panel",
-            Self::ProjectAction => "project-action",
-            Self::ProjectFacts => "project-facts",
-            Self::ProjectImport => "project-import",
-            Self::ProjectLayout => "project-layout",
-            Self::ProjectNavigation => "project-navigation",
-            Self::ScheduledTask => "scheduled-task",
-            Self::Settings => "settings",
-            Self::Sidebar => "sidebar",
-            Self::SkillsProvider => "skills-provider",
-            Self::TerminalPresentation => "terminal-presentation",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RuntimeContributionDeclaration {
-    pub family: RuntimeContributionFamily,
-    pub id: String,
-    pub schema_version: u32,
-}
-
-/// Static application declarations which can be compared with a provisionally
-/// loaded TypeScript plugin before any service or contribution is published.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RuntimeApplicationManifest {
-    pub schema_version: u32,
-    pub role: RuntimePluginRole,
-    #[serde(default)]
-    pub required_services: Vec<RuntimeServiceDeclaration>,
-    #[serde(default)]
-    pub provided_services: Vec<RuntimeServiceDeclaration>,
-    #[serde(default)]
-    pub background_effects: Vec<String>,
-    #[serde(default)]
-    pub contributions: Vec<RuntimeContributionDeclaration>,
-}
-
-impl RuntimeApplicationManifest {
-    fn is_legacy_empty(&self) -> bool {
-        self == &Self::default()
-    }
-
-    fn validate(&self) -> Result<(), ArtifactContractError> {
-        if self.schema_version != APPLICATION_DECLARATION_SCHEMA_VERSION {
-            return Err(ArtifactContractError::new(
-                ARTIFACT_MANIFEST_INVALID,
-                "Application declarations use an unsupported schema version",
-            ));
-        }
-        validate_service_declarations(&self.required_services, "Required services")?;
-        validate_service_declarations(&self.provided_services, "Provided services")?;
-        validate_unique_scoped_strings(&self.background_effects, "Background effects")?;
-
-        let mut contributions = BTreeSet::new();
-        for contribution in &self.contributions {
-            if contribution.schema_version == 0
-                || !valid_contribution_id(contribution.family, &contribution.id)
-                || !contributions.insert((contribution.family, contribution.id.as_str()))
-            {
-                return Err(ArtifactContractError::new(
-                    ARTIFACT_MANIFEST_INVALID,
-                    "Application contributions require unique family-appropriate IDs and nonzero schema versions",
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactLifecycleRequirement {
@@ -631,13 +503,12 @@ pub struct RuntimeArtifactManifest {
     pub assets: Vec<String>,
     pub messages: MessageDeclarations,
     pub capabilities: CapabilityManifest,
-    #[serde(
-        default,
-        skip_serializing_if = "RuntimeApplicationManifest::is_legacy_empty"
-    )]
-    pub application: RuntimeApplicationManifest,
-    #[serde(default)]
-    pub ui_contributions: Vec<RuntimeUiContribution>,
+    /// Opaque, signed product declarations. The native artifact boundary only
+    /// requires this schema-2 protocol field to be present; the trusted
+    /// TypeScript runtime owns its role, service, effect, and contribution
+    /// semantics before activation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application: Option<Value>,
     #[serde(default)]
     pub requested_grants: Vec<String>,
     #[serde(default)]
@@ -693,14 +564,13 @@ impl RuntimeArtifactManifest {
             ));
         }
         if self.schema_version >= 2 {
-            self.application.validate()?;
-            if !self.ui_contributions.is_empty() {
+            if self.application.is_none() {
                 return Err(ArtifactContractError::new(
                     ARTIFACT_MANIFEST_INVALID,
-                    "Schema version 2 declares contributions only through application.contributions",
+                    "Schema version 2 requires an application declaration payload",
                 ));
             }
-        } else if !self.application.is_legacy_empty() {
+        } else if self.application.is_some() {
             return Err(ArtifactContractError::new(
                 ARTIFACT_MANIFEST_INVALID,
                 "Schema version 1 cannot declare version 2 application metadata",
@@ -721,20 +591,6 @@ impl RuntimeArtifactManifest {
                 ARTIFACT_MANIFEST_INVALID,
                 "Configuration schema must be a JSON object when declared",
             ));
-        }
-
-        let mut contribution_ids = BTreeSet::new();
-        for contribution in &self.ui_contributions {
-            if !valid_scoped_id(&contribution.id)
-                || contribution.slot.trim().is_empty()
-                || !valid_archive_path(&contribution.entry)
-                || !contribution_ids.insert(contribution.id.as_str())
-            {
-                return Err(ArtifactContractError::new(
-                    ARTIFACT_MANIFEST_INVALID,
-                    "UI contributions require unique stable ids, a slot, and a normalized entry path",
-                ));
-            }
         }
         for (peer, range) in &self.peer_dependencies {
             if peer.trim().is_empty() || VersionReq::parse(range).is_err() {
@@ -917,8 +773,6 @@ impl RuntimeArtifactArchive {
 pub struct ArtifactPreflightContext {
     pub host_api_version: Option<String>,
     pub peer_versions: BTreeMap<String, String>,
-    pub service_versions: BTreeMap<String, u32>,
-    pub contribution_schema_versions: BTreeMap<String, u32>,
     pub allowed_grants: BTreeSet<String>,
     pub supported_native_adapters: BTreeSet<String>,
 }
@@ -975,29 +829,6 @@ impl ArtifactPreflightContext {
                 return Err(ArtifactContractError::new(
                     ARTIFACT_PEER_INCOMPATIBLE,
                     format!("Required host peer {peer:?} is incompatible"),
-                ));
-            }
-        }
-        for required in &artifact.manifest.application.required_services {
-            if self.service_versions.get(&required.id) != Some(&required.version) {
-                return Err(ArtifactContractError::new(
-                    ARTIFACT_SERVICE_INCOMPATIBLE,
-                    format!(
-                        "Required service {}@{} is unavailable or incompatible",
-                        required.id, required.version
-                    ),
-                ));
-            }
-        }
-        for contribution in &artifact.manifest.application.contributions {
-            let family = contribution.family.as_str();
-            if self.contribution_schema_versions.get(family) != Some(&contribution.schema_version) {
-                return Err(ArtifactContractError::new(
-                    ARTIFACT_CONTRIBUTION_INCOMPATIBLE,
-                    format!(
-                        "Contribution family {family} schema version {} is unsupported",
-                        contribution.schema_version
-                    ),
                 ));
             }
         }
@@ -1446,39 +1277,6 @@ fn validate_unique_strings(values: &[String], subject: &str) -> Result<(), Artif
     Ok(())
 }
 
-fn validate_unique_scoped_strings(
-    values: &[String],
-    subject: &str,
-) -> Result<(), ArtifactContractError> {
-    let mut seen = BTreeSet::new();
-    if values
-        .iter()
-        .any(|value| !valid_scoped_id(value) || !seen.insert(value.as_str()))
-    {
-        return Err(ArtifactContractError::new(
-            ARTIFACT_MANIFEST_INVALID,
-            format!("{subject} must be unique stable scoped identifiers"),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_service_declarations(
-    services: &[RuntimeServiceDeclaration],
-    subject: &str,
-) -> Result<(), ArtifactContractError> {
-    let mut seen = BTreeSet::new();
-    if services.iter().any(|service| {
-        !valid_scoped_id(&service.id) || service.version == 0 || !seen.insert(service.id.as_str())
-    }) {
-        return Err(ArtifactContractError::new(
-            ARTIFACT_MANIFEST_INVALID,
-            format!("{subject} require unique stable ids and nonzero versions"),
-        ));
-    }
-    Ok(())
-}
-
 fn validate_unique_paths(paths: &[String]) -> Result<(), ArtifactContractError> {
     let mut seen = BTreeSet::new();
     if paths
@@ -1501,12 +1299,6 @@ fn validate_manifest_files(
     required.insert(manifest.entry.clone());
     required.extend(manifest.styles.iter().cloned());
     required.extend(manifest.assets.iter().cloned());
-    required.extend(
-        manifest
-            .ui_contributions
-            .iter()
-            .map(|item| item.entry.clone()),
-    );
     if required.iter().any(|path| !files.contains_key(path)) {
         return Err(ArtifactContractError::new(
             ARTIFACT_MANIFEST_INVALID,
@@ -1793,15 +1585,6 @@ fn valid_scoped_id(value: &str) -> bool {
         })
 }
 
-fn valid_contribution_id(family: RuntimeContributionFamily, value: &str) -> bool {
-    match family {
-        RuntimeContributionFamily::TerminalPresentation => {
-            crate::terminal_host::TerminalDriverId::new(value).is_ok()
-        }
-        _ => valid_scoped_id(value),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
@@ -1978,19 +1761,18 @@ mod tests {
                     scopes: vec![CapabilityScope::Workspace],
                 }],
             },
-            application: RuntimeApplicationManifest {
-                schema_version: APPLICATION_DECLARATION_SCHEMA_VERSION,
-                role: RuntimePluginRole::Compound,
-                required_services: Vec::new(),
-                provided_services: Vec::new(),
-                background_effects: vec!["fixture.work-review.refresh".to_string()],
-                contributions: vec![RuntimeContributionDeclaration {
-                    family: RuntimeContributionFamily::Panel,
-                    id: "fixture.work-review.panel".to_string(),
-                    schema_version: 1,
+            application: Some(json!({
+                "schemaVersion": 1,
+                "role": "compound",
+                "requiredServices": [],
+                "providedServices": [],
+                "backgroundEffects": ["fixture.work-review.refresh"],
+                "contributions": [{
+                    "family": "panel",
+                    "id": "fixture.work-review.panel",
+                    "schemaVersion": 1,
                 }],
-            },
-            ui_contributions: Vec::new(),
+            })),
             requested_grants: Vec::new(),
             native_adapters: Vec::new(),
             configuration_schema: Some(json!({"type": "object"})),
@@ -2069,30 +1851,6 @@ mod tests {
 
     fn fixture_archive(provenance: &str) -> RuntimeArtifactArchive {
         RuntimeArtifactArchive::new(archive_files(&fixture_manifest(provenance))).unwrap()
-    }
-
-    #[test]
-    fn contribution_ids_follow_their_public_domain_contracts() {
-        let mut application = fixture_manifest("/fixture/source").application;
-        application.contributions = vec![RuntimeContributionDeclaration {
-            family: RuntimeContributionFamily::TerminalPresentation,
-            id: "thin-terminal".to_string(),
-            schema_version: 1,
-        }];
-        assert!(application.validate().is_ok());
-
-        application.contributions[0].id = "Thin Terminal".to_string();
-        assert_eq!(
-            application.validate().unwrap_err().code,
-            ARTIFACT_MANIFEST_INVALID
-        );
-
-        application.contributions[0].family = RuntimeContributionFamily::Panel;
-        application.contributions[0].id = "thin-terminal".to_string();
-        assert_eq!(
-            application.validate().unwrap_err().code,
-            ARTIFACT_MANIFEST_INVALID
-        );
     }
 
     #[test]
@@ -2277,10 +2035,6 @@ mod tests {
             manifest_schema in any::<u8>(),
             host_api_major in any::<u8>(),
             required_api_major in any::<u8>(),
-            service_version in any::<u8>(),
-            host_service_version in any::<u8>(),
-            contribution_version in any::<u8>(),
-            host_contribution_version in any::<u8>(),
             host_api_available in any::<bool>(),
             malformed_api_range in any::<bool>(),
         ) {
@@ -2292,14 +2046,7 @@ mod tests {
                 format!("={required_api_major}.0.0")
             };
             if manifest.schema_version == 1 {
-                manifest.application = RuntimeApplicationManifest::default();
-            } else {
-                manifest.application.required_services = vec![RuntimeServiceDeclaration {
-                    id: "fixture.required-service".to_string(),
-                    version: u32::from(service_version) + 1,
-                }];
-                manifest.application.contributions[0].schema_version =
-                    u32::from(contribution_version) + 1;
+                manifest.application = None;
             }
             let inspected = RuntimeArtifactArchive::new(archive_files(&manifest))
                 .unwrap()
@@ -2314,22 +2061,42 @@ mod tests {
             let artifact = inspected.unwrap();
             let context = ArtifactPreflightContext {
                 host_api_version: host_api_available.then(|| format!("{host_api_major}.0.0")),
-                service_versions: BTreeMap::from([(
-                    "fixture.required-service".to_string(),
-                    u32::from(host_service_version) + 1,
-                )]),
-                contribution_schema_versions: BTreeMap::from([(
-                    "panel".to_string(),
-                    u32::from(host_contribution_version) + 1,
-                )]),
                 ..ArtifactPreflightContext::default()
             };
-            let expected = host_api_available
-                && host_api_major == required_api_major
-                && (manifest.schema_version == 1
-                    || (service_version == host_service_version
-                        && contribution_version == host_contribution_version));
+            let expected = host_api_available && host_api_major == required_api_major;
             prop_assert_eq!(context.validate_requirements(&artifact).is_ok(), expected);
+        }
+
+        #[test]
+        fn architecture_artifact_application_payload_is_opaque_to_native_admission(
+            role_suffix in "[a-z0-9-]{0,32}",
+            family_suffix in "[a-z0-9-]{0,32}",
+            id_suffix in "[a-z0-9-]{0,32}",
+        ) {
+            let mut manifest = fixture_manifest("/fixture/source");
+            let payload = json!({
+                "schemaVersion": 999,
+                "role": format!("future-product-role-{role_suffix}"),
+                "requiredServices": [{ "id": "not a scoped id", "version": 0 }],
+                "providedServices": [],
+                "backgroundEffects": ["not a scoped id"],
+                "contributions": [{
+                    "family": format!("future-contribution-family-{family_suffix}"),
+                    "id": format!("not-a-contribution-id-{id_suffix}"),
+                    "schemaVersion": 0,
+                }],
+            });
+            manifest.application = Some(payload.clone());
+            let artifact = RuntimeArtifactArchive::new(archive_files(&manifest))
+                .unwrap()
+                .inspect()
+                .unwrap();
+            let context = ArtifactPreflightContext {
+                host_api_version: Some("1.0.0".to_string()),
+                ..ArtifactPreflightContext::default()
+            };
+            prop_assert!(context.validate_requirements(&artifact).is_ok());
+            prop_assert_eq!(artifact.manifest.application, Some(payload));
         }
     }
 }

@@ -1,4 +1,4 @@
-import type { CodingAssistant, RestorableAssistantProvider } from "./types";
+import type { CodingAssistant } from "./types";
 
 export const CODING_ASSISTANTS: readonly CodingAssistant[] = [
   { id: "claude", name: "Claude Code", command: "claude", yoloFlag: "--dangerously-skip-permissions", modelFlag: "--model" },
@@ -15,7 +15,3 @@ export const ASSISTANT_INSTALL_URLS: Readonly<Record<string, string>> = {
   opencode: "https://opencode.ai/",
   pi: "https://pi.dev/",
 };
-
-export function restorableProvider(id: string): RestorableAssistantProvider | null {
-  return id === "claude" || id === "codex" ? id : null;
-}

@@ -1,6 +1,5 @@
 {
-  "schema_version": "source-architecture/v1",
-  "composition_source": "core/frontend/host/enabledModules.ts",
+  "schema_version": "source-architecture/v2",
   "modules": [
     {
       "id": "assistants",
@@ -23,19 +22,20 @@
           "backend": null
         }
       },
-      "composition": null,
       "frontend_source": {
         "entrypoint": "modules/assistants/frontend/src/index.ts",
         "import_closure": [
           "modules/assistants/frontend/src/assistantLaunchClient.ts",
+          "modules/assistants/frontend/src/assistantProviderPolicy.ts",
           "modules/assistants/frontend/src/branding.ts",
           "modules/assistants/frontend/src/catalog.ts",
           "modules/assistants/frontend/src/index.ts",
+          "modules/assistants/frontend/src/pluginContributions.ts",
           "modules/assistants/frontend/src/runtime.ts",
           "modules/assistants/frontend/src/types.ts"
         ],
         "entrypoint_effects": [],
-        "source_file_count": 9,
+        "source_file_count": 11,
         "direct_tauri_imports": []
       },
       "native_crates": []
@@ -61,19 +61,19 @@
           "backend": null
         }
       },
-      "composition": null,
       "frontend_source": {
         "entrypoint": "modules/commands/frontend/src/index.ts",
         "import_closure": [
           "modules/commands/frontend/src/CommandsPanel.tsx",
           "modules/commands/frontend/src/commandsDataClient.ts",
           "modules/commands/frontend/src/index.ts",
+          "modules/commands/frontend/src/pluginContributions.ts",
           "modules/commands/frontend/src/runtime.ts",
           "modules/commands/frontend/src/store.ts",
           "modules/commands/frontend/src/types.ts"
         ],
         "entrypoint_effects": [],
-        "source_file_count": 7,
+        "source_file_count": 8,
         "direct_tauri_imports": []
       },
       "native_crates": []
@@ -99,17 +99,18 @@
           "backend": null
         }
       },
-      "composition": null,
       "frontend_source": {
         "entrypoint": "modules/git/frontend/src/index.ts",
         "import_closure": [
           "modules/git/frontend/src/gitClient.ts",
+          "modules/git/frontend/src/gitPreferences.ts",
           "modules/git/frontend/src/index.ts",
+          "modules/git/frontend/src/pluginContributions.ts",
           "modules/git/frontend/src/store.ts",
           "modules/git/frontend/src/types.ts"
         ],
         "entrypoint_effects": [],
-        "source_file_count": 22,
+        "source_file_count": 24,
         "direct_tauri_imports": []
       },
       "native_crates": []
@@ -135,15 +136,47 @@
           "backend": null
         }
       },
-      "composition": null,
       "frontend_source": {
         "entrypoint": "modules/ports/frontend/src/index.ts",
         "import_closure": [
           "modules/ports/frontend/src/index.ts",
+          "modules/ports/frontend/src/pluginContributions.ts",
           "modules/ports/frontend/src/types.ts"
         ],
         "entrypoint_effects": [],
-        "source_file_count": 3,
+        "source_file_count": 4,
+        "direct_tauri_imports": []
+      },
+      "native_crates": []
+    },
+    {
+      "id": "runtime-operations",
+      "manifest_path": "modules/runtime-operations/module.yaml",
+      "manifest": {
+        "schema_version": 1,
+        "id": "runtime-operations",
+        "frontend": {
+          "package": "@shipctl/module-runtime-operations",
+          "path": "modules/runtime-operations/frontend",
+          "delivery": "runtime-artifact",
+          "artifact": "modules/runtime-operations/artifact"
+        },
+        "backend": null,
+        "tauri": null,
+        "messages": null,
+        "profile": null,
+        "tests": {
+          "frontend": "modules/runtime-operations/frontend/tests",
+          "backend": null
+        }
+      },
+      "frontend_source": {
+        "entrypoint": "modules/runtime-operations/frontend/src/pluginContributions.ts",
+        "import_closure": [
+          "modules/runtime-operations/frontend/src/pluginContributions.ts"
+        ],
+        "entrypoint_effects": [],
+        "source_file_count": 1,
         "direct_tauri_imports": []
       },
       "native_crates": []
@@ -169,12 +202,12 @@
           "backend": null
         }
       },
-      "composition": null,
       "frontend_source": {
         "entrypoint": "modules/semantic-terminal/frontend/src/index.ts",
         "import_closure": [
           "modules/semantic-terminal/frontend/src/browserInteraction.ts",
           "modules/semantic-terminal/frontend/src/index.ts",
+          "modules/semantic-terminal/frontend/src/pluginContributions.ts",
           "modules/semantic-terminal/frontend/src/presentation/keybindingPresets.ts",
           "modules/semantic-terminal/frontend/src/presentation/semanticTerminalAttachmentController.ts",
           "modules/semantic-terminal/frontend/src/presentation/semanticTerminalBrowserSession.ts",
@@ -212,7 +245,7 @@
           "modules/semantic-terminal/frontend/src/terminalPerformanceMetrics.ts"
         ],
         "entrypoint_effects": [],
-        "source_file_count": 39,
+        "source_file_count": 40,
         "direct_tauri_imports": []
       },
       "native_crates": []
@@ -238,18 +271,18 @@
           "backend": null
         }
       },
-      "composition": null,
       "frontend_source": {
         "entrypoint": "modules/skills/frontend/src/index.ts",
         "import_closure": [
           "modules/skills/frontend/src/catalog.ts",
           "modules/skills/frontend/src/index.ts",
+          "modules/skills/frontend/src/pluginContributions.ts",
           "modules/skills/frontend/src/skillInstallationClient.ts",
           "modules/skills/frontend/src/store.ts",
           "modules/skills/frontend/src/types.ts"
         ],
         "entrypoint_effects": [],
-        "source_file_count": 5,
+        "source_file_count": 6,
         "direct_tauri_imports": []
       },
       "native_crates": []
@@ -275,15 +308,15 @@
           "backend": null
         }
       },
-      "composition": null,
       "frontend_source": {
         "entrypoint": "modules/thin-terminal/frontend/src/index.ts",
         "import_closure": [
           "modules/thin-terminal/frontend/src/index.ts",
-          "modules/thin-terminal/frontend/src/oscNotification.ts"
+          "modules/thin-terminal/frontend/src/oscNotification.ts",
+          "modules/thin-terminal/frontend/src/pluginContributions.ts"
         ],
         "entrypoint_effects": [],
-        "source_file_count": 5,
+        "source_file_count": 6,
         "direct_tauri_imports": []
       },
       "native_crates": []
@@ -309,17 +342,18 @@
           "backend": null
         }
       },
-      "composition": null,
       "frontend_source": {
         "entrypoint": "modules/todos/frontend/src/index.ts",
         "import_closure": [
           "modules/todos/frontend/src/index.ts",
+          "modules/todos/frontend/src/pluginContributions.ts",
           "modules/todos/frontend/src/store.ts",
           "modules/todos/frontend/src/todoDocuments.ts",
+          "modules/todos/frontend/src/todoPreferences.ts",
           "modules/todos/frontend/src/types.ts"
         ],
         "entrypoint_effects": [],
-        "source_file_count": 8,
+        "source_file_count": 10,
         "direct_tauri_imports": []
       },
       "native_crates": []
@@ -403,26 +437,26 @@
           "backend": null
         }
       },
-      "composition": null,
       "frontend_source": {
         "entrypoint": "modules/usage/frontend/src/index.ts",
         "import_closure": [
           "modules/usage/frontend/src/index.ts",
           "modules/usage/frontend/src/ingestCompleted.ts",
+          "modules/usage/frontend/src/pluginContributions.ts",
           "modules/usage/frontend/src/types.ts",
           "modules/usage/frontend/src/usagePricing.ts",
           "modules/usage/frontend/src/usageProjection.ts",
           "modules/usage/frontend/src/usageSettingsDataClient.ts",
           "modules/usage/frontend/src/usageSettingsStore.ts",
+          "modules/usage/frontend/src/usageSourcePolicy.ts",
           "modules/usage/frontend/src/usageSourcesClient.ts",
           "modules/usage/frontend/src/usageStore.ts"
         ],
         "entrypoint_effects": [],
-        "source_file_count": 14,
+        "source_file_count": 16,
         "direct_tauri_imports": []
       },
       "native_crates": []
     }
-  ],
-  "legacy_composition": []
+  ]
 }

@@ -6,15 +6,35 @@ import { fileURLToPath } from "node:url";
 import type {
   ModuleActivationContext,
   ModuleActivationId,
+  PluginContributionRegistries,
   ShipctlModule,
 } from "@shipctl/module-api";
 import { createServer, type ViteDevServer } from "vite";
+
+import type { WorkspaceContributionSource } from "../workspaceContributionCatalog.ts";
 
 type WorkspaceContributionCatalogModule = typeof import("../workspaceContributionCatalog.ts");
 type AcceptedWorkspaceContributionEntriesModule = typeof import(
   "../acceptedWorkspaceContributionEntries.ts"
 );
-type WorkspaceProfilesModule = typeof import("../../workspace/profiles.ts");
+type CommandsContributionsModule = typeof import(
+  "../../../../modules/commands/frontend/src/pluginContributions.ts"
+);
+type AssistantsContributionsModule = typeof import(
+  "../../../../modules/assistants/frontend/src/pluginContributions.ts"
+);
+type PortsContributionsModule = typeof import(
+  "../../../../modules/ports/frontend/src/pluginContributions.ts"
+);
+type TodosContributionsModule = typeof import(
+  "../../../../modules/todos/frontend/src/pluginContributions.ts"
+);
+type GitContributionsModule = typeof import(
+  "../../../../modules/git/frontend/src/pluginContributions.ts"
+);
+type UsageContributionsModule = typeof import(
+  "../../../../modules/usage/frontend/src/pluginContributions.ts"
+);
 
 let vite: ViteDevServer;
 let WorkspaceContributionCatalog: WorkspaceContributionCatalogModule["WorkspaceContributionCatalog"];
@@ -22,9 +42,9 @@ let WorkspaceContributionCatalogError: WorkspaceContributionCatalogModule["Works
 let activeWorkspaceContributionEntries: AcceptedWorkspaceContributionEntriesModule["activeWorkspaceContributionEntries"];
 let canvasSurfaceComponentKey: AcceptedWorkspaceContributionEntriesModule["canvasSurfaceComponentKey"];
 let currentCanvasSurfaceActivation: AcceptedWorkspaceContributionEntriesModule["currentCanvasSurfaceActivation"];
-let createCurrentCanvasWorkspaceCatalog: WorkspaceProfilesModule["createCurrentCanvasWorkspaceCatalog"];
-let CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID: WorkspaceProfilesModule["CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID"];
+let createDefaultWorkspaceCatalog: typeof import("../../workspace/profiles.ts")["createDefaultWorkspaceCatalog"];
 let shippedViewModules: readonly ShipctlModule[];
+let shippedRuntimeContributions: readonly WorkspaceContributionSource[];
 
 before(async () => {
   vite = await createServer({
@@ -43,12 +63,9 @@ before(async () => {
   } = await vite.ssrLoadModule(
     "/core/frontend/host/acceptedWorkspaceContributionEntries.ts",
   ) as AcceptedWorkspaceContributionEntriesModule);
-  ({
-    createCurrentCanvasWorkspaceCatalog,
-    CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
-  } = await vite.ssrLoadModule(
+  ({ createDefaultWorkspaceCatalog } = await vite.ssrLoadModule(
     "/core/frontend/workspace/profiles.ts",
-  ) as WorkspaceProfilesModule);
+  ) as typeof import("../../workspace/profiles.ts"));
   const [
     assistants,
     commands,
@@ -58,19 +75,62 @@ before(async () => {
     usage,
   ] = await Promise.all([
     vite.ssrLoadModule("/modules/assistants/frontend/src/index.ts"),
-    vite.ssrLoadModule("/modules/commands/frontend/src/index.ts"),
+    vite.ssrLoadModule("/modules/commands/frontend/src/pluginContributions.ts"),
     vite.ssrLoadModule("/modules/git/frontend/src/index.ts"),
-    vite.ssrLoadModule("/modules/ports/frontend/src/index.ts"),
-    vite.ssrLoadModule("/modules/todos/frontend/src/index.ts"),
-    vite.ssrLoadModule("/modules/usage/frontend/src/index.ts"),
+    vite.ssrLoadModule("/modules/ports/frontend/src/pluginContributions.ts"),
+    vite.ssrLoadModule("/modules/todos/frontend/src/pluginContributions.ts"),
+    vite.ssrLoadModule("/modules/usage/frontend/src/pluginContributions.ts"),
   ]);
-  shippedViewModules = [
-    assistants.assistantsModule,
-    commands.commandsModule,
-    git.gitModule,
-    ports.portsModule,
-    todos.todosModule,
-    usage.usageModule,
+  const assistantsContributions = assistants as AssistantsContributionsModule;
+  const commandsContributions = commands as CommandsContributionsModule;
+  const gitContributions = git as GitContributionsModule;
+  const portsContributions = ports as PortsContributionsModule;
+  const todosContributions = todos as TodosContributionsModule;
+  const usageContributions = usage as UsageContributionsModule;
+  shippedViewModules = [];
+  shippedRuntimeContributions = [
+    {
+      moduleId: assistantsContributions.ASSISTANTS_MODULE_ID,
+      activation: activation(assistantsContributions.ASSISTANTS_MODULE_ID),
+      panels: assistantsContributions.assistantsContributions.panels,
+    },
+    {
+      moduleId: commandsContributions.COMMANDS_MODULE_ID,
+      activation: activation(commandsContributions.COMMANDS_MODULE_ID),
+      commands: commandsContributions.commandsContributions.commands,
+      panels: commandsContributions.commandsContributions.panels,
+      projectNavigation: commandsContributions.commandsContributions.projectNavigation,
+    },
+    {
+      moduleId: portsContributions.PORTS_MODULE_ID,
+      activation: activation(portsContributions.PORTS_MODULE_ID),
+      globalSurfaces: portsContributions.portsContributions.globalSurfaces,
+      globalNavigation: portsContributions.portsContributions.globalNavigation,
+    },
+    {
+      moduleId: todosContributions.TODOS_MODULE_ID,
+      activation: activation(todosContributions.TODOS_MODULE_ID),
+      panels: todosContributions.todosContributions.panels,
+      projectNavigation: todosContributions.todosContributions.projectNavigation,
+      settings: todosContributions.todosContributions.settings,
+    },
+    {
+      moduleId: gitContributions.GIT_MODULE_ID,
+      activation: activation(gitContributions.GIT_MODULE_ID),
+      panels: gitContributions.gitContributions.panels,
+      projectNavigation: gitContributions.gitContributions.projectNavigation,
+      projectLayout: gitContributions.gitContributions.projectLayout,
+      projectActions: gitContributions.gitContributions.projectActions,
+      settings: gitContributions.gitContributions.settings,
+    },
+    {
+      moduleId: usageContributions.USAGE_MODULE_ID,
+      activation: activation(usageContributions.USAGE_MODULE_ID),
+      globalSurfaces: usageContributions.usageContributions.globalSurfaces,
+      globalNavigation: usageContributions.usageContributions.globalNavigation,
+      sidebar: usageContributions.usageContributions.sidebars,
+      settings: usageContributions.usageContributions.settings,
+    },
   ];
 });
 
@@ -90,9 +150,30 @@ function activation(moduleId: string, revision = "1"): ModuleActivationContext {
       has: () => false,
       require: () => { throw new Error("fixture does not use semantic services"); },
     },
+    notices: { push: () => undefined },
+    contributions: EMPTY_CONTRIBUTIONS,
     own: () => { throw new Error("fixture does not own resources"); },
   };
 }
+
+const EMPTY_CONTRIBUTIONS: PluginContributionRegistries = Object.freeze({
+  commands: { register: () => { throw new Error("fixture does not register contributions"); } },
+  configuration: { register: () => { throw new Error("fixture does not register contributions"); } },
+  globalNavigation: { register: () => { throw new Error("fixture does not register contributions"); } },
+  globalSurfaces: { register: () => { throw new Error("fixture does not register contributions"); } },
+  messages: { register: () => { throw new Error("fixture does not register contributions"); } },
+  panels: { register: () => { throw new Error("fixture does not register contributions"); } },
+  projectActions: { register: () => { throw new Error("fixture does not register contributions"); } },
+  projectFacts: { register: () => { throw new Error("fixture does not register contributions"); } },
+  projectImports: { register: () => { throw new Error("fixture does not register contributions"); } },
+  projectLayouts: { register: () => { throw new Error("fixture does not register contributions"); } },
+  projectNavigation: { register: () => { throw new Error("fixture does not register contributions"); } },
+  scheduledTasks: { register: () => { throw new Error("fixture does not register contributions"); } },
+  settings: { register: () => { throw new Error("fixture does not register contributions"); } },
+  sidebars: { register: () => { throw new Error("fixture does not register contributions"); } },
+  skillsProviders: { register: () => { throw new Error("fixture does not register contributions"); } },
+  terminalPresentations: { register: () => { throw new Error("fixture does not register contributions"); } },
+});
 
 const fixtureModule: ShipctlModule = {
   id: "shipctl.fixture",
@@ -178,13 +259,18 @@ function hostContributions(context: ModuleActivationContext) {
 function catalogFor(
   modules: readonly ShipctlModule[] = [fixtureModule],
   registryRevision = 7,
+  runtimeContributions: readonly WorkspaceContributionSource[] = [],
 ) {
-  const contexts = new Map(modules.map((module) => [module.id, activation(module.id)]));
+  const contexts = new Map([
+    ...modules.map((module) => [module.id, activation(module.id)] as const),
+    ...runtimeContributions.map((source) => [source.moduleId, source.activation] as const),
+  ]);
   const core = activation("core");
   return WorkspaceContributionCatalog.create({
     registryRevision,
     modules,
     activationContextsByModule: contexts,
+    runtimeContributions,
     hostContributions: hostContributions(core),
   });
 }
@@ -259,7 +345,7 @@ test("catalog admits one activation-owned family and keeps renderer ports privat
 });
 
 test("catalog admits every current shipped view contributor", () => {
-  const catalog = catalogFor(shippedViewModules, 8);
+  const catalog = catalogFor(shippedViewModules, 8, shippedRuntimeContributions);
   assert.deepEqual(
     catalog.workspaceCatalog().definitions.map((definition) => definition.viewTypeId),
     [
@@ -274,7 +360,8 @@ test("catalog admits every current shipped view contributor", () => {
   );
   assert.equal(
     catalog.inspect().contributions.every((record) => record.ownerModuleId === "core"
-      || shippedViewModules.some((module) => module.id === record.ownerModuleId)),
+      || shippedViewModules.some((module) => module.id === record.ownerModuleId)
+      || shippedRuntimeContributions.some((source) => source.moduleId === record.ownerModuleId)),
     true,
   );
 });
@@ -430,27 +517,14 @@ test("accepted entry selection rejects a stale activation after replacement or r
   );
 });
 
-test("catalog admits the host compatibility definition without a module renderer", () => {
-  const compatibility = createCurrentCanvasWorkspaceCatalog();
-  const catalog = catalogFor().withHostWorkspaceDefinitions(compatibility.definitions);
+test("default workspace catalog introduces no private host compatibility definition", () => {
+  const defaults = createDefaultWorkspaceCatalog();
+  const catalog = catalogFor().withHostWorkspaceDefinitions(defaults.definitions);
 
-  assert.deepEqual(
-    catalog.workspaceCatalog().definitions.find(
-      (definition) => definition.viewTypeId === CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
-    ),
-    compatibility.definitions[0],
-  );
-  assert.equal(catalog.renderer(CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID), undefined);
+  assert.deepEqual(defaults.definitions, []);
   assert.equal(
-    catalog.withRegistryRevision(8).workspaceCatalog().definitions.some(
-      (definition) => definition.viewTypeId === CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
-    ),
-    true,
-  );
-  assert.throws(
-    () => catalog.withHostWorkspaceDefinitions(compatibility.definitions),
-    (error) => error instanceof WorkspaceContributionCatalogError
-      && error.code === "duplicate-workspace-view",
+    catalog.workspaceCatalog().definitions.some((definition) => definition.ownerModuleId === "shipctl.host"),
+    false,
   );
 });
 

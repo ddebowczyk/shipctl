@@ -234,9 +234,36 @@ const properties = [
     library: "proptest",
     version: "1.11.0",
     classifications: {
-      dimension: ["api", "manifest", "service", "contribution", "malformed"],
+      dimension: ["api", "artifact-protocol", "malformed"],
       outcome: ["compatible", "incompatible"],
     },
+  },
+  {
+    propertyId: "PROP-H-NATIVE-PLUGIN-SEMANTICS-001",
+    phaseId: "phase-h",
+    testId: "architecture.artifact-application-payload-opaque.property",
+    language: "rust",
+    library: "proptest",
+    version: "1.11.0",
+    classifications: {
+      outcome: ["opaque-native-admission", "generic-preflight"],
+      product_payload: ["future-role", "future-contribution", "malformed-value"],
+    },
+    deletionGates: ["DELETE-H-NATIVE-PLUGIN-SEMANTICS"],
+  },
+  {
+    propertyId: "PROP-H-POST-PACKAGE-PLUGIN-DEPLOY-001",
+    phaseId: "phase-h",
+    testId: "architecture.post-package-plugin-deployment.property",
+    language: "typescript",
+    library: "fast-check",
+    version: fastCheckVersion,
+    classifications: {
+      delivery: ["external-artifact", "digest-qualified-url", "dynamic-import"],
+      asset: ["entry", "style", "no-host-mutation"],
+      lifecycle: ["runtime-catalog", "passive-load", "admission"],
+    },
+    deletionGates: ["DELETE-H-NATIVE-PLUGIN-SEMANTICS"],
   },
   {
     propertyId: "PROP-E-HEADLESS-001",
@@ -255,12 +282,12 @@ const evidenceFiles = [];
 for (const property of properties) {
   const evidence = propertyEvidence({
     ...property,
-    phaseId: "phase-e",
+    phaseId: property.phaseId ?? "phase-e",
     repository,
     seed,
     replayCommand,
     result: "pass",
-    deletionGates: ["DELETE-E-STATIC-IMPORT"],
+    deletionGates: property.deletionGates ?? ["DELETE-E-STATIC-IMPORT"],
   });
   const file = path.join(evidenceDirectory, `${property.propertyId}.evidence.json`);
   await writePropertyEvidence({ repositoryRoot, file, evidence });

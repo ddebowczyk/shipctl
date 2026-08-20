@@ -251,7 +251,6 @@ fn runtime_artifact(
             "backgroundEffects": [],
             "contributions": []
         },
-        "uiContributions": [],
         "requestedGrants": [],
         "nativeAdapters": [],
         "peerDependencies": {},

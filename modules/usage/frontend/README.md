@@ -5,8 +5,9 @@ alias review, the semantic Usage Sources client, global stores, quota helpers,
 the Usage panel, the sidebar utilization widget, settings, styles, refresh
 scheduling, and the ingestion-event lifecycle.
 
-The host imports only the public `usageModule` contribution from
-`@shipctl/module-usage`. The persisted global surface ID is `core.usage`.
+The runtime artifact imports the direct plugin declarations from this package;
+its activation owns every registered contribution and the Usage Sources
+observer. The persisted global surface ID is `core.usage`.
 
 Usage settings are read and replaced through the host's generic global-data
 port under the `usage` key. This package owns their schema, defaults,

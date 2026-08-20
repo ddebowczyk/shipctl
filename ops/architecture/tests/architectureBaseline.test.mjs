@@ -154,7 +154,7 @@ function ordered(modules, field) {
     .map(({ item }) => item);
 }
 
-test("architecture.legacy-composition.property", async () => {
+test("architecture.module-composition.property", async () => {
   const vite = await createServer({
     configFile: false,
     optimizeDeps: { noDiscovery: true },

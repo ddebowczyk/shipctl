@@ -135,7 +135,7 @@ function availability(value: unknown): WorkspaceViewAvailability {
   return invalid("Workspace availability is invalid.");
 }
 
-function instance(value: unknown): WorkspaceViewInstance {
+function instance(value: unknown, legacy: boolean): WorkspaceViewInstance {
   const candidate = record(value, "Workspace instance", [
     "instanceId",
     "viewTypeId",
@@ -143,9 +143,9 @@ function instance(value: unknown): WorkspaceViewInstance {
     "ownerActivationId",
     "resource",
     "label",
-    "stateRef",
     "availability",
     "lifecycle",
+    ...(legacy ? ["stateRef"] : []),
   ]);
   if (
     !hasIdentity(candidate.instanceId)
@@ -156,7 +156,7 @@ function instance(value: unknown): WorkspaceViewInstance {
     || !hasIdentity(candidate.ownerActivationId)
     || (candidate.label !== null && !hasIdentity(candidate.label))
     || (candidate.lifecycle !== "placed" && candidate.lifecycle !== "hidden")
-    || !jsonSafe(candidate.stateRef)
+    || (legacy && !jsonSafe(candidate.stateRef))
   ) invalid("Workspace instance is invalid.");
   return cloneAndFreeze({
     instanceId: candidate.instanceId,
@@ -165,7 +165,6 @@ function instance(value: unknown): WorkspaceViewInstance {
     ownerActivationId: candidate.ownerActivationId as ModuleActivationId,
     resource: resource(candidate.resource),
     label: candidate.label,
-    stateRef: candidate.stateRef,
     availability: availability(candidate.availability),
     lifecycle: candidate.lifecycle,
   });
@@ -287,26 +286,27 @@ function placedIds(documentRoot: WorkspaceNode | null, floatingStacks: readonly 
 
 /** Parses, normalizes, clones, and freezes a semantic document. */
 export function parseUiWorkspaceDocument(value: unknown): UiWorkspaceDocument {
+  const legacy = isPlainRecord(value) && value.schemaVersion === 1;
   const candidate = record(value, "Workspace document", [
     "schemaVersion",
     "workspaceId",
-    "profileId",
     "instances",
     "root",
     "floating",
     "maximizedStackId",
+    ...(legacy ? ["profileId"] : []),
   ]);
   if (
-    candidate.schemaVersion !== WORKSPACE_DOCUMENT_SCHEMA_VERSION
+    (candidate.schemaVersion !== WORKSPACE_DOCUMENT_SCHEMA_VERSION && candidate.schemaVersion !== 1)
     || !hasIdentity(candidate.workspaceId)
-    || !hasIdentity(candidate.profileId)
+    || (legacy && !hasIdentity(candidate.profileId))
     || !Array.isArray(candidate.instances)
     || !Array.isArray(candidate.floating)
     || (candidate.root !== null && !isPlainRecord(candidate.root))
     || (candidate.maximizedStackId !== null && !hasIdentity(candidate.maximizedStackId))
   ) invalid("Workspace document is invalid.");
 
-  const instances = candidate.instances.map(instance)
+  const instances = candidate.instances.map((item) => instance(item, legacy))
     .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
   if (new Set(instances.map((item) => item.instanceId)).size !== instances.length) {
     invalid("Workspace instance identities are duplicated.");
@@ -336,7 +336,6 @@ export function parseUiWorkspaceDocument(value: unknown): UiWorkspaceDocument {
   return cloneAndFreeze({
     schemaVersion: WORKSPACE_DOCUMENT_SCHEMA_VERSION,
     workspaceId: candidate.workspaceId,
-    profileId: candidate.profileId,
     instances,
     root,
     floating: floatingStacks,

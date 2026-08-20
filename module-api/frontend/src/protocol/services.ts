@@ -32,6 +32,15 @@ export interface ModuleNoticeOptions {
   readonly durationMs?: number;
 }
 
+/**
+ * Activation-local feedback channel supplied by the trusted desktop host.
+ * It is not a privileged semantic service: modules use it only to surface
+ * bounded, user-facing results from their already-authorized work.
+ */
+export interface ModuleNoticeSink {
+  push(notice: ModuleNotice, options?: ModuleNoticeOptions): void;
+}
+
 export interface ModuleTerminalSessionIcon {
   readonly src: string;
   readonly alt?: string;

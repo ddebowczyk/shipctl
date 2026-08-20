@@ -6,7 +6,7 @@ version: 1.0.0
 title: Namespaced durable plugin data
 status: implemented
 layer: native-kernel
-consumers: [commands, assistants, usage]
+consumers: [commands, assistants, todos, usage, git]
 current_implementations:
   - module-api/frontend/src/protocol/pluginData.ts
   - module-api/frontend/src/testing/pluginData.ts
@@ -14,6 +14,8 @@ current_implementations:
   - core/tauri/src/plugin_data.rs
   - core/frontend/platform/pluginData.ts
   - modules/commands/frontend/src/commandsDataClient.ts
+  - modules/todos/frontend/src/todoPreferences.ts
+  - modules/git/frontend/src/gitPreferences.ts
   - modules/usage/frontend/src/usageSettingsDataClient.ts
 target_owners:
   provider: core/backend/src/plugin_data
@@ -50,3 +52,4 @@ property_ids:
   - PROP-D-PARITY-001
   - PROP-D-AUTHORITY-001
   - PROP-D-OWNERSHIP-001
+  - PROP-E-GIT-PARITY-001

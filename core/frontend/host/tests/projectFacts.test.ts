@@ -10,16 +10,16 @@ import type {
 import { createServer, type ViteDevServer } from "vite";
 
 type ProjectFactsModule = typeof import("../projectFacts.ts");
-type ModuleComposition = typeof import("../moduleComposition.ts");
-type GitModule = typeof import("../../../../modules/git/frontend/src/index.ts");
+type GitContributionsModule = typeof import(
+  "../../../../modules/git/frontend/src/pluginContributions.ts"
+);
 type GitStoreModule = typeof import("../../../../modules/git/frontend/src/store.ts");
 
 let vite: ViteDevServer;
 let refreshProjectFacts: ProjectFactsModule["refreshProjectFacts"];
 let resolveProjectFacts: ProjectFactsModule["resolveProjectFacts"];
 let subscribeProjectFacts: ProjectFactsModule["subscribeProjectFacts"];
-let enabledProjectFactsProvider: ModuleComposition["enabledProjectFactsProvider"];
-let gitModule: GitModule["gitModule"];
+let gitContributions: GitContributionsModule["gitContributions"];
 let useGitStore: GitStoreModule["useGitStore"];
 
 before(async () => {
@@ -36,12 +36,9 @@ before(async () => {
   } = await vite.ssrLoadModule(
     "/core/frontend/host/projectFacts.ts",
   ) as ProjectFactsModule);
-  ({ enabledProjectFactsProvider } = await vite.ssrLoadModule(
-    "/core/frontend/host/moduleComposition.ts",
-  ) as ModuleComposition);
-  ({ gitModule } = await vite.ssrLoadModule(
-    "/modules/git/frontend/src/index.ts",
-  ) as GitModule);
+  ({ gitContributions } = await vite.ssrLoadModule(
+    "/modules/git/frontend/src/pluginContributions.ts",
+  ) as GitContributionsModule);
   ({ useGitStore } = await vite.ssrLoadModule(
     "/modules/git/frontend/src/store.ts",
   ) as GitStoreModule);
@@ -167,7 +164,7 @@ test("refresh and subscription failures do not escape into host lifecycle", asyn
   assert.doesNotThrow(cleanup);
 });
 
-test("an admitted Git module maps revision and lineage into stable generic facts", () => {
+test("an admitted direct Git contribution maps revision and lineage into stable generic facts", () => {
   useGitStore.setState({
     projectGitStatus: {
       [project.path]: {
@@ -183,7 +180,8 @@ test("an admitted Git module maps revision and lineage into stable generic facts
       },
     },
   });
-  const provider = enabledProjectFactsProvider([gitModule]);
+  const provider = gitContributions.projectFacts[0];
+  assert.ok(provider);
   const first = resolveProjectFacts(project, services, provider);
   const second = resolveProjectFacts(project, services, provider);
 

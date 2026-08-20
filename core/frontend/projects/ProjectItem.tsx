@@ -1,10 +1,8 @@
 import { useState, useCallback, useMemo } from "react";
 import type {
-  ModuleActivationContext,
   ModuleActivationId,
   ModuleId,
   ProjectAction,
-  ProjectActionContribution,
   ProjectSurfaceAction,
 } from "@shipctl/module-api";
 import type { RepoInfo, RepoGroup } from "@shipctl/core/platform";
@@ -30,11 +28,8 @@ import { getErrorMessage } from "@shipctl/core/platform";
 import { handleActionKey } from "@shipctl/core/shared";
 import { revealInFinder } from "@shipctl/core/platform";
 import {
-  useModuleProjectActions,
-} from "@shipctl/core/host";
-import type { ActivatedWorkspaceContribution } from "@shipctl/core/host";
-import {
   ModuleProjectActionSurface,
+  useAcceptedModuleProjectActions,
 } from "@shipctl/core/host/views";
 import { ActivityIndicator, getAggregateActivityStatus } from "@shipctl/core/shared/views";
 
@@ -52,10 +47,6 @@ interface ProjectItemProps {
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
   onNewGroupForRepo: (repoPath: string) => void;
   isDropTarget: boolean;
-  projectActionContributions: readonly ActivatedWorkspaceContribution<
-    ProjectActionContribution
-  >[];
-  moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
 export default function ProjectItem({
@@ -72,8 +63,6 @@ export default function ProjectItem({
   onMoveToGroup,
   onNewGroupForRepo,
   isDropTarget,
-  projectActionContributions,
-  moduleActivations,
 }: ProjectItemProps) {
   const activityStatus = getAggregateActivityStatus({
     hasCrash: activity?.hasCrash,
@@ -94,11 +83,7 @@ export default function ProjectItem({
     path: repo.path,
     groupId: repo.group,
   }), [repo.group, repo.name, repo.path]);
-  const projectActions = useModuleProjectActions(
-    projectRef,
-    moduleActivations,
-    projectActionContributions,
-  );
+  const projectActions = useAcceptedModuleProjectActions(projectRef);
   const preferredEditor = useEditorStore((s) => s.settings.preferredEditor);
   const pushNotice = useNoticeStore((s) => s.pushNotice);
   const preferredEditorLabel = getEditorLabel(preferredEditor);
@@ -283,7 +268,6 @@ export default function ProjectItem({
             addProject: onAddProject,
             moveProjectToGroup: onMoveToGroup,
           }}
-          moduleActivations={moduleActivations}
         />
       )}
     </>

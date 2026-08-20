@@ -15,6 +15,7 @@ current_implementations:
   - core/tauri/src/skill_installation.rs
   - modules/skills/frontend/src/catalog.ts
   - modules/skills/frontend/src/skillInstallationClient.ts
+  - modules/skills/frontend/src/pluginContributions.ts
 target_owners:
   provider: core/backend/src/skill_installation
   tauri_adapter: core/tauri/src/skill_installation.rs

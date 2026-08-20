@@ -1,117 +1,215 @@
 <!-- markdownlint-disable MD013 -->
 
-# Step 05 — Move configuration and persistence policy to TypeScript
+# Step 05 — Move configuration grammar out of Rust and collapse to one durable authority
 
 ## Outcome
 
-Move configuration grammar, defaults, validation, migrations, and workspace
-interpretation from Rust into the TypeScript application runtime and plugins.
-Retain only generic durable-document mechanics in Rust. This makes config
-inspectable and evolvable by plugins and usable by the future headless runtime
-without duplicating product semantics in the lean Rust CLI.
+Rust stops defining what a setting *means*. `GlobalConfig` keeps only what the
+native kernel genuinely needs, and everything else becomes a TypeScript-owned,
+versioned, migratable configuration namespace stored through the durable-record
+authority that already exists.
 
-## The separation to preserve
+## The durable authority already exists — do not add a second one
 
-The native kernel should provide a generic revisioned document facility:
+The earlier draft proposed defining a `DurableDocumentPort` with "namespaced
+document identifiers, opaque payloads, compare-and-swap, atomic persistence,
+backup/recovery, transaction primitives". That is a description of
+`shipctl.plugin-data@1` (`module-api/frontend/src/protocol/pluginData.ts`),
+which is implemented, admitted, granted, and in use:
 
-- namespaced document identifiers;
-- opaque JSON or bytes payloads;
-- current revision, origin, and compare-and-swap write;
-- atomic persistence, backup/recovery, and transaction primitives where needed;
-- a platform-defined configuration root and migration-safe file access.
+| Draft requirement | Already provided by `shipctl.plugin-data@1` |
+| --- | --- |
+| namespaced document ids | `ownerModuleId` + `scope` (`global` \| `project`) + `key` |
+| opaque payload | `value: ModuleJsonValue`, `schemaVersion` |
+| compare-and-swap write | `writeRecord.expectedRevision` (`null` = create-only) |
+| atomic multi-document commit | `migrateRecords` — "All record changes in one migration commit or none do" (`pluginData.ts:57-61`) |
+| idempotent recovery | `PluginDataMigrationReceipt.replayed` — a replay returns the original committed records without new revisions |
+| structured failure | 13-member `PluginDataErrorCode`, including `conflict`, `denied`, `invalid-revision`, `unavailable` |
+| grant scoping | `plugin-data.read` / `.write` / `.migrate` |
 
-The TypeScript runtime should provide:
+**Binding: no `DurableDocumentPort` is introduced.** The draft's open question —
+"the choice should be made and tested before configuration is used to activate
+plugins" — is already answered by `migrateRecords`. Delete the question; test
+the existing primitive instead.
 
-- schema and human-readable configuration grammar;
-- defaults and layered resolution;
-- plugin-owned namespaces;
-- semantic validation and migration;
-- inspect, validate, plan, apply, and rollback-oriented operations;
-- user-facing diagnostics and configuration provenance.
+### Dynamic authorization boundary
 
-Native code must not parse or select a UI canvas, workspace profile, panel
-position, sidebar side, module enablement policy, or feature setting merely
-because the file happens to be located under the application configuration
-directory.
+`createPluginDataServiceProvider` now binds an activation's effective
+`plugin-data.read` / `.write` / `.migrate` grants to its private native request.
+The native store validates only the stable grant vocabulary, record identity,
+revision, schema-version positivity, and JSON integrity. It does not contain a
+product table for a module id, key, schema, registered project, or legacy
+fallback. Configuration declarations and migrations in TypeScript decide which
+records are meaningful.
 
-## Current-to-target mapping
+### The one real gap in that authority
 
-| Current implementation | Target | Migration decision |
+`PluginDataRecord.ownerModuleId` is *derived from the activation* — "callers
+never select another namespace" (`pluginData.ts:28`). Host-owned state therefore
+has no namespace today: the trusted runtime is not an activation.
+
+This forces a decision that this step must make explicitly:
+
+- **Option A** — host-owned configuration is stored under a reserved host
+  identity admitted by the runtime (e.g. `shipctl.host`), with writes restricted
+  to the trusted runtime, never reachable from a plugin activation context.
+- **Option B** — configuration that needs a namespace becomes a bundled plugin's
+  configuration; the workspace document then belongs to the workspace plugin
+  (Step 06), and host bootstrap stays in the native config file because it must
+  be readable before any plugin activates.
+
+Option B is the smaller move and is consistent with Step 06's premise, but it
+does not cover host bootstrap. Whichever is chosen, record it here — the
+`shipctl.workspace@1` capability record already declares
+`depends_on: [plugin-data]`, so the workspace half of this decision is
+half-made and should not be left implicit.
+
+**Implemented decision — Option A.** The trusted TypeScript runtime activates
+the reserved `shipctl.host` identity internally, with all three plugin-data
+grants. No admitted plugin receives that activation or can select its namespace.
+`core/frontend/configuration/` owns the schemas, defaults, validation,
+inspection, migration ids, and revision-aware apply path for runtime, editor,
+projects, keybindings, terminal, and sidebar records.
+
+## What Rust actually owns today
+
+`core/backend/src/workspace/config.rs` — `GlobalConfig` fields:
+
+| Field | Classification | Disposition |
 | --- | --- | --- |
-| core/backend/src/workspace/config.rs CanvasAdapter and UiSettings | TypeScript configuration service and workspace/plugin schemas | Read legacy settings once, translate to a versioned TypeScript-owned document, then stop writing native UI config. |
-| core/backend/src/state/workspace_document.rs workspace-shaped record | generic native durable document CAS | Retain revision mechanics; remove workspace names and payload interpretation from the kernel API. |
-| core/backend/src/state/workspace_layout.rs raw Layman snapshots | legacy importer only, then delete | Do not make renderer snapshots canonical. Import once to a semantic document if support is worthwhile. |
-| core/frontend/platform/workspacePersistence.ts named workspace commands | generic durable document port | Workspace service uses a namespace/id/revision contract. |
-| src/main.tsx native canvas adapter selection | TypeScript bootstrap/profile selection | Native bootstrap launches the runtime; runtime selects compatible renderer/plugin profile. |
-| feature-specific settings in host wiring | plugin configuration contributions | Each plugin owns schema/defaults/migration for its namespace. |
+| `version` | native file-format version | keep |
+| `repos`, `groups` | project registry — durable native resource identity | keep in Rust; expose via the projects service (Step 04) |
+| `ui: UiSettings { canvas: CanvasAdapter }` | **renderer selection** | **delete** — see below |
+| `editor`, `keybindings`, `terminal`, `sidebar`, `projects` | user-facing settings grammar | move to TypeScript namespaces |
+| `capability_data` (`#[serde(flatten)]`) | opaque legacy import source | keep only for compatibility reads; current durable configuration lives in plugin-data |
 
-## Configuration document model
+The legacy keys are permanently reserved after typed-field removal, so generic
+capability-data calls cannot repurpose `editor`, `projects`, `keybindings`,
+`terminal`, `sidebar`, or `ui` while the compatibility import remains.
 
-Use a small number of durable document families, rather than one global
-untyped configuration object:
+**Hazard to handle explicitly:** `assert_capability_id` (`config.rs:105+`)
+rejects a capability id that collides with a host-owned field by serialising
+`GlobalConfig` and checking the key set. As host fields are removed, previously
+rejected ids silently become admissible — `editor`, `terminal`, `sidebar`,
+`keybindings`, `ui`. Removal order therefore changes validation behavior. Either
+reserve the retired names permanently or state that reuse is intended.
 
-| Family | Owner | Examples |
+## The renderer-selection bootstrap dependency
+
+`src/main.tsx:13-19` awaits `getCanvasAdapter()` — a Tauri round-trip into
+`GlobalConfig.ui.canvas` — *before the first render*, and passes the result into
+`<App>` as both `canvasAdapter` and `canvasAdapterId`. A Rust enum with two
+variants (`config.rs:9-14`) decides which renderer the application is.
+
+This is the clearest single instance of native code owning product composition,
+and it is small: two variants, one command, one bootstrap await.
+
+Target: the runtime starts, reads renderer selection from TypeScript-owned
+configuration, and resolves an adapter from the registered renderer set. Adding
+a renderer must not require a Rust enum variant. The failure path in
+`main.tsx:25-39` (a rendered error page) stays — but it should report a
+configuration diagnostic, not a transport error.
+
+Sequencing note: this depends on Step 03 having moved runtime construction out of
+`AppShell`, and it is a prerequisite for Step 07's renderer composition. Do not
+attempt it before Step 03 lands.
+
+## Workspace durable record — delivered
+
+The selected owner is the trusted bundled `shipctl.workspace` plugin. Its
+canonical workspace record lives in the generic plugin-data namespace under the
+global key `workspace-document:<workspaceId>`. The schema-2 opaque owner value
+contains the document, origin, and `catalogRevision`; native plugin-data keeps
+only generic record identity, revision, integrity, and grant checks.
+
+`workspace-documents.json` is now a read-only generic legacy-record-map source,
+not a second active workspace store. If a canonical plugin-data record is
+absent, the source exposes its old value at schema 1 and virtual revision zero.
+The workspace plugin migrates that value once with
+`workspace-document-record-v1-to-plugin-data-v2`; replay returns the same
+canonical record, and a stale competing migration cannot overwrite it. The
+canonical record then shadows the legacy source permanently.
+
+The native workspace-document store, its `load_workspace_document` /
+`save_workspace_document` commands, and the temporary bootstrap exception are
+deleted. Raw Layman snapshot persistence was already deleted independently.
+
+## Configuration model
+
+Configuration namespaces, each with an owner, a `schemaVersion`, defaults, and a
+migration function:
+
+| Namespace family | Owner | Contents |
 | --- | --- | --- |
-| host bootstrap | trusted TypeScript runtime | enabled artifact sources, trust/admission policy, selected user profile |
-| workspace profile | workspace plugin | layout tree, view instances, frame and navigation preferences |
-| plugin configuration | individual plugin | assistant provider preferences, usage filters, terminal presentation options |
-| project-scoped settings | owning plugin/service | project-bound behavior where a project identity is required |
+| host bootstrap | native config file | config version, project registry, artifact source roots, trust policy — anything needed *before* a plugin activates |
+| runtime configuration | trusted TypeScript runtime | renderer selection, admission policy, active profile |
+| plugin configuration | individual plugin | assistant providers, usage filters, terminal presentation, editor/keybinding/sidebar preferences after migration |
+| project-scoped settings | owning plugin | via `PluginDataScope { kind: "project" }`, which already exists |
 
-Configuration needs explicit version fields and migration functions. A plugin
-does not get to mutate another plugin's namespace. Cross-plugin configuration is
-expressed through a shared public schema or a host-owned policy document, never
-through an undocumented property in a global YAML file.
+A plugin cannot write another plugin's namespace; `ownerModuleId` derivation
+already enforces this. Cross-plugin configuration goes through a published
+schema or a runtime-owned policy record, never an undocumented key.
 
-The existing ~/.shipctl/config.yml may remain a human-facing entry point during
-migration. Its grammar should be parsed and validated by TypeScript, then
-projected into versioned documents. The target must support deterministic
-offline resolution; it cannot require a running React webview to answer what a
-setting means.
+`~/.shipctl/config.yml` remains the human-facing entry point. Its non-host
+sections are parsed and validated by TypeScript and projected into records.
+Resolution must be deterministic without a webview — that is the headless
+requirement (Step 10), and it is why parsing cannot live in a React hook.
 
-## Transaction and revision requirements
+## Migration protocol
 
-Configuration and workspace apply operations need the same basic safety:
+Per migrated namespace, once, idempotently:
 
-1. read document plus revision;
-2. parse and validate all affected documents;
-3. compute a semantic plan and explicit migration actions;
-4. commit using compare-and-swap or an atomic multi-document primitive;
-5. activate a candidate runtime graph if the change affects plugins;
-6. publish only after validation and activation succeed; otherwise retain the
-   prior accepted state and report a structured failure.
+1. read the legacy native value and the current record revision;
+2. validate the legacy value against the new schema; on failure, write nothing
+   and emit a diagnostic naming the namespace and the failing path;
+3. commit via `migrateRecords` with a stable `migrationId`;
+4. on replay, `receipt.replayed === true` and no revision advances;
+5. stop writing the native field; keep reading it until the deletion gate;
+6. delete the native field, its accessor commands, and its TypeScript adapter
+   members in one commit.
 
-For multi-document changes, do not pretend that sequential writes are
-transactional. Either use a generic transaction/journal primitive in the
-native document store or persist a recoverable intent with a verified recovery
-protocol. The choice should be made and tested before configuration is used to
-activate plugins.
+Step 5→6 is the removal condition. A migration that leaves the native field
+readable indefinitely is the half-transition; each namespace needs a named gate.
 
 ## Refactoring actions
 
-1. Define a generic DurableDocumentPort in module-api or trusted runtime
-   contracts; its names are generic and its payload is opaque to Rust.
-2. Implement TypeScript configuration loading, schema validation, defaults,
-   provenance, and migrations.
-3. Move ui.canvas and all visual settings out of Rust configuration enums.
-4. Define configuration contributions in the plugin contract and register
-   schemas from the accepted graph.
-5. Build read-only inspect and validate operations before apply operations.
-6. Add revision-aware plan/apply to prevent an agent from overwriting a newer
-   user edit.
-7. Implement a one-way, idempotent legacy import with backup and clear
-   diagnostics; retain a rollback/read path only for the supported transition.
-8. Remove legacy native configuration writes once migrated profiles have been
-   proven.
+1. Record the host-namespace decision (Option A or B above) before writing code.
+2. Record the workspace-store decision (Converge or Keep-separate) with its
+   argument.
+3. Replace the hard-coded plugin-data authorization and matching fake policies
+   with effective-grant binding from Step 02. Prove that an arbitrary admitted
+   plugin can use its own configuration namespace, while a denied or disposed
+   plugin cannot leave a write behind.
+4. Move renderer selection out of `CanvasAdapter`/`UiSettings`; remove the
+   `getCanvasAdapter` await from `src/main.tsx`; delete the command.
+5. Migrate `editor`, `keybindings`, `terminal`, `sidebar`, `projects` to
+   TypeScript namespaces one at a time, each with its own `migrationId` and gate.
+6. Delete the matching getters/setters from `platform/tauri.ts` as each
+   namespace lands (Step 04 depends on this).
+7. Decide and document the fate of the retired `GlobalConfig` field names in
+   `assert_capability_id`.
+8. Add configuration-schema contributions to the plugin contract, registered
+   from the accepted graph.
+9. Build inspect and validate operations before apply operations; apply is
+   revision-aware and refuses to overwrite a newer edit.
 
 ## Validation and exit criteria
 
-- Changing a TypeScript-owned configuration setting does not require a Rust
-  enum, Tauri command, or app rebuild.
-- Invalid configuration never replaces the last accepted document.
-- Re-applying the same migration produces no further semantic change.
-- Revision conflict messages identify the document id and expected/current
+- Adding a renderer, a setting, or a default requires no Rust change and no
+  rebuild of the native binary.
+- `rg "CanvasAdapter"` returns no Rust match; `src/main.tsx` performs no
+  configuration `invoke` before first render.
+- Invalid configuration never replaces the last accepted record; the prior
+  record and its revision are unchanged after a failed apply.
+- Re-running a completed migration returns `replayed: true` with no revision
+  advance — a `node --test` case, not a manual check.
+- A fixture plugin with admitted `plugin-data.*` grants can create, inspect, and
+  migrate its own new configuration key with no Rust change; an unadmitted peer
+  cannot read, write, or migrate that record.
+- A conflict error names the namespace, key, expected revision, and current
   revision.
-- The UI and headless test runtime resolve the same fixture configuration into
-  the same semantic result.
-- The raw Layman layout store has no production writer and a documented
-  deletion date.
+- The UI runtime and the headless runtime resolve the same fixture
+  configuration to the same semantic result (proof obligation 6, Step 00).
+- Exactly one durable-record authority remains, or the second one has a written
+  bootstrap-ordering justification in this file.
+- No native command name in the codebase contains a UI-settings noun.

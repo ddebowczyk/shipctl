@@ -1,15 +1,22 @@
-import type { ShipctlModule, ShipctlPluginDefinition } from "@shipctl/module-api";
+import type {
+  AcceptedPluginAdmission,
+  ShipctlModule,
+  ShipctlPluginDefinition,
+} from "@shipctl/module-api";
 import {
   getRuntimeModuleCatalog,
-  type RuntimeModuleCatalog,
-  type RuntimeModuleDescriptor,
 } from "../platform/moduleControl.ts";
+import type {
+  RuntimeModuleCatalog,
+  RuntimeModuleDescriptor,
+} from "@shipctl/core/runtime";
 
 import {
   loadShipctlModuleArtifact,
   moduleArtifactUrl,
   ModuleArtifactLoadError,
   type LoadShipctlModuleArtifactRequest,
+  type ModuleArtifactDiagnostic,
 } from "./moduleArtifactLoader.ts";
 
 export type RuntimeModuleLoadDescriptor = RuntimeModuleDescriptor;
@@ -20,12 +27,16 @@ export interface RuntimeModuleLoadFailure {
   readonly phase: "descriptor" | "resolve" | "import" | "validate" | "activation";
   readonly code: string;
   readonly message: string;
+  /** Present when TypeScript rejected the artifact's product declarations. */
+  readonly diagnostic?: ModuleArtifactDiagnostic;
 }
 
 export interface LoadedRuntimeModules {
   readonly catalog: RuntimeModuleLoadCatalog;
+  /** Temporary compatibility view for artifacts not yet on direct activation. */
   readonly modules: readonly ShipctlModule[];
   readonly definitions: readonly ShipctlPluginDefinition[];
+  readonly admissionsByModule: ReadonlyMap<string, AcceptedPluginAdmission>;
   readonly failures: readonly RuntimeModuleLoadFailure[];
 }
 
@@ -55,6 +66,7 @@ export async function loadRuntimeModules(
   const resolveArtifactUrl = options.resolveArtifactUrl ?? moduleArtifactUrl;
   const modules: ShipctlModule[] = [];
   const definitions: ShipctlPluginDefinition[] = [];
+  const admissionsByModule = new Map<string, AcceptedPluginAdmission>();
   const failures: RuntimeModuleLoadFailure[] = [];
   for (const descriptor of runtimeCatalog.modules) {
     try {
@@ -78,8 +90,9 @@ export async function loadRuntimeModules(
         styleUrls,
         ...(options.importModule === undefined ? {} : { importModule: options.importModule }),
       });
-      modules.push(loaded.module);
+      if (loaded.module !== undefined) modules.push(loaded.module);
       definitions.push(loaded.definition);
+      admissionsByModule.set(descriptor.moduleId, loaded.admission);
     } catch (error) {
       failures.push({
         moduleId: descriptor.moduleId,
@@ -90,8 +103,11 @@ export async function loadRuntimeModules(
           ? error.code
           : "module.loader.invalid_artifact",
         message: error instanceof Error ? error.message : "Module artifact load failed",
+        ...(error instanceof ModuleArtifactLoadError && error.diagnostic !== undefined
+          ? { diagnostic: error.diagnostic }
+          : {}),
       });
     }
   }
-  return { catalog: runtimeCatalog, modules, definitions, failures };
+  return { catalog: runtimeCatalog, modules, definitions, admissionsByModule, failures };
 }

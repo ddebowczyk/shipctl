@@ -369,14 +369,14 @@ test("architecture.service-event.scheduler.property", async () => {
 });
 
 test("architecture.scheduler-ownership.property", async () => {
-  const [usageModule, composition, publicContract] = await Promise.all([
-    readFile(new URL("../../../modules/usage/frontend/src/index.ts", import.meta.url), "utf8"),
+  const [usageContributions, composition, publicContract] = await Promise.all([
+    readFile(new URL("../../../modules/usage/frontend/src/pluginContributions.ts", import.meta.url), "utf8"),
     readFile(new URL("../../../core/frontend/host/moduleComposition.ts", import.meta.url), "utf8"),
     readFile(new URL("../../../module-api/frontend/src/module/module.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(usageModule, /scheduledTasks:\s*\[/);
-  assert.match(usageModule, /target:\s*\{\s*kind:\s*"channel"/);
-  assert.doesNotMatch(usageModule, /delayMs|intervalMs|setTimeout|setInterval|writeFile/);
+  assert.match(usageContributions, /scheduledTasks:\s*Object\.freeze\(\s*\[/);
+  assert.match(usageContributions, /target:\s*\{\s*kind:\s*"channel"/);
+  assert.doesNotMatch(usageContributions, /delayMs|intervalMs|setTimeout|setInterval|writeFile/);
   assert.doesNotMatch(composition, /setTimeout|setInterval|\.shipctl\/schedules/);
   assert.match(publicContract, /Omit<RegisterScheduleInput<unknown>, "scheduleId">/);
   assert.doesNotMatch(publicContract, /readonly run:/);

@@ -25,14 +25,6 @@ import { createFakeRequestOperation } from "./semanticServices";
 
 export type FakePluginDataOperation = "read" | "write" | "migrate";
 
-export interface FakePluginDataPolicy {
-  readonly moduleId: string;
-  readonly scope: PluginDataScope["kind"];
-  readonly key: string;
-  readonly schemaVersions: readonly number[];
-  readonly grants: readonly PluginDataGrant[];
-}
-
 export interface FakePluginDataRecordSeed {
   readonly ownerModuleId: string;
   readonly scope: PluginDataScope;
@@ -52,27 +44,9 @@ export interface FakePluginDataTrace {
 }
 
 export interface FakePluginDataProviderOptions {
-  readonly policies?: readonly FakePluginDataPolicy[];
   readonly records?: readonly FakePluginDataRecordSeed[];
   readonly trace?: FakePluginDataTrace[];
 }
-
-const DEFAULT_POLICIES: readonly FakePluginDataPolicy[] = [
-  {
-    moduleId: "shipctl.usage",
-    scope: "global",
-    key: "settings",
-    schemaVersions: [1],
-    grants: ["plugin-data.read", "plugin-data.write", "plugin-data.migrate"],
-  },
-  {
-    moduleId: "shipctl.commands",
-    scope: "project",
-    key: "commands",
-    schemaVersions: [1],
-    grants: ["plugin-data.read", "plugin-data.write", "plugin-data.migrate"],
-  },
-];
 
 const REQUEST_POLICY = {
   cancellation: "before-dispatch",
@@ -126,31 +100,29 @@ function assertIdentity(value: string, label: string) {
   }
 }
 
-function policyFor(
-  policies: readonly FakePluginDataPolicy[],
-  moduleId: string,
+function assertGrant(
+  context: SemanticServiceProviderContext,
   scope: PluginDataScope,
   key: string,
   grant: PluginDataGrant,
-): FakePluginDataPolicy {
+): void {
   assertIdentity(key, "record key");
   if (scope.kind === "project") assertIdentity(scope.projectId, "project ID");
-  const policy = policies.find((candidate) =>
-    candidate.moduleId === moduleId
-    && candidate.scope === scope.kind
-    && candidate.key === key
-    && candidate.grants.includes(grant));
-  if (!policy) {
+  const admission = context.acceptedAdmission;
+  if (
+    admission === null
+    || admission.artifact.moduleId !== context.activation.moduleId
+    || !admission.effectiveGrants.includes(grant)
+  ) {
     throw new FakePluginDataFailure(
       "plugin-data.denied",
       "Plugin data access was denied",
     );
   }
-  return policy;
 }
 
-function assertSchema(policy: FakePluginDataPolicy, version: number) {
-  if (!Number.isSafeInteger(version) || version < 1 || !policy.schemaVersions.includes(version)) {
+function assertSchema(version: number) {
+  if (!Number.isSafeInteger(version) || version < 1) {
     throw new FakePluginDataFailure(
       "plugin-data.invalid-schema",
       "Plugin data schema version was not admitted",
@@ -228,7 +200,6 @@ function operation<Input, Output>(
 export function createFakePluginDataServiceProvider(
   options: FakePluginDataProviderOptions = {},
 ): SemanticServiceProvider<PluginDataService> {
-  const policies = options.policies ?? DEFAULT_POLICIES;
   const records = new Map<string, PluginDataRecord>();
   for (const seed of options.records ?? []) {
     const record: PluginDataRecord = {
@@ -249,7 +220,7 @@ export function createFakePluginDataServiceProvider(
           "read",
           options,
           (input) => {
-            policyFor(policies, moduleId, input.scope, input.key, "plugin-data.read");
+            assertGrant(context, input.scope, input.key, "plugin-data.read");
             const record = records.get(identity(moduleId, input.scope, input.key));
             return record ? copyRecord(record) : null;
           },
@@ -259,14 +230,8 @@ export function createFakePluginDataServiceProvider(
           "write",
           options,
           (input) => {
-            const policy = policyFor(
-              policies,
-              moduleId,
-              input.scope,
-              input.key,
-              "plugin-data.write",
-            );
-            assertSchema(policy, input.schemaVersion);
+            assertGrant(context, input.scope, input.key, "plugin-data.write");
+            assertSchema(input.schemaVersion);
             assertJsonSafe(input.value);
             const recordId = identity(moduleId, input.scope, input.key);
             const current = records.get(recordId);
@@ -306,14 +271,8 @@ export function createFakePluginDataServiceProvider(
             }
             const identities = new Set<string>();
             const current = input.records.map((write) => {
-              const policy = policyFor(
-                policies,
-                moduleId,
-                write.scope,
-                write.key,
-                "plugin-data.migrate",
-              );
-              assertSchema(policy, write.toSchemaVersion);
+              assertGrant(context, write.scope, write.key, "plugin-data.migrate");
+              assertSchema(write.toSchemaVersion);
               assertJsonSafe(write.value);
               const recordId = identity(moduleId, write.scope, write.key);
               if (identities.has(recordId)) {

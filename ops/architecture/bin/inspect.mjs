@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { inspectFrontendArchitecture } from "../../modularity/lib/module-boundaries.mjs";
-import { inspectLegacyComposition } from "./composition-inventory.mjs";
 
 const exec = promisify(execFile);
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -64,10 +63,6 @@ export async function inspectArchitecture(repositoryRoot = defaultRepositoryRoot
   const root = path.resolve(repositoryRoot);
   const frontend = await inspectFrontendArchitecture(root);
   const sourceByPackage = new Map(frontend.modules.map((item) => [item.package, item]));
-  const compositionByPackage = new Map(frontend.composition.map((item, order) => [
-    item.package,
-    { order, symbol: item.symbol, environment: item.environment },
-  ]));
   const moduleDirectories = (await readdir(path.join(root, "modules"), { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
@@ -83,7 +78,6 @@ export async function inspectArchitecture(repositoryRoot = defaultRepositoryRoot
       id: manifest.id,
       manifest_path: manifestPath,
       manifest: normalizeManifest(manifest),
-      composition: compositionByPackage.get(manifest.frontend.package) ?? null,
       frontend_source: source
         ? {
             entrypoint: source.entrypoint,
@@ -97,10 +91,8 @@ export async function inspectArchitecture(repositoryRoot = defaultRepositoryRoot
     });
   }
   return {
-    schema_version: "source-architecture/v1",
-    composition_source: "core/frontend/host/enabledModules.ts",
+    schema_version: "source-architecture/v2",
     modules,
-    legacy_composition: await inspectLegacyComposition(root),
   };
 }
 
@@ -133,7 +125,9 @@ if (import.meta.url === new URL(process.argv[1], "file:").href) {
       diagnostics,
       summary: {
         modules: architecture.modules.length,
-        composed_modules: architecture.modules.filter(({ composition }) => composition !== null).length,
+        runtime_artifacts: architecture.modules.filter(
+          ({ manifest }) => manifest.frontend.delivery === "runtime-artifact",
+        ).length,
         direct_tauri_imports: architecture.modules.reduce(
           (count, module) => count + (module.frontend_source?.direct_tauri_imports.length ?? 0),
           0,

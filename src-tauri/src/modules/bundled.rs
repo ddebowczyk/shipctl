@@ -200,6 +200,61 @@ mod tests {
         }
     }
 
+    #[cfg(shipctl_bundled_modules)]
+    fn application(
+        manifest: &shipctl_core::module_control::artifact::RuntimeArtifactManifest,
+    ) -> &serde_json::Value {
+        manifest
+            .application
+            .as_ref()
+            .expect("schema version 2 bundled artifacts include application declarations")
+    }
+
+    #[cfg(shipctl_bundled_modules)]
+    fn application_role(
+        manifest: &shipctl_core::module_control::artifact::RuntimeArtifactManifest,
+    ) -> &str {
+        application(manifest)
+            .get("role")
+            .and_then(serde_json::Value::as_str)
+            .expect("bundled application declaration has a role")
+    }
+
+    #[cfg(shipctl_bundled_modules)]
+    fn application_required_services(
+        manifest: &shipctl_core::module_control::artifact::RuntimeArtifactManifest,
+    ) -> Vec<(&str, u64)> {
+        application(manifest)
+            .get("requiredServices")
+            .and_then(serde_json::Value::as_array)
+            .expect("bundled application declaration has required services")
+            .iter()
+            .map(|service| {
+                (
+                    service
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .expect("required service has an id"),
+                    service
+                        .get("version")
+                        .and_then(serde_json::Value::as_u64)
+                        .expect("required service has a version"),
+                )
+            })
+            .collect()
+    }
+
+    #[cfg(shipctl_bundled_modules)]
+    fn requires_service(
+        manifest: &shipctl_core::module_control::artifact::RuntimeArtifactManifest,
+        id: &str,
+        version: u64,
+    ) -> bool {
+        application_required_services(manifest)
+            .into_iter()
+            .any(|service| service == (id, version))
+    }
+
     #[test]
     fn bundled_selection_enables_only_its_fresh_install() {
         let target = identity(ModuleRuntimeKind::FrontendEsm, 'a');
@@ -309,25 +364,17 @@ mod tests {
             .iter()
             .find(|module| module.module_id == "shipctl.assistants")
             .unwrap();
-        assert_eq!(
-            assistants.manifest.application.role,
-            shipctl_core::module_control::artifact::RuntimePluginRole::Compound,
-        );
+        assert_eq!(application_role(&assistants.manifest), "compound");
         assert!(assistants.style_paths.is_empty());
         assert!(assistants.entry_path.is_file());
         assert_eq!(
-            assistants
-                .manifest
-                .application
-                .required_services
-                .iter()
-                .map(|service| (service.id.as_str(), service.version))
-                .collect::<Vec<_>>(),
+            application_required_services(&assistants.manifest),
             vec![
-                ("shipctl.assistant-launch", 1),
+                ("shipctl.assistant-launch", 2),
                 ("shipctl.credential-store", 1),
                 ("shipctl.processes", 1),
                 ("shipctl.terminal-sessions", 1),
+                ("shipctl.projects", 1),
             ],
         );
         assert_eq!(
@@ -335,6 +382,9 @@ mod tests {
             vec![
                 "assistant.launch".to_string(),
                 "assistant.session-record".to_string(),
+                "assistant.resource.read".to_string(),
+                "assistant.resource.write".to_string(),
+                "assistant.resource.execute".to_string(),
                 "credential.inspect".to_string(),
                 "credential.write".to_string(),
                 "terminal.start".to_string(),
@@ -346,10 +396,7 @@ mod tests {
             .iter()
             .find(|module| module.module_id == "shipctl.commands")
             .unwrap();
-        assert_eq!(
-            commands.manifest.application.role,
-            shipctl_core::module_control::artifact::RuntimePluginRole::Compound,
-        );
+        assert_eq!(application_role(&commands.manifest), "compound");
         assert!(!commands.style_paths.is_empty());
         assert!(commands.entry_path.is_file());
         assert!(commands.style_paths.iter().all(|style| style.is_file()));
@@ -358,39 +405,25 @@ mod tests {
             .iter()
             .find(|module| module.module_id == "shipctl.git")
             .unwrap();
-        assert_eq!(
-            git.manifest.application.role,
-            shipctl_core::module_control::artifact::RuntimePluginRole::Compound,
-        );
+        assert_eq!(application_role(&git.manifest), "compound");
         assert!(!git.style_paths.is_empty());
         assert!(git.entry_path.is_file());
         assert!(git.style_paths.iter().all(|style| style.is_file()));
-        assert!(git
-            .manifest
-            .application
-            .required_services
-            .iter()
-            .any(|service| service.id == "shipctl.git" && service.version == 1));
+        assert!(requires_service(&git.manifest, "shipctl.git", 1));
         let semantic_terminal = catalog
             .modules
             .iter()
             .find(|module| module.module_id == "shipctl.semantic-terminal")
             .unwrap();
         assert_eq!(
-            semantic_terminal.manifest.application.role,
-            shipctl_core::module_control::artifact::RuntimePluginRole::Presentation,
+            application_role(&semantic_terminal.manifest),
+            "presentation"
         );
         assert_eq!(semantic_terminal.style_paths.len(), 1);
         assert!(semantic_terminal.entry_path.is_file());
         assert!(semantic_terminal.style_paths[0].is_file());
         assert_eq!(
-            semantic_terminal
-                .manifest
-                .application
-                .required_services
-                .iter()
-                .map(|service| (service.id.as_str(), service.version))
-                .collect::<Vec<_>>(),
+            application_required_services(&semantic_terminal.manifest),
             vec![
                 ("shipctl.semantic-terminals", 1),
                 ("shipctl.terminal-sessions", 1),
@@ -412,53 +445,37 @@ mod tests {
             .iter()
             .find(|module| module.module_id == "shipctl.ports")
             .unwrap();
-        assert_eq!(
-            ports.manifest.application.role,
-            shipctl_core::module_control::artifact::RuntimePluginRole::Presentation,
-        );
+        assert_eq!(application_role(&ports.manifest), "presentation");
         assert!(ports.style_paths.is_empty());
         assert!(ports.entry_path.is_file());
-        assert!(ports
-            .manifest
-            .application
-            .required_services
-            .iter()
-            .any(|service| service.id == "shipctl.processes" && service.version == 1));
+        assert!(requires_service(&ports.manifest, "shipctl.processes", 1));
         let skills = catalog
             .modules
             .iter()
             .find(|module| module.module_id == "shipctl.skills")
             .unwrap();
-        assert_eq!(
-            skills.manifest.application.role,
-            shipctl_core::module_control::artifact::RuntimePluginRole::Compound,
-        );
+        assert_eq!(application_role(&skills.manifest), "compound");
         assert!(skills.style_paths.is_empty());
         assert!(skills.entry_path.is_file());
-        assert!(skills
-            .manifest
-            .application
-            .required_services
-            .iter()
-            .any(|service| { service.id == "shipctl.skill-installation" && service.version == 2 }));
+        assert!(requires_service(
+            &skills.manifest,
+            "shipctl.skill-installation",
+            2,
+        ));
         let thin_terminal = catalog
             .modules
             .iter()
             .find(|module| module.module_id == "shipctl.thin-terminal")
             .unwrap();
-        assert_eq!(
-            thin_terminal.manifest.application.role,
-            shipctl_core::module_control::artifact::RuntimePluginRole::Presentation,
-        );
+        assert_eq!(application_role(&thin_terminal.manifest), "presentation");
         assert_eq!(thin_terminal.style_paths.len(), 1);
         assert!(thin_terminal.entry_path.is_file());
         assert!(thin_terminal.style_paths[0].is_file());
-        assert!(thin_terminal
-            .manifest
-            .application
-            .required_services
-            .iter()
-            .any(|service| { service.id == "shipctl.terminal-sessions" && service.version == 1 }));
+        assert!(requires_service(
+            &thin_terminal.manifest,
+            "shipctl.terminal-sessions",
+            1,
+        ));
         assert_eq!(
             thin_terminal.manifest.requested_grants,
             vec![
@@ -472,41 +489,28 @@ mod tests {
             .iter()
             .find(|module| module.module_id == "shipctl.todos")
             .unwrap();
-        assert_eq!(
-            todos.manifest.application.role,
-            shipctl_core::module_control::artifact::RuntimePluginRole::Compound,
-        );
+        assert_eq!(application_role(&todos.manifest), "compound");
         assert!(!todos.style_paths.is_empty());
         assert!(todos.entry_path.is_file());
         assert!(todos.style_paths.iter().all(|style| style.is_file()));
-        assert!(todos
-            .manifest
-            .application
-            .required_services
-            .iter()
-            .any(|service| service.id == "shipctl.project-documents" && service.version == 1));
+        assert!(requires_service(
+            &todos.manifest,
+            "shipctl.project-documents",
+            1,
+        ));
         let usage = catalog
             .modules
             .iter()
             .find(|module| module.module_id == "shipctl.usage")
             .unwrap();
-        assert_eq!(
-            usage.manifest.application.role,
-            shipctl_core::module_control::artifact::RuntimePluginRole::Compound,
-        );
+        assert_eq!(application_role(&usage.manifest), "compound");
         assert_eq!(usage.style_paths.len(), 1);
         assert!(usage.entry_path.is_file());
         assert!(usage.style_paths[0].is_file());
         assert_eq!(
-            usage
-                .manifest
-                .application
-                .required_services
-                .iter()
-                .map(|service| (service.id.as_str(), service.version))
-                .collect::<Vec<_>>(),
+            application_required_services(&usage.manifest),
             vec![
-                ("shipctl.usage-sources", 2),
+                ("shipctl.usage-sources", 3),
                 ("shipctl.plugin-data", 1),
                 ("shipctl.messages", 1),
                 ("shipctl.scheduler", 1),
@@ -586,6 +590,7 @@ mod tests {
                 "shipctl.assistants",
                 "shipctl.git",
                 "shipctl.ports",
+                "shipctl.runtime-operations",
                 "shipctl.semantic-terminal",
                 "shipctl.skills",
                 "shipctl.thin-terminal",

@@ -1,20 +1,19 @@
-//! Reviewed usage-source access and durable transcript ingestion.
+//! Permission-bounded usage-source storage and resource access.
 //!
-//! This permanent provider owns filesystem, credential, subprocess, network,
-//! and SQLite authority. It returns normalized source facts only. Pricing,
-//! aggregation, aliases, refresh workflow, and presentation belong to the
-//! TypeScript Usage module.
+//! Product source identity, filesystem/keychain selection, payload parsing,
+//! quota policy, and cache shape belong to the trusted TypeScript Usage
+//! artifact. This permanent native capability owns only generic resource
+//! boundaries, bounded persistence, and activation lifetime.
 
 #![forbid(unsafe_code)]
 
+mod collection;
 mod db;
 mod helpers;
-mod ingest;
-mod providers;
 mod snapshot;
 mod types;
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -23,44 +22,59 @@ use serde::{Deserialize, Serialize};
 pub use db::UsageDb;
 pub use snapshot::UsageSnapshotProvider;
 pub use types::{
-    UsageProviderObservation, UsageProviderWindow, UsageSourceDataset, UsageSourceRecord,
+    UsageSourceDataset, UsageSourceFile, UsageSourceHttpHeader, UsageSourceRecord,
+    UsageSourceResourceReadInput, UsageSourceResourceRequest, UsageSourceResourceResult,
+    UsageSourceUpdate,
 };
 
-use helpers::{now_epoch_seconds, now_iso_string};
-use types::UsageWindowSnapshot;
+use helpers::now_iso_string;
 
 pub const USAGE_SOURCES_TRANSPORT_FAILED: &str = "usage-sources.transport-failed";
 pub const USAGE_SOURCES_DENIED: &str = "usage-sources.denied";
 pub const USAGE_SOURCES_INVALID_REQUEST: &str = "usage-sources.invalid-request";
+pub const USAGE_SOURCES_UNAVAILABLE: &str = "usage-sources.unavailable";
 pub const USAGE_SOURCES_ACTIVATION_DISPOSED: &str = "usage-sources.activation-disposed";
 
-pub const USAGE_PROVIDERS: [&str; 6] =
-    ["claude", "codex", "antigravity", "gemini", "opencode", "pi"];
+const MAX_SOURCE_IDS: usize = 64;
+const MAX_UPDATES: usize = 64;
+const MAX_RECORDS_PER_UPDATE: usize = 100_000;
+const MAX_TEXT_LENGTH: usize = 16 * 1024;
 
-const PROVIDER_QUOTA_SOURCES: [&str; 4] = ["claude", "codex", "antigravity", "gemini"];
-const COOLDOWN_SUCCESS_SECS: u64 = 300;
-const COOLDOWN_ERROR_BASE_SECS: u64 = 30;
-const COOLDOWN_ERROR_MAX_SECS: u64 = 300;
+/// Grants passed from the trusted semantic-service binding. The native layer
+/// knows this reusable capability vocabulary, but never a product module or
+/// source allowlist.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub enum UsageSourcesGrant {
+    #[serde(rename = "usage-source.read")]
+    Read,
+    #[serde(rename = "usage-source.refresh")]
+    Refresh,
+    #[serde(rename = "usage-source.observe")]
+    Observe,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageSourcesActor {
     pub module_id: String,
     pub activation_id: String,
+    pub effective_grants: BTreeSet<UsageSourcesGrant>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InspectUsageSourcesInput {
     #[serde(default)]
-    pub source_ids: Option<Vec<String>>,
+    pub source_ids: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RefreshUsageSourcesInput {
     #[serde(default)]
-    pub source_ids: Option<Vec<String>>,
+    pub source_ids: Vec<String>,
+    #[serde(default)]
+    pub updates: Option<Vec<UsageSourceUpdate>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -77,88 +91,9 @@ pub struct UsageSourcesError {
     pub retryable: bool,
 }
 
-#[derive(Clone)]
-enum ProviderCacheData {
-    Claude(Vec<UsageWindowSnapshot>, Vec<UsageWindowSnapshot>),
-    Codex(Vec<UsageWindowSnapshot>),
-    Gemini(Vec<UsageWindowSnapshot>),
-    Antigravity(Vec<UsageWindowSnapshot>, Vec<UsageWindowSnapshot>),
-}
-
-#[derive(Default)]
-struct ProviderState {
-    cache: Option<ProviderCacheData>,
-    fetched_at: u64,
-    consecutive_errors: u32,
-    last_error: Option<String>,
-}
-
-impl ProviderState {
-    fn cooldown_secs(&self) -> u64 {
-        if self.consecutive_errors == 0 {
-            return COOLDOWN_SUCCESS_SECS;
-        }
-        let backoff = COOLDOWN_ERROR_BASE_SECS
-            .saturating_mul(1u64 << self.consecutive_errors.saturating_sub(1).min(4));
-        backoff.min(COOLDOWN_ERROR_MAX_SECS)
-    }
-
-    fn is_stale(&self, now: u64) -> bool {
-        now.saturating_sub(self.fetched_at) >= self.cooldown_secs()
-    }
-
-    fn record_success(&mut self, now: u64, cache: ProviderCacheData) {
-        self.cache = Some(cache);
-        self.fetched_at = now;
-        self.consecutive_errors = 0;
-        self.last_error = None;
-    }
-
-    fn record_error(&mut self, now: u64, error: String) {
-        let changed = self.last_error.as_deref() != Some(error.as_str());
-        self.fetched_at = now;
-        self.consecutive_errors = self.consecutive_errors.saturating_add(1);
-        self.last_error = Some(error.clone());
-        if changed {
-            log::warn!(target: "shipctl::usage_sources", "Usage provider refresh failed: {error}");
-        }
-    }
-}
-
-#[derive(Default)]
-struct ProviderCache {
-    claude: ProviderState,
-    codex: ProviderState,
-    gemini: ProviderState,
-    antigravity: ProviderState,
-}
-
-impl ProviderCache {
-    fn state(&self, provider: &str) -> Option<&ProviderState> {
-        match provider {
-            "claude" => Some(&self.claude),
-            "codex" => Some(&self.codex),
-            "gemini" => Some(&self.gemini),
-            "antigravity" => Some(&self.antigravity),
-            _ => None,
-        }
-    }
-
-    fn state_mut(&mut self, provider: &str) -> Option<&mut ProviderState> {
-        match provider {
-            "claude" => Some(&mut self.claude),
-            "codex" => Some(&mut self.codex),
-            "gemini" => Some(&mut self.gemini),
-            "antigravity" => Some(&mut self.antigravity),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Default)]
 struct UsageSourcesState {
     released_activations: HashSet<(String, String)>,
-    provider_cache: ProviderCache,
 }
 
 struct UsageSourcesServiceInner {
@@ -167,7 +102,7 @@ struct UsageSourcesServiceInner {
     refresh: Mutex<()>,
 }
 
-/// Permanent, Tauri-free authority for reviewed usage sources.
+/// Permanent, Tauri-free authority for generic Usage source resources.
 #[derive(Clone)]
 pub struct UsageSourcesService {
     inner: Arc<UsageSourcesServiceInner>,
@@ -200,76 +135,64 @@ impl UsageSourcesService {
         actor: &UsageSourcesActor,
         input: InspectUsageSourcesInput,
     ) -> Result<UsageSourceDataset, UsageSourcesError> {
-        self.authorize(actor)?;
+        self.authorize(actor, UsageSourcesGrant::Read)?;
         let source_ids = normalized_source_ids(input.source_ids)?;
         let records = self.read_records(&source_ids)?;
-        let state = self
-            .inner
-            .state
-            .lock()
-            .expect("usage sources state poisoned");
-        let provider_observations = PROVIDER_QUOTA_SOURCES
-            .into_iter()
-            .filter(|provider| source_ids.contains(*provider))
-            .filter_map(|provider| {
-                state
-                    .provider_cache
-                    .state(provider)
-                    .map(|provider_state| observation(provider, provider_state))
-            })
-            .collect();
         Ok(UsageSourceDataset {
             captured_at: now_iso_string(),
             records,
-            provider_observations,
         })
     }
 
+    /// Commit plugin-parsed source facts atomically. The source id is opaque to
+    /// this layer: it is only a namespace for replacement and inspection.
     pub fn refresh_sources(
         &self,
         actor: &UsageSourcesActor,
         input: RefreshUsageSourcesInput,
     ) -> Result<UsageSourcesRefreshReceipt, UsageSourcesError> {
-        self.authorize(actor)?;
+        self.authorize(actor, UsageSourcesGrant::Refresh)?;
         let source_ids = normalized_source_ids(input.source_ids)?;
         let _refresh = self
             .inner
             .refresh
             .lock()
             .expect("usage refresh lock poisoned");
-        self.authorize(actor)?;
-
-        loop {
-            let done = {
-                let _write = self
-                    .inner
-                    .db
-                    .durable_writes
-                    .enter_update()
-                    .map_err(|error| {
-                        usage_error(USAGE_SOURCES_TRANSPORT_FAILED, error.to_string())
-                    })?;
-                let connection = self.inner.db.conn.lock().expect("usage database poisoned");
-                ingest::ingest_sources(&connection, &source_ids)
-            };
-            if done {
-                break;
-            }
-            std::thread::yield_now();
+        self.authorize(actor, UsageSourcesGrant::Refresh)?;
+        if let Some(updates) = input.updates {
+            self.commit_updates(&source_ids, &updates)?;
         }
-        self.refresh_provider_observations(&source_ids);
-
         Ok(UsageSourcesRefreshReceipt {
-            accepted_source_ids: USAGE_PROVIDERS
-                .into_iter()
-                .filter(|provider| source_ids.contains(*provider))
-                .map(str::to_string)
-                .collect(),
+            accepted_source_ids: source_ids,
+        })
+    }
+
+    /// Execute exactly one declared generic resource read. The caller receives
+    /// no home directory, raw native handle, Tauri API, or durable DB handle.
+    pub fn read_resource(
+        &self,
+        actor: &UsageSourcesActor,
+        input: UsageSourceResourceReadInput,
+    ) -> Result<UsageSourceResourceResult, UsageSourcesError> {
+        self.authorize(actor, UsageSourcesGrant::Read)?;
+        if !valid_source_id(&input.source_id) {
+            return Err(usage_error(
+                USAGE_SOURCES_INVALID_REQUEST,
+                "Usage source identity is invalid",
+            ));
+        }
+        collection::read_resource(input.request).map_err(|message| {
+            let code = if message.contains("unavailable") {
+                USAGE_SOURCES_UNAVAILABLE
+            } else {
+                USAGE_SOURCES_INVALID_REQUEST
+            };
+            usage_error(code, message)
         })
     }
 
     pub fn release_activation(&self, actor: &UsageSourcesActor) -> Result<bool, UsageSourcesError> {
-        self.authorize(actor)?;
+        self.authorize_active(actor)?;
         Ok(self
             .inner
             .state
@@ -279,10 +202,11 @@ impl UsageSourcesService {
             .insert((actor.module_id.clone(), actor.activation_id.clone())))
     }
 
-    fn authorize(&self, actor: &UsageSourcesActor) -> Result<(), UsageSourcesError> {
-        if actor.activation_id.trim().is_empty()
-            || !matches!(actor.module_id.as_str(), "core" | "shipctl.usage")
-        {
+    fn authorize_active(&self, actor: &UsageSourcesActor) -> Result<(), UsageSourcesError> {
+        // Admission and effective-grant checks are enforced by the trusted
+        // TypeScript semantic-service binding. Native code receives no
+        // product-module allowlist: it only revokes a disposed activation.
+        if actor.module_id.trim().is_empty() || actor.activation_id.trim().is_empty() {
             return Err(usage_error(
                 USAGE_SOURCES_DENIED,
                 "The module activation cannot access usage sources",
@@ -304,10 +228,145 @@ impl UsageSourcesService {
         Ok(())
     }
 
+    fn authorize(
+        &self,
+        actor: &UsageSourcesActor,
+        grant: UsageSourcesGrant,
+    ) -> Result<(), UsageSourcesError> {
+        self.authorize_active(actor)?;
+        if actor.effective_grants.contains(&grant) {
+            Ok(())
+        } else {
+            Err(usage_error(
+                USAGE_SOURCES_DENIED,
+                "The module activation lacks the required usage source grant",
+            ))
+        }
+    }
+
+    fn commit_updates(
+        &self,
+        source_ids: &[String],
+        updates: &[UsageSourceUpdate],
+    ) -> Result<(), UsageSourcesError> {
+        if updates.is_empty() || updates.len() > MAX_UPDATES {
+            return Err(usage_error(
+                USAGE_SOURCES_INVALID_REQUEST,
+                "Usage source updates are invalid",
+            ));
+        }
+        let requested = source_ids.iter().collect::<HashSet<_>>();
+        let update_ids = updates
+            .iter()
+            .map(|update| &update.source_id)
+            .collect::<HashSet<_>>();
+        if update_ids.len() != updates.len()
+            || requested.len() != update_ids.len()
+            || requested
+                .iter()
+                .any(|source_id| !update_ids.contains(source_id))
+        {
+            return Err(usage_error(
+                USAGE_SOURCES_INVALID_REQUEST,
+                "Usage source updates must exactly match their requested source identities",
+            ));
+        }
+        for update in updates {
+            validate_update(update)?;
+        }
+
+        let _write = self
+            .inner
+            .db
+            .durable_writes
+            .enter_update()
+            .map_err(|error| usage_error(USAGE_SOURCES_TRANSPORT_FAILED, error.to_string()))?;
+        let mut connection = self.inner.db.conn.lock().expect("usage database poisoned");
+        let transaction = connection.transaction().map_err(database_error)?;
+        for update in updates {
+            transaction
+                .execute(
+                    "DELETE FROM usage_messages WHERE provider = ?1",
+                    [&update.source_id],
+                )
+                .map_err(database_error)?;
+            transaction
+                .execute(
+                    "DELETE FROM usage_daily WHERE provider = ?1",
+                    [&update.source_id],
+                )
+                .map_err(database_error)?;
+            for record in &update.records {
+                match record.grain.as_str() {
+                    "message" => {
+                        transaction
+                            .execute(
+                                "INSERT INTO usage_messages (
+                                provider, session_id, project, model, timestamp,
+                                tokens_input, tokens_output, tokens_cache_write,
+                                tokens_cache_read, tokens_thoughts, tokens_total,
+                                pricing_provider, recorded_cost
+                             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                rusqlite::params![
+                                    record.source_id,
+                                    record.session_id,
+                                    record.project,
+                                    record.model,
+                                    record.timestamp,
+                                    record.tokens_input,
+                                    record.tokens_output,
+                                    record.tokens_cache_write,
+                                    record.tokens_cache_read,
+                                    record.tokens_thoughts,
+                                    record.tokens_total,
+                                    record.pricing_provider,
+                                    record.recorded_cost,
+                                ],
+                            )
+                            .map_err(database_error)?;
+                    }
+                    "daily" => {
+                        transaction
+                            .execute(
+                                "INSERT INTO usage_daily (
+                                provider, date, project, model,
+                                tokens_input, tokens_output, tokens_cache_write,
+                                tokens_cache_read, tokens_thoughts, tokens_total,
+                                message_count, pricing_provider, recorded_cost
+                             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                rusqlite::params![
+                                    record.source_id,
+                                    record.date,
+                                    record.project,
+                                    record.model,
+                                    record.tokens_input,
+                                    record.tokens_output,
+                                    record.tokens_cache_write,
+                                    record.tokens_cache_read,
+                                    record.tokens_thoughts,
+                                    record.tokens_total,
+                                    record.message_count,
+                                    record.pricing_provider,
+                                    record.recorded_cost,
+                                ],
+                            )
+                            .map_err(database_error)?;
+                    }
+                    _ => unreachable!("update validated before storage"),
+                }
+            }
+        }
+        transaction.commit().map_err(database_error)?;
+        drop(connection);
+
+        Ok(())
+    }
+
     fn read_records(
         &self,
-        source_ids: &HashSet<String>,
+        source_ids: &[String],
     ) -> Result<Vec<UsageSourceRecord>, UsageSourcesError> {
+        let source_ids = source_ids.iter().collect::<HashSet<_>>();
         let connection = self.inner.db.conn.lock().expect("usage database poisoned");
         let mut records = Vec::new();
         let mut messages = connection
@@ -315,7 +374,7 @@ impl UsageSourcesService {
                 "SELECT provider, session_id, project, model, timestamp,
                         tokens_input, tokens_output, tokens_cache_write,
                         tokens_cache_read, tokens_thoughts, tokens_total,
-                        COALESCE(pricing_provider, provider), recorded_cost
+                        COALESCE(pricing_provider, ''), recorded_cost
                  FROM usage_messages
                  ORDER BY timestamp, id",
             )
@@ -324,7 +383,7 @@ impl UsageSourcesService {
             .query_map([], |row| {
                 Ok(UsageSourceRecord {
                     grain: "message".to_string(),
-                    provider: row.get(0)?,
+                    source_id: row.get(0)?,
                     session_id: row.get(1)?,
                     date: None,
                     project: row.get(2)?,
@@ -344,7 +403,7 @@ impl UsageSourcesService {
             .map_err(database_error)?;
         for row in rows {
             let record = row.map_err(database_error)?;
-            if source_ids.contains(&record.provider) {
+            if source_ids.contains(&record.source_id) {
                 records.push(record);
             }
         }
@@ -355,7 +414,7 @@ impl UsageSourcesService {
                 "SELECT provider, date, project, model,
                         tokens_input, tokens_output, tokens_cache_write,
                         tokens_cache_read, tokens_thoughts, tokens_total,
-                        message_count, COALESCE(pricing_provider, provider), recorded_cost
+                        message_count, COALESCE(pricing_provider, ''), recorded_cost
                  FROM usage_daily
                  ORDER BY date, id",
             )
@@ -364,7 +423,7 @@ impl UsageSourcesService {
             .query_map([], |row| {
                 Ok(UsageSourceRecord {
                     grain: "daily".to_string(),
-                    provider: row.get(0)?,
+                    source_id: row.get(0)?,
                     session_id: None,
                     date: row.get(1)?,
                     project: row.get(2)?,
@@ -384,90 +443,73 @@ impl UsageSourcesService {
             .map_err(database_error)?;
         for row in rows {
             let record = row.map_err(database_error)?;
-            if source_ids.contains(&record.provider) {
+            if source_ids.contains(&record.source_id) {
                 records.push(record);
             }
         }
         Ok(records)
     }
-
-    fn refresh_provider_observations(&self, source_ids: &HashSet<String>) {
-        let now = now_epoch_seconds();
-        for provider in PROVIDER_QUOTA_SOURCES {
-            if !source_ids.contains(provider) {
-                continue;
-            }
-            let stale = self
-                .inner
-                .state
-                .lock()
-                .expect("usage sources state poisoned")
-                .provider_cache
-                .state(provider)
-                .is_some_and(|state| state.is_stale(now));
-            if !stale {
-                continue;
-            }
-            let result = match provider {
-                "claude" => providers::claude_provider_windows()
-                    .map(|(summary, extra)| ProviderCacheData::Claude(summary, extra)),
-                "codex" => providers::codex_provider_windows().map(ProviderCacheData::Codex),
-                "gemini" => providers::gemini_provider_windows().map(ProviderCacheData::Gemini),
-                "antigravity" => providers::antigravity_provider_windows()
-                    .map(|(summary, extra)| ProviderCacheData::Antigravity(summary, extra)),
-                _ => continue,
-            };
-            let mut state = self
-                .inner
-                .state
-                .lock()
-                .expect("usage sources state poisoned");
-            let provider_state = state
-                .provider_cache
-                .state_mut(provider)
-                .expect("quota provider has cache state");
-            match result {
-                Ok(cache) => provider_state.record_success(now, cache),
-                Err(error) => provider_state.record_error(now, error),
-            }
-        }
-    }
 }
 
-fn normalized_source_ids(
-    source_ids: Option<Vec<String>>,
-) -> Result<HashSet<String>, UsageSourcesError> {
-    let values =
-        source_ids.unwrap_or_else(|| USAGE_PROVIDERS.iter().map(ToString::to_string).collect());
-    if values.is_empty()
-        || values
+fn normalized_source_ids(source_ids: Vec<String>) -> Result<Vec<String>, UsageSourcesError> {
+    if source_ids.is_empty()
+        || source_ids.len() > MAX_SOURCE_IDS
+        || source_ids
             .iter()
-            .any(|source_id| !USAGE_PROVIDERS.contains(&source_id.as_str()))
+            .any(|source_id| !valid_source_id(source_id))
+        || source_ids.iter().collect::<HashSet<_>>().len() != source_ids.len()
     {
         return Err(usage_error(
             USAGE_SOURCES_INVALID_REQUEST,
             "Usage source identity is invalid",
         ));
     }
-    Ok(values.into_iter().collect())
+    Ok(source_ids)
 }
 
-fn observation(provider: &str, state: &ProviderState) -> UsageProviderObservation {
-    let (summary_windows, extra_windows) = match state.cache.as_ref() {
-        Some(ProviderCacheData::Claude(summary, extra))
-        | Some(ProviderCacheData::Antigravity(summary, extra)) => (summary.clone(), extra.clone()),
-        Some(ProviderCacheData::Codex(summary)) | Some(ProviderCacheData::Gemini(summary)) => {
-            (summary.clone(), Vec::new())
-        }
-        None => (Vec::new(), Vec::new()),
-    };
-    UsageProviderObservation {
-        provider: provider.to_string(),
-        available: state.cache.is_some(),
-        fetched_at: (state.fetched_at > 0).then(now_iso_string),
-        summary_windows,
-        extra_windows,
+fn valid_source_id(value: &str) -> bool {
+    let mut characters = value.chars();
+    matches!(characters.next(), Some(first) if first.is_ascii_lowercase())
+        && value.len() <= 64
+        && characters.all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        })
+}
+
+fn valid_text(value: &str) -> bool {
+    value.len() <= MAX_TEXT_LENGTH && !value.chars().any(char::is_control)
+}
+
+fn validate_update(update: &UsageSourceUpdate) -> Result<(), UsageSourcesError> {
+    if !valid_source_id(&update.source_id) || update.records.len() > MAX_RECORDS_PER_UPDATE {
+        return Err(usage_error(
+            USAGE_SOURCES_INVALID_REQUEST,
+            "Usage source update is invalid",
+        ));
     }
+    for record in &update.records {
+        let message = record.grain == "message";
+        let daily = record.grain == "daily";
+        if !(message || daily)
+            || record.source_id != update.source_id
+            || !valid_text(&record.pricing_provider)
+            || record.tokens_input < 0
+            || record.tokens_output < 0
+            || record.tokens_cache_write < 0
+            || record.tokens_cache_read < 0
+            || record.tokens_thoughts < 0
+            || record.tokens_total < 0
+            || record.message_count < 0
+            || (message && (record.session_id.is_none() || record.timestamp.is_none()))
+            || (daily && record.date.is_none())
+        {
+            return Err(usage_error(
+                USAGE_SOURCES_INVALID_REQUEST,
+                "Usage source record is invalid",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn database_error(error: rusqlite::Error) -> UsageSourcesError {
@@ -487,86 +529,128 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    fn actor(module_id: &str, activation_id: &str) -> UsageSourcesActor {
+    fn actor(
+        module_id: &str,
+        activation_id: &str,
+        grants: &[UsageSourcesGrant],
+    ) -> UsageSourcesActor {
         UsageSourcesActor {
             module_id: module_id.to_string(),
             activation_id: activation_id.to_string(),
+            effective_grants: grants.iter().copied().collect(),
+        }
+    }
+
+    fn full_actor(module_id: &str, activation_id: &str) -> UsageSourcesActor {
+        actor(
+            module_id,
+            activation_id,
+            &[
+                UsageSourcesGrant::Read,
+                UsageSourcesGrant::Refresh,
+                UsageSourcesGrant::Observe,
+            ],
+        )
+    }
+
+    fn message_record(source_id: &str, tokens: i64) -> UsageSourceRecord {
+        UsageSourceRecord {
+            grain: "message".to_string(),
+            source_id: source_id.to_string(),
+            session_id: Some("fixture-session".to_string()),
+            date: None,
+            project: Some("fixture-project".to_string()),
+            model: Some("fixture-model".to_string()),
+            timestamp: Some(42),
+            tokens_input: tokens,
+            tokens_output: 0,
+            tokens_cache_write: 0,
+            tokens_cache_read: 0,
+            tokens_thoughts: 0,
+            tokens_total: tokens,
+            message_count: 1,
+            pricing_provider: "fixture-pricing".to_string(),
+            recorded_cost: None,
         }
     }
 
     #[test]
-    fn unauthorized_modules_cannot_observe_or_refresh_sources() {
+    fn empty_or_disposed_activations_are_denied_without_a_product_allowlist() {
         let service = UsageSourcesService::open_in_memory(Default::default());
-        let denied = actor("shipctl.unknown", "activation-1");
+        let empty = full_actor("", "activation-1");
         assert_eq!(
             service
-                .inspect_sources(&denied, InspectUsageSourcesInput::default())
+                .inspect_sources(
+                    &empty,
+                    InspectUsageSourcesInput {
+                        source_ids: vec!["fixture".to_string()]
+                    }
+                )
                 .unwrap_err()
                 .code,
             USAGE_SOURCES_DENIED
         );
-        assert_eq!(
-            service
-                .refresh_sources(&denied, RefreshUsageSourcesInput::default())
-                .unwrap_err()
-                .code,
-            USAGE_SOURCES_DENIED
-        );
-    }
-
-    #[test]
-    fn release_revokes_authority_without_deleting_durable_records() {
-        let service = UsageSourcesService::open_in_memory(Default::default());
-        let active = actor("shipctl.usage", "activation-1");
-        service
-            .inner
-            .db
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO usage_messages
-                 (provider, session_id, timestamp, tokens_total, pricing_provider)
-                 VALUES ('codex', 'session-1', 1, 42, 'openai')",
-                [],
+        let active = full_actor("fixture.module", "activation-1");
+        assert!(service
+            .inspect_sources(
+                &active,
+                InspectUsageSourcesInput {
+                    source_ids: vec!["fixture".to_string()]
+                }
             )
-            .unwrap();
-        assert_eq!(
-            service
-                .inspect_sources(&active, InspectUsageSourcesInput::default())
-                .unwrap()
-                .records
-                .len(),
-            1
-        );
+            .is_ok());
         assert!(service.release_activation(&active).unwrap());
         assert_eq!(
             service
-                .inspect_sources(&active, InspectUsageSourcesInput::default())
+                .inspect_sources(
+                    &active,
+                    InspectUsageSourcesInput {
+                        source_ids: vec!["fixture".to_string()]
+                    }
+                )
                 .unwrap_err()
                 .code,
             USAGE_SOURCES_ACTIVATION_DISPOSED
         );
-        assert_eq!(
-            service
-                .inner
-                .db
-                .conn
-                .lock()
-                .unwrap()
-                .query_row("SELECT COUNT(*) FROM usage_messages", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
+    }
+
+    #[test]
+    fn refresh_replaces_only_plugin_declared_source_facts() {
+        let service = UsageSourcesService::open_in_memory(Default::default());
+        let active = full_actor("fixture.module", "activation-1");
+        let source_id = "fixture-source".to_string();
+        service
+            .refresh_sources(
+                &active,
+                RefreshUsageSourcesInput {
+                    source_ids: vec![source_id.clone()],
+                    updates: Some(vec![UsageSourceUpdate {
+                        source_id: source_id.clone(),
+                        records: vec![message_record(&source_id, 42)],
+                    }]),
+                },
+            )
+            .unwrap();
+        let dataset = service
+            .inspect_sources(
+                &active,
+                InspectUsageSourcesInput {
+                    source_ids: vec![source_id],
+                },
+            )
+            .unwrap();
+        assert_eq!(dataset.records.len(), 1);
+        assert_eq!(dataset.records[0].tokens_total, 42);
     }
 
     #[test]
     fn inspection_never_exposes_paths_or_credential_material() {
         let dataset = UsageSourcesService::open_in_memory(Default::default())
             .inspect_sources(
-                &actor("shipctl.usage", "activation-1"),
-                InspectUsageSourcesInput::default(),
+                &full_actor("fixture.module", "activation-1"),
+                InspectUsageSourcesInput {
+                    source_ids: vec!["fixture".to_string()],
+                },
             )
             .unwrap();
         let json = serde_json::to_string(&dataset).unwrap();
@@ -580,135 +664,79 @@ mod tests {
 
     proptest! {
         #[test]
-        fn architecture_provider_usage_sources_parity_property(
-            provider_index in 0usize..USAGE_PROVIDERS.len(),
-            session_suffix in "[a-z0-9]{1,16}",
-            tokens_input in 0i64..1_000_000,
-            tokens_output in 0i64..1_000_000,
-            recorded_cost in proptest::option::of(0u32..1_000_000),
-        ) {
-            let provider = USAGE_PROVIDERS[provider_index];
-            let session_id = format!("session-{session_suffix}");
-            let expected_cost = recorded_cost.map(|value| f64::from(value) / 100_000.0);
-            let service = UsageSourcesService::open_in_memory(Default::default());
-            service.inner.db.conn.lock().unwrap().execute(
-                "INSERT INTO usage_messages (
-                    provider, session_id, project, model, timestamp,
-                    tokens_input, tokens_output, tokens_cache_write,
-                    tokens_cache_read, tokens_thoughts, tokens_total,
-                    pricing_provider, recorded_cost
-                 ) VALUES (?1, ?2, 'fixture-project', 'fixture-model', 42,
-                           ?3, ?4, 3, 5, 7, ?5, 'fixture-pricing', ?6)",
-                rusqlite::params![
-                    provider,
-                    session_id,
-                    tokens_input,
-                    tokens_output,
-                    tokens_input + tokens_output + 15,
-                    expected_cost,
-                ],
-            ).unwrap();
-
-            let observed = service.inspect_sources(
-                &actor("shipctl.usage", "parity"),
-                InspectUsageSourcesInput { source_ids: Some(vec![provider.to_string()]) },
-            ).unwrap();
-
-            prop_assert_eq!(observed.records, vec![UsageSourceRecord {
-                grain: "message".to_string(),
-                provider: provider.to_string(),
-                session_id: Some(session_id),
-                date: None,
-                project: Some("fixture-project".to_string()),
-                model: Some("fixture-model".to_string()),
-                timestamp: Some(42),
-                tokens_input,
-                tokens_output,
-                tokens_cache_write: 3,
-                tokens_cache_read: 5,
-                tokens_thoughts: 7,
-                tokens_total: tokens_input + tokens_output + 15,
-                message_count: 1,
-                pricing_provider: "fixture-pricing".to_string(),
-                recorded_cost: expected_cost,
-            }]);
-            prop_assert!(observed.provider_observations.iter().all(|item| item.provider == provider));
-        }
-
-        #[test]
-        fn architecture_provider_usage_sources_authority_property(
-            known_module in any::<bool>(),
-            disposed in any::<bool>(),
-            valid_scope in any::<bool>(),
-            provider_index in 0usize..USAGE_PROVIDERS.len(),
-        ) {
-            let service = UsageSourcesService::open_in_memory(Default::default());
-            let candidate = actor(
-                if known_module { "shipctl.usage" } else { "shipctl.unknown" },
-                "authority",
-            );
-            if known_module && disposed {
-                service.release_activation(&candidate).unwrap();
-            }
-            let source_id = if valid_scope {
-                USAGE_PROVIDERS[provider_index].to_string()
-            } else {
-                "foreign-source".to_string()
-            };
-            let result = service.inspect_sources(
-                &candidate,
-                InspectUsageSourcesInput { source_ids: Some(vec![source_id]) },
-            );
-            let expected_code = if !known_module {
-                Some(USAGE_SOURCES_DENIED)
-            } else if disposed {
-                Some(USAGE_SOURCES_ACTIVATION_DISPOSED)
-            } else if !valid_scope {
-                Some(USAGE_SOURCES_INVALID_REQUEST)
-            } else {
-                None
-            };
-            match expected_code {
-                Some(code) => prop_assert_eq!(result.unwrap_err().code, code),
-                None => prop_assert!(result.is_ok()),
-            }
-        }
-
-        #[test]
-        fn architecture_provider_usage_sources_ownership_property(
-            release_owner in any::<bool>(),
+        fn architecture_provider_usage_sources_parity_property_generic_source_ids_round_trip(
+            suffix in "[a-z0-9]{1,16}",
             tokens in 0i64..1_000_000,
         ) {
+            let source_id = format!("fixture-{suffix}");
             let service = UsageSourcesService::open_in_memory(Default::default());
-            let owner = actor("shipctl.usage", "owner");
-            let peer = actor("shipctl.usage", "peer");
-            service.inner.db.conn.lock().unwrap().execute(
-                "INSERT INTO usage_messages
-                 (provider, session_id, timestamp, tokens_total, pricing_provider)
-                 VALUES ('codex', 'durable-session', 1, ?1, 'openai')",
-                [tokens],
+            let active = full_actor("fixture.module", "parity");
+            service.refresh_sources(
+                &active,
+                RefreshUsageSourcesInput {
+                    source_ids: vec![source_id.clone()],
+                    updates: Some(vec![UsageSourceUpdate {
+                        source_id: source_id.clone(),
+                        records: vec![message_record(&source_id, tokens)],
+                    }]),
+                },
             ).unwrap();
-            let (released, live) = if release_owner { (&owner, &peer) } else { (&peer, &owner) };
-
-            service.release_activation(released).unwrap();
-            prop_assert_eq!(
-                service.inspect_sources(released, InspectUsageSourcesInput::default()).unwrap_err().code,
-                USAGE_SOURCES_ACTIVATION_DISPOSED,
-            );
-            let live_records = service
-                .inspect_sources(live, InspectUsageSourcesInput::default())
-                .unwrap()
-                .records;
-            prop_assert_eq!(live_records.len(), 1);
-            prop_assert_eq!(live_records[0].tokens_total, tokens);
-            prop_assert_eq!(
-                service.inner.db.conn.lock().unwrap().query_row(
-                    "SELECT COUNT(*) FROM usage_messages",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                ).unwrap(),
-                1,
-            );
+            let observed = service.inspect_sources(
+                &active,
+                InspectUsageSourcesInput { source_ids: vec![source_id.clone()] },
+            ).unwrap();
+            prop_assert_eq!(observed.records, vec![message_record(&source_id, tokens)]);
         }
+
+        #[test]
+        fn architecture_provider_usage_sources_authority_property_invalid_source_ids_are_rejected(
+            invalid_source_id in prop_oneof![
+                Just(String::new()),
+                "[A-Z][a-z0-9]{0,16}",
+                "[a-z]{1,12}_[a-z]{1,12}",
+                "[a-z]{1,12}![a-z]{0,12}",
+            ],
+        ) {
+            let service = UsageSourcesService::open_in_memory(Default::default());
+            let active = full_actor("fixture.module", "authority");
+            let error = service.inspect_sources(
+                &active,
+                InspectUsageSourcesInput { source_ids: vec![invalid_source_id] },
+            ).unwrap_err();
+            prop_assert_eq!(error.code, USAGE_SOURCES_INVALID_REQUEST);
+        }
+
+        #[test]
+        fn architecture_provider_usage_sources_ownership_property_released_activations_are_revoked(
+            suffix in "[a-z0-9]{1,16}",
+        ) {
+            let source_id = format!("fixture-{suffix}");
+            let service = UsageSourcesService::open_in_memory(Default::default());
+            let active = full_actor("fixture.module", "ownership");
+            prop_assert!(service.release_activation(&active).unwrap());
+            let error = service.inspect_sources(
+                &active,
+                InspectUsageSourcesInput { source_ids: vec![source_id] },
+            ).unwrap_err();
+            prop_assert_eq!(error.code, USAGE_SOURCES_ACTIVATION_DISPOSED);
+        }
+    }
+
+    #[test]
+    fn absent_grant_is_denied_before_any_native_usage_source_access() {
+        let service = UsageSourcesService::open_in_memory(Default::default());
+        let actor = actor("fixture.module", "activation-1", &[]);
+        assert_eq!(
+            service
+                .inspect_sources(
+                    &actor,
+                    InspectUsageSourcesInput {
+                        source_ids: vec!["fixture".to_string()]
+                    }
+                )
+                .unwrap_err()
+                .code,
+            USAGE_SOURCES_DENIED,
+        );
     }
 }

@@ -1,5 +1,8 @@
 import {
   messagesService,
+  type AcceptedPluginAdmission,
+  type DirectShipctlPluginDefinition,
+  type LegacyShipctlPluginDefinition,
   type ModuleActivationContext,
   type ModuleActivationId,
   type ModuleActivationIdentity,
@@ -33,8 +36,23 @@ import {
   createActivationHostServiceGate,
   type ActivationHostServiceGate,
 } from "../activationHostServices.ts";
+import type { RegisteredPluginContributions } from "../pluginContributionRegistry.ts";
 
 const SEMANTIC_REGISTRY_SERVICE = "shipctl.runtime.semantic-services";
+
+const PRESENTATION_FAMILIES: ReadonlySet<PluginContributionFamily> = new Set([
+  "command",
+  "global-navigation",
+  "global-surface",
+  "panel",
+  "project-action",
+  "project-facts",
+  "project-layout",
+  "project-navigation",
+  "settings",
+  "sidebar",
+  "terminal-presentation",
+]);
 
 function semanticServiceKey(reference: SemanticServiceReference<unknown>): string {
   return `shipctl.semantic.${reference.id}@${reference.version}`;
@@ -61,9 +79,11 @@ function hasHeadlessBehavior(module: ShipctlModule): boolean {
     || module.projectImport !== undefined
     || module.skillsProvider !== undefined
     || module.messages !== undefined
+    || (module.configuration?.length ?? 0) > 0
     || (module.scheduledTasks?.length ?? 0) > 0;
 }
 
+/** Transitional inference retained only for the legacy static-object adapter. */
 export function inferShipctlPluginRole(module: ShipctlModule): ShipctlPluginRole {
   const presentation = hasPresentation(module);
   const headless = hasHeadlessBehavior(module);
@@ -72,50 +92,118 @@ export function inferShipctlPluginRole(module: ShipctlModule): ShipctlPluginRole
   return "headless";
 }
 
-export function adaptShipctlModule(module: ShipctlModule): ShipctlPluginDefinition {
+/** Transitional adapter, intentionally local to the Cordis compatibility runtime. */
+export function adaptShipctlModule(module: ShipctlModule): LegacyShipctlPluginDefinition {
   return Object.freeze({ module, role: inferShipctlPluginRole(module) });
 }
 
-function contributionRecords(
+function isLegacyDefinition(
   definition: ShipctlPluginDefinition,
-  identity: ModuleActivationIdentity,
-): PluginContributionInspection[] {
-  const { module } = definition;
-  const records: PluginContributionInspection[] = [];
-  const add = (family: PluginContributionFamily, id: string) => records.push({
-    ownerActivationId: identity.activationId,
-    moduleId: module.id,
-    family,
-    id,
-  });
-  for (const value of module.commands ?? []) add("command", value.id);
-  for (const value of module.panels ?? []) add("panel", value.id);
-  for (const value of module.globalSurfaces ?? []) add("global-surface", value.id);
-  for (const value of module.globalNavigation ?? []) add("global-navigation", value.id);
-  for (const value of module.sidebar ?? []) add("sidebar", value.id);
-  for (const value of module.projectNavigation ?? []) add("project-navigation", value.id);
-  for (const value of module.projectLayout ?? []) add("project-layout", value.id);
-  for (const value of module.projectActions ?? []) add("project-action", value.id);
-  if (module.projectFactsProvider) add("project-facts", module.projectFactsProvider.id);
-  if (module.projectImport) add("project-import", module.projectImport.id);
-  for (const value of module.settings ?? []) add("settings", value.id);
-  if (module.skillsProvider) add("skills-provider", module.skillsProvider.id);
-  for (const value of module.scheduledTasks ?? []) add("scheduled-task", value.id);
-  if (module.messages) add("message-graph", `${module.id}.messages`);
-  for (const value of module.terminalPresentations ?? []) {
-    add("terminal-presentation", value.driverId);
-  }
-  return records;
+): definition is LegacyShipctlPluginDefinition {
+  return "module" in definition;
+}
+
+function definitionIdentity(
+  definition: ShipctlPluginDefinition,
+): { readonly id: ModuleId; readonly version: string } {
+  return isLegacyDefinition(definition)
+    ? { id: definition.module.id, version: definition.module.version }
+    : { id: definition.id, version: definition.version };
+}
+
+function declaredGrants(definition: ShipctlPluginDefinition): readonly string[] {
+  return isLegacyDefinition(definition)
+    ? definition.module.requiredGrants ?? []
+    : definition.requiredGrants ?? [];
 }
 
 function scopedHostServices(services: ModuleHostServices): ModuleHostServices {
   return Object.freeze({ ...services });
 }
 
+function registerLegacyContributions(
+  module: ShipctlModule,
+  registrations: ModuleActivationContext["contributions"],
+): void {
+  for (const value of module.commands ?? []) registrations.commands.register(value);
+  for (const value of module.configuration ?? []) registrations.configuration.register(value);
+  for (const value of module.globalNavigation ?? []) registrations.globalNavigation.register(value);
+  for (const value of module.globalSurfaces ?? []) registrations.globalSurfaces.register(value);
+  if (module.messages !== undefined) registrations.messages.register(module.messages);
+  for (const value of module.panels ?? []) registrations.panels.register(value);
+  for (const value of module.projectActions ?? []) registrations.projectActions.register(value);
+  if (module.projectFactsProvider !== undefined) registrations.projectFacts.register(module.projectFactsProvider);
+  if (module.projectImport !== undefined) registrations.projectImports.register(module.projectImport);
+  for (const value of module.projectLayout ?? []) registrations.projectLayouts.register(value);
+  for (const value of module.projectNavigation ?? []) registrations.projectNavigation.register(value);
+  for (const value of module.scheduledTasks ?? []) registrations.scheduledTasks.register(value);
+  for (const value of module.settings ?? []) registrations.settings.register(value);
+  for (const value of module.sidebar ?? []) registrations.sidebars.register(value);
+  if (module.skillsProvider !== undefined) registrations.skillsProviders.register(module.skillsProvider);
+  for (const value of module.terminalPresentations ?? []) {
+    registrations.terminalPresentations.register(value);
+  }
+}
+
+function assertDirectRole(
+  definition: DirectShipctlPluginDefinition,
+  contributions: readonly PluginContributionInspection[],
+  registeredBackgroundEffects: ReadonlySet<string>,
+): void {
+  const presentation = contributions.some(({ family }) => PRESENTATION_FAMILIES.has(family));
+  const headless = contributions.some(({ family }) => !PRESENTATION_FAMILIES.has(family))
+    || registeredBackgroundEffects.size > 0
+    || (definition.provides?.length ?? 0) > 0;
+  const valid = definition.role === "headless"
+    ? !presentation
+    : definition.role === "presentation"
+      ? presentation && !headless
+      : presentation && headless;
+  if (!valid) {
+    throw new Error(
+      `Declared plugin role ${definition.role} does not match its registered contribution families`,
+    );
+  }
+}
+
+function sameGrants(left: readonly string[], right: readonly string[]): boolean {
+  const normalize = (grants: readonly string[]) => [...grants].sort();
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
+function assertAdmissionBinding(
+  definition: ShipctlPluginDefinition,
+  admission: AcceptedPluginAdmission | null,
+): void {
+  if (admission === null) return;
+  const identity = definitionIdentity(definition);
+  if (
+    admission.artifact.moduleId !== identity.id
+    || admission.artifact.version !== identity.version
+    || !sameGrants(declaredGrants(definition), admission.effectiveGrants)
+  ) {
+    throw new Error("Plugin declaration does not match its accepted admission binding");
+  }
+}
+
+function activationFailureMessage(error: unknown): string {
+  if (
+    error instanceof Error
+    && error.message.startsWith("Duplicate plugin contribution:")
+  ) {
+    // The collector, rather than plugin-provided text, constructs this stable
+    // diagnostic. Keeping it preserves the actionable duplicate family/ID
+    // proof without leaking arbitrary plugin activation errors.
+    return error.message;
+  }
+  return "Plugin activation failed";
+}
+
 interface ActivePlugin {
   readonly definition: ShipctlPluginDefinition;
   readonly context: ModuleActivationContext;
   readonly contributions: readonly PluginContributionInspection[];
+  readonly registeredContributions: RegisteredPluginContributions;
   readonly effects: readonly PluginEffectInspection[];
   readonly services: readonly {
     readonly ownerActivationId: string;
@@ -136,29 +224,36 @@ export interface PluginActivationFailure {
 export interface ObservedStaticPluginActivation {
   readonly activeModuleIds: ReadonlySet<string>;
   readonly activationContextsByModule: ReadonlyMap<ModuleId, ModuleActivationContext>;
+  readonly contributionsByModule: ReadonlyMap<ModuleId, RegisteredPluginContributions>;
   readonly failures: readonly PluginActivationFailure[];
   inspect(): PluginRuntimeInspection;
   publishHostServices(): void;
+  /** Runs every accepted plugin's pre-shutdown lifecycle in activation order. */
+  beforeShutdown(): Promise<void>;
   deactivate(): Promise<void>;
 }
 
 export interface CordisStaticPluginRuntimeOptions {
-  readonly services: ModuleHostServices;
+  /** Required only while the legacy static-object adapter remains available. */
+  readonly services?: ModuleHostServices;
   readonly semanticServices?: SemanticServiceRegistry;
   readonly activationIdsByModule?: ReadonlyMap<string, string>;
-  /** Gate host mutations until the supervisor publishes the complete graph. */
+  /** Accepted host bindings keyed by the artifact module identity. */
+  readonly admissionsByModule?: ReadonlyMap<string, AcceptedPluginAdmission>;
+  /** Gate legacy host mutations until the supervisor publishes the complete graph. */
   readonly gateHostServices?: boolean;
 }
 
 /**
- * The only Shipctl adapter that imports Cordis. Its public surface contains
- * Shipctl values only; fibers and contexts stay private.
+ * The only Shipctl adapter that imports Cordis. Direct plugins use activation
+ * registrations; the legacy static object is translated here until Step 08.
  */
 export class CordisStaticPluginRuntime {
   readonly #root: CordisContext = new Context();
-  readonly #services: ModuleHostServices;
+  readonly #services: ModuleHostServices | null;
   readonly #semanticServices: SemanticServiceRegistry;
   readonly #activationIdsByModule: ReadonlyMap<string, string>;
+  readonly #admissionsByModule: ReadonlyMap<string, AcceptedPluginAdmission>;
   readonly #gateHostServices: boolean;
   readonly #states = new Map<string, PluginActivationInspection>();
   readonly #active = new Map<string, ActivePlugin>();
@@ -168,10 +263,11 @@ export class CordisStaticPluginRuntime {
   #leaseSequence = 0;
   #disposed = false;
 
-  constructor(options: CordisStaticPluginRuntimeOptions) {
-    this.#services = options.services;
+  constructor(options: CordisStaticPluginRuntimeOptions = {}) {
+    this.#services = options.services ?? null;
     this.#semanticServices = options.semanticServices ?? new SemanticServiceRegistry();
     this.#activationIdsByModule = options.activationIdsByModule ?? new Map();
+    this.#admissionsByModule = options.admissionsByModule ?? new Map();
     this.#gateHostServices = options.gateHostServices ?? false;
     this.#root.provide(SEMANTIC_REGISTRY_SERVICE, this.#semanticServices);
   }
@@ -182,11 +278,12 @@ export class CordisStaticPluginRuntime {
     if (this.#disposed) throw new Error("The Shipctl plugin runtime is disposed");
     const failures: PluginActivationFailure[] = [];
     for (const definition of definitions) {
+      const declared = definitionIdentity(definition);
       const active = await this.activate(definition);
       if (!active) {
         failures.push({
-          moduleId: definition.module.id,
-          message: this.#failureMessages.get(definition.module.id) ?? "Plugin activation failed",
+          moduleId: declared.id,
+          message: this.#failureMessages.get(declared.id) ?? "Plugin activation failed",
         });
       }
     }
@@ -195,6 +292,12 @@ export class CordisStaticPluginRuntime {
       activationContextsByModule: new Map(
         [...this.#active].map(([moduleId, active]) => [moduleId as ModuleId, active.context]),
       ),
+      contributionsByModule: new Map(
+        [...this.#active].map(([moduleId, active]) => [
+          moduleId as ModuleId,
+          active.registeredContributions,
+        ]),
+      ),
       failures,
       inspect: () => this.inspect(),
       publishHostServices: () => {
@@ -202,6 +305,7 @@ export class CordisStaticPluginRuntime {
           this.#active.get(moduleId)?.hostServices?.accept();
         }
       },
+      beforeShutdown: () => this.beforeShutdown(),
       deactivate: () => this.dispose(),
     };
   }
@@ -213,6 +317,22 @@ export class CordisStaticPluginRuntime {
       effects: [...this.#active.values()].flatMap((value) => value.effects),
       services: [...this.#active.values()].flatMap((value) => value.services),
     };
+  }
+
+  async beforeShutdown(): Promise<void> {
+    for (const moduleId of this.#activationOrder) {
+      const active = this.#active.get(moduleId);
+      if (active === undefined || active.context.disposed) continue;
+      if (isLegacyDefinition(active.definition)) {
+        const services = active.hostServices?.services ?? this.#services;
+        if (services === null) {
+          throw new Error(`Legacy plugin ${moduleId} requires the deprecated host service bag`);
+        }
+        await active.definition.module.beforeShutdown?.(services, active.context);
+      } else {
+        await active.definition.beforeShutdown?.(active.context);
+      }
+    }
   }
 
   async deactivate(moduleId: string): Promise<void> {
@@ -236,43 +356,25 @@ export class CordisStaticPluginRuntime {
 
   async activate(definition: ShipctlPluginDefinition): Promise<boolean> {
     if (this.#disposed) throw new Error("The Shipctl plugin runtime is disposed");
-    const { module } = definition;
-    if (this.#active.has(module.id)) {
-      this.#failureMessages.set(module.id, "Plugin activation is already active");
+    const declared = definitionIdentity(definition);
+    const moduleId = declared.id;
+    if (this.#active.has(moduleId)) {
+      this.#failureMessages.set(moduleId, "Plugin activation is already active");
       return false;
     }
-    const configuredActivationId = this.#activationIdsByModule.get(module.id);
+    const configuredActivationId = this.#activationIdsByModule.get(moduleId);
     const identity: ModuleActivationIdentity = configuredActivationId === undefined
-      ? createModuleActivationIdentity(module.id, module.version)
+      ? createModuleActivationIdentity(moduleId, declared.version)
       : {
-          moduleId: module.id,
+          moduleId,
           activationId: configuredActivationId as ModuleActivationId,
         };
-    const hostServices = this.#gateHostServices
+    const admission = this.#admissionsByModule.get(moduleId) ?? null;
+    const hostServices = this.#gateHostServices && this.#services !== null
       ? createActivationHostServiceGate(this.#services)
       : null;
-    const candidateContributions = contributionRecords(definition, identity);
-    const candidateContributionKeys = new Set<string>();
-    for (const contribution of candidateContributions) {
-      const key = `${contribution.family}:${contribution.id}`;
-      if (candidateContributionKeys.has(key) || this.#contributionOwners.has(key)) {
-        hostServices?.dispose();
-        this.#failureMessages.set(
-          module.id,
-          `Duplicate plugin contribution: ${contribution.family}:${contribution.id}`,
-        );
-        this.#states.set(module.id, {
-          moduleId: module.id,
-          activationId: identity.activationId,
-          role: definition.role,
-          status: "failed",
-        });
-        return false;
-      }
-      candidateContributionKeys.add(key);
-    }
-    this.#states.set(module.id, {
-      moduleId: module.id,
+    this.#states.set(moduleId, {
+      moduleId,
       activationId: identity.activationId,
       role: definition.role,
       status: "preparing",
@@ -281,218 +383,239 @@ export class CordisStaticPluginRuntime {
     let fiber: CordisFiberHandle | null = null;
     const candidate = { semanticActivation: null as SemanticActivationController | null };
     const cordisPlugin = {
-      name: `shipctl:${module.id}`,
+      name: `shipctl:${moduleId}`,
       apply: async (cordisContext: CordisContext) => {
-      const semanticRegistry = cordisContext.get(SEMANTIC_REGISTRY_SERVICE) as SemanticServiceRegistry;
-      const semanticActivation = semanticRegistry.activate(identity);
-      candidate.semanticActivation = semanticActivation;
-      const stagedEffects: PluginEffectInspection[] = [{
-        ownerActivationId: identity.activationId,
-        moduleId: module.id,
-        kind: "activation",
-        id: module.id,
-      }];
-      const stagedServiceKeys = new Set<string>();
-      const stagedServiceInstances = new Map<string, unknown>();
-      const recordEffect = (kind: PluginEffectInspection["kind"], id: string) => {
-        const key = `${kind}:${id}`;
-        if (stagedEffects.some((effect) => `${effect.kind}:${effect.id}` === key)) return;
-        stagedEffects.push({
+        assertAdmissionBinding(definition, admission);
+        const semanticRegistry = cordisContext.get(SEMANTIC_REGISTRY_SERVICE) as SemanticServiceRegistry;
+        const semanticActivation = semanticRegistry.activate(identity, admission);
+        candidate.semanticActivation = semanticActivation;
+        const stagedEffects: PluginEffectInspection[] = [{
           ownerActivationId: identity.activationId,
-          moduleId: module.id,
-          kind,
-          id,
-        });
-      };
-      cordisContext.effect(
-        () => () => semanticActivation.dispose(),
-        `shipctl.activation(${identity.activationId})`,
-      );
-
-      const registeredBackgroundEffects = new Set<string>();
-      const ownCleanup = (cleanup: () => void | Promise<void>) => {
-        const leaseId = `lease-${++this.#leaseSequence}`;
-        recordEffect("owned-lease", leaseId);
-        return semanticActivation.context.own(cleanup);
-      };
-      const own = (
-        cleanup: () => void | Promise<void>,
-        backgroundEffectId?: string,
-      ) => {
-        if (backgroundEffectId === undefined) {
-          if (definition.backgroundEffects !== undefined) {
-            throw new Error("Artifact background effects must register with their declared stable ID");
-          }
-        } else {
-          if (!definition.backgroundEffects?.includes(backgroundEffectId)) {
-            throw new Error(`Undeclared background effect: ${backgroundEffectId}`);
-          }
-          if (registeredBackgroundEffects.has(backgroundEffectId)) {
-            throw new Error(`Duplicate background effect: ${backgroundEffectId}`);
-          }
-          registeredBackgroundEffects.add(backgroundEffectId);
-          recordEffect("background", backgroundEffectId);
-        }
-        return ownCleanup(cleanup);
-      };
-      const access: SemanticServiceAccess = {
-        has: (reference) => stagedServiceInstances.has(semanticServiceKey(reference))
-          || cordisContext.get(semanticServiceKey(reference)) !== undefined
-          || semanticActivation.context.services.has(reference),
-        require: <Service>(reference: SemanticServiceReference<Service>): Service => {
-          const key = semanticServiceKey(reference);
-          if (stagedServiceInstances.has(key)) {
-            recordEffect("semantic-service", `${reference.id}@${reference.version}`);
-            return stagedServiceInstances.get(key) as Service;
-          }
-          const published = cordisContext.get(key) as Service | undefined;
-          if (published !== undefined) {
-            recordEffect("semantic-service", `${reference.id}@${reference.version}`);
-            return published;
-          }
-          const service = semanticActivation.context.services.require(reference);
-          recordEffect("semantic-service", `${reference.id}@${reference.version}`);
-          return service;
-        },
-      };
-      const activation = Object.freeze({
-        identity,
-        services: Object.freeze(access),
-        get disposed() { return semanticActivation.context.disposed; },
-        own,
-      }) satisfies ModuleActivationContext;
-
-      const stagedServices: ActivePlugin["services"][number][] = [];
-      for (const provider of definition.provides ?? []) {
-        const key = semanticServiceKey(provider.service);
-        if (stagedServiceInstances.has(key)
-          || semanticActivation.context.services.has(provider.service)
-          || cordisContext.get(key) !== undefined) {
-          throw new Error(`Duplicate semantic service provider: ${provider.service.id}@${provider.service.version}`);
-        }
-        const providerContext: SemanticServiceProviderContext = {
-          activation: identity,
-          get active() { return !activation.disposed; },
-          own,
+          moduleId,
+          kind: "activation",
+          id: moduleId,
+        }];
+        const stagedServiceKeys = new Set<string>();
+        const stagedServiceInstances = new Map<string, unknown>();
+        const recordEffect = (kind: PluginEffectInspection["kind"], id: string) => {
+          const key = `${kind}:${id}`;
+          if (stagedEffects.some((effect) => `${effect.kind}:${effect.id}` === key)) return;
+          stagedEffects.push({
+            ownerActivationId: identity.activationId,
+            moduleId,
+            kind,
+            id,
+          });
         };
-        const service = provider.bind(providerContext);
-        stagedServiceKeys.add(key);
-        stagedServiceInstances.set(key, service);
-        stagedServices.push({
-          ownerActivationId: identity.activationId,
-          moduleId: module.id,
-          id: provider.service.id,
-          version: provider.service.version,
-        });
-        recordEffect("semantic-service", `${provider.service.id}@${provider.service.version}`);
-      }
+        cordisContext.effect(
+          () => () => semanticActivation.dispose(),
+          `shipctl.activation(${identity.activationId})`,
+        );
 
-      for (const required of definition.requires ?? []) access.require(required);
-      if (module.messages !== undefined) access.require(messagesService);
+        const registeredBackgroundEffects = new Set<string>();
+        const ownCleanup = (cleanup: () => void | Promise<void>) => {
+          const leaseId = `lease-${++this.#leaseSequence}`;
+          recordEffect("owned-lease", leaseId);
+          return semanticActivation.context.own(cleanup);
+        };
+        const own = (
+          cleanup: () => void | Promise<void>,
+          backgroundEffectId?: string,
+        ) => {
+          if (backgroundEffectId === undefined) {
+            if (definition.backgroundEffects !== undefined) {
+              throw new Error("Artifact background effects must register with their declared stable ID");
+            }
+          } else {
+            if (!definition.backgroundEffects?.includes(backgroundEffectId)) {
+              throw new Error(`Undeclared background effect: ${backgroundEffectId}`);
+            }
+            if (registeredBackgroundEffects.has(backgroundEffectId)) {
+              throw new Error(`Duplicate background effect: ${backgroundEffectId}`);
+            }
+            registeredBackgroundEffects.add(backgroundEffectId);
+            recordEffect("background", backgroundEffectId);
+          }
+          return ownCleanup(cleanup);
+        };
+        const access: SemanticServiceAccess = {
+          has: (reference) => stagedServiceInstances.has(semanticServiceKey(reference))
+            || cordisContext.get(semanticServiceKey(reference)) !== undefined
+            || semanticActivation.context.services.has(reference),
+          require: <Service>(reference: SemanticServiceReference<Service>): Service => {
+            const key = semanticServiceKey(reference);
+            if (stagedServiceInstances.has(key)) {
+              recordEffect("semantic-service", `${reference.id}@${reference.version}`);
+              return stagedServiceInstances.get(key) as Service;
+            }
+            const published = cordisContext.get(key) as Service | undefined;
+            if (published !== undefined) {
+              recordEffect("semantic-service", `${reference.id}@${reference.version}`);
+              return published;
+            }
+            const service = semanticActivation.context.services.require(reference);
+            recordEffect("semantic-service", `${reference.id}@${reference.version}`);
+            return service;
+          },
+        };
+        const activation = Object.freeze({
+          identity,
+          services: Object.freeze(access),
+          notices: hostServices?.services.notices
+            ?? this.#services?.notices
+            ?? semanticActivation.context.notices,
+          contributions: semanticActivation.context.contributions,
+          get disposed() { return semanticActivation.context.disposed; },
+          own,
+        }) satisfies ModuleActivationContext;
 
-      const deactivation = module.activate?.({
-        activation,
-        panels: hostServices?.services.panels ?? this.#services.panels,
-        services: scopedHostServices(hostServices?.services ?? this.#services),
-      });
-      if (deactivation) {
-        ownCleanup(() => deactivation.deactivate());
-      }
+        const stagedServices: ActivePlugin["services"][number][] = [];
+        for (const provider of definition.provides ?? []) {
+          const key = semanticServiceKey(provider.service);
+          if (stagedServiceInstances.has(key)
+            || semanticActivation.context.services.has(provider.service)
+            || cordisContext.get(key) !== undefined) {
+            throw new Error(
+              `Duplicate semantic service provider: ${provider.service.id}@${provider.service.version}`,
+            );
+          }
+          const providerContext: SemanticServiceProviderContext = {
+            activation: identity,
+            acceptedAdmission: admission,
+            get active() { return !activation.disposed; },
+            own,
+          };
+          const service = provider.bind(providerContext);
+          stagedServiceKeys.add(key);
+          stagedServiceInstances.set(key, service);
+          stagedServices.push({
+            ownerActivationId: identity.activationId,
+            moduleId,
+            id: provider.service.id,
+            version: provider.service.version,
+          });
+          recordEffect("semantic-service", `${provider.service.id}@${provider.service.version}`);
+        }
 
-      for (const task of module.scheduledTasks ?? []) {
-        if (task.moduleId !== module.id) {
-          throw new Error(
-            `Scheduled task ${task.id} belongs to ${task.moduleId}, not ${module.id}`,
+        for (const required of definition.requires ?? []) access.require(required);
+        let deactivation: { deactivate(): void | Promise<void> } | undefined;
+        if (isLegacyDefinition(definition)) {
+          const legacyServices = this.#services;
+          if (legacyServices === null) {
+            throw new Error(`Legacy plugin ${moduleId} requires the deprecated host service bag`);
+          }
+          registerLegacyContributions(definition.module, activation.contributions);
+          if (definition.module.messages !== undefined) access.require(messagesService);
+          const legacyDeactivation = definition.module.activate?.({
+            activation,
+            panels: hostServices?.services.panels ?? legacyServices.panels,
+            services: scopedHostServices(hostServices?.services ?? legacyServices),
+          });
+          if (legacyDeactivation !== undefined) deactivation = legacyDeactivation;
+        } else {
+          deactivation = await definition.activate(activation) ?? undefined;
+        }
+        if (deactivation !== undefined) ownCleanup(() => deactivation.deactivate());
+
+        const activeContributions = semanticActivation.contributions.inspect();
+        if (!isLegacyDefinition(definition)) {
+          assertDirectRole(definition, activeContributions, registeredBackgroundEffects);
+        }
+        const candidateContributionKeys = new Set<string>();
+        for (const contribution of activeContributions) {
+          const key = `${contribution.family}:${contribution.id}`;
+          if (candidateContributionKeys.has(key) || this.#contributionOwners.has(key)) {
+            throw new Error(`Duplicate plugin contribution: ${key}`);
+          }
+          candidateContributionKeys.add(key);
+          recordEffect("contribution", key);
+        }
+        const registeredContributions = semanticActivation.contributions.snapshot();
+        for (const task of registeredContributions.scheduledTasks) {
+          recordEffect("scheduled-task", task.id);
+        }
+
+        if (definition.backgroundEffects !== undefined) {
+          const missing = definition.backgroundEffects.filter(
+            (id) => !registeredBackgroundEffects.has(id),
+          );
+          if (missing.length > 0) {
+            throw new Error(`Missing declared background effects: ${missing.join(", ")}`);
+          }
+        }
+
+        // Publication is the commit point. Activation work above may inspect a
+        // staged service, but other plugins cannot observe it until all failure-
+        // prone preparation succeeds.
+        for (const [key, service] of stagedServiceInstances) {
+          cordisContext.provide(key, service);
+        }
+        for (const contribution of activeContributions) {
+          this.#contributionOwners.set(
+            `${contribution.family}:${contribution.id}`,
+            identity.activationId,
           );
         }
-        // The host commits declared schedules with the candidate message-route
-        // graph. Registering a schedule here would make it an independent,
-        // non-transactional side effect of plugin activation.
-        recordEffect("scheduled-task", task.id);
-      }
-
-      if (definition.backgroundEffects !== undefined) {
-        const missing = definition.backgroundEffects.filter(
-          (id) => !registeredBackgroundEffects.has(id),
-        );
-        if (missing.length > 0) {
-          throw new Error(`Missing declared background effects: ${missing.join(", ")}`);
-        }
-      }
-
-      // Publication is the commit point. Activation work above may inspect a
-      // staged service, but other plugins cannot observe it until all failure-
-      // prone preparation succeeds.
-      for (const [key, service] of stagedServiceInstances) {
-        cordisContext.provide(key, service);
-      }
-
-      for (const contribution of candidateContributions) {
-        recordEffect("contribution", `${contribution.family}:${contribution.id}`);
-        this.#contributionOwners.set(
-          `${contribution.family}:${contribution.id}`,
-          identity.activationId,
-        );
-      }
-      const active: ActivePlugin = {
-        definition,
-        context: activation,
-        contributions: candidateContributions,
-        effects: stagedEffects,
-        services: stagedServices,
-        fiber: fiber!,
-        hostServices,
-      };
-      this.#active.set(module.id, active);
-      this.#activationOrder.push(module.id);
-      this.#states.set(module.id, {
-        moduleId: module.id,
-        activationId: identity.activationId,
-        role: definition.role,
-        status: "active",
-      });
-      return async () => {
-        hostServices?.beginDisposal();
-        this.#active.delete(module.id);
-        for (const contribution of candidateContributions) {
-          const key = `${contribution.family}:${contribution.id}`;
-          if (this.#contributionOwners.get(key) === identity.activationId) {
-            this.#contributionOwners.delete(key);
-          }
-        }
-        const orderIndex = this.#activationOrder.lastIndexOf(module.id);
-        if (orderIndex !== -1) this.#activationOrder.splice(orderIndex, 1);
-        this.#states.set(module.id, {
-          moduleId: module.id,
+        const active: ActivePlugin = {
+          definition,
+          context: activation,
+          contributions: activeContributions,
+          registeredContributions,
+          effects: stagedEffects,
+          services: stagedServices,
+          fiber: fiber!,
+          hostServices,
+        };
+        this.#active.set(moduleId, active);
+        this.#activationOrder.push(moduleId);
+        this.#states.set(moduleId, {
+          moduleId,
           activationId: identity.activationId,
           role: definition.role,
-          status: "disposed",
+          status: "active",
         });
-        stagedServiceKeys.clear();
-        hostServices?.dispose();
-      };
+        return async () => {
+          hostServices?.beginDisposal();
+          this.#active.delete(moduleId);
+          for (const contribution of activeContributions) {
+            const key = `${contribution.family}:${contribution.id}`;
+            if (this.#contributionOwners.get(key) === identity.activationId) {
+              this.#contributionOwners.delete(key);
+            }
+          }
+          const orderIndex = this.#activationOrder.lastIndexOf(moduleId);
+          if (orderIndex !== -1) this.#activationOrder.splice(orderIndex, 1);
+          this.#states.set(moduleId, {
+            moduleId,
+            activationId: identity.activationId,
+            role: definition.role,
+            status: "disposed",
+          });
+          stagedServiceKeys.clear();
+          hostServices?.dispose();
+        };
       },
     };
 
     try {
       fiber = this.#root.plugin(cordisPlugin);
       await fiber;
-      this.#failureMessages.delete(module.id);
+      this.#failureMessages.delete(moduleId);
       return true;
     } catch (error) {
       hostServices?.beginDisposal();
       await fiber?.dispose();
       await candidate.semanticActivation?.dispose();
       hostServices?.dispose();
-      this.#active.delete(module.id);
-      this.#states.set(module.id, {
-        moduleId: module.id,
+      this.#active.delete(moduleId);
+      this.#states.set(moduleId, {
+        moduleId,
         activationId: identity.activationId,
         role: definition.role,
         status: "failed",
       });
-      this.#failureMessages.set(module.id, "Plugin activation failed");
-      if (import.meta.env.DEV) console.error(`Plugin ${module.id} activation failed:`, error);
+      this.#failureMessages.set(moduleId, activationFailureMessage(error));
+      if (import.meta.env.DEV) console.error(`Plugin ${moduleId} activation failed:`, error);
       return false;
     }
   }
@@ -513,16 +636,18 @@ export async function activateStaticPluginsObserved(
 }
 
 export async function activatePluginDefinitionsObserved(
-  services: ModuleHostServices,
+  services: ModuleHostServices | undefined,
   definitions: readonly ShipctlPluginDefinition[],
   activationIdsByModule: ReadonlyMap<string, string> = new Map(),
   semanticServices: SemanticServiceRegistry = new SemanticServiceRegistry(),
   gateHostServices = false,
+  admissionsByModule: ReadonlyMap<string, AcceptedPluginAdmission> = new Map(),
 ): Promise<ObservedStaticPluginActivation> {
   const runtime = new CordisStaticPluginRuntime({
-    services,
+    ...(services === undefined ? {} : { services }),
     semanticServices,
     activationIdsByModule,
+    admissionsByModule,
     gateHostServices,
   });
   return runtime.activateAll(definitions);

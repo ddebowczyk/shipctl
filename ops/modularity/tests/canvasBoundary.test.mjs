@@ -62,3 +62,24 @@ test("canvas rejects feature and Tauri imports while modules cannot import canva
     ],
   );
 });
+
+test("canvas rejects direct workspace persistence and plugin-data reaches", async (t) => {
+  const root = await fixture({
+    "core/frontend/canvas/leaky.ts": [
+      "import { loadWorkspace } from '../workspace/persistence.ts';",
+      "import { persistWorkspace } from '../platform/workspacePersistence.ts';",
+      "export const pluginDataKey = 'shipctl.plugin-data';",
+      "export default [loadWorkspace, persistWorkspace, pluginDataKey];",
+    ].join("\n"),
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.deepEqual(
+    (await checkModuleBoundaries(root)).map(({ rule, specifier }) => ({ rule, specifier })),
+    [
+      { rule: "canvas-persistence-import", specifier: "../workspace/persistence.ts" },
+      { rule: "canvas-persistence-import", specifier: "../platform/workspacePersistence.ts" },
+      { rule: "canvas-persistence-import", specifier: "shipctl.plugin-data" },
+    ],
+  );
+});

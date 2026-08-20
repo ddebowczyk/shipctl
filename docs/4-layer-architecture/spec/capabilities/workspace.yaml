@@ -8,12 +8,13 @@ status: implemented
 layer: application-runtime
 consumers: [commands, assistants, git, ports, skills, todos, usage]
 current_implementations:
-  - core/frontend/host/moduleComposition.ts
-  - core/frontend/host/workspaceContributionCatalog.ts
+  - core/frontend/workspace/pluginRuntime.ts
+  - core/frontend/workspace/acceptedCatalogController.ts
+  - core/frontend/workspace/pluginDataPersistence.ts
   - core/frontend/canvas
 target_owners:
-  provider: core/frontend/workspace
-  tauri_adapter: core/frontend/platform/workspacePersistence
+  provider: core/frontend/workspace/pluginRuntime.ts
+  tauri_adapter: core/frontend/platform/pluginData.ts
   typescript_client: module-api/frontend/src/services/workspace
 operations:
   - id: publishContributions
@@ -23,15 +24,41 @@ operations:
   - id: mutateWorkspace
     kind: request
     contract: >-
-      Apply a semantic open, close, move, focus, split, or reset command.
+      Compatibility alias for applying one revision-checked semantic workspace
+      command.
+  - id: validateWorkspace
+    kind: request
+    contract: Dry-run a revision-checked semantic command without writing state.
+  - id: planWorkspace
+    kind: request
+    contract: Return the normalized next document without writing state.
+  - id: applyWorkspace
+    kind: request
+    contract: >-
+      Commit one command or an all-or-nothing ordered batch with one revision
+      advance.
+  - id: inspectWorkspace
+    kind: request
+    contract: >-
+      Inspect revisioned workspace state with an opt-in canonical document.
   - id: observeWorkspace
     kind: event
     contract: Observe immutable workspace revisions with stable view identity.
 required_grants: []
 ownership:
-  authority: The TypeScript runtime owns catalog and semantic workspace state.
-  resources: View instances belong to workspace; registrations to activations.
-  activation_scope: Publication and disposal always name the activation owner.
+  authority: >-
+    The bundled trusted shipctl.workspace plugin owns authority, document
+    validation,
+    accepted-catalog reconciliation, bridge lifecycle, and workspace
+    diagnostics.
+  resources: >-
+    View instances belong to the workspace; shared layout and open views are a
+    schema-2 opaque plugin-data record, while view-local data belongs to its
+    owner.
+  activation_scope: >-
+    Publication and disposal name the activation owner; catalog reconciliation
+    is
+    post-commit diagnostic-only and cannot unpublish an accepted family.
 depends_on: [plugin-data]
 property_ids:
   - PROP-F-ATOMIC-001
@@ -40,5 +67,6 @@ property_ids:
   - PROP-G-LAYMAN-MOVE-001
   - PROP-G-LAYMAN-SPLIT-001
   - PROP-G-LAYOUT-001
+  - PROP-G-WORKSPACE-OPERATIONS-001
   - PROP-G-CONTRIBUTION-CLEANUP-001
   - PROP-G-CONTRIBUTION-SCHEMA-001

@@ -21,9 +21,9 @@ proof needs.
 | `commands` | Frontend-only immutable artifact | Saved-command service, persistence policy, autostart, session tracking, commands, optional presentation | Terminal, contribution, and workspace command services | First compound Cordis and artifact pilot complete; live replacement remains |
 | `ports` | Frontend-only; permanent process provider | Polling policy, port projection, commands, action wording, notices, optional UI | Scoped process inspection and termination | First native-provider slice complete |
 | `thin-terminal` | Frontend-only immutable artifact | xterm view, terminal workflow, local presentation state | Terminal session, stream, input, and resize | First terminal presentation artifact complete |
-| `todos` | Frontend-only immutable artifact; permanent project-document provider | TODO parsing policy, ordering, presentation, mutations | Scoped project document read and atomic write | Second native-provider and third artifact slice complete |
-| `skills` | Frontend-only immutable artifact; permanent native provider | Catalog and source policy, setup workflow, commands, optional presentation | Approved skill installation operations | Fourth native-provider and fifth artifact slice complete |
-| `git` | Frontend-only immutable artifact; permanent Git provider and watcher | Git projections, workflow, refresh policy, commands, optional UI | Scoped Git operations and watcher leases | Third native-provider and fourth artifact slice complete |
+| `todos` | Frontend-only immutable artifact; permanent project-document provider | TODO parsing policy, ordering, presentation, mutations, and preferences | Scoped project-document read/write, host project catalog, durable plugin data | Second native-provider and third artifact slice complete |
+| `skills` | Frontend-only immutable artifact; permanent native provider | Catalog and source policy, setup workflow, commands, optional presentation | Approved skill installation operations and host project catalog | Fourth native-provider and fifth artifact slice complete |
+| `git` | Frontend-only immutable artifact; permanent Git provider and watcher | Git projections, workflow, refresh policy, commands, optional UI | Scoped Git operations, project catalog, durable plugin data, and repository-change leases | Third native-provider and fourth artifact slice complete |
 | `assistants` | Frontend-only immutable artifact; permanent launch and credential providers | Session services, provider orchestration, commands, labels, models, optional UI | Terminal/process, credentials, durable plugin data | Seventh native-provider and eighth artifact slice complete |
 | `usage` | Frontend-only immutable artifact; permanent usage-source provider | Ingestion, normalization, aggregation, scheduled refresh, projections, optional dashboard | Approved source access, durable plugin data, scheduling and messages | Sixth native-provider and ninth artifact slice complete |
 | `semantic-terminal` | Frontend-only immutable artifact; permanent native parser and authority provider | Semantic terminal view, interaction policy, presentation | Host terminal plus semantic screen protocol and durable anchors | Fifth native-provider and seventh artifact slice complete |
@@ -43,6 +43,54 @@ assistant plugins remain late because replacement must preserve live sessions.
 The low-risk order starts with `ports`, which has a small and clear OS
 mechanism. Later slices can proceed when their required service and ownership
 records pass. The order can branch; it is not one large serial rewrite.
+
+## Legacy host-service disposition
+
+`ModuleHostServices` is a temporary compatibility bag, not a host capability
+contract. The activation contract must replace each member through the target
+below; no replacement may reintroduce a shared module-shaped service object.
+
+| Legacy member | Target boundary | Owning migration | Deletion condition |
+| --- | --- | --- | --- |
+| `panels` | `shipctl.workspace@1` view and navigation contributions | workspace-service and frame work | contributed workspace commands replace imperative panel calls |
+| `terminalSessions` | `shipctl.terminal-sessions@1` | existing semantic capability | every caller resolves the declared service from its activation |
+| `terminalPresentation` | `shipctl.semantic-terminals@1` | existing semantic capability | presentation drivers bind through their declared service |
+| `settings` | activation-derived plugin configuration namespace | configuration migration | module settings sections and project policy no longer consume the global settings bag |
+| `skills` | `shipctl.skill-installation@1` | existing semantic capability | feature code resolves the declared service rather than a legacy alias |
+| `appearance` | read-only `shipctl.appearance@1` semantic service | presentation-contract migration | appearance consumers use the declared projection without a store reference |
+| `notices` | structured runtime diagnostics and notice sink | runtime extraction | candidate and accepted activations emit attributable diagnostic records |
+| `externalLinks` | grant-checked desktop-links port | native-port migration | URL opening is authorized from the activation binding |
+
+The last four rows deliberately identify their target capability rather than a
+convenience wrapper. Their implementation remains sequenced with the named
+migrations; the table is the deletion contract for the legacy bag.
+
+## Legacy artifact adapter migration matrix
+
+`staticPluginRuntime.ts` retains one module-private compatibility branch while
+the existing immutable artifacts are converted. It is not a membership or
+authorization path: an artifact is still selected only by admitted runtime
+catalogue state. Each row below replaces that branch with a direct activation
+entrypoint that registers the same declared contribution facts through the
+activation-owned registries.
+
+| Artifact | Declared role | Direct-activation task | Legacy adapter deletion condition |
+| --- | --- | --- | --- |
+| `shipctl.commands` | `compound` | `shep-2yc.12` | Direct command, project, layout, navigation, and terminal-presentation registrations match its admitted manifest. |
+| `shipctl.ports` | `presentation` | `shep-2yc.13` | Direct navigation and global-surface registrations match its admitted manifest. |
+| `shipctl.todos` | `compound` | `shep-2yc.14` | Direct project-document behavior and registered contributions match its admitted manifest. |
+| `shipctl.git` | `compound` | `shep-2yc.15` | Direct Git service behavior and registered contributions match its admitted manifest. |
+| `shipctl.skills` | `compound` | `shep-2yc.16` | Direct skill-installation behavior and registered contributions match its admitted manifest. |
+| `shipctl.thin-terminal` | `presentation` | `shep-2yc.17` | Direct terminal-presentation registration and activation cleanup match its admitted manifest. |
+| `shipctl.semantic-terminal` | `presentation` | `shep-2yc.18` | Direct semantic-terminal presentation and cleanup match its admitted manifest. |
+| `shipctl.assistants` | `compound` | `shep-2yc.19` | Direct assistant behavior and registered contributions match its admitted manifest. |
+| `shipctl.usage` | `compound` | `shep-2yc.20` | Direct usage schedules, messages, behavior, and registered contributions match its admitted manifest. |
+
+The adapter, `ShipctlModule`, `ModuleHostServices`, and
+`inferShipctlPluginRole` are deleted together only after all nine rows have
+passed their direct-activation proof and the legacy host-service exception
+ledger reaches zero. That deletion is the Step 08 closure, not an exception
+that permits another static route.
 
 ## Shared Rust module API
 
@@ -151,7 +199,8 @@ preserves its host-owned session across live module transitions.
 
 Current facts:
 
-- the module is frontend-only and uses the public Project Documents capability;
+- the module is frontend-only and uses public Project Documents, Projects, and
+  Plugin Data capabilities;
 - it is built as an immutable compound artifact and has no static host import
   or root package dependency;
 - scoped filesystem authority lives in `core/backend/src/project_documents/`;
@@ -159,31 +208,32 @@ Current facts:
 
 Target split:
 
-- the plugin owns TODO syntax interpretation, ordering, move rules, and UI;
+- the plugin owns TODO syntax interpretation, ordering, move rules, UI, and
+  persisted preferences;
 - a scoped project-document service owns authorized reads and atomic writes;
-- a temporary TODO-specific adapter can preserve current behavior while
-  TypeScript policy is characterized and moved.
+- a generic project catalog owns project identity and lifecycle events.
 
 The Phase D deletion gate is complete. Document roundtrip, conflict, path
 scope, atomic-write, activation ownership, and native graph closure have
 replayable properties. Core contains no TODO policy. The Phase E deletion gate
-is also complete. Todos declares `shipctl.project-documents@1`; differential
-properties cover its contribution catalog, enabled and disabled lifecycle,
-document discovery success and denial, passive CSS, and idempotent disposal.
-Generated bundle inventory proves that the host seeds the artifact as enabled
-at startup.
+is also complete. Todos directly declares `shipctl.project-documents@1`,
+`shipctl.projects@1`, and `shipctl.plugin-data@1`; differential properties
+cover contribution parity, persisted preference revisions, catalog and
+filesystem lifecycle changes, document discovery success and denial, passive
+CSS, and idempotent disposal. Generated bundle inventory proves that the host
+seeds the artifact as enabled at startup.
 
 ## Skills
 
 Current facts:
 
-- the module is frontend-only and uses the public Skill Installation
-  capability;
+- the module is frontend-only and uses public Skill Installation and Projects
+  capabilities;
 - the Tauri-free provider lives in
   `core/backend/src/skill_installation/`;
 - the private adapter lives in `core/tauri/src/skill_installation.rs`;
-- the frontend uses the public Skill Installation service through its module
-  activation;
+- the frontend uses public Skill Installation and Projects services through its
+  module activation;
 - the plugin owns the built-in catalog and Markdown sources;
 - operations cross an authorized project filesystem boundary.
 
@@ -194,19 +244,23 @@ Target split:
 - the platform capability owns registered-root authorization, source identity
   validation, safe directory traversal, atomic publication, rollback, and safe
   removal;
+- the generic project catalog owns project identity and lifecycle events that
+  keep the plugin cache current;
 - grants identify allowed roots and operations. They do not expose an
   unrestricted filesystem bridge.
 
 The Phase D deletion gate is complete. Traversal, scope, parity, atomic
 installation, rollback, activation ownership, and native graph closure have
 replayable properties. The Phase E deletion gate is also complete. Skills is a
-DOM-free immutable compound artifact that declares `shipctl.skill-installation@2`
-and its project-action and skills-provider contributions. Generated discovery,
-refresh, install, remove, denial, notice, cache-eviction, and disposal cases
-match the static reference. The packaged app seeds and activates the artifact
-through the common loader. The static host import and root dependency are
-deleted. Skills does not declare Plugin Data because it owns no durable record;
-its Zustand state is a cache of filesystem-backed capability results.
+DOM-free immutable compound artifact that directly declares
+`shipctl.skill-installation@2` and `shipctl.projects@1`, registers its
+project-action and skills-provider contributions, and owns its generic catalog
+lease through `skills.runtime`. Generated discovery, refresh, install, remove,
+denial, notice, cache-eviction, and disposal cases match the direct source
+definition. The packaged app seeds and activates the artifact through the
+common loader. The static host import and root dependency are deleted. Skills
+does not declare Plugin Data because it owns no durable record; its Zustand
+state is a cache of filesystem-backed capability results.
 
 ## Git
 
@@ -215,8 +269,8 @@ Current facts:
 - the module is frontend-only and uses the public Git capability;
 - scoped repository operations live in `core/backend/src/git/`;
 - the private command adapter lives in `core/tauri/src/git.rs`;
-- a host-wide project watcher publishes the trusted native change signal, and
-  activation-owned Git subscriptions filter it by project.
+- the trusted platform adapter owns the raw native change signal; Git receives
+  scoped semantic repository-change leases and the generic project catalog.
 
 Target split:
 
@@ -225,15 +279,17 @@ Target split:
 - the plugin owns Git projections, workflow, refresh policy, wording, commands,
   and optional views;
 - a semantic event subscription service replaces raw Tauri event names and
-  returns an activation-owned lease.
+  returns an activation-owned lease; plugin-data owns persisted preferences.
 
 The Phase D deletion gate is complete. Command parity, repository scope,
 activation access, event ordering, subscription disposal, and native graph
 closure have replayable properties. The Phase E gate is also complete. Git now
-declares `shipctl.git@1` and its seven contribution families in an immutable
-artifact. Differential properties cover refresh success and denial, clean and
-dirty project facts, worktree expansion, service traces, and repeated disposal.
-The static host import and root package dependency are deleted.
+declares `shipctl.git@1`, `shipctl.projects@1`, and `shipctl.plugin-data@1` with
+eight contribution families in an immutable artifact. Differential properties
+cover refresh success and denial, clean and dirty project facts, worktree
+preferences and expansion, catalog and repository-change lifecycle, service
+traces, and repeated disposal. The static host import and root package
+dependency are deleted.
 
 ## Assistants
 
@@ -266,13 +322,15 @@ non-disclosure, and native graph closure have replayable properties.
 
 The Phase E deletion gate is complete. Assistants is an immutable compound
 artifact with no static host import or root package dependency. Its manifest
-declares the four services used by current code: Assistant Launch, Credential
-Store, Processes, and Terminal Sessions. It requests the exact six grants for
-assistant launch and records, credential inspection and writes, and terminal
-start and attachment. Differential properties preserve the launcher panel,
-restore warning, shutdown preparation, semantic service results and traces,
-activation subscription, and repeated disposal. Plugin Data and Workspace stay
-target capabilities until the module consumes their public contracts.
+declares the five services used by current code: Assistant Launch, Credential
+Store, Processes, Terminal Sessions, and Projects. The `assistants.runtime`
+effect owns project-catalog and terminal lifecycle subscriptions without a
+workspace grant. It requests the exact six grants for assistant launch and
+records, credential inspection and writes, and terminal start and attachment.
+Differential properties preserve the launcher panel, restore warning, shutdown
+preparation, semantic service results and traces, activation subscription, and
+repeated disposal. Plugin Data and Workspace stay target capabilities until the
+module consumes their public contracts.
 
 ## Usage
 
@@ -300,17 +358,19 @@ The Phase D deletion gate is complete. Source parity, authority, redaction,
 durable-record ownership, TypeScript policy ownership, and native graph
 closure have replayable properties.
 
-The Phase E deletion gate is also complete. Usage is an immutable compound
-artifact with no static host import or root package dependency. Its manifest
-declares the four services used by current code: Usage Sources, Plugin Data,
-Messages, and Scheduler. It requests the exact nine grants for source reads,
-refresh and observation, settings reads and writes, message publication,
-subscription and directed refresh, and schedule registration. Differential
-properties preserve settings access, source ingestion and observation,
-directed refresh, schedule registration, presentation loaders, runtime
-inspection, and repeated disposal. Credential Store stays private behind the
-native Usage Sources provider. Workspace stays a target capability until the
-module consumes its public contract.
+The Phase E deletion gate is also complete. Usage is a direct immutable
+compound artifact with no static host import, static module wrapper, or root
+package dependency. Its manifest declares the four services used by current
+code: Usage Sources, Plugin Data, Messages, and Scheduler. Its
+`usage.runtime` effect owns the semantic source observer and global-store
+adapters. It requests the exact nine grants for source reads, refresh and
+observation, settings reads and writes, message publication, subscription and
+directed refresh, and schedule registration. Differential properties and the
+direct lifecycle fixture preserve settings access, source ingestion and
+observation, scheduled message delivery, presentation loaders, denied-grant
+withdrawal, runtime inspection, and repeated disposal. Credential Store stays
+private behind the native Usage Sources provider. Workspace stays a target
+capability until the module consumes its public contract.
 
 ## Semantic terminal
 
@@ -338,14 +398,15 @@ The Phase D deletion gate is complete. Replay, revision, backpressure, input,
 paste, resize, anchor, detach/reattach, activation disposal, PTY continuity,
 and native graph closure have replayable properties.
 
-The Phase E deletion gate is also complete. Semantic Terminal is an immutable
-presentation artifact with no static host import or root package dependency.
-It declares `shipctl.terminal-sessions@1`, `shipctl.semantic-terminals@1`, its
-six existing grants, and one terminal-presentation contribution. The artifact
-property compares source and admitted catalogs, wrapper props, service binding,
-passive import, stylesheet ownership, and repeated disposal. The existing 65
-focused interaction tests cover attachment, flow control, input, history,
-anchors, selection, paste, resize, recovery, focus, and teardown.
+The Phase E deletion gate is also complete. Semantic Terminal is a direct
+immutable presentation artifact with no static host import or root package
+dependency. Its activation declares `shipctl.terminal-sessions@1`,
+`shipctl.semantic-terminals@1`, its six existing grants, and one
+terminal-presentation contribution. The artifact property compares source and
+admitted direct registrations, wrapper props, service binding, passive import,
+stylesheet ownership, and repeated disposal. The existing 66 focused
+interaction tests cover attachment, flow control, input, history, anchors,
+selection, paste, resize, recovery, focus, and teardown.
 The packaged proof creates a Semantic Terminal through the application menu,
 writes through the real PTY before and after live module transitions, and
 preserves its host-owned identity beside a running Thin Terminal.

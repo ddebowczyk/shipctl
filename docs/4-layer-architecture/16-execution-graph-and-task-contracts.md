@@ -144,8 +144,8 @@ lifecycle, module Rust projections, and raw shims named by the disposition
 records.
 
 Exit: every end-state acceptance proof in document 13 passes. Deleting the
-legacy canvas is not part of H unless product review makes a separate renderer
-decision.
+legacy canvas is part of H only under the separately recorded product decision
+and its named parity evidence; that authorization was recorded on 2026-08-19.
 
 ## Child task contract
 

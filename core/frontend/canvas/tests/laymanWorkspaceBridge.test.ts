@@ -2,17 +2,20 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
 import { createServer, type ViteDevServer } from "vite";
+import type { UiWorkspaceDocument, WorkspaceRevision } from "@shipctl/module-api";
+import type { WorkspaceCanvasProjection } from "@shipctl/core/workspace";
 import type { LaymanSnapshotPort, LaymanWorkspaceUpdate } from "../layman/workspaceBridge.ts";
 
 type LaymanModule = typeof import("../layman/workspaceBridge.ts");
 type LaymanCanvasModule = typeof import("../layman/LaymanCanvas.tsx");
+type LaymanWorkspaceProjectionModule = typeof import("../layman/workspaceProjection.ts");
 
 let vite: ViteDevServer;
 let createLaymanWorkspaceBridge: LaymanModule["createLaymanWorkspaceBridge"];
 let serializeState: LaymanModule["serializeState"];
 let createLaymanCanvasController: LaymanCanvasModule["createLaymanCanvasController"];
-let LAYMAN_CANVAS_WINDOW_ID: LaymanCanvasModule["LAYMAN_CANVAS_WINDOW_ID"];
 let LAYMAN_CANVAS_WORKSPACE_ID: LaymanCanvasModule["LAYMAN_CANVAS_WORKSPACE_ID"];
+let createLaymanWorkspaceState: LaymanWorkspaceProjectionModule["createLaymanWorkspaceState"];
 
 before(async () => {
   vite = await createServer({
@@ -27,19 +30,68 @@ before(async () => {
   ) as LaymanModule);
   ({
     createLaymanCanvasController,
-    LAYMAN_CANVAS_WINDOW_ID,
     LAYMAN_CANVAS_WORKSPACE_ID,
   } = await vite.ssrLoadModule(
     "/core/frontend/canvas/layman/LaymanCanvas.tsx",
   ) as LaymanCanvasModule);
+  ({ createLaymanWorkspaceState } = await vite.ssrLoadModule(
+    "/core/frontend/canvas/layman/workspaceProjection.ts",
+  ) as LaymanWorkspaceProjectionModule);
 });
 
 after(async () => {
   await vite.close();
 });
 
+function semanticProjection(): WorkspaceCanvasProjection {
+  const document: UiWorkspaceDocument = {
+    schemaVersion: 2,
+    workspaceId: "fixture.workspace",
+    instances: [{
+      instanceId: "fixture.surface",
+      viewTypeId: "fixture.surface",
+      ownerModuleId: "fixture",
+      ownerActivationId: "fixture@1#surface" as never,
+      resource: { kind: "global" },
+      label: "Fixture surface",
+      availability: { kind: "available" },
+      lifecycle: "placed",
+    }],
+    root: {
+      kind: "stack",
+      stackId: "fixture.primary",
+      instanceIds: ["fixture.surface"],
+      selectedInstanceId: "fixture.surface",
+    },
+    floating: [],
+    maximizedStackId: null,
+  };
+  return {
+    workspaceId: document.workspaceId,
+    revision: 1 as WorkspaceRevision,
+    catalogRevision: 1,
+    document,
+    views: [{
+      instance: document.instances[0]!,
+      definition: null,
+      title: "Fixture surface",
+      closeable: true,
+      splitAllowed: true,
+    }],
+  };
+}
+
+function semanticController() {
+  const controller = createLaymanCanvasController(createLaymanWorkspaceState(semanticProjection()));
+  const layout = controller.getState().layout;
+  if (!layout || !("tabs" in layout)) {
+    throw new Error("fixture requires a semantic Layman workspace window");
+  }
+  return { controller, windowId: layout.id };
+}
+
 function snapshotWithTitle(title: string) {
-  const snapshot = structuredClone(serializeState(createLaymanCanvasController().getState()));
+  const snapshot = structuredClone(serializeState(semanticController().controller.getState()));
   if (!snapshot.layout || snapshot.layout.kind !== "window") {
     throw new Error("fixture requires the initial Layman canvas window");
   }
@@ -81,7 +133,7 @@ test("restores one record, ignores a delayed stale update, and applies a newer e
       };
     },
   } satisfies LaymanSnapshotPort;
-  const controller = createLaymanCanvasController();
+  const { controller } = semanticController();
   const bridge = createLaymanWorkspaceBridge({
     workspaceId: LAYMAN_CANVAS_WORKSPACE_ID,
     originId: "active-webview",
@@ -121,7 +173,7 @@ test("a failed save retains the active in-memory canvas and emits a diagnostics 
       throw new Error("CANVAS_LAYOUT_REVISION_CONFLICT: a newer canvas exists");
     },
   } satisfies LaymanSnapshotPort;
-  const controller = createLaymanCanvasController();
+  const { controller, windowId } = semanticController();
   const bridge = createLaymanWorkspaceBridge({
     workspaceId: LAYMAN_CANVAS_WORKSPACE_ID,
     originId: "active-webview",
@@ -135,7 +187,7 @@ test("a failed save retains the active in-memory canvas and emits a diagnostics 
   await bridge.start();
   const transition = bridge.dispatch({
     type: "window.move",
-    windowId: LAYMAN_CANVAS_WINDOW_ID,
+    windowId,
     target: {
       kind: "floating",
       position: { top: 8, left: 8, width: 640, height: 480 },
@@ -169,7 +221,7 @@ test("a compare-and-save conflict restores the confirmed canvas and drops stale 
       };
     },
   } satisfies LaymanSnapshotPort;
-  const controller = createLaymanCanvasController();
+  const { controller, windowId } = semanticController();
   const bridge = createLaymanWorkspaceBridge({
     workspaceId: LAYMAN_CANVAS_WORKSPACE_ID,
     originId: "active-webview",
@@ -185,7 +237,7 @@ test("a compare-and-save conflict restores the confirmed canvas and drops stale 
   await bridge.start();
   const transition = bridge.dispatch({
     type: "window.move",
-    windowId: LAYMAN_CANVAS_WINDOW_ID,
+    windowId,
     target: {
       kind: "floating",
       position: { top: 8, left: 8, width: 640, height: 480 },

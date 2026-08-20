@@ -23,18 +23,19 @@ import {
   BUILTIN_GLOBAL_NAVIGATION,
   createBuiltinGlobalSurfaceContributions,
 } from "./builtinGlobalSurfaceAdapters.ts";
-import { ENABLED_MODULES } from "./enabledModules.ts";
 import { GlobalSurfaceRegistry } from "./globalSurfaceRegistry.ts";
 import { PanelRegistry } from "./panelRegistry.ts";
 
+const NO_STATIC_MODULES: readonly ShipctlModule[] = Object.freeze([]);
+
 export function modulePanelContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly PanelContribution[] {
   return modules.flatMap((module) => module.panels ?? []);
 }
 
 export function modulePanelMigrationAliases(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly PanelMigrationAlias[] {
   return modulePanelContributions(modules).flatMap((panel) => panel.migrationAlias
     ? [{
@@ -46,19 +47,19 @@ export function modulePanelMigrationAliases(
 }
 
 export function moduleGlobalSurfaceContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly GlobalSurfaceContribution[] {
   return modules.flatMap((module) => module.globalSurfaces ?? []);
 }
 
 export function moduleGlobalNavigationContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly GlobalNavigationContribution[] {
   return modules.flatMap((module) => module.globalNavigation ?? []);
 }
 
 export function moduleSidebarContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly SidebarContribution[] {
   return modules
     .flatMap((module) => (module.sidebar ?? []).map((contribution) => {
@@ -81,7 +82,7 @@ export function moduleSidebarContributions(
 }
 
 export function moduleProjectNavigationContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly ProjectNavigationContribution[] {
   return modules
     .flatMap((module) => module.projectNavigation ?? [])
@@ -89,7 +90,7 @@ export function moduleProjectNavigationContributions(
 }
 
 export function moduleProjectActionContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly ProjectActionContribution[] {
   return modules
     .flatMap((module) => module.projectActions ?? [])
@@ -97,13 +98,13 @@ export function moduleProjectActionContributions(
 }
 
 export function enabledProjectActionContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly ProjectActionContribution[] {
   return moduleProjectActionContributions(modules);
 }
 
 export function moduleProjectLayoutContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly ProjectLayoutContribution[] {
   return modules
     .flatMap((module) => module.projectLayout ?? [])
@@ -111,13 +112,13 @@ export function moduleProjectLayoutContributions(
 }
 
 export function enabledProjectLayoutContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly ProjectLayoutContribution[] {
   return moduleProjectLayoutContributions(modules);
 }
 
 export function moduleProjectImportContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly ProjectImportContribution[] {
   return modules.flatMap((module) => module.projectImport ? [module.projectImport] : []);
 }
@@ -127,7 +128,7 @@ export async function discoverRelatedProjectPaths(
   options: { readonly expandRelated: boolean },
   services: ModuleHostServices,
   moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>,
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): Promise<readonly string[]> {
   const results = await Promise.allSettled(
     moduleProjectImportContributions(modules).map(async (contribution) => {
@@ -143,7 +144,7 @@ export async function discoverRelatedProjectPaths(
 }
 
 export function moduleProjectFactsProviders(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly ProjectFactsProviderContribution[] {
   return modules.flatMap((module) => {
     const provider = module.projectFactsProvider;
@@ -167,13 +168,13 @@ export function selectProjectFactsProvider(
 }
 
 export function enabledProjectFactsProvider(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): ProjectFactsProviderContribution | null {
   return selectProjectFactsProvider(moduleProjectFactsProviders(modules));
 }
 
 export function moduleSkillsProvider(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): ModuleSkillsPort | null {
   const providers = modules.flatMap((module) => {
     const provider = module.skillsProvider;
@@ -192,7 +193,7 @@ export function moduleSkillsProvider(
 }
 
 export function moduleSettingsContributions(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
   slot?: SettingsSlot,
 ): readonly SettingsContribution[] {
   return modules
@@ -203,7 +204,7 @@ export function moduleSettingsContributions(
 }
 
 export function moduleScheduledTasks(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): readonly ModuleScheduledTask[] {
   return modules.flatMap((module) => (module.scheduledTasks ?? []).map((task) => {
     if (task.moduleId !== module.id) {
@@ -222,7 +223,7 @@ export function moduleScheduledTasks(
 export async function notifyModulesBeforeShutdown(
   services: ModuleHostServices,
   activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): Promise<void> {
   for (const module of modules) {
     const activation = activations.get(module.id);
@@ -236,7 +237,7 @@ async function notifyProjectLifecycle(
   value: readonly string[] | string,
   services: ModuleHostServices,
   activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): Promise<void> {
   await Promise.allSettled(modules.map(async (module) => {
     const handler = module.projectLifecycle?.[callback];
@@ -289,14 +290,14 @@ export function notifyModulesProjectRemoved(
 }
 
 export function createEnabledPanelRegistry(
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): PanelRegistry {
   return PanelRegistry.create(modulePanelContributions(modules));
 }
 
 export function createEnabledGlobalSurfaceRegistry(
   builtinLoaders: BuiltinGlobalSurfaceLoaders,
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): GlobalSurfaceRegistry {
   return GlobalSurfaceRegistry.create({
     surfaces: [

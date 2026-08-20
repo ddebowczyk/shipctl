@@ -235,7 +235,6 @@ fn rapid_demo_archive() -> Result<RuntimeArtifactArchive, Box<dyn std::error::Er
                 {"family": "message-graph", "id": "shipctl.rapid-demo.messages", "schemaVersion": 1}
             ]
         },
-        "uiContributions": [],
         "requestedGrants": [],
         "nativeAdapters": [],
         "secretReferences": [],

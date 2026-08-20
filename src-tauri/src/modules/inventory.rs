@@ -85,7 +85,7 @@ mod tests {
     }
 
     #[test]
-    fn current_host_inventory_matches_native_features_and_frontend_profile() {
+    fn current_host_inventory_matches_native_features_and_bundled_artifacts() {
         let inventory = current_build_inventory().unwrap();
         let membership = current_membership()
             .into_iter()
@@ -101,11 +101,5 @@ mod tests {
             assert_eq!(record.native_compiled, expected.native_compiled);
             assert_eq!(record.frontend_shipped, expected.frontend_shipped);
         }
-
-        let frontend_profile = include_str!("../../../core/frontend/host/enabledModules.ts");
-        assert!(frontend_profile.contains("ENABLED_MODULES = []"));
-        assert!(frontend_profile.lines().all(|line| {
-            !line.contains("@shipctl/module-") || line.contains("@shipctl/module-api")
-        }));
     }
 }

@@ -6,11 +6,6 @@ import type {
   TerminalViewId,
 } from "@shipctl/core/terminal-host";
 
-// ── Config types (match Rust structs) ────────────────────────────────
-
-/** The host-owned main canvas selected before the application shell mounts. */
-export type CanvasAdapterId = "legacy" | "layman";
-
 export interface RepoInfo {
   path: string;
   name: string;
@@ -23,69 +18,15 @@ export interface RepoGroup {
   order: number;
 }
 
-export interface CommandConfig {
-  name: string;
-  command: string;
-  autostart: boolean;
-  env: Record<string, string>;
-  cwd: string | null;
-}
-
 export interface WorkspaceConfig {
   name: string;
-  commands: CommandConfig[];
-  /** Module-owned top-level values are preserved without entering host schema. */
+  /** Opaque workspace bootstrap data, pending workspace-plugin migration. */
   [capabilityId: string]: unknown;
 }
 
 export interface RegisteredRepo {
   path: string;
   workspace: WorkspaceConfig;
-}
-
-export type PreferredEditor = "vscode" | "zed" | "cursor" | "sublime_text";
-
-export interface EditorSettings {
-  preferredEditor: PreferredEditor | null;
-}
-
-export interface ProjectSettings {
-  showAgentSessionsInSidebar: boolean;
-  /** Capability-owned values are preserved without becoming host contracts. */
-  [key: string]: unknown;
-}
-
-export interface KeybindingSettings {
-  shiftEnterNewline: boolean;
-  optionDeleteWord: boolean;
-  cmdKClear: boolean;
-}
-
-export type CursorStyle = "block" | "underline" | "bar";
-
-export interface TerminalSettings {
-  cursorStyle: CursorStyle;
-  cursorBlink: boolean;
-  /** Host history budget in bytes. The host measures history in bytes, not rows. */
-  scrollbackBytes: number;
-  fontFamily: string;
-  fontSize: number;
-  urlAllowlist: string[];
-  confirmUnsafePaste: boolean;
-}
-
-/**
- * Terminal settings plus the retention revision they were committed at.
- * A response carrying a revision lower than the one already held is stale.
- */
-export interface TerminalSettingsCommit extends TerminalSettings {
-  retentionRevision: number;
-}
-
-export interface SidebarSettings {
-  fontSize: number;
-  fontFamily: string;
-  width: number;
 }
 
 export interface UiState {

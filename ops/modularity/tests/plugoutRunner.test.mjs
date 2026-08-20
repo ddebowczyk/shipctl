@@ -78,7 +78,6 @@ for (const id of ["todos", "ports", "skills", "git", "commands", "assistants", "
       await mkdir(path.join(root, directory), { recursive: true });
     }
     for (const relativePath of [
-      "core/frontend/host/enabledModules.ts",
       "src-tauri/Cargo.toml",
       "src-tauri/src/lib.rs",
       "src-tauri/src/modules/mod.rs",

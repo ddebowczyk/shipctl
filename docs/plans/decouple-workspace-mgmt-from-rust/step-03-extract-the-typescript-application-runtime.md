@@ -1,108 +1,143 @@
 <!-- markdownlint-disable MD013 -->
 
-# Step 03 — Extract the TypeScript application runtime
+# Step 03 — Move the existing runtime out of React
 
 ## Outcome
 
-Make a renderer-independent TypeScript ApplicationRuntime the sole application
-composition root. It owns the Cordis graph, plugin admission, configuration
-projection, accepted contribution catalogue, lifecycle, diagnostics, and
-semantic operations. AppShell becomes a thin React bootstrap and renderer
-consumer rather than a place that creates business services.
+The application runtime already exists. `AppShell.tsx` owns its *lifetime*, not
+its logic. This step relocates construction and gives the runtime an explicit
+lifecycle owner outside React. It adds no new composition root and no new facade
+type.
 
-## Why this comes before workspace UI work
+## The precise problem
 
-Today AppShell constructs semantic service registries, core activation, native
-providers, LiveModuleSupervisor, workspace authority, workspace canvas bridge,
-and the contribution catalogue. Moving workspace code alone would merely move a
-new dependency into the same React composition root. The runtime must be
-extractable before plugins can be truly self-sufficient.
+`core/frontend/shell/AppShell.tsx` constructs the runtime in two places:
 
-The existing staticPluginRuntime adapter, LiveModuleSupervisor,
-runtimeModuleLoader, moduleArtifactLoader, and accepted workspace catalogue
-controller should be composed into the new runtime incrementally. They are not
-throwaway prototypes.
+- module scope, lines 124-140: `SEMANTIC_SERVICE_PROVIDERS` (nine providers),
+  `SEMANTIC_SERVICES`, `CORE_ACTIVATION`, `CORE_MODULE_ACTIVATIONS` — evaluated
+  at import time, so importing the shell starts service construction;
+- a single mount effect, lines 429-582: `WorkspaceAuthority.open` with a
+  fallback to `InMemoryWorkspacePersistence`, `WorkspaceCanvasBridge`,
+  `AcceptedWorkspaceCatalogController`, and `LiveModuleSupervisor` with five
+  more inline providers (workspace, messages, scheduler, terminal sessions,
+  semantic terminals), plus `publish`, `reportApplied`, and `reportRejected`
+  callbacks that push user notices.
 
-## Runtime responsibility
+Consequences that matter beyond tidiness:
 
-ApplicationRuntime should accept injected ports and expose a semantic snapshot
-and operation surface. It should not import React, a canvas renderer, or Tauri.
+1. **The runtime cannot start without React.** There is no way to activate the
+   accepted graph in a `node --test` lane or headless process, which blocks
+   Steps 06 and 10 outright.
+2. **Provider composition is split across module scope and effect scope**, so
+   which providers exist depends on where the code runs.
+3. **Failure reporting is a `pushNotice` call.** A rejected runtime revision is
+   reported as a transient toast (lines 548-563) with the structured record sent
+   separately to `reportModuleReconciliationFailure`. An agent cannot read the
+   toast, and the notice is the only thing a user sees.
+4. **Persistence failure silently degrades to in-memory** (lines 443-456) with a
+   notice. The workspace then accepts writes that will never survive restart.
+   That is a correctness decision made in a React catch block.
 
-| Input | Examples |
+## The rule for this step
+
+> Nothing may be created here that is not already created in `AppShell.tsx`.
+
+The deliverable is a `core/frontend/runtime` entrypoint that accepts injected
+ports and returns the same objects AppShell builds today, plus start/dispose.
+If the diff introduces a new abstraction, an interface with one implementation,
+or a "runtime facade" wrapping `LiveModuleSupervisor`, it has failed the step.
+
+`core/frontend/runtime` already exports `SemanticServiceRegistry`,
+`LivePluginReconciler`, `AtomicRuntimePublication`, `createActivationHostServiceGate`,
+`assertCompleteRuntimeFamily`, and `CordisStaticPluginRuntime`. The new
+entrypoint composes those. `LiveModuleSupervisor` (currently in
+`core/frontend/host`) moves to `core/frontend/runtime` because it is the
+lifecycle owner, and the new `runtime-import-boundary` rule from Step 01 will
+then hold it React-free.
+
+## Inputs and outputs
+
+Inputs are ports, supplied by whoever starts the runtime:
+
+| Input | Supplied today by |
 | --- | --- |
-| Native base-service ports | terminal host, process control, credentials, filesystem-backed documents, desktop bridge |
-| Artifact source | bundled artifact directory, installed artifact registry, integrity/admission provider |
-| Configuration/document port | generic revisioned durable document capability |
-| Runtime policy | trusted artifact policy, feature flags, bootstrap compatibility profile |
-| Diagnostics sink | structured events, health snapshot, notices adapter |
+| Native semantic service providers | the nine `create*ServiceProvider()` calls at `AppShell.tsx:124-133` |
+| Activation-scoped provider factories | the five inline factories at `AppShell.tsx:492-510` |
+| Workspace persistence port | `createTauriWorkspacePersistencePort()` (`AppShell.tsx:440`) |
+| Artifact source, admission, and effective grants | `moduleArtifactLoader` / `runtimeModuleLoader` via the supervisor; the accepted admission binding reaches host-side providers, not plugin code (Step 02) |
+| Diagnostics sink | `reportModuleReconciliationFailure` + `publishFrontendRuntimeSnapshot` |
 
-| Output | Consumers |
-| --- | --- |
-| Accepted runtime snapshot | React shell, CLI bridge, diagnostics |
-| Semantic service resolver | accepted plugins and privileged host adapters |
-| Contribution catalogue | workspace plugin and renderer |
-| Operation registry | UI command surfaces, online CLI, headless CLI |
-| Lifecycle controls | native bootstrap and orderly shutdown |
-| Structured diagnostics | logs, inspection commands, user notices |
+Outputs are a subscribable accepted snapshot, the semantic service resolver, the
+contribution catalogue, and lifecycle controls. React subscribes; it does not
+construct.
 
 ## Lifecycle model
 
-The runtime should follow an explicit candidate-to-published sequence:
+The candidate→publish sequence is already implemented by `LivePluginReconciler`
+and `AtomicRuntimePublication` and is proved by `PROP-F-ATOMIC-001`. Do not
+re-specify it. Two things this step must fix in it:
 
-1. discover manifests and configuration;
-2. resolve artifact graph, service dependencies, and grants;
-3. instantiate a candidate Cordis graph;
-4. validate manifests, settings, contribution identities, routes, schedules,
-   and required capabilities;
-5. activate candidate plugins into staged registries;
-6. atomically publish the accepted snapshot and start owned effects;
-7. dispose the previous graph only after publication is safe;
-8. emit a structured revisioned outcome for inspection.
-
-Failure before publication disposes staged effects and leaves the prior accepted
-graph intact. This is essential for the reported class of “runtime revision was
-rejected” failures: the agent must be able to inspect why, and the UI must not
-be left partly rewired.
+1. **Persistence degradation becomes an explicit mode, not a catch block.** If
+   the durable port is unavailable, the runtime starts in a named
+   `persistence: "unavailable"` state that is visible in the accepted snapshot
+   and in CLI inspection, and workspace writes fail loudly rather than
+   succeeding into memory. Falling back silently to `InMemoryWorkspacePersistence`
+   in production is a data-loss path disguised as resilience.
+2. **Rejection reporting is structured first.** The runtime emits a diagnostic
+   record; React maps selected records to `pushNotice`. The notice references
+   the diagnostic id. No failure may exist only as a toast.
 
 ## Bootstrap variants
 
-The same constructor should support three compositions:
-
-| Composition | Supplied ports | Purpose |
+| Composition | Ports | Purpose |
 | --- | --- | --- |
-| Tauri UI runtime | full native ports plus React renderer adapter | normal desktop application |
-| Headless runtime | durable config/documents and explicitly allowed non-UI ports | offline CLI inspection, validation, planning, and apply |
-| Test runtime | deterministic fake ports and fixture artifacts | contract, property, and failure tests |
+| Tauri UI | all platform adapters + React renderer | desktop app |
+| Test | deterministic fakes from `@shipctl/module-api/testing` + fixture artifacts | contract and property tests |
+| Headless | durable records + explicitly allowed non-UI ports | Step 10 |
 
-This does not mean the UI and CLI are the same process. It means their
-application semantics come from the same TypeScript implementation.
+`module-api/frontend/src/testing/*` already provides fakes for every semantic
+service (assistant launch, credentials, git, messages, plugin data, processes,
+project documents, scheduler, semantic services, semantic terminals, skill
+installation, terminal sessions, usage sources). The test bootstrap composes
+those; it does not need new doubles.
+
+The test bootstrap is the **exit criterion**, not an optional extra: without it
+this step cannot be shown to have removed the React dependency.
 
 ## Refactoring actions
 
-1. Define the renderer-independent ApplicationRuntime facade under
-   core/frontend/runtime or a renamed trusted TypeScript host package.
-2. Move the non-React construction currently in AppShell behind that facade.
-3. Make native/Tauri bootstrap create platform adapters and inject them; it
-   must not select application features or construct workspace policy.
-4. Have AppShell subscribe to runtime snapshots and render a selected canvas
-   adapter only.
-5. Move startup notices and diagnostics to a structured runtime event stream;
-   React maps appropriate events to pushNotice.
-6. Keep existing supervisor and static adapter behind the facade while later
-   steps replace their legacy inputs.
-7. Add an in-memory test bootstrap before adding a headless executable.
+1. Move `liveModuleSupervisor.ts` from `core/frontend/host` to
+   `core/frontend/runtime`; confirm `runtime-import-boundary` (Step 01) passes.
+2. Add a runtime entrypoint that takes the ports listed above and performs the
+   construction currently in `AppShell.tsx:124-140` and `429-582`, unchanged.
+3. Make provider composition a single ordered list supplied by the caller;
+   remove the module-scope/effect-scope split and the import-time side effect.
+4. Replace the in-memory persistence fallback with an explicit degraded mode
+   surfaced in the accepted snapshot.
+5. Emit structured diagnostics for applied and rejected revisions; have React
+   subscribe and map to notices by diagnostic id.
+6. Reduce `AppShell` to: subscribe to the snapshot, hold canvas model/actions/
+   ports, render `CanvasHost`. Its remaining `useEffect`s should be listeners,
+   timers, and imperative integrations only, per `CLAUDE.md`.
+7. Add the in-memory test bootstrap and one activation test with no DOM.
+8. Leave `src/main.tsx` alone in this step; the `get_canvas_adapter` bootstrap
+   dependency is Step 05's.
 
 ## Validation and exit criteria
 
-- A test activates the same fixture plugin graph with no DOM and no Tauri
-  package imported.
-- AppShell no longer constructs workspace authority, module supervisors, or
-  semantic registries itself.
-- Native bootstrap code is limited to platform port creation, configuration
-  location, lifecycle wiring, and renderer launch.
-- A failed candidate graph leaves the preceding runtime revision, contribution
-  catalogue, and active effects unchanged.
-- Runtime diagnostics identify plugin, manifest version, grant, phase, and
-  causal error without relying on a transient notification.
-- Existing application startup and shutdown behavior remains covered while the
-  legacy module adapter is still in place.
+- A `node --test` case starts the runtime with fixture artifacts and fake ports,
+  activates a plugin, resolves a service, and disposes — with no DOM and no
+  `@tauri-apps/*` in the import closure.
+- `AppShell.tsx` constructs no `SemanticServiceRegistry`, `WorkspaceAuthority`,
+  `WorkspaceCanvasBridge`, `AcceptedWorkspaceCatalogController`, or
+  `LiveModuleSupervisor`, and has no module-scope service construction.
+- Importing `@shipctl/core/shell` performs no service construction
+  (`module-entrypoint-side-effect` reasoning, applied to the host).
+- `runtime-import-boundary` passes with no exception entry.
+- A failed candidate graph leaves the prior accepted revision, catalogue, and
+  effects unchanged — existing `PROP-F-ATOMIC-001` evidence still replays.
+- With the durable port unavailable, the runtime reports a degraded persistence
+  mode and workspace writes fail with a structured error; no write silently
+  lands in memory.
+- Every activation failure is retrievable from the diagnostics stream after the
+  notice has been dismissed.

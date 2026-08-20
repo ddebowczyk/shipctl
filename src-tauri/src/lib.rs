@@ -28,7 +28,9 @@ use shipctl_core::logs::{
 use shipctl_core::message_bus::RuntimeMessageBus;
 use shipctl_core::module_control::live::ModuleControlService;
 use shipctl_core::module_control::registry::ModuleRegistrySnapshotProvider;
-use shipctl_core::plugin_data::PluginDataService;
+use shipctl_core::plugin_data::{
+    LegacyPluginDataRecordMapSource, PluginDataScope, PluginDataService,
+};
 use shipctl_core::processes::ProcessesService;
 use shipctl_core::project_documents::ProjectDocumentsService;
 use shipctl_core::scheduler::{
@@ -39,11 +41,9 @@ use shipctl_core::skill_installation::SkillInstallationService;
 use shipctl_core::state::archive::StateArchiveService;
 use shipctl_core::state::providers::{
     LegacyStateSnapshotProvider, PluginDataSnapshotProvider, UiSnapshotProvider,
-    WorkspaceDocumentSnapshotProvider, WorkspaceLayoutSnapshotProvider, WorkspaceSnapshotProvider,
+    WorkspaceSnapshotProvider,
 };
 use shipctl_core::state::ui::UiStateStore;
-use shipctl_core::state::workspace_document::WorkspaceDocumentStore;
-use shipctl_core::state::workspace_layout::WorkspaceLayoutStore;
 use shipctl_core::state::{DurableWriteBarrier, SnapshotProvider};
 use shipctl_core::terminal_host::{
     TerminalDriverDescriptor, TerminalDriverId, TerminalDriverRegistry, TerminalService,
@@ -107,11 +107,10 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init());
     let workspace = WorkspaceManager::new_with_barrier(paths.clone(), durable_writes.clone());
-    // Seed retention from normalized settings before any terminal can spawn, so
-    // no runtime is ever constructed with a policy the user did not choose.
+    // TypeScript applies durable configuration after the shell is available.
+    // The native resource starts with its stable generic default and accepts a
+    // byte-budget commit through `set_terminal_retention`.
     let terminals = {
-        let mut settings = workspace.load_terminal_settings().unwrap_or_default();
-        shipctl_core::workspace::config::normalize_terminal_settings(&mut settings);
         let mut drivers = TerminalDriverRegistry::default();
         drivers
             .register(shipctl_core::semantic_terminal::native_factory())
@@ -125,26 +124,27 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
             .expect("the thin terminal driver registers once");
         TerminalService::with_driver_registry(
             context.instance_id.to_string(),
-            shipctl_core::terminal_host::retention::TerminalRetentionPolicy::from_bytes(
-                settings.scrollback_bytes,
-            ),
+            shipctl_core::terminal_host::retention::TerminalRetentionPolicy::default(),
             drivers,
         )
     };
     let semantic_terminals = SemanticTerminalService::terminal_host(terminals.clone());
     let ui_state = UiStateStore::new_with_barrier(paths.ui_state.clone(), durable_writes.clone());
-    let workspace_layouts = WorkspaceLayoutStore::new_with_barrier(
-        paths.workspace_layouts.clone(),
-        durable_writes.clone(),
-    );
-    let workspace_documents = WorkspaceDocumentStore::new_with_barrier(
-        paths.workspace_documents.clone(),
-        durable_writes.clone(),
-    );
-    let plugin_data = PluginDataService::new_with_barrier(
+    // This is a read-only input only. The generic plugin-data service exposes
+    // it as revision-zero migration data for the reserved workspace owner;
+    // its first migration writes the canonical plugin-data record and every
+    // later read is served exclusively from that record.
+    let workspace_document_source = LegacyPluginDataRecordMapSource::new(
+        paths.state_root.join("workspace-documents.json"),
+        "shipctl.workspace".to_string(),
+        PluginDataScope::Global,
+        "workspace-document:".to_string(),
+        1,
+    )?;
+    let plugin_data = PluginDataService::with_legacy_record_maps(
         paths.plugin_data.clone(),
-        workspace.clone(),
         durable_writes.clone(),
+        vec![workspace_document_source],
     );
     let processes = ProcessesService::system();
     let git = GitService::workspace(workspace.clone());
@@ -159,7 +159,6 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         terminals.clone(),
         paths.assistant_sessions.clone(),
         durable_writes.clone(),
-        build_info::APP_VERSION.to_string(),
     );
     let credentials = CredentialStoreService::new();
     let message_bus = RuntimeMessageBus::new(context.clone());
@@ -196,8 +195,6 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
         .manage(assistant_launch)
         .manage(credentials)
         .manage(ui_state)
-        .manage(workspace_layouts)
-        .manage(workspace_documents)
         .manage(state_archive)
         .manage(module_control)
         .manage(shipctl_tauri_adapter::module_control::ModuleRegistryRevisionObservers::default())
@@ -228,10 +225,6 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
             if let Err(e) = workspace.migrate() {
                 eprintln!("Migration warning: {e}");
             }
-            if let Err(e) = workspace.backfill_global_config_defaults() {
-                eprintln!("Config backfill warning: {e}");
-            }
-
             // Start file system watcher for git status updates
             app.manage(GitWatcher::new(app.handle().clone()));
 
@@ -305,11 +298,8 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            shipctl_tauri_adapter::workspace::get_canvas_adapter,
-            shipctl_tauri_adapter::state::load_workspace_layout,
-            shipctl_tauri_adapter::state::save_workspace_layout,
-            shipctl_tauri_adapter::state::load_workspace_document,
-            shipctl_tauri_adapter::state::save_workspace_document,
+            shipctl_tauri_adapter::configuration::read_global_configuration_value,
+            shipctl_tauri_adapter::configuration::read_project_configuration_value,
             shipctl_tauri_adapter::projects::list_repos,
             shipctl_tauri_adapter::projects::register_repo,
             shipctl_tauri_adapter::projects::unregister_repo,
@@ -322,16 +312,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
             shipctl_tauri_adapter::projects::move_repo_to_group,
             shipctl_tauri_adapter::projects::watch_repo,
             shipctl_tauri_adapter::projects::unwatch_repo,
-            shipctl_tauri_adapter::settings::get_editor_settings,
-            shipctl_tauri_adapter::settings::save_editor_settings,
-            shipctl_tauri_adapter::settings::get_project_settings,
-            shipctl_tauri_adapter::settings::save_project_settings,
-            shipctl_tauri_adapter::settings::get_keybinding_settings,
-            shipctl_tauri_adapter::settings::save_keybinding_settings,
-            shipctl_tauri_adapter::settings::get_sidebar_settings,
-            shipctl_tauri_adapter::settings::open_in_editor,
-            shipctl_tauri_adapter::terminal_host::get_terminal_settings,
-            shipctl_tauri_adapter::terminal_host::save_terminal_settings,
+            shipctl_tauri_adapter::terminal_host::set_terminal_retention,
             shipctl_tauri_adapter::terminal_host::get_memory_stats,
             shipctl_tauri_adapter::terminal_host::spawn_terminal,
             shipctl_tauri_adapter::terminal_host::list_terminals,
@@ -354,6 +335,7 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
             shipctl_tauri_adapter::platform::get_computer_name,
             shipctl_tauri_adapter::platform::check_command_exists,
             shipctl_tauri_adapter::platform::reveal_in_finder,
+            shipctl_tauri_adapter::platform::open_in_editor,
             shipctl_tauri_adapter::platform::open_url,
             shipctl_tauri_adapter::plugin_data::read_plugin_data_record,
             shipctl_tauri_adapter::plugin_data::write_plugin_data_record,
@@ -393,10 +375,11 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
             shipctl_tauri_adapter::skill_installation::release_skill_installation_activation,
             shipctl_tauri_adapter::usage_sources::inspect_usage_sources,
             shipctl_tauri_adapter::usage_sources::refresh_usage_sources,
+            shipctl_tauri_adapter::usage_sources::read_usage_source_resource,
             shipctl_tauri_adapter::usage_sources::release_usage_sources_activation,
             shipctl_tauri_adapter::assistant_launch::start_assistant_session,
             shipctl_tauri_adapter::assistant_launch::resume_assistant_session,
-            shipctl_tauri_adapter::assistant_launch::refresh_assistant_session_identity,
+            shipctl_tauri_adapter::assistant_launch::record_assistant_session_identity,
             shipctl_tauri_adapter::assistant_launch::mark_assistant_session_identity_failed,
             shipctl_tauri_adapter::assistant_launch::record_assistant_session_placement,
             shipctl_tauri_adapter::assistant_launch::record_assistant_session_label,
@@ -405,9 +388,9 @@ pub fn run_with_options(options: InstanceLaunchOptions) -> Result<(), String> {
             shipctl_tauri_adapter::assistant_launch::inspect_restorable_assistant_sessions,
             shipctl_tauri_adapter::assistant_launch::take_assistant_session_startup_warning,
             shipctl_tauri_adapter::assistant_launch::prepare_assistant_sessions_for_shutdown,
-            shipctl_tauri_adapter::assistant_launch::inspect_assistant_models,
-            shipctl_tauri_adapter::assistant_launch::inspect_assistant_provider_configuration,
-            shipctl_tauri_adapter::assistant_launch::save_assistant_provider_configuration,
+            shipctl_tauri_adapter::assistant_launch::read_assistant_launch_resource,
+            shipctl_tauri_adapter::assistant_launch::write_assistant_launch_resource,
+            shipctl_tauri_adapter::assistant_launch::execute_assistant_launch_resource,
             shipctl_tauri_adapter::assistant_launch::release_assistant_launch_activation,
             shipctl_tauri_adapter::credentials::inspect_credential,
             shipctl_tauri_adapter::credentials::save_credential,
@@ -479,12 +462,6 @@ fn snapshot_providers(
         Arc::new(WorkspaceSnapshotProvider::new(paths.global_config.clone())),
         Arc::new(LegacyStateSnapshotProvider),
         Arc::new(UiSnapshotProvider::new(paths.ui_state.clone())),
-        Arc::new(WorkspaceLayoutSnapshotProvider::new(
-            paths.workspace_layouts.clone(),
-        )),
-        Arc::new(WorkspaceDocumentSnapshotProvider::new(
-            paths.workspace_documents.clone(),
-        )),
         Arc::new(PluginDataSnapshotProvider::new(paths.plugin_data.clone())),
         Arc::new(ModuleRegistrySnapshotProvider::new(
             paths.module_registry_database.clone(),

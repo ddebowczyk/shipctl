@@ -84,8 +84,8 @@ The replayable proof is:
 just --justfile ops/architecture/justfile git-extraction
 ```
 
-Git still uses static frontend activation. Phase E will replace that static
-composition edge; it does not need another native migration.
+Git's former static frontend activation has been replaced in Phase E by direct
+immutable artifact activation; it did not need another native migration.
 
 ## Fourth slice: Skills
 

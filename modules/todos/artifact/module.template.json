@@ -27,13 +27,28 @@
     "role": "compound",
     "requiredServices": [
       {
+        "id": "shipctl.plugin-data",
+        "version": 1
+      },
+      {
         "id": "shipctl.project-documents",
+        "version": 1
+      },
+      {
+        "id": "shipctl.projects",
         "version": 1
       }
     ],
     "providedServices": [],
-    "backgroundEffects": [],
+    "backgroundEffects": [
+      "todos.runtime"
+    ],
     "contributions": [
+      {
+        "family": "configuration",
+        "id": "todos.preferences",
+        "schemaVersion": 1
+      },
       {
         "family": "panel",
         "id": "todos.board",
@@ -51,8 +66,10 @@
       }
     ]
   },
-  "uiContributions": [],
-  "requestedGrants": [],
+  "requestedGrants": [
+    "plugin-data.read",
+    "plugin-data.write"
+  ],
   "nativeAdapters": [],
   "secretReferences": [],
   "peerDependencies": {

@@ -2,7 +2,7 @@ import cursorLogoSrc from "./logos/cursor.svg";
 import sublimeLogoSrc from "./logos/sublime.svg";
 import vscodeLogoSrc from "./logos/vscode.svg";
 import zedLogoSrc from "./logos/zed.svg";
-import type { PreferredEditor } from "@shipctl/core/platform";
+import type { PreferredEditor } from "@shipctl/core/configuration";
 
 export interface EditorOption {
   id: PreferredEditor;

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "shipctl-artifact:///messages/runtime-operation-request.schema.json",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "operation", "workspaceId", "includeDocument"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "operation": { "const": "workspace.inspect" },
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "includeDocument": { "type": "boolean" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "operation", "workspaceId", "command"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "operation": {
+          "enum": ["workspace.validate", "workspace.plan", "workspace.apply", "workspace.mutate"]
+        },
+        "workspaceId": { "type": "string", "minLength": 1 },
+        "command": true
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "operation", "key"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "operation": { "enum": ["configuration.inspect", "configuration.resolve"] },
+        "key": { "enum": ["runtime", "editor", "projects", "keybindings", "terminal", "sidebar"] }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "operation", "key", "value"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "operation": { "const": "configuration.update" },
+        "key": { "enum": ["runtime", "editor", "projects", "keybindings", "terminal", "sidebar"] },
+        "value": true
+      }
+    }
+  ]
+}

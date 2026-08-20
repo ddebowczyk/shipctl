@@ -3,22 +3,195 @@ $schema: ../schema/phase.v1.schema.yaml
 schema_version: phase/v1
 id: phase-h
 title: Architecture closure
-status: implementing
+status: complete
 source: docs/4-layer-architecture/13-verification-cutover-and-rollback.md
 depends_on: [phase-d, phase-f, phase-g]
-semantics: []
-properties: []
+semantics:
+  - id: SEM-H-001
+    kind: MUST-NOT
+    rule: >-
+      Native artifact admission must not enumerate product plugin roles,
+      services, contribution families, or UI contribution shapes; trusted
+      TypeScript validates opaque application declarations before activation.
+  - id: SEM-H-002
+    kind: MUST
+    rule: >-
+      An artifact built after a host package is produced enters that package
+      only through the runtime catalog, a digest-qualified production asset
+      URL, and a dynamic module import; enabling it must not mutate host
+      package assets.
+properties:
+  - id: PROP-H-NATIVE-PLUGIN-SEMANTICS-001
+    claim: >-
+      Native admission accepts opaque application payloads containing future
+      product roles and contribution families when archive integrity and
+      artifact protocol remain valid.
+    shapes: [safety]
+    evidence: [SEM-H-001]
+    domain:
+      generates: >-
+        Future role names, contribution-family names, and malformed product
+        identifiers inside an otherwise valid schema-v2 artifact.
+      excludes:
+        - archive-integrity violations
+        - artifact-protocol violations
+        - native-grant violations
+      strategy: >-
+        Generate product-semantic payload variation independently of the
+        native archive, digest, and API compatibility contracts.
+      classifications:
+        - opaque-native
+        - future-role
+        - future-contribution
+        - malformed-product-value
+    preconditions:
+      - The archive has a valid integrity index and schema-v2 protocol envelope.
+      - The host API version satisfies the artifact API range.
+    oracle:
+      primary:
+        kind: invariant
+        description: >-
+          Archive inspection and generic preflight preserve the application
+          JSON payload without interpreting its product semantics.
+        independence: >-
+          The assertion exercises Rust archive admission and does not call the
+          TypeScript declaration validator.
+      alternative:
+        kind: reference
+        description: >-
+          The TypeScript loader rejects malformed product declarations with a
+          structured diagnostic before plugin activation.
+        independence: >-
+          The loader runs after native admission through the separately owned
+          frontend runtime boundary.
+    failure_value: >-
+      A future ordinary plugin concept requires a Rust enum, native validator,
+      or host re-release before the TypeScript runtime can decide its meaning.
+    runner:
+      language: rust
+      library: proptest
+      test_id: architecture.artifact-application-payload-opaque.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: passing
+    deletion_gates: [DELETE-H-NATIVE-PLUGIN-SEMANTICS]
+  - id: PROP-H-POST-PACKAGE-PLUGIN-DEPLOY-001
+    claim: >-
+      Generated external live-artifact identities resolve entry and style
+      paths through the digest-qualified production loader and import exactly
+      the catalog entry, while installed-app evidence proves an artifact built
+      after packaging becomes active without changing host hashes.
+    shapes: [safety, metamorphic]
+    evidence: [SEM-H-002]
+    domain:
+      generates: >-
+        External module IDs, versions, SHA-256 digests, entry paths, and zero
+        or more style paths under immutable artifact directories.
+      excludes:
+        - invalid SHA-256 digests
+        - restart-required artifacts
+        - archive-integrity and API-protocol violations
+      strategy: >-
+        Generate live runtime catalog descriptors, capture the loader's
+        digest-qualified URL resolution and dynamic import, then independently
+        exercise the installed package with an artifact built after packaging.
+      classifications:
+        - external-artifact
+        - digest-qualified-url
+        - dynamic-import
+        - entry-asset
+        - style-asset
+        - unchanged-host-hash
+    preconditions:
+      - The artifact descriptor was admitted by the runtime catalog.
+      - The artifact is live and its manifest declarations match its factory.
+    oracle:
+      primary:
+        kind: invariant
+        description: >-
+          The runtime loader resolves each requested entry or style through the
+          exact digest and invokes the importer only with the resolved entry
+          URL, preserving the admitted identity.
+        independence: >-
+          The generated loader test uses a captured platform URL adapter and
+          importer rather than the installed application process.
+      alternative:
+        kind: reference
+        description: >-
+          The installed-app post-package deployment proof builds an external
+          artifact after packaging, enables it through the public registry,
+          restarts the unchanged app, and observes its active contribution and
+          plugin-data write.
+        independence: >-
+          The proof boots the packaged native app and its production Tauri
+          asset protocol rather than the Vite-hosted property-test modules.
+    failure_value: >-
+      A newly built plugin can enter through an unqualified or host-mutating
+      path, so deployed extensions are not independently deliverable.
+    runner:
+      language: typescript
+      library: fast-check
+      test_id: architecture.post-package-plugin-deployment.property
+      shrink: required
+      replay: required
+    tiers: [pr, release]
+    status: passing
+    deletion_gates: [DELETE-H-NATIVE-PLUGIN-SEMANTICS]
 deliverables:
   - All source, contract, unit, property, integration, and package proofs.
   - Installed-app and live-control evidence for every end-state claim.
   - Deletion of each compatibility path authorized by a passing proof.
 deletion_gates:
+  - id: DELETE-H-NATIVE-PLUGIN-SEMANTICS
+    condition: >-
+      The native opaque-payload and post-package runtime-loader properties,
+      plus the installed-app post-package plugin-deployment proof, pass,
+      including TypeScript structured rejection before activation and unchanged
+      host hashes after an external artifact is enabled.
+    removes:
+      - RuntimeContributionFamily and all typed Rust product declaration models.
+      - RuntimeUiContribution and schema-v2 native UI-contribution validation.
+      - Native service, role, and contribution-family compatibility branches.
   - id: DELETE-H-COMPATIBILITY
     condition: >-
       Every end-state and repository-closure proof passes in the packaged app.
     removes:
       - Static membership, restart-only loading, and raw compatibility shims.
-      - Legacy canvas only after a separate product decision authorizes it.
+  - id: DELETE-H-LEGACY-CANVAS
+    condition: >-
+      Shipctl product owner Dariusz Debowczyk authorized retirement on
+      2026-08-19. Delete the listed artifacts only after parity evidence proves
+      the chosen replacement preserves semantic
+      workspace selection and close behavior, admitted global surfaces and
+      panels, navigation and project-layout contributions, and mount-stable
+      terminal hide/show/focus behavior. This is authorization to retire after
+      those checks pass, not authorization to remove the renderer beforehand.
+    removes:
+      - core/frontend/canvas/legacy/LegacyCanvas.tsx.
+      - core/frontend/canvas/legacy/LegacyTabBar.tsx.
+      - core/frontend/canvas/legacy/LegacySidebar.tsx.
+      - core/frontend/canvas/legacy/LegacySidebarFooter.tsx.
+      - core/frontend/canvas/legacy/useSidebarSettingsStore.ts.
+      - core/frontend/canvas/legacy/workspaceProjection.ts.
+      - core/frontend/canvas/legacy/legacyCanvas.css.
+      - >-
+        CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID and its compatibility
+        workspace profile.
+      - >-
+        CanvasModel, CanvasActions, CanvasPorts, CanvasViewPorts, and
+        createCanvasModel.
+      - >-
+        core/frontend/canvas/tests/legacyCanvas.test.ts and
+        legacyWorkspaceProjection.test.ts.
 decisions:
   - >-
     Layman selection is not required to close the four-layer architecture wall.
+  - >-
+    DELETE-H-LEGACY-CANVAS decision owner: Dariusz Debowczyk; decision date:
+    2026-08-19; choice: authorize retirement after the gate's required parity
+    evidence passes. Rationale: complete the approved migration to the
+    TypeScript-owned contributed workspace without treating implementation
+    progress as authorization. Required evidence remains the
+    semantic-workspace, admitted-contribution, and terminal hide/show/focus
+    proof named by the gate.

@@ -41,7 +41,6 @@
       }
     ]
   },
-  "uiContributions": [],
   "requestedGrants": [
     "terminal.attach",
     "terminal.input",

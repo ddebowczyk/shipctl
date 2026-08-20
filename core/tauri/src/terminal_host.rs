@@ -15,8 +15,6 @@ use shipctl_core::terminal_host::types::{
     TerminalId, TerminalLaunchRequest, TerminalMetadata, TerminalRawAttachment,
     TerminalRegistryEvent, TerminalRegistrySubscriptionId,
 };
-use shipctl_core::workspace::config::{normalize_terminal_settings, TerminalSettings};
-use shipctl_core::workspace::manager::WorkspaceManager;
 
 struct TauriTerminalEventSink {
     on_event: Channel<Response>,
@@ -193,49 +191,25 @@ pub fn update_terminal_metadata(
         .map_err(|error| error.to_string())
 }
 
-/// The canonical result of reading or committing terminal settings.
-///
-/// `retention_revision` lets a client discard its own delayed response: a lower
-/// revision than the one it already holds describes an older policy.
+/// The terminal resource acknowledgement. `retention_revision` lets a caller
+/// discard delayed acknowledgements that describe an older resource policy.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TerminalSettingsCommit {
-    #[serde(flatten)]
-    pub settings: TerminalSettings,
+pub struct TerminalRetentionCommit {
+    pub retention_bytes: usize,
     pub retention_revision: u64,
 }
 
+/// Apply a byte budget to the terminal resource. Configuration schema,
+/// defaults, validation, and durable storage stay in TypeScript.
 #[tauri::command]
-pub fn get_terminal_settings(
-    workspace: State<'_, WorkspaceManager>,
+pub fn set_terminal_retention(
+    retention_bytes: usize,
     terminals: State<'_, TerminalService>,
-) -> Result<TerminalSettingsCommit, String> {
-    let mut settings = workspace.load_terminal_settings()?;
-    normalize_terminal_settings(&mut settings);
-    Ok(TerminalSettingsCommit {
-        settings,
-        retention_revision: terminals.retention().revision,
-    })
-}
-
-/// Normalize, persist, then commit the service revision. Durable persistence
-/// and the service revision are one product commit; terminals created after it
-/// use the new policy and running terminals keep the policy they were built
-/// with, because the pinned parser accepts a retention budget only at
-/// construction.
-#[tauri::command]
-pub fn save_terminal_settings(
-    mut settings: TerminalSettings,
-    workspace: State<'_, WorkspaceManager>,
-    terminals: State<'_, TerminalService>,
-) -> Result<TerminalSettingsCommit, String> {
-    normalize_terminal_settings(&mut settings);
-    workspace.save_terminal_settings(&settings)?;
-    let committed = terminals.set_retention(TerminalRetentionPolicy::from_bytes(
-        settings.scrollback_bytes,
-    ));
-    Ok(TerminalSettingsCommit {
-        settings,
+) -> Result<TerminalRetentionCommit, String> {
+    let committed = terminals.set_retention(TerminalRetentionPolicy::from_bytes(retention_bytes));
+    Ok(TerminalRetentionCommit {
+        retention_bytes: committed.policy.bytes(),
         retention_revision: committed.revision,
     })
 }

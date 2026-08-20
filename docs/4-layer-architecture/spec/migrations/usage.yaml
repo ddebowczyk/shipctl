@@ -32,10 +32,13 @@ compatibility_paths:
     the semantic Usage Sources event.
   - Route persistence and secrets through typed capability clients.
   - >-
-    Phase E packages Usage as an immutable compound artifact. It declares
-    Usage Sources, Plugin Data, Messages, and Scheduler because those are the
-    services used by current code. Credential Store remains behind the native
-    Usage Sources provider. Workspace remains a target capability; neither is
+    Phase E packages Usage as a direct immutable compound artifact. Its
+    usage.runtime effect owns the semantic source observer and global-store
+    adapters. It declares Usage Sources, Plugin Data, Messages, and Scheduler
+    because those are the services used by current code. The plugin owns source
+    identity, resource selection, parsing, quota/cache policy, and presentation;
+    the native Usage Sources port enforces only bounded generic resource access.
+    Credential Store and Workspace remain target capabilities; neither is
     pre-granted to the plugin before direct consumption exists.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE

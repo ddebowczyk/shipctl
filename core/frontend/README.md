@@ -14,14 +14,14 @@ see `../backend/README.md`.
 
 | Directory | Owns | Depends on |
 | --- | --- | --- |
-| `platform/` | Tauri IPC bindings, private wire values, error extraction, and semantic capability adapters | `module-api` |
-| `runtime/` | activation-scoped semantic service binding and application lifecycle; Cordis adapter owner | `module-api` |
+| `platform/` | named native resource adapters, private wire values, error extraction, and semantic capability adapters; never a transport-shaped facade | `module-api` |
+| `runtime/` | activation-scoped semantic service binding, artifact reconciliation, and application lifecycle; Cordis adapter owner | `module-api`, `workspace` public API |
 | `shared/` | building blocks that more than one capability already imports: notices, UI state, `ContextMenu`, `a11y`, tab-kind metadata, well-known surface ids | `platform` |
 | `appearance/` | themes, custom themes, fonts (`fonts/`), `globals.css`, terminal colour derivation | `platform` |
 | `terminal-host/` | terminal session state, tab chrome, generic raw attachment, and the presentation port used by terminal modules | `platform`, `shared`, `appearance` |
 | `settings/` | user preferences not owned by another capability: editor choice and its logos (`logos/`) | `platform` |
 | `projects/` | repositories, grouping for the navigation, per-project settings, module-contributed project facts | `platform`, `shared` |
-| `host/` | module activation and composition, `ModuleHostServices`, panel/global registries, the static `CanvasSurfaceCatalog`, module session chrome | every capability above |
+| `host/` | desktop artifact-loading ports, `ModuleHostServices`, panel/global registries, `CanvasSurfaceCatalog`, module session chrome | every capability above |
 | `canvas/` | **not a capability** — host-owned main-canvas adapters, normalized rendering model, and placement of host and module surfaces | `host`, `terminal-host`, `projects`, `shared`, `platform` |
 | `shell/` | **not a capability** — app startup, native title bar, native menu dispatch, settings panel, theme applicator and Homebrew update guidance; it constructs the canvas model and actions | everything |
 
@@ -83,12 +83,13 @@ under `src/`, app imports into `ops/`, and host/module direction violations.
 Cross-capability imports use an exported `@shipctl/core/<capability>` entrypoint;
 `platform/` and `shared/` remain leaf foundations that may be imported directly.
 
-Frontend Tauri imports belong only in `platform/`. During Phase B, the checker
-also reads `ops/modularity/legacy-tauri-imports.json`, an exact counted ledger
-of existing imports outside that directory. It rejects every new edge and every
-stale ledger entry. A capability migration removes both its old import and its
-ledger record; the ledger must be empty at the Phase B exit.
+Frontend Tauri imports belong only in `platform/`. `runtime/` is also kept
+React-, Tauri-, canvas-, shell-, and module-package-free so its semantic graph
+can remain portable.
 
-The checker carries exact exceptions for the host-service adapter's concrete
-store/session imports. Loading the corresponding barrels there would pull the
-whole UI and xterm into Node test lanes. New deep imports are still rejected.
+The checker carries a narrow, structured exception ledger. Five entries are
+owned by `host/moduleHostServices.ts`, explain its concrete store/session
+imports, and are deleted with `ModuleHostServices` in Step 08 after every
+legacy artifact uses direct activation. One Git-module event entry is owned by
+`modules/git/frontend` and is deleted in Step 09 when a semantic event source
+replaces the raw Tauri listener. New deep imports are still rejected.

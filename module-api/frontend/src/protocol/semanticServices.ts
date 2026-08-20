@@ -1,5 +1,6 @@
 import type { ModuleId } from "./panels";
-import type { ModuleJsonValue } from "./services";
+import type { ModuleJsonValue, ModuleNoticeSink } from "./services";
+import type { PluginContributionRegistries } from "./pluginContributions";
 
 declare const activationIdBrand: unique symbol;
 declare const correlationIdBrand: unique symbol;
@@ -64,6 +65,10 @@ export interface SemanticOwnedLease {
 export interface ModuleActivationContext {
   readonly identity: ModuleActivationIdentity;
   readonly services: SemanticServiceAccess;
+  /** Bounded user-facing feedback supplied by the trusted application host. */
+  readonly notices: ModuleNoticeSink;
+  /** Activation-owned registrations for the closed plugin contribution taxonomy. */
+  readonly contributions: PluginContributionRegistries;
   readonly disposed: boolean;
   own(cleanup: SemanticCleanup, backgroundEffectId?: string): SemanticOwnedLease;
 }

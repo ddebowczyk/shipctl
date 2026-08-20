@@ -235,49 +235,52 @@ compatibility policy as startup admission.
 
 ### PROP-E-TODOS-PARITY-001
 
-- **Claim:** For every generated Todos project set, setting state, and document
-  failure mode, the built-in artifact path and static reference path produce
-  equivalent contributions, project lifecycle requests, service traces, and
-  disposal.
+- **Claim:** For every generated Todos project catalog, persisted preference,
+  and document failure mode, the built-in artifact path and direct source
+  definition produce equivalent contributions, project lifecycle requests,
+  service traces, and disposal.
 - **Shape:** differential.
 - **Evidence:** SEM-E-007.
-- **Domain:** generated enabled and disabled states, project sets, discovered
-  TODO documents, and permitted or denied discovery. Exclude pixel rendering
-  and native filesystem access.
-- **Preconditions:** both paths use equivalent isolated project-document
-  services.
+- **Domain:** generated enabled and disabled preferences, project catalog and
+  filesystem changes, discovered TODO documents, and permitted or denied
+  discovery. Exclude pixel rendering and native filesystem access.
+- **Preconditions:** both paths use equivalent isolated project-document,
+  project-catalog, and plugin-data services.
 - **Oracle:** compare normalized catalogs and attributed service traces from
   isolated hosts; then require passive style loading, one executable file, and
   empty runtime ledgers after repeated disposal.
-- **Failure value:** the artifact discovers TODO documents or publishes
-  contributions differently from the source module.
+- **Failure value:** the artifact discovers TODO documents, reacts to a project
+  lifecycle change, or publishes contributions differently from its direct
+  source definition.
 - **Tier:** pull request.
 - **Current status/test ID:** passing / `architecture.todos-artifact-parity.property`.
 
 ### PROP-E-GIT-PARITY-001
 
 - **Claim:** For every generated Git repository state, refresh result, and
-  worktree setting, the built-in artifact path and static reference path
-  produce equivalent contributions, project facts, related paths, service
-  traces, and disposal.
+  stored worktree preference, the built-in artifact path and direct source
+  definition path produce equivalent contributions, project facts, related
+  paths, service traces, and disposal.
 - **Shape:** differential.
 - **Evidence:** SEM-E-007.
 - **Domain:** generated repository identities, branch names, clean and dirty
-  status, worktrees, expansion settings, and permitted or denied status reads.
+  status, worktrees, stored preferences, expansion settings, project-catalog
+  changes, repository-change events, and permitted or denied status reads.
   Exclude pixel rendering and native Git execution.
-- **Preconditions:** both paths use equivalent isolated Git services.
+- **Preconditions:** both paths use equivalent isolated Git, project-catalog,
+  and plugin-data services.
 - **Oracle:** compare normalized catalogs, project facts, related paths, and
   attributed service traces; then require passive style loading, one executable
   file, and empty runtime ledgers after repeated disposal.
 - **Failure value:** the artifact refreshes repository state or expands related
-  worktrees differently from the source module.
+  worktrees differently from the direct source definition.
 - **Tier:** pull request.
 - **Current status/test ID:** passing / `architecture.git-artifact-parity.property`.
 
 ### PROP-E-SKILLS-PARITY-001
 
-- **Claim:** For every generated Skills project state, workflow action, and
-  service failure, the built-in artifact path and static reference path produce
+- **Claim:** For every generated Skills project catalog, workflow action, and
+  service failure, the built-in artifact and direct source definition produce
   equivalent contributions, catalog projections, service traces, notices, and
   disposal.
 - **Shape:** differential.
@@ -285,8 +288,8 @@ compatibility policy as startup admission.
 - **Domain:** generated project identities, installed skill states, lifecycle
   refreshes, provider and project-action calls, and permitted or denied
   inspection, installation, and removal. Exclude native filesystem access.
-- **Preconditions:** both paths use equivalent isolated Skill Installation
-  services.
+- **Preconditions:** both paths use equivalent isolated Skill Installation and
+  project-catalog services.
 - **Oracle:** compare normalized catalogs, snapshots, project actions, notices,
   and attributed service traces; then require no React or presentation files,
   one executable file, project-cache eviction, and empty runtime ledgers after
@@ -299,7 +302,7 @@ compatibility policy as startup admission.
 ### PROP-E-THIN-TERMINAL-PARITY-001
 
 - **Claim:** For generated terminal identities and visibility states, the
-  admitted artifact and source module publish equal terminal presentation,
+  admitted artifact and source direct artifact definition register equal terminal presentation,
   authority, service, and React wrapper contracts.
 - **Shape:** differential lifecycle.
 - **Evidence:** SEM-E-007 and SEM-E-009.
@@ -321,7 +324,7 @@ compatibility policy as startup admission.
 ### PROP-E-SEMANTIC-TERMINAL-PARITY-001
 
 - **Claim:** For generated terminal identities and visibility states, the
-  admitted artifact and source module publish equal semantic-terminal
+  admitted artifact and source direct artifact definition publish equal semantic-terminal
   presentation, authority, service, and React wrapper contracts.
 - **Shape:** differential lifecycle.
 - **Evidence:** SEM-E-007 and SEM-E-009.
@@ -344,7 +347,7 @@ compatibility policy as startup admission.
 ### PROP-E-ASSISTANTS-PARITY-001
 
 - **Claim:** For generated provider availability, model catalogs, and
-  credential states, the admitted artifact and source module publish equal
+  credential states, the admitted artifact and source direct definition publish equal
   launcher, authority, semantic-service, restore, shutdown, and disposal
   behavior.
 - **Shape:** differential lifecycle.
@@ -353,7 +356,8 @@ compatibility policy as startup admission.
   credential status, session inspection, restore warning, shutdown, and
   teardown. Exclude pixel rendering and native process or credential access.
 - **Preconditions:** both paths use isolated Assistant Launch, Credential Store,
-  Processes, and Terminal Sessions fakes and equivalent host lifecycle ports.
+  Processes, Terminal Sessions, and Projects fakes and equivalent host lifecycle
+  ports.
 - **Oracle:** compare normalized catalogs, service results and traces, restore
   notices, panel exports, runtime ledgers, and host subscription traces. Also
   require one executable, no loose assets or styles, exact grants and service
@@ -368,22 +372,24 @@ compatibility policy as startup admission.
 ### PROP-E-USAGE-PARITY-001
 
 - **Claim:** For generated provider and settings inputs, the admitted Usage
-  artifact and source module publish equal catalogs, source ingestion,
+  artifact and source direct definition publish equal catalogs, source ingestion,
   observation, directed refresh, schedule registration, presentation loading,
   activation inspection, and disposal behavior.
 - **Shape:** differential lifecycle.
 - **Evidence:** SEM-E-007 and SEM-E-009.
 - **Domain:** provider identities, visibility, budget mode, monthly budget,
   preserved settings extensions, source refresh, source-change delivery,
-  message routing, presentation imports, and teardown. Exclude pixel rendering
-  and native provider subprocess or credential access.
+  scheduled message routing, denied source observation, presentation imports,
+  and teardown. Exclude pixel rendering and native provider subprocess or
+  credential access.
 - **Preconditions:** both paths use isolated Usage Sources, Plugin Data,
   Messages, and Scheduler fakes with the same activation identity.
 - **Oracle:** compare normalized catalogs, service traces, message receipts,
   presentation exports, and runtime ledgers. Also require one executable, one
-  stylesheet, no loose assets, exact grants and service declarations, and empty
-  ledgers after repeated disposal. The Usage characterization suite separately
-  preserves pricing, alias review, aggregation, and presentation policy.
+  stylesheet, no loose assets, exact grants and service declarations, atomic
+  withdrawal after a denied observer grant, and empty ledgers after repeated
+  disposal. The Usage characterization suite separately preserves pricing,
+  alias review, aggregation, and presentation policy.
 - **Failure value:** the artifact changes ingestion or refresh behavior, loses
   a Usage surface, bypasses semantic services, or retains an observer or
   schedule.
@@ -474,13 +480,16 @@ cut-overs reuse the same path and prove:
 - generated bundle inventory seeds Commands, Ports, Todos, Git, Skills, Thin
   Terminal, Semantic Terminal, and Assistants as enabled immutable frontend
   artifacts;
-- each artifact declares only its required semantic platform service and exact
+- each artifact declares only its required semantic platform services and exact
   contribution catalog;
-- Git refresh, fact projection, and worktree expansion match the static
-  reference for generated clean, dirty, allowed, and denied cases.
-- Skills declares `shipctl.skill-installation@2`, has no React or presentation
-  files, and matches source behavior for generated discovery, refresh,
-  installation, removal, denial, notice, cache eviction, and disposal cases.
+- Git refresh, fact projection, worktree expansion, catalog lifecycle, and
+  semantic repository-change handling match the direct source definition for
+  generated clean, dirty, allowed, and denied cases.
+- Skills directly declares `shipctl.skill-installation@2` and
+  `shipctl.projects@1`, has no React or presentation files, and owns the
+  generic project-catalog lifecycle through its `skills.runtime` effect. It
+  matches source behavior for generated discovery, refresh, installation,
+  removal, denial, notice, cache eviction, and disposal cases.
 - Thin Terminal declares `shipctl.terminal-sessions@1` and exact grants, bundles
   xterm, carries one admitted stylesheet, and removes that stylesheet with its
   activation while its host-owned session remains independent.
@@ -489,10 +498,12 @@ cut-overs reuse the same path and prove:
   one activation-owned stylesheet. Its existing interaction suite preserves
   attach, flow control, history, selection, paste, input, resize, and teardown.
 - Assistants declares `shipctl.assistant-launch@1`,
-  `shipctl.credential-store@1`, `shipctl.processes@1`, and
-  `shipctl.terminal-sessions@1`, its exact six grants, and one compound launcher
-  panel. Differential properties preserve restore, shutdown, service access,
-  panel loading, activation subscription, and teardown behavior.
+  `shipctl.credential-store@1`, `shipctl.processes@1`,
+  `shipctl.terminal-sessions@1`, and `shipctl.projects@1`; its
+  `assistants.runtime` activation effect owns project and terminal subscriptions.
+  It requests its exact six grants and publishes one compound launcher panel.
+  Differential properties preserve restore, shutdown, service access, panel
+  loading, activation subscription, and teardown behavior.
 
 ## Deletion gate
 

@@ -8,6 +8,7 @@ import type {
 } from "./semanticServices.ts";
 import type {
   ModuleTerminalDimensions,
+  ModuleManagedTerminalSessionLaunchRequest,
   ModuleTerminalSession,
   ModuleTerminalSessionLaunchRequest,
   ModuleTerminalSessionLifecycleEvent,
@@ -46,6 +47,8 @@ export interface InspectTerminalSessionsInput {
 
 /** The module identity is supplied by the activation, never by this request. */
 export type StartTerminalSessionInput = ModuleTerminalSessionLaunchRequest;
+/** A host-owned start transaction whose callback may create a native PTY. */
+export type StartManagedTerminalSessionInput = ModuleManagedTerminalSessionLaunchRequest;
 
 export interface UpdateTerminalSessionInput {
   readonly sessionId: string;
@@ -116,6 +119,11 @@ export interface TerminalSessionsService {
   >;
   readonly startSession: SemanticRequestOperation<
     StartTerminalSessionInput,
+    ModuleTerminalSession,
+    TerminalSessionsErrorCode
+  >;
+  readonly startManagedSession: SemanticRequestOperation<
+    StartManagedTerminalSessionInput,
     ModuleTerminalSession,
     TerminalSessionsErrorCode
   >;

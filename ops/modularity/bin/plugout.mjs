@@ -262,15 +262,17 @@ function assertManifestContract(root, manifest) {
     }
   }
   if (frontend.composition_symbol) {
-    const compositionPath = fixtureProfile
-      ? "ops/modularity/fixtures/module-fixture/enabledModules.ts"
-      : "core/frontend/host/enabledModules.ts";
-    if (!exists(compositionPath)) fail(`${compositionPath} does not exist`);
-    const composition = readFileSync(path.join(root, compositionPath), "utf8");
-    const importMarker = `import { ${frontend.composition_symbol} } from "${frontend.package}";`;
-    if (!composition.includes(importMarker)) fail(`${compositionPath} must import ${frontend.composition_symbol}`);
-    if ((composition.match(new RegExp(`\\b${frontend.composition_symbol}\\b`, "g")) ?? []).length < 2) {
-      fail(`${compositionPath} must compose ${frontend.composition_symbol}`);
+    if (!fixtureProfile) {
+      fail("static composition symbols are allowed only in the module fixture");
+    } else {
+      const compositionPath = "ops/modularity/fixtures/module-fixture/enabledModules.ts";
+      if (!exists(compositionPath)) fail(`${compositionPath} does not exist`);
+      const composition = readFileSync(path.join(root, compositionPath), "utf8");
+      const importMarker = `import { ${frontend.composition_symbol} } from "${frontend.package}";`;
+      if (!composition.includes(importMarker)) fail(`${compositionPath} must import ${frontend.composition_symbol}`);
+      if ((composition.match(new RegExp(`\\b${frontend.composition_symbol}\\b`, "g")) ?? []).length < 2) {
+        fail(`${compositionPath} must compose ${frontend.composition_symbol}`);
+      }
     }
   }
 
@@ -356,13 +358,15 @@ function assertManifestContract(root, manifest) {
 }
 
 function frontendDisabledContract(root, manifest) {
-  const composition = readFileSync(path.join(root, "core/frontend/host/enabledModules.ts"), "utf8");
   if (manifest.frontend.delivery === "runtime-artifact") {
-    if (composition.includes(manifest.frontend.package)) {
-      throw new Error(`${manifest.id} runtime artifact must not be statically composed`);
-    }
     return "runtime-artifact";
   }
+
+  if (!manifest.profile || manifest.profile.includes("-disabled/")) {
+    throw new Error(`${manifest.id} has no fixture-only static composition contract`);
+  }
+  const compositionPath = "ops/modularity/fixtures/module-fixture/enabledModules.ts";
+  const composition = readFileSync(path.join(root, compositionPath), "utf8");
 
   const envName = `VITE_SHIPCTL_${manifest.id.toUpperCase().replaceAll("-", "_")}_MODULE`;
   if (!composition.includes(`import.meta.env.${envName}`)) {
@@ -397,51 +401,7 @@ export function nativeDisabled(root, id) {
 export function prepareDisabled(root, manifest) {
   if (!manifest.frontend.composition_symbol) return;
   if (manifest.profile && !manifest.profile.includes("-disabled/")) return;
-  const relativePath = "core/frontend/host/enabledModules.ts";
-  const file = path.join(root, relativePath);
-  let source = readFileSync(file, "utf8");
-  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const removals = [];
-  for (const statement of parsed.statements) {
-    if (
-      ts.isImportDeclaration(statement) &&
-      ts.isStringLiteral(statement.moduleSpecifier) &&
-      statement.moduleSpecifier.text === manifest.frontend.package
-    ) {
-      removals.push([statement.getFullStart(), statement.end]);
-    }
-    if (!ts.isVariableStatement(statement)) continue;
-    for (const declaration of statement.declarationList.declarations) {
-      if (!declaration.initializer) continue;
-      let compositionArray = null;
-      const findCompositionArray = (node) => {
-        if (
-          !compositionArray &&
-          ts.isArrayLiteralExpression(node) &&
-          node.getText(parsed).includes(manifest.frontend.composition_symbol)
-        ) {
-          compositionArray = node;
-          return;
-        }
-        ts.forEachChild(node, findCompositionArray);
-      };
-      findCompositionArray(declaration.initializer);
-      if (!compositionArray) continue;
-      for (const element of compositionArray.elements) {
-        if (!element.getText(parsed).includes(manifest.frontend.composition_symbol)) continue;
-        let end = element.end;
-        if (source[end] === ",") end += 1;
-        removals.push([element.getFullStart(), end]);
-      }
-    }
-  }
-  if (removals.length !== 2) {
-    throw new Error(`Expected one import and one composition for ${manifest.id} in ${relativePath}`);
-  }
-  for (const [start, end] of removals.sort((left, right) => right[0] - left[0])) {
-    source = `${source.slice(0, start)}${source.slice(end)}`;
-  }
-  writeFileSync(file, source);
+  throw new Error(`${manifest.id} declares static composition outside the module fixture`);
 }
 
 export function prepareSourceAbsent(root, manifest) {
@@ -560,9 +520,7 @@ function verifyEnabled(root, manifest) {
 }
 
 function verifyDisabled(root, manifest) {
-  const envName = `VITE_SHIPCTL_${manifest.id.toUpperCase().replaceAll("-", "_")}_MODULE`;
-  const composition = readFileSync(path.join(root, "core/frontend/host/enabledModules.ts"), "utf8");
-  if (composition.includes(`import.meta.env.${envName}`)) frontendDisabledContract(root, manifest);
+  if (manifest.frontend.delivery !== "runtime-artifact") frontendDisabledContract(root, manifest);
   if (manifest.backend?.cargo_feature && manifest.profile?.includes("-disabled/")) {
     nativeDisabled(root, manifest.id);
   }

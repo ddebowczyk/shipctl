@@ -18,9 +18,10 @@ import {
   BUILTIN_GLOBAL_NAVIGATION,
   createBuiltinGlobalSurfaceContributions,
 } from "./builtinGlobalSurfaceAdapters.ts";
-import { ENABLED_MODULES } from "./enabledModules.ts";
 import { GlobalSurfaceRegistry } from "./globalSurfaceRegistry.ts";
 import { PanelRegistry } from "./panelRegistry.ts";
+
+const NO_STATIC_MODULES: readonly ShipctlModule[] = Object.freeze([]);
 
 export type CanvasSurfaceLoadKind =
   | "global-surface"
@@ -503,7 +504,7 @@ export class CanvasSurfaceCatalog {
 
 export function createEnabledCanvasSurfaceCatalog(
   builtinLoaders: BuiltinGlobalSurfaceLoaders,
-  modules: readonly ShipctlModule[] = ENABLED_MODULES,
+  modules: readonly ShipctlModule[] = NO_STATIC_MODULES,
 ): CanvasSurfaceCatalog {
   return CanvasSurfaceCatalog.create({
     modules,

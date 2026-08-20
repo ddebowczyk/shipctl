@@ -15,8 +15,13 @@ target:
   responsibilities:
     - Implement todo document policy and workflow in TypeScript.
     - Publish todo views and commands through typed contributions.
+    - >-
+      Own project-catalog refresh and persisted user preferences through generic
+      services.
   capabilities:
+    - plugin-data
     - project-documents
+    - projects
     - workspace
 phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
 prerequisites:
@@ -27,7 +32,9 @@ compatibility_paths:
     public project documents capability client.
   - >-
     Phase E packages Todos as an immutable built-in artifact. The host admits
-    and activates it through the same runtime path as user-installed plugins.
+    and activates it through the same runtime path as user-installed plugins;
+    its project catalog, project documents, and preferences are declared
+    generic services rather than a static module adapter.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE
     proof_ids: [PROP-D-PARITY-001, PROP-D-CLOSURE-001]

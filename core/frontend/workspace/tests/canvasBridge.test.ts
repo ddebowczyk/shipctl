@@ -49,7 +49,7 @@ after(async () => {
 
 function catalog(viewTypeIds: readonly string[]): WorkspaceCatalogSnapshot {
   return parseWorkspaceCatalogSnapshot({
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision: 1,
     definitions: viewTypeIds.map((viewTypeId) => ({
       viewTypeId,
@@ -61,7 +61,6 @@ function catalog(viewTypeIds: readonly string[]): WorkspaceCatalogSnapshot {
       closeBehavior: "dispose",
       requiredCapabilityIds: [],
       placement: { defaultRegion: "primary", allowSplit: true },
-      state: { kind: "none" },
       presentation: { loaderId: viewTypeId, exportName: "default" },
       migrationAliases: [],
     })),
@@ -70,9 +69,8 @@ function catalog(viewTypeIds: readonly string[]): WorkspaceCatalogSnapshot {
 
 function profile(workspaceId: string): UiWorkspaceDocument {
   return parseUiWorkspaceDocument({
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspaceId,
-    profileId: "fixture.canvas",
     instances: ["first", "second"].map((instanceId) => ({
       instanceId,
       viewTypeId: instanceId === "first" ? "fixture.first" : "fixture.second",
@@ -80,7 +78,6 @@ function profile(workspaceId: string): UiWorkspaceDocument {
       ownerActivationId: "shipctl.fixture@1#canvas",
       resource: { kind: "global" },
       label: instanceId,
-      stateRef: null,
       availability: { kind: "available" },
       lifecycle: "placed",
     })),
@@ -97,9 +94,8 @@ function profile(workspaceId: string): UiWorkspaceDocument {
 
 function splitProfile(workspaceId: string): UiWorkspaceDocument {
   return parseUiWorkspaceDocument({
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspaceId,
-    profileId: "fixture.canvas",
     instances: ["first", "second", "third"].map((instanceId) => ({
       instanceId,
       viewTypeId: `fixture.${instanceId}`,
@@ -107,7 +103,6 @@ function splitProfile(workspaceId: string): UiWorkspaceDocument {
       ownerActivationId: "shipctl.fixture@1#canvas",
       resource: { kind: "global" },
       label: instanceId,
-      stateRef: null,
       availability: { kind: "available" },
       lifecycle: "placed",
     })),
@@ -202,6 +197,31 @@ test("canvas bridge opens semantic views without exposing an authority or render
   assert.equal(
     document?.instances.find((instance) => instance.instanceId === "fixture.global.instance")?.viewTypeId,
     "fixture.global",
+  );
+
+  bridge.dispose();
+});
+
+test("canvas bridge renames a semantic view through the authority", async () => {
+  const workspaceId = "fixture.workspace";
+  const authority = await WorkspaceAuthority.open({
+    workspaceId,
+    catalog: catalog(["fixture.first", "fixture.second"]),
+    persistence: new InMemoryWorkspacePersistence(),
+    defaultProfile: ({ workspaceId: id }) => profile(id),
+  });
+  const bridge = new WorkspaceCanvasBridge({ authority, originId: "fixture.canvas" });
+
+  const renamed = await bridge.snapshot().execute({
+    kind: "rename",
+    instanceId: "second",
+    label: "Renamed panel",
+  });
+
+  assert.equal(renamed.status, "applied");
+  assert.equal(
+    authority.inspect(true).document?.instances.find((item) => item.instanceId === "second")?.label,
+    "Renamed panel",
   );
 
   bridge.dispose();

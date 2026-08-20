@@ -11,8 +11,6 @@ export {
   createLaymanCanvasController,
   createLaymanCanvasState,
   default as LaymanCanvas,
-  LAYMAN_CANVAS_TAB_ID,
-  LAYMAN_CANVAS_WINDOW_ID,
   LAYMAN_CANVAS_WORKSPACE_ID,
   LAYMAN_SOURCE_REVISION,
 } from "./layman/LaymanCanvas.tsx";
@@ -25,7 +23,6 @@ export {
   LAYMAN_WORKSPACE_STACK_PREFIX,
 } from "./layman/workspaceProjection.ts";
 export type {
-  LaymanLegacyCanvasPaneData,
   LaymanWorkspaceViewPaneData,
 } from "./layman/workspaceProjection.ts";
 export {
@@ -40,12 +37,3 @@ export type {
   LaymanWorkspaceBridgeEvent,
   LaymanWorkspaceUpdate,
 } from "./layman/workspaceBridge.ts";
-export type {
-  CanvasGlobalSurfaceRendererProps,
-  CanvasPanelRendererProps,
-  CanvasSidebarRendererProps,
-  CanvasTabBarRendererProps,
-  CanvasTerminalRendererProps,
-  CanvasTrailingLayoutRendererProps,
-  CanvasViewPorts,
-} from "./viewPorts.ts";

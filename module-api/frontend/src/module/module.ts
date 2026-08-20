@@ -8,6 +8,7 @@ import type { ModuleHost } from "../host/module";
 import type { ModuleHostServices, ModuleSkillsPort } from "../host/services";
 import type { ModuleActivationContext } from "../protocol/semanticServices";
 import type { CommandContribution } from "./commands";
+import type { ConfigurationContribution } from "./configuration";
 import type { PanelContribution } from "./panels";
 import type { TerminalPresentationProvider } from "./terminalHost";
 import type {
@@ -46,6 +47,8 @@ export interface ShipctlModule {
   readonly requiredGrants?: readonly string[];
   /** Static frontend commands. Native menu placement stays host-owned. */
   readonly commands?: readonly CommandContribution[];
+  /** TypeScript-owned durable configuration schemas for this module. */
+  readonly configuration?: readonly ConfigurationContribution[];
   readonly panels?: readonly PanelContribution[];
   readonly globalSurfaces?: readonly GlobalSurfaceContribution[];
   readonly globalNavigation?: readonly GlobalNavigationContribution[];

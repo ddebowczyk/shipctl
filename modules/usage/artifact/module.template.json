@@ -105,7 +105,7 @@
     "requiredServices": [
       {
         "id": "shipctl.usage-sources",
-        "version": 2
+        "version": 3
       },
       {
         "id": "shipctl.plugin-data",
@@ -121,7 +121,7 @@
       }
     ],
     "providedServices": [],
-    "backgroundEffects": [],
+    "backgroundEffects": ["usage.runtime"],
     "contributions": [
       {
         "family": "global-surface",
@@ -155,7 +155,6 @@
       }
     ]
   },
-  "uiContributions": [],
   "requestedGrants": [
     "usage-source.read",
     "usage-source.refresh",

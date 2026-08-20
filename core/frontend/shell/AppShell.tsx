@@ -1,39 +1,23 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import {
-  ACTIVATION_TERMINAL_SESSIONS,
-  terminalHostAdapter,
-  terminalPresentationRegistry,
+  TerminalPresentationRegistry,
 } from "../terminal-host/index.ts";
-import {
-  createModuleActivationIdentity,
-  SemanticServiceRegistry,
-} from "../runtime/index.ts";
+import type { ApplicationRuntimeDiagnostic } from "../runtime/index.ts";
 import {
   terminalDriverId,
   type CommandContribution,
   type ContributionId,
-  type ModuleActivationContext,
-  type ModuleId,
   type PanelContribution,
   type TerminalDriverId,
-  type TerminalHostDescriptor,
 } from "@shipctl/module-api";
 import {
-  createCanvasModel,
-  type CanvasActions,
-  type CanvasPorts,
-} from "@shipctl/core/canvas";
-import { CanvasHost, type CanvasAdapterView } from "@shipctl/core/canvas/views";
+  CanvasHost,
+  type CanvasAdapterView,
+} from "@shipctl/core/canvas/views";
 import {
-  CURRENT_CANVAS_WORKSPACE_ID,
-  InMemoryWorkspacePersistence,
-  WorkspaceAuthority,
-  WorkspaceCanvasBridge,
-  CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
-  createCurrentCanvasWorkspaceCatalog,
-  createWorkspaceServiceProvider,
   selectedWorkspaceInstanceIds,
   workspaceGlobalInstanceId,
+  workspaceProjectInstanceId,
   type WorkspaceCanvas,
   type WorkspaceCanvasView,
 } from "@shipctl/core/workspace";
@@ -47,7 +31,6 @@ import { useShallow } from "zustand/shallow";
 import { useTerminalActions } from "../terminal-host/index.ts";
 import { useThemeApplicator } from "./useThemeApplicator.ts";
 import { useProjectWatcher } from "../projects/index.ts";
-import { BUILTIN_GLOBAL_SURFACE_LOADERS } from "./builtinGlobalSurfaceLoaders.ts";
 import {
   getUsername,
   getComputerName,
@@ -55,26 +38,12 @@ import {
   openInEditor,
   setLastRepoPath,
   shutdownAndQuit,
-  createGitServiceProvider,
-  createProcessesServiceProvider,
-  createProjectDocumentsServiceProvider,
-  createSkillInstallationServiceProvider,
-  createCredentialStoreServiceProvider,
-  createAssistantLaunchServiceProvider,
-  createUsageSourcesServiceProvider,
-  createPluginDataServiceProvider,
-  createMessagesServiceProvider,
-  createSchedulerServiceProvider,
-  createSemanticTerminalsServiceProvider,
-  createTerminalSessionsServiceProvider,
-  createTauriWorkspacePersistencePort,
   confirmApplicationQuit,
   confirmGroupRemoval,
   confirmProjectRemoval,
   handleTitleBarPrimaryPress,
   observeNativeMenuCommands,
   observeQuitRequests,
-  reportModuleReconciliationFailure,
 } from "../platform/index.ts";
 import { useThemeStore } from "../appearance/index.ts";
 import { useEditorStore } from "../settings/index.ts";
@@ -84,87 +53,41 @@ import { getErrorMessage } from "../platform/index.ts";
 import { useNoticeStore } from "../shared/index.ts";
 import {
   bindTerminalSessionDimensions,
-  BUILTIN_GLOBAL_NAVIGATION,
-  createBuiltinGlobalSurfaceContributions,
   MODULE_HOST_SERVICES,
-  ENABLED_MODULES,
-  notifyModulesBeforeShutdown,
   notifyModulesProjectOpened,
   notifyModulesProjectRemoved,
   notifyModulesProjectsChanged,
-  panelIdForTab,
-  AcceptedWorkspaceCatalogController,
-  LiveModuleSupervisor,
-  publishFrontendRuntimeSnapshot,
-  type ShipctlModule,
-  type LiveModuleFamily,
-  WorkspaceContributionCatalog,
 } from "../host/index.ts";
 import {
   matchesPanelShortcut,
 } from "../host/index.ts";
 import {
   AcceptedWorkspaceContributionRuntimeProvider,
+  ModuleProjectLayoutSurfaces,
 } from "../host/views.ts";
+import {
+  TerminalPresentationRuntimeProvider,
+} from "../terminal-host/views.ts";
 import { createCommandRegistry } from "./commandRegistry.ts";
 import { CanvasAdapterRuntimeProvider } from "./canvasAdapterRuntime.tsx";
+import { createDesktopApplicationRuntime } from "./applicationRuntime.ts";
+import StandardWorkspaceFrame from "./StandardWorkspaceFrame.tsx";
+import StandardWorkspaceNavigation from "./StandardWorkspaceNavigation.tsx";
+import StandardWorkspaceTabs from "./StandardWorkspaceTabs.tsx";
 
 import type {
-  CanvasAdapterId,
   TabCycleDirection,
-  TerminalTabData,
   UiState,
-  UnifiedTab,
 } from "../platform/index.ts";
-import type { TerminalId } from "@shipctl/core/terminal-host";
+import type { CanvasAdapterId } from "@shipctl/core/configuration";
 
-// Stable empty arrays to avoid infinite re-render loops with zustand v5's
-// useSyncExternalStore — selectors must return the same reference for the same state.
-const EMPTY_TABS: UnifiedTab[] = [];
-const SEMANTIC_SERVICE_PROVIDERS = [
-  createGitServiceProvider(),
-  createProcessesServiceProvider(),
-  createProjectDocumentsServiceProvider(),
-  createSkillInstallationServiceProvider(),
-  createCredentialStoreServiceProvider(),
-  createAssistantLaunchServiceProvider(),
-  createUsageSourcesServiceProvider(),
-  createPluginDataServiceProvider(),
-];
-const SEMANTIC_SERVICES = new SemanticServiceRegistry(SEMANTIC_SERVICE_PROVIDERS);
-const CORE_ACTIVATION = SEMANTIC_SERVICES.activate(
-  createModuleActivationIdentity("core", "host"),
-).context;
-const CORE_MODULE_ACTIVATIONS: ReadonlyMap<ModuleId, ModuleActivationContext> = new Map([
-  ["core", CORE_ACTIVATION],
-]);
 const SEMANTIC_TERMINAL_DRIVER_ID = terminalDriverId("semantic-terminal");
 const DEFAULT_TERMINAL_DIMENSIONS = { cols: 80, rows: 24 } as const;
-
-function withCoreActivation(
-  activations: ReadonlyMap<ModuleId, ModuleActivationContext>,
-): ReadonlyMap<ModuleId, ModuleActivationContext> {
-  return new Map([["core", CORE_ACTIVATION], ...activations]);
-}
-
-function terminalSlotDescriptor(terminalId: TerminalId): TerminalHostDescriptor {
-  const descriptor = TERMINAL_CLIENT_RUNTIME.descriptor(terminalId);
-  return {
-    id: terminalId,
-    driverId: descriptor?.driverId ?? SEMANTIC_TERMINAL_DRIVER_ID,
-    lifecycle: descriptor?.lifecycle ?? "starting",
-    columns: descriptor?.columns ?? 0,
-    rows: descriptor?.rows ?? 0,
-    label: descriptor?.metadata.label ?? "Terminal",
-    projectPath: descriptor?.metadata.projectPath ?? null,
-  };
-}
 
 function fallbackWorkspaceName(repoPath: string) {
   return repoPath.split("/").filter(Boolean).pop() ?? "Project";
 }
 
-/** The current compatibility view is global but is never a user surface. */
 function selectedGlobalWorkspaceView(
   canvas: WorkspaceCanvas,
 ): WorkspaceCanvasView | undefined {
@@ -172,39 +95,42 @@ function selectedGlobalWorkspaceView(
   return canvas.projection.views.find((view) => (
     selectedInstanceIds.has(view.instance.instanceId)
     && view.instance.resource.kind === "global"
-    && view.instance.viewTypeId !== CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID
   ));
 }
 
-/**
- * Build the host's private renderer catalog from an already activated runtime
- * family. The resulting semantic catalog contains only data; React loaders
- * remain behind this host boundary.
- */
-function createWorkspaceContributions(
-  family: Pick<
-    LiveModuleFamily,
-    "registryRevision" | "modules" | "activationContextsByModule"
-  >,
-): WorkspaceContributionCatalog {
-  return WorkspaceContributionCatalog.create({
-    registryRevision: family.registryRevision,
-    modules: family.modules,
-    activationContextsByModule: family.activationContextsByModule,
-    hostContributions: [{
-      moduleId: "core",
-      activation: CORE_ACTIVATION,
-      globalSurfaces: createBuiltinGlobalSurfaceContributions(BUILTIN_GLOBAL_SURFACE_LOADERS),
-      globalNavigation: BUILTIN_GLOBAL_NAVIGATION,
-    }],
-  }).withHostWorkspaceDefinitions(createCurrentCanvasWorkspaceCatalog().definitions);
+function selectedProjectWorkspaceView(
+  canvas: WorkspaceCanvas,
+): WorkspaceCanvasView | undefined {
+  const selectedInstanceIds = new Set(selectedWorkspaceInstanceIds(canvas.projection.document));
+  return canvas.projection.views.find((view) => (
+    selectedInstanceIds.has(view.instance.instanceId)
+    && view.instance.resource.kind === "project"
+  ));
 }
 
-const INITIAL_WORKSPACE_CONTRIBUTIONS = createWorkspaceContributions({
-  registryRevision: 0,
-  modules: [],
-  activationContextsByModule: new Map<ModuleId, ModuleActivationContext>(),
-});
+function selectedSemanticWorkspaceView(
+  canvas: WorkspaceCanvas,
+): WorkspaceCanvasView | undefined {
+  const selectedInstanceIds = new Set(selectedWorkspaceInstanceIds(canvas.projection.document));
+  return canvas.projection.views.find((view) => (
+    selectedInstanceIds.has(view.instance.instanceId)
+  ));
+}
+
+function runtimeDiagnosticTitle(diagnostic: ApplicationRuntimeDiagnostic): string {
+  switch (diagnostic.kind) {
+    case "persistence":
+      return "Workspace persistence is unavailable";
+    case "workspace":
+      return diagnostic.code === "workspace.catalog-synchronization-failed"
+        ? "Workspace catalog could not be synchronized"
+        : "Workspace change could not be saved";
+    case "reconciliation":
+      return `Runtime revision ${diagnostic.registryRevision ?? "unknown"} was rejected`;
+    case "startup":
+      return "Runtime modules could not be inspected";
+  }
+}
 
 export interface AppShellProps {
   /** Resolved once by bootstrap before terminal registry work can start. */
@@ -223,19 +149,22 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   const durableUiStateRef = useRef<UiState | null>(null);
   const [durableUiStateLoaded, setDurableUiStateLoaded] = useState(false);
   const [tabDropProjectPath, setTabDropProjectPath] = useState<string | null>(null);
-  const [workspaceCanvas, setWorkspaceCanvas] = useState<WorkspaceCanvas | undefined>();
-  const workspaceCanvasRef = useRef<WorkspaceCanvas | undefined>(undefined);
+  const [applicationRuntime] = useState(createDesktopApplicationRuntime);
+  const [runtimeSnapshot, setRuntimeSnapshot] = useState(() => applicationRuntime.snapshot());
+  const workspaceCanvas = runtimeSnapshot.workspaceCanvas;
+  const workspaceCanvasRef = useRef<WorkspaceCanvas | undefined>(workspaceCanvas);
   const workspaceGlobalActionTailRef = useRef<Promise<void>>(Promise.resolve());
-  const [moduleRuntime, setModuleRuntime] = useState({
-    moduleActivations: CORE_MODULE_ACTIVATIONS,
-    activeModules: [] as readonly ShipctlModule[],
-    workspaceContributions: INITIAL_WORKSPACE_CONTRIBUTIONS,
-  });
-  const { moduleActivations, activeModules, workspaceContributions } = moduleRuntime;
+  const reportedRuntimeDiagnosticIdsRef = useRef(new Set<string>());
+  const {
+    moduleActivations,
+    activeModules,
+    beforeShutdown,
+    terminalPresentations,
+    workspaceContributions,
+  } = runtimeSnapshot.family;
   const lastTabCycleAtRef = useRef(0);
 
   const canvasSurfaceCatalog = workspaceContributions.canvasSurfaceCatalog;
-  const projectActionContributions = workspaceContributions.projectActions();
   const modulePanelContributions = useMemo(
     () => canvasSurfaceCatalog.panels().filter((panel) => panel.moduleId !== "core"),
     [canvasSurfaceCatalog],
@@ -245,8 +174,8 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     [canvasSurfaceCatalog],
   );
   const activeTerminalPresentationRegistry = useMemo(
-    () => terminalPresentationRegistry(activeModules),
-    [activeModules],
+    () => new TerminalPresentationRegistry(terminalPresentations),
+    [terminalPresentations],
   );
 
   const scheduleWorkspaceGlobalAction = useCallback(
@@ -261,18 +190,22 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     [],
   );
 
-  const closeSemanticGlobalSurface = useCallback(async () => {
+  /** Close the selected semantic view so the mount-stable terminal stage shows. */
+  const showTerminalWorkspace = useCallback(async () => {
     try {
       const closed = await scheduleWorkspaceGlobalAction(async (canvas) => {
-        const view = selectedGlobalWorkspaceView(canvas);
+        const view = selectedSemanticWorkspaceView(canvas);
         if (view === undefined) return false;
         await canvas.execute({ kind: "close", instanceId: view.instance.instanceId });
         return true;
       });
+      // Before the semantic workspace has started, the terminal stage is
+      // visible by default. Keep transient global-surface state from masking
+      // it while startup catches up.
       if (!closed) useUIStore.getState().closeGlobalSurface();
       return true;
     } catch {
-      // WorkspaceCanvasBridge reports the saved diagnostic. Do not duplicate it.
+      // The runtime canvas bridge records the diagnostic. Do not duplicate it.
       return false;
     }
   }, [scheduleWorkspaceGlobalAction]);
@@ -306,7 +239,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
       }
       return true;
     } catch {
-      // WorkspaceCanvasBridge reports the saved diagnostic. Do not duplicate it.
+      // The runtime canvas bridge records the diagnostic. Do not duplicate it.
       return false;
     }
   }, [scheduleWorkspaceGlobalAction]);
@@ -316,7 +249,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
       if (repoPath === activeRepoPath) return true;
 
       try {
-        if (!await closeSemanticGlobalSurface()) return false;
+        if (!await showTerminalWorkspace()) return false;
         await openRepo(repoPath);
         initialProjectAttemptedRef.current = true;
         durableUiStateRef.current = await setLastRepoPath(repoPath);
@@ -336,7 +269,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         return false;
       }
     },
-    [activeModules, activeRepoPath, closeSemanticGlobalSurface, moduleActivations, openRepo, pushNotice],
+    [activeModules, activeRepoPath, showTerminalWorkspace, moduleActivations, openRepo, pushNotice],
   );
 
   const {
@@ -382,36 +315,15 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     return { columns: cols, rows };
   }), [getTerminalDimensions]);
 
-  // Derive active project's tabs and commands from stores
-  const activeProjectTerminals = useTerminalStore(
-    (s) => (activeRepoPath ? s.projectState[activeRepoPath] : null),
+  const activeTabId = useTerminalStore(
+    (state) => activeRepoPath ? state.projectState[activeRepoPath]?.activeTabId ?? null : null,
   );
-  const tabs = activeProjectTerminals?.tabs ?? EMPTY_TABS;
-  const activeTabId = activeProjectTerminals?.activeTabId ?? null;
-  // Derive allTabs via useMemo instead of a selector that returns a new array
-  // every call — zustand v5 + useSyncExternalStore would infinite-loop otherwise.
-  const projectState = useTerminalStore((s) => s.projectState);
 
   const projectPaths = useMemo(
     () => repos.map((r) => r.path),
     [repos],
   );
   useProjectWatcher(projectPaths, moduleActivations, activeModules);
-  // Collect only PTY-backed tabs for terminal presentation (panel tabs have no terminal)
-  const allTerminalTabs = useMemo(() => {
-    const all: Array<{ tab: TerminalTabData; projectPath: string }> = [];
-    for (const [projectPath, ps] of Object.entries(projectState)) {
-      for (const tab of ps.tabs) {
-        if (tab.kind === "terminal") {
-          all.push({ tab, projectPath });
-        }
-      }
-    }
-
-    // Canvas owns the stable presentation order. The source list remains a
-    // complete inventory, independent from tab display order.
-    return all;
-  }, [projectState]);
 
   const { setActiveTab } = useTerminalStore.getState();
 
@@ -421,165 +333,40 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     diffPanelVisible: s.diffPanelVisible,
   })));
 
-  // Derive which kind of local tab is active (for panel content rendering)
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
   const { loadSettings: loadEditorSettings } = useEditorStore.getState();
   const { loadSettings: loadTerminalSettings } = useTerminalSettingsStore.getState();
 
   useEffect(() => {
     let disposed = false;
-    let supervisor: LiveModuleSupervisor | undefined;
-    let workspaceController: AcceptedWorkspaceCatalogController | undefined;
-    let workspaceCanvasBridge: WorkspaceCanvasBridge | undefined;
-    void (async () => {
-      let workspaceAuthority: WorkspaceAuthority;
-      try {
-        workspaceAuthority = await WorkspaceAuthority.open({
-          workspaceId: CURRENT_CANVAS_WORKSPACE_ID,
-          catalog: INITIAL_WORKSPACE_CONTRIBUTIONS.workspaceCatalog(),
-          persistence: createTauriWorkspacePersistencePort(),
-          deferCatalogReconciliationUntilFirstAcceptedSnapshot: true,
-        });
-      } catch (error) {
-        if (disposed) return;
+    const reportedDiagnosticIds = reportedRuntimeDiagnosticIdsRef.current;
+    const applySnapshot = (snapshot: ReturnType<typeof applicationRuntime.snapshot>) => {
+      if (disposed) return;
+      workspaceCanvasRef.current = snapshot.workspaceCanvas;
+      setRuntimeSnapshot(snapshot);
+      for (const diagnostic of snapshot.diagnostics) {
+        if (reportedDiagnosticIds.has(diagnostic.id)) continue;
+        reportedDiagnosticIds.add(diagnostic.id);
         pushNotice({
           tone: "error",
-          title: "Workspace state will not persist this run",
-          message: getErrorMessage(error),
-        });
-        workspaceAuthority = await WorkspaceAuthority.open({
-          workspaceId: CURRENT_CANVAS_WORKSPACE_ID,
-          catalog: INITIAL_WORKSPACE_CONTRIBUTIONS.workspaceCatalog(),
-          persistence: new InMemoryWorkspacePersistence(),
-          deferCatalogReconciliationUntilFirstAcceptedSnapshot: true,
+          title: runtimeDiagnosticTitle(diagnostic),
+          message: `[${diagnostic.id}] ${diagnostic.code}: ${diagnostic.message}`,
         });
       }
-      if (disposed) return;
+    };
 
-      workspaceCanvasBridge = new WorkspaceCanvasBridge({
-        authority: workspaceAuthority,
-        onFailure: (_action, error) => {
-          if (disposed) return;
-          pushNotice({
-            tone: "error",
-            title: "Workspace change could not be saved",
-            message: getErrorMessage(error),
-          });
-        },
-      });
-      workspaceCanvasBridge.subscribe((canvas) => {
-        workspaceCanvasRef.current = canvas;
-        if (!disposed) setWorkspaceCanvas(canvas);
-      });
-      const initialCanvas = workspaceCanvasBridge.snapshot();
-      workspaceCanvasRef.current = initialCanvas;
-      setWorkspaceCanvas(initialCanvas);
-
-      workspaceController = new AcceptedWorkspaceCatalogController({
-        authority: workspaceAuthority,
-        onFailure: (failure) => {
-          if (disposed) return;
-          pushNotice({
-            tone: "error",
-            title: "Workspace catalog could not be synchronized",
-            message: `Revision ${failure.catalogRevision}: ${failure.message}`,
-          });
-        },
-      });
-      supervisor = new LiveModuleSupervisor({
-        staticModules: ENABLED_MODULES,
-        services: MODULE_HOST_SERVICES,
-        createSemanticServices: (bindings, deactivateActivation) => new SemanticServiceRegistry([
-          ...SEMANTIC_SERVICE_PROVIDERS,
-          createWorkspaceServiceProvider({ authority: workspaceAuthority }),
-          createMessagesServiceProvider({
-            clientsByActivation: bindings.clientsByActivation,
-            deactivateActivation,
-          }),
-          createSchedulerServiceProvider({
-            bindingsByActivation: bindings.schedulerBindingsByActivation,
-          }),
-          createTerminalSessionsServiceProvider({
-            bindingsByActivation: bindings.terminalBindingsByActivation,
-            runtime: ACTIVATION_TERMINAL_SESSIONS,
-            terminalHost: terminalHostAdapter,
-          }),
-          createSemanticTerminalsServiceProvider({
-            bindingsByActivation: bindings.terminalBindingsByActivation,
-          }),
-        ]),
-        createWorkspaceContributions,
-        publish: (family) => {
-          if (disposed) return;
-          const workspaceContributions = family.workspaceContributions;
-          if (workspaceContributions === undefined) {
-            pushNotice({
-              tone: "error",
-              title: "Workspace contributions were not published",
-              message: "The accepted runtime family has no canvas contribution catalog.",
-            });
-            return;
-          }
-          setModuleRuntime({
-            activeModules: family.modules,
-            moduleActivations: withCoreActivation(family.activationContextsByModule),
-            workspaceContributions,
-          });
-          // This observer runs only after route/schedule reconciliation and
-          // semantic host-service publication have committed. Its failure is a
-          // workspace diagnostic, never a rejected runtime revision.
-          void workspaceController?.submit(workspaceContributions.workspaceCatalog());
-        },
-        reportApplied: async (family) => {
-          await publishFrontendRuntimeSnapshot(
-            {
-              registryRevision: family.registryRevision,
-              activationContextsByModule: family.activationContextsByModule,
-              artifactDescriptorsByModule: family.artifactDescriptorsByModule,
-              activationOutcomes: [...family.artifactDescriptorsByModule.keys()].map((moduleId) => ({
-                moduleId,
-                status: "active" as const,
-                phase: "active" as const,
-              })),
-            },
-            family.modules,
-          );
-        },
-        reportRejected: async (diagnostic) => {
-          await reportModuleReconciliationFailure({
-            schemaVersion: 1,
-            registryRevision: diagnostic.desiredRevision,
-            moduleId: diagnostic.moduleId,
-            activationId: diagnostic.activationId,
-            phase: diagnostic.stage,
-            code: diagnostic.code,
-            message: diagnostic.message,
-          });
-          pushNotice({
-            tone: "error",
-            title: `Runtime revision ${diagnostic.desiredRevision} was rejected`,
-            message: `${diagnostic.code}: ${diagnostic.message}`,
-          });
-        },
-      });
-      await supervisor.start();
-    })().catch((error) => {
-      if (disposed) return;
-      pushNotice({
-        tone: "error",
-        title: "Runtime modules could not be inspected",
-        message: getErrorMessage(error),
-      });
-    });
+    applySnapshot(applicationRuntime.snapshot());
+    const unsubscribe = applicationRuntime.subscribe(applySnapshot);
+    // The runtime records startup failures as durable diagnostics. React maps
+    // those records to notices rather than owning a second error path.
+    void applicationRuntime.start().catch(() => undefined);
 
     return () => {
       disposed = true;
+      unsubscribe();
       workspaceCanvasRef.current = undefined;
-      workspaceCanvasBridge?.dispose();
-      workspaceController?.dispose();
-      void supervisor?.dispose();
+      void applicationRuntime.dispose();
     };
-  }, []);
+  }, [applicationRuntime, pushNotice]);
 
   useEffect(() => {
     void notifyModulesProjectsChanged(
@@ -671,7 +458,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   const handleAddProject = useCallback(
     async (repoPath: string) => {
       try {
-        if (!await closeSemanticGlobalSurface()) return;
+        if (!await showTerminalWorkspace()) return;
         await addRepo(repoPath, MODULE_HOST_SERVICES, moduleActivations);
         // addRepo sets activeRepoPath in the repo store, get the canonical path
         const canonicalPath = useRepoStore.getState().activeRepoPath;
@@ -692,7 +479,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         });
       }
     },
-    [activeModules, addRepo, closeSemanticGlobalSurface, moduleActivations, pushNotice],
+    [activeModules, addRepo, showTerminalWorkspace, moduleActivations, pushNotice],
   );
 
   const handleRemoveProject = useCallback(
@@ -772,7 +559,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
 
   const handleSelectSidebarTab = useCallback(async (tabId: string) => {
     if (!activeRepoPath) return;
-    if (!await closeSemanticGlobalSurface()) return;
+    if (!await showTerminalWorkspace()) return;
     setActiveTab(activeRepoPath, tabId);
     const store = useTerminalStore.getState();
     const allTabs = activeRepoPath ? store.getAllProjectTabs(activeRepoPath) : [];
@@ -780,13 +567,13 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     if (tab?.kind === "terminal") {
       store.clearTabBell(tab.terminalId);
     }
-  }, [activeRepoPath, closeSemanticGlobalSurface, setActiveTab]);
+  }, [activeRepoPath, showTerminalWorkspace, setActiveTab]);
 
   const handleSelectSidebarProjectTab = useCallback(async (repoPath: string, tabId: string) => {
     if (repoPath !== activeRepoPath) {
       if (!await handleSelectRepo(repoPath)) return;
     } else {
-      if (!await closeSemanticGlobalSurface()) return;
+      if (!await showTerminalWorkspace()) return;
     }
 
     const store = useTerminalStore.getState();
@@ -795,7 +582,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     if (tab?.kind === "terminal") {
       store.clearTabBell(tab.terminalId);
     }
-  }, [activeRepoPath, closeSemanticGlobalSurface, handleSelectRepo]);
+  }, [activeRepoPath, showTerminalWorkspace, handleSelectRepo]);
 
   const handleCloseTab = useCallback((tabId: string) => {
     if (!activeRepoPath) return;
@@ -809,6 +596,46 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     }
   }, [activeRepoPath, closeTab]);
 
+  const handleOpenPanel = useCallback(async (panel: PanelContribution) => {
+    const projectPath = activeRepoPath;
+    if (panel.scope === "project" && projectPath === null) {
+      pushNotice({
+        tone: "info",
+        title: "Project required",
+        message: `${panel.label} opens in an active project.`,
+      });
+      return false;
+    }
+
+    try {
+      return await scheduleWorkspaceGlobalAction(async (canvas) => {
+        const currentGlobal = selectedGlobalWorkspaceView(canvas);
+        const isGlobal = panel.scope === "global";
+        const instanceId = isGlobal
+          ? workspaceGlobalInstanceId(panel.id)
+          : workspaceProjectInstanceId(panel.id, projectPath!);
+        await canvas.execute({
+          kind: "open",
+          instanceId,
+          viewTypeId: panel.id,
+          resource: isGlobal
+            ? { kind: "global" }
+            : { kind: "project", projectId: projectPath! },
+        });
+        // Keep the old global surface visible until the admitted target opens;
+        // a rejected semantic command therefore leaves a usable workspace.
+        if (currentGlobal && currentGlobal.instance.instanceId !== instanceId) {
+          await canvas.execute({ kind: "close", instanceId: currentGlobal.instance.instanceId });
+        }
+        useUIStore.getState().closeGlobalSurface();
+        return true;
+      });
+    } catch {
+      // Workspace diagnostics already identify admission/persistence failures.
+      return false;
+    }
+  }, [activeRepoPath, pushNotice, scheduleWorkspaceGlobalAction]);
+
   const handleNewModuleSession = useCallback(async () => {
     const launcher = modulePanelContributions
       .filter((panel) => panel.newSession)
@@ -821,31 +648,14 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
       });
       return;
     }
-    if (!activeRepoPath) return;
-    if (!await closeSemanticGlobalSurface()) return;
-    useTerminalStore.getState().addContributedPanelTab(activeRepoPath, launcher.id, launcher.label);
-  }, [activeRepoPath, closeSemanticGlobalSurface, modulePanelContributions, pushNotice]);
-
-  const handleOpenPanel = useCallback(async (panel: PanelContribution) => {
-    if (!activeRepoPath) return;
-    if (!await closeSemanticGlobalSurface()) return;
-    useTerminalStore.getState().addContributedPanelTab(
-      activeRepoPath,
-      panel.id,
-      panel.label,
-    );
-  }, [activeRepoPath, closeSemanticGlobalSurface]);
-
-  const handleReorderTab = useCallback((tabId: string, destinationIndex: number) => {
-    if (!activeRepoPath) return;
-    useTerminalStore.getState().reorderTab(activeRepoPath, tabId, destinationIndex);
-  }, [activeRepoPath]);
+    await handleOpenPanel(launcher);
+  }, [handleOpenPanel, modulePanelContributions, pushNotice]);
 
   const handleNewShell = useCallback(async (driverId: TerminalDriverId = SEMANTIC_TERMINAL_DRIVER_ID) => {
-    if (!await closeSemanticGlobalSurface()) return;
+    if (!await showTerminalWorkspace()) return;
     const { cols, rows } = getTerminalDimensions();
     void spawnBlankShell(driverId, cols, rows);
-  }, [closeSemanticGlobalSurface, getTerminalDimensions, spawnBlankShell]);
+  }, [showTerminalWorkspace, getTerminalDimensions, spawnBlankShell]);
 
   const handleOpenInEditor = useCallback(async (repoPath: string) => {
     const preferredEditor = useEditorStore.getState().settings.preferredEditor;
@@ -855,7 +665,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     }
 
     try {
-      await openInEditor(repoPath);
+      await openInEditor(repoPath, preferredEditor);
     } catch (error) {
       if (import.meta.env.DEV) {
         console.error("Failed to open editor:", error);
@@ -1017,11 +827,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
         const confirmed = await confirmApplicationQuit(count);
         if (confirmed) {
           try {
-            await notifyModulesBeforeShutdown(
-              MODULE_HOST_SERVICES,
-              moduleActivations,
-              activeModules,
-            );
+            await beforeShutdown();
             await shutdownAndQuit();
           } catch (error) {
             pushNotice({
@@ -1036,7 +842,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
       }
     });
     return () => { unlisten.then((f) => f()); };
-  }, [activeModules, moduleActivations, pushNotice]);
+  }, [beforeShutdown, pushNotice]);
 
   // The native menu emits stable command IDs. The registry owns their static
   // dispatch, so this listener stays a transport edge instead of a command switch.
@@ -1069,158 +875,131 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [cycleTabs, handleOpenPanel, modulePanelContributions]);
 
-  const activePanelId = activeTab ? panelIdForTab(activeTab) : null;
+  const selectedProjectView = workspaceCanvas
+    ? selectedProjectWorkspaceView(workspaceCanvas)
+    : undefined;
+  const selectedGlobalView = workspaceCanvas
+    ? selectedGlobalWorkspaceView(workspaceCanvas)
+    : undefined;
+  const activePanelId = selectedProjectView
+    ? selectedProjectView.instance.viewTypeId as ContributionId
+    : null;
+  const activePanelProjectPath = selectedProjectView?.instance.resource.kind === "project"
+    ? selectedProjectView.instance.resource.projectId
+    : null;
   const activePanelProject = useMemo(() => activeRepoPath ? {
     id: activeRepoPath,
     name: fallbackWorkspaceName(activeRepoPath),
     path: activeRepoPath,
   } : null, [activeRepoPath]);
-  const canvasModel = useMemo(() => createCanvasModel({
-    repos,
-    groups,
-    sidebarVisible,
-    tabDropProjectPath,
-    activeProjectPath: activeRepoPath,
-    activeTabId,
-    tabs,
-    activeTab,
-    activeGlobalSurfaceId,
-    activePanelId,
-    activeProject: activePanelProject,
-    panels: modulePanelContributions,
-    globalNavigation,
-    terminalSlots: allTerminalTabs.map(({ tab, projectPath }) => ({
-      tab,
-      projectPath,
-      descriptor: terminalSlotDescriptor(tab.terminalId),
-    })),
-    trailingLayoutVisible: diffPanelVisible,
-  }), [
-    activeGlobalSurfaceId,
-    activePanelId,
-    activePanelProject,
-    activeRepoPath,
-    activeTab,
-    activeTabId,
-    allTerminalTabs,
-    diffPanelVisible,
-    groups,
-    globalNavigation,
-    modulePanelContributions,
-    repos,
-    sidebarVisible,
-    tabDropProjectPath,
-    tabs,
-  ]);
-  const canvasActions = useMemo<CanvasActions>(() => ({
-    selectRepo: handleSelectRepo,
-    addProject: handleAddProject,
-    removeProject: handleRemoveProject,
-    newModuleSession: handleNewModuleSession,
-    openInEditor: handleOpenInEditor,
-    selectTab: handleSelectSidebarTab,
-    selectProjectTab: handleSelectSidebarProjectTab,
-    closeTab: handleCloseTab,
-    moveTab: handleMoveTab,
-    newDefaultTerminal: () => handleNewShell(),
-    newTerminal: handleNewShell,
-    openPanel: handleOpenPanel,
-    renameTab: handleRenameTab,
-    reorderTab: handleReorderTab,
-    renameGroup: handleRenameGroup,
-    deleteGroup: handleDeleteGroup,
-    moveToGroup: handleMoveToGroup,
-    setTabDropProjectPath,
-    toggleGlobalSurface: (surfaceId) => { void toggleSemanticGlobalSurface(surfaceId); },
-    closeGlobalSurface: () => { void closeSemanticGlobalSurface(); },
-    setTabTitle: (tabId, title) => {
-      if (title) useTerminalStore.getState().updateTab(tabId, { label: title });
-    },
-  }), [
-    handleAddProject,
-    handleCloseTab,
-    handleDeleteGroup,
-    handleMoveTab,
-    handleMoveToGroup,
-    handleNewModuleSession,
-    handleNewShell,
-    handleOpenInEditor,
-    handleOpenPanel,
-    handleRemoveProject,
-    handleRenameGroup,
-    handleRenameTab,
-    handleReorderTab,
-    handleSelectRepo,
-    handleSelectSidebarProjectTab,
-    handleSelectSidebarTab,
-    closeSemanticGlobalSurface,
-    toggleSemanticGlobalSurface,
-  ]);
-  const canvasPorts = useMemo<CanvasPorts>(() => ({
-    projectPaths,
-    surfaceCatalog: canvasSurfaceCatalog,
-    projectActionContributions,
-    terminalPresentationRegistry: activeTerminalPresentationRegistry,
-    moduleHostServices: MODULE_HOST_SERVICES,
-    moduleActivations,
-  }), [
-    activeTerminalPresentationRegistry,
-    canvasSurfaceCatalog,
-    moduleActivations,
-    projectActionContributions,
-    projectPaths,
-  ]);
+  const semanticWorkspaceOpen = workspaceCanvas !== undefined
+    && selectedSemanticWorkspaceView(workspaceCanvas) !== undefined;
+  const visibleGlobalSurfaceId = selectedGlobalView
+    ? selectedGlobalView.instance.viewTypeId as ContributionId
+    : activeGlobalSurfaceId;
   return (
     <CanvasAdapterRuntimeProvider adapterId={canvasAdapterId}>
       <AcceptedWorkspaceContributionRuntimeProvider
         catalog={workspaceContributions}
         moduleActivations={moduleActivations}
       >
-        <div className="app-shell">
-          <NoticeCenter />
-          <div
-            className="drag-region"
-            aria-hidden="true"
-            onMouseDown={(e) => {
-              if (e.buttons === 1) {
-                if (e.detail === 2) {
-                  handleTitleBarPrimaryPress(2);
-                } else {
-                  handleTitleBarPrimaryPress(1);
+        <TerminalPresentationRuntimeProvider
+          registry={activeTerminalPresentationRegistry}
+          moduleActivations={moduleActivations}
+          services={MODULE_HOST_SERVICES}
+          activeProjectPath={activeRepoPath}
+          activeTabId={activeTabId}
+        >
+          <div className="app-shell">
+            <NoticeCenter />
+            <div
+              className="drag-region"
+              aria-hidden="true"
+              onMouseDown={(e) => {
+                if (e.buttons === 1) {
+                  if (e.detail === 2) {
+                    handleTitleBarPrimaryPress(2);
+                  } else {
+                    handleTitleBarPrimaryPress(1);
+                  }
                 }
-              }
-            }}
-          >
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
-              <button
-                onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleSidebar(); }}
-                onMouseDown={(e) => e.stopPropagation()}
-                className={`p-1 rounded transition-opacity hover:opacity-70 ${sidebarVisible ? "opacity-40" : "opacity-15"}`}
-                title={sidebarVisible ? "Hide sidebar (Cmd+B)" : "Show sidebar (Cmd+B)"}
-                aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
-              >
-                <PanelLeft size={20} />
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleDiffPanel(); }}
-                onMouseDown={(e) => e.stopPropagation()}
-                className={`p-1 rounded transition-opacity hover:opacity-70 ${diffPanelVisible ? "opacity-40" : "opacity-15"}`}
-                title={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
-                aria-label={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
-              >
-                <PanelRight size={20} />
-              </button>
+              }}
+            >
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
+                <button
+                  onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleSidebar(); }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className={`p-1 rounded transition-opacity hover:opacity-70 ${sidebarVisible ? "opacity-40" : "opacity-15"}`}
+                  title={sidebarVisible ? "Hide sidebar (Cmd+B)" : "Show sidebar (Cmd+B)"}
+                  aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
+                >
+                  <PanelLeft size={20} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleDiffPanel(); }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className={`p-1 rounded transition-opacity hover:opacity-70 ${diffPanelVisible ? "opacity-40" : "opacity-15"}`}
+                  title={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
+                  aria-label={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
+                >
+                  <PanelRight size={20} />
+                </button>
+              </div>
             </div>
-          </div>
 
-          <CanvasHost
-            adapter={canvasAdapter}
-            model={canvasModel}
-            actions={canvasActions}
-            ports={canvasPorts}
-            workspace={workspaceCanvas}
-          />
-        </div>
+            <StandardWorkspaceFrame
+              navigation={sidebarVisible ? (
+                <StandardWorkspaceNavigation
+                  repos={repos}
+                  groups={groups}
+                  activeRepoPath={activeRepoPath}
+                  activeTabId={activeTabId}
+                  activePanelId={activePanelId}
+                  activePanelProjectPath={activePanelProjectPath}
+                  activeGlobalSurfaceId={visibleGlobalSurfaceId}
+                  onSelectRepo={handleSelectRepo}
+                  onAddProject={handleAddProject}
+                  onRemoveProject={handleRemoveProject}
+                  onNewModuleSession={() => { void handleNewModuleSession(); }}
+                  onOpenInEditor={handleOpenInEditor}
+                  onSelectTab={(tabId) => { void handleSelectSidebarTab(tabId); }}
+                  onSelectProjectTab={(projectPath, tabId) => { void handleSelectSidebarProjectTab(projectPath, tabId); }}
+                  onCloseTab={handleCloseTab}
+                  onMoveTab={handleMoveTab}
+                  onNewShell={() => { void handleNewShell(); }}
+                  onRenameGroup={handleRenameGroup}
+                  onDeleteGroup={handleDeleteGroup}
+                  onMoveToGroup={handleMoveToGroup}
+                  onOpenPanel={(panel) => { void handleOpenPanel(panel); }}
+                  onToggleGlobalSurface={(surfaceId) => { void toggleSemanticGlobalSurface(surfaceId); }}
+                  tabDropProjectPath={tabDropProjectPath}
+                  globalNavigation={globalNavigation}
+                />
+              ) : undefined}
+              tabs={(
+                <StandardWorkspaceTabs
+                  onClose={handleCloseTab}
+                  onSelectTab={(tabId) => { void handleSelectSidebarTab(tabId); }}
+                  onNewTerminal={(driverId) => { void handleNewShell(driverId); }}
+                  panels={modulePanelContributions}
+                  onOpenPanel={(panel) => { void handleOpenPanel(panel); }}
+                  onOpenInEditor={() => {
+                    if (activeRepoPath) void handleOpenInEditor(activeRepoPath);
+                  }}
+                  onRenameTab={handleRenameTab}
+                  onMoveTab={handleMoveTab}
+                  onDragProjectChange={setTabDropProjectPath}
+                  globalSurfaceOpen={semanticWorkspaceOpen || activeGlobalSurfaceId !== null}
+                />
+              )}
+              trailing={diffPanelVisible && activePanelProject ? (
+                <ModuleProjectLayoutSurfaces project={activePanelProject} />
+              ) : undefined}
+            >
+              <CanvasHost adapter={canvasAdapter} workspace={workspaceCanvas} />
+            </StandardWorkspaceFrame>
+          </div>
+        </TerminalPresentationRuntimeProvider>
       </AcceptedWorkspaceContributionRuntimeProvider>
     </CanvasAdapterRuntimeProvider>
   );

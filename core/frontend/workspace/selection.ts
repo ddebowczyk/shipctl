@@ -26,3 +26,8 @@ export function selectedWorkspaceInstanceIds(
 export function workspaceGlobalInstanceId(viewTypeId: string): string {
   return `shipctl.workspace.global:${viewTypeId}`;
 }
+
+/** Stable per-project identity for a project-scoped semantic workspace view. */
+export function workspaceProjectInstanceId(viewTypeId: string, projectId: string): string {
+  return `shipctl.workspace.project:${encodeURIComponent(viewTypeId)}:${encodeURIComponent(projectId)}`;
+}

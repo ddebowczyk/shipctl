@@ -15,6 +15,7 @@ current_implementations:
   - core/tauri/src/git.rs
   - core/tauri/src/projects_watcher.rs
   - modules/git/frontend/src/gitClient.ts
+  - modules/git/frontend/src/pluginContributions.ts
 target_owners:
   provider: core/backend/src/git
   tauri_adapter: core/tauri/src/git.rs
@@ -55,3 +56,4 @@ property_ids:
   - PROP-D-PARITY-001
   - PROP-D-AUTHORITY-001
   - PROP-D-OWNERSHIP-001
+  - PROP-E-GIT-PARITY-001

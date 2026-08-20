@@ -2,8 +2,8 @@
 $schema: ../schema/capability.v1.schema.yaml
 schema_version: capability/v1
 id: usage-sources
-version: 1.0.0
-title: Approved usage source access
+version: 2.0.0
+title: Permission-bounded usage source resource access
 status: implemented
 layer: native-kernel
 consumers: [usage]
@@ -14,6 +14,7 @@ current_implementations:
   - core/backend/src/usage_sources
   - core/tauri/src/usage_sources.rs
   - modules/usage/frontend/src/usageSourcesClient.ts
+  - modules/usage/frontend/src/usageSourcePolicy.ts
   - modules/usage/frontend/src/usageProjection.ts
 target_owners:
   provider: core/backend/src/usage_sources
@@ -23,23 +24,37 @@ operations:
   - id: inspectSource
     kind: request
     contract: >-
-      Read approved provider source records without exposing native source or
-      credential authority. Pricing, aliases, aggregation, and presentation
-      remain TypeScript module policy.
+      Read records for explicit opaque source IDs without exposing native paths,
+      credential material, or durable handles. Source identity, pricing,
+      aliases, aggregation, and presentation remain TypeScript module policy.
   - id: refreshSources
     kind: request
-    contract: Request refresh of an explicit set of approved provider sources.
+    contract: >-
+      Atomically persist plugin-parsed facts for an explicit dynamic source-ID
+      set after the plugin has collected and validated its source data.
+  - id: readResource
+    kind: request
+    contract: >-
+      Execute one bounded generic resource request: a home-relative file or
+      tree read, read-only SQLite query, constrained process or port snapshot,
+      HTTPS or loopback HTTP request, or bounded keychain-password lookup.
   - id: observeSource
     kind: event
-    contract: Observe approved source changes through an activation lease.
+    contract: Observe explicit source changes through an activation lease.
 required_grants:
   - usage-source.read
   - usage-source.refresh
   - usage-source.observe
 ownership:
-  authority: The native kernel owns source path and credential boundaries.
-  resources: Source files are external; observation leases are activation-owned.
-  activation_scope: Provider and source identities are explicit and reviewed.
+  authority: >-
+    The native kernel owns generic filesystem, SQLite, process, network,
+    keychain, durable-record, and activation-lifetime bounds.
+  resources: >-
+    The Usage plugin owns source identity, path and credential selection,
+    response parsing, quota/cache policy, and presentation.
+  activation_scope: >-
+    Module admission and effective grants are explicit; source IDs are opaque,
+    dynamic plugin facts rather than host-reviewed product identities.
 depends_on: [credential-store]
 property_ids:
   - PROP-B-ADAPTER-001

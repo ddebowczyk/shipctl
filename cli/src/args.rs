@@ -88,6 +88,12 @@ pub enum Command {
     },
     /// Print the Shipctl and control-protocol versions.
     Version,
+    /// Internal installed-resource probe used by package verification only.
+    #[command(name = "__headless-runner-probe", hide = true)]
+    HeadlessRunnerProbe,
+    /// Internal generic native-resource endpoint used only by the packaged runner.
+    #[command(name = "__headless-kernel", hide = true)]
+    HeadlessKernel,
 }
 
 #[derive(Debug, Subcommand)]
@@ -552,8 +558,6 @@ pub enum ModulesCommand {
     InspectCapability(OfflineCapabilityInspectArgs),
     /// Run registry and module diagnostics.
     Diagnose(ModuleDiagnoseArgs),
-    /// Verify offline registry state against an expectation file.
-    Verify(ModuleVerifyArgs),
     /// Request that a running instance enable a module.
     Enable(ModuleTransitionArgs),
     /// Request that a running instance disable a module.
@@ -613,6 +617,12 @@ pub struct CapabilityInspectArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("capability_call_target")
+        .required(true)
+        .multiple(false)
+        .args(["instance", "offline"])
+))]
 pub struct CapabilityCallArgs {
     pub capability_id: String,
     pub port_id: String,
@@ -621,8 +631,21 @@ pub struct CapabilityCallArgs {
     #[arg(long, value_name = "JSON")]
     pub input: String,
 
-    #[command(flatten)]
-    pub target: CapabilityTargetArgs,
+    /// Run through the installed, admitted headless runtime instead of a live instance.
+    #[arg(long)]
+    pub offline: bool,
+
+    /// Running instance name or UUID.
+    #[arg(long, visible_alias = "name", value_name = "NAME")]
+    pub instance: Option<String>,
+
+    /// Override the durable state root used by the admitted headless runtime.
+    #[arg(long, value_name = "PATH", requires = "offline")]
+    pub state_root: Option<PathBuf>,
+
+    /// Override the local instance discovery directory for a live invocation.
+    #[arg(long, value_name = "PATH", requires = "instance")]
+    pub runtime_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -764,7 +787,7 @@ pub struct ModuleInspectArgs {
 
 #[derive(Debug, Args)]
 pub struct ModuleDiagnoseArgs {
-    /// Module to diagnose; omit during offline whole-registry diagnosis.
+    /// Module to diagnose in a running instance; omit during offline generic registry diagnosis.
     #[arg(required_unless_present = "offline")]
     pub module_id: Option<String>,
 
@@ -778,23 +801,6 @@ pub struct ModuleDiagnoseArgs {
 
     #[command(flatten)]
     pub online: OnlineTargetArgs,
-}
-
-#[derive(Debug, Args)]
-pub struct ModuleVerifyArgs {
-    pub module_id: String,
-
-    /// Read durable state without contacting or starting a runtime.
-    #[arg(long, required = true)]
-    pub offline: bool,
-
-    /// JSON expectation contract to evaluate.
-    #[arg(long = "expect", value_name = "FILE")]
-    pub expectation: PathBuf,
-
-    /// Override the offline state root.
-    #[arg(long, value_name = "PATH")]
-    pub state_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

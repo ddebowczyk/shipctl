@@ -15,8 +15,13 @@ target:
   responsibilities:
     - Implement Git workflow policy in TypeScript plugin application logic.
     - Publish Git views and actions through typed contributions.
+    - >-
+      Own project-catalog refresh and persisted worktree preferences through
+      generic services.
   capabilities:
     - git
+    - plugin-data
+    - projects
     - workspace
 phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
 prerequisites:
@@ -26,12 +31,14 @@ compatibility_paths:
     Phase D native extraction is complete: Git is frontend-only and uses the
     public Git capability client.
   - >-
-    The host-wide project watcher remains a permanent core resource; Git
-    subscriptions are activation-owned and filter its events by registered
-    project.
+    The trusted platform adapter owns raw `git-fs-changed` transport. Git uses
+    the generic project catalog and scoped repository-change leases, both
+    activation-owned and released on deactivation.
   - >-
     Phase E packages Git as an immutable built-in artifact. The host admits and
-    activates it through the same runtime path as user-installed plugins.
+    activates it through the same runtime path as user-installed plugins; its
+    Git access, project catalog, and preferences are declared generic services
+    rather than a static module adapter.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE
     proof_ids: [PROP-D-PARITY-001, PROP-D-AUTHORITY-001, PROP-D-CLOSURE-001]

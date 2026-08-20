@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { TerminalSettings, TerminalSettingsCommit } from "@shipctl/core/platform";
+import type { TerminalSettings } from "@shipctl/core/configuration";
+import type { TerminalRetentionCommit } from "@shipctl/core/platform";
 import {
-  applyTerminalSettingsCommit,
+  applyTerminalRetentionCommit,
   formatRetentionBudget,
   RETENTION_DEFAULT_BYTES,
   RETENTION_MAX_BYTES,
@@ -22,8 +23,8 @@ function settings(scrollbackBytes: number): TerminalSettings {
   };
 }
 
-function commit(scrollbackBytes: number, retentionRevision: number): TerminalSettingsCommit {
-  return { ...settings(scrollbackBytes), retentionRevision };
+function commit(retentionBytes: number, retentionRevision: number): TerminalRetentionCommit {
+  return { retentionBytes, retentionRevision };
 }
 
 test("every offered budget is inside the domain the backend clamps to", () => {
@@ -38,22 +39,22 @@ test("a zero budget is described as no history, not as a small one", () => {
   assert.equal(formatRetentionBudget(RETENTION_DEFAULT_BYTES), "16 MB");
 });
 
-test("a newer commit replaces the held policy", () => {
+test("a newer resource acknowledgement advances the held revision", () => {
   const held = { settings: settings(0), retentionRevision: 3 };
-  const next = applyTerminalSettingsCommit(held, commit(RETENTION_DEFAULT_BYTES, 4));
+  const next = applyTerminalRetentionCommit(held, commit(RETENTION_DEFAULT_BYTES, 4));
   assert.equal(next.retentionRevision, 4);
-  assert.equal(next.settings.scrollbackBytes, RETENTION_DEFAULT_BYTES);
+  assert.equal(next.settings, held.settings);
 });
 
 test("a delayed older response cannot roll back a newer committed policy", () => {
   const held = { settings: settings(RETENTION_MAX_BYTES), retentionRevision: 7 };
-  const stale = applyTerminalSettingsCommit(held, commit(0, 6));
+  const stale = applyTerminalRetentionCommit(held, commit(0, 6));
   assert.equal(stale, held, "a stale response must leave committed state untouched");
 });
 
-test("re-reading the same revision is not treated as a rollback", () => {
+test("re-reading the same revision does not replace TypeScript-owned settings", () => {
   const held = { settings: settings(RETENTION_DEFAULT_BYTES), retentionRevision: 7 };
-  const reread = applyTerminalSettingsCommit(held, commit(RETENTION_MAX_BYTES, 7));
+  const reread = applyTerminalRetentionCommit(held, commit(RETENTION_MAX_BYTES, 7));
   assert.equal(reread.retentionRevision, 7);
-  assert.equal(reread.settings.scrollbackBytes, RETENTION_MAX_BYTES);
+  assert.equal(reread.settings, held.settings);
 });
