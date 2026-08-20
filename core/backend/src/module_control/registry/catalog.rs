@@ -597,6 +597,150 @@ pub(super) fn migrate_v1_to_v2(transaction: &Transaction<'_>) -> Result<(), Regi
         })
 }
 
+/// Rewrite persisted artifact documents from before the Cordis runtime
+/// migration. `uiContributions` was removed from the native manifest contract,
+/// so it must be discarded from every durable copy before strict deserialization.
+pub(super) fn migrate_v3_to_v4(transaction: &Transaction<'_>) -> Result<(), RegistryError> {
+    let catalog_rows = {
+        let mut statement = transaction
+            .prepare(
+                "SELECT module_id, content_digest, record_json, canonical_metadata_json
+                 FROM runtime_artifact_catalog",
+            )
+            .map_err(|error| {
+                RegistryError::new(
+                    REGISTRY_MIGRATION_FAILED,
+                    format!("Cannot read runtime artifact catalog for migration: {error}"),
+                )
+            })?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|error| {
+                RegistryError::new(
+                    REGISTRY_MIGRATION_FAILED,
+                    format!("Cannot enumerate runtime artifact catalog for migration: {error}"),
+                )
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                RegistryError::new(
+                    REGISTRY_MIGRATION_FAILED,
+                    format!("Cannot decode runtime artifact catalog row for migration: {error}"),
+                )
+            })?;
+        rows
+    };
+    for (module_id, content_digest, record, canonical_metadata) in catalog_rows {
+        let record = remove_legacy_ui_contributions(
+            &record,
+            "runtime artifact catalog record",
+            "/manifest",
+        )?;
+        let canonical_metadata = remove_legacy_ui_contributions(
+            &canonical_metadata,
+            "runtime artifact canonical metadata",
+            "/manifest",
+        )?;
+        transaction
+            .execute(
+                "UPDATE runtime_artifact_catalog
+                 SET record_json = ?3, canonical_metadata_json = ?4
+                 WHERE module_id = ?1 AND content_digest = ?2",
+                params![module_id, content_digest, record, canonical_metadata],
+            )
+            .map_err(|error| {
+                RegistryError::new(
+                    REGISTRY_MIGRATION_FAILED,
+                    format!("Cannot rewrite runtime artifact catalog record: {error}"),
+                )
+            })?;
+    }
+
+    let pending_rows = {
+        let mut statement = transaction
+            .prepare("SELECT request_id, intent_json FROM pending_artifact_installs")
+            .map_err(|error| {
+                RegistryError::new(
+                    REGISTRY_MIGRATION_FAILED,
+                    format!("Cannot read pending artifact installs for migration: {error}"),
+                )
+            })?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| {
+                RegistryError::new(
+                    REGISTRY_MIGRATION_FAILED,
+                    format!("Cannot enumerate pending artifact installs for migration: {error}"),
+                )
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                RegistryError::new(
+                    REGISTRY_MIGRATION_FAILED,
+                    format!("Cannot decode pending artifact install for migration: {error}"),
+                )
+            })?;
+        rows
+    };
+    for (request_id, intent) in pending_rows {
+        let intent = remove_legacy_ui_contributions(
+            &intent,
+            "pending artifact install",
+            "/artifact/manifest",
+        )?;
+        transaction
+            .execute(
+                "UPDATE pending_artifact_installs SET intent_json = ?2 WHERE request_id = ?1",
+                params![request_id, intent],
+            )
+            .map_err(|error| {
+                RegistryError::new(
+                    REGISTRY_MIGRATION_FAILED,
+                    format!("Cannot rewrite pending artifact install: {error}"),
+                )
+            })?;
+    }
+    Ok(())
+}
+
+fn remove_legacy_ui_contributions(
+    source: &str,
+    subject: &str,
+    manifest_pointer: &str,
+) -> Result<String, RegistryError> {
+    let mut document: serde_json::Value = serde_json::from_str(source).map_err(|error| {
+        RegistryError::new(
+            REGISTRY_MIGRATION_FAILED,
+            format!("Stored {subject} JSON cannot be migrated: {error}"),
+        )
+    })?;
+    let manifest = document
+        .pointer_mut(manifest_pointer)
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| {
+            RegistryError::new(
+                REGISTRY_MIGRATION_FAILED,
+                format!("Stored {subject} JSON lacks an object manifest"),
+            )
+        })?;
+    manifest.remove("uiContributions");
+    serde_json::to_string(&canonicalize_json(document)).map_err(|error| {
+        RegistryError::new(
+            REGISTRY_MIGRATION_FAILED,
+            format!("Cannot serialize migrated {subject} JSON: {error}"),
+        )
+    })
+}
+
 fn require_writable(registry: &ModuleRegistry) -> Result<(), RegistryError> {
     if registry.access != super::Access::Writable {
         return Err(RegistryError::new(

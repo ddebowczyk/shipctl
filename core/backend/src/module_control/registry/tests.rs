@@ -397,7 +397,7 @@ fn create_v1_registry(path: &std::path::Path, artifact: &ModuleIdentity) {
 }
 
 #[test]
-fn v1_registry_migrates_additively_to_runtime_catalog_and_recovery_v3() {
+fn v1_registry_migrates_additively_to_runtime_catalog_and_recovery_v4() {
     let temporary = TempDir::new().unwrap();
     let paths = test_paths(&temporary);
     std::fs::create_dir_all(&paths.state_root).unwrap();
@@ -435,6 +435,141 @@ fn v1_registry_migrates_additively_to_runtime_catalog_and_recovery_v3() {
         )
         .unwrap();
     assert_eq!(catalog_tables, 7);
+}
+
+fn with_legacy_ui_contributions(source: &str, manifest_pointer: &str) -> String {
+    let mut document: serde_json::Value = serde_json::from_str(source).unwrap();
+    document
+        .pointer_mut(manifest_pointer)
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .insert("uiContributions".to_string(), json!([]));
+    serde_json::to_string(&document).unwrap()
+}
+
+#[test]
+fn v3_registry_migrates_obsolete_ui_contributions_from_runtime_metadata() {
+    let temporary = TempDir::new().unwrap();
+    let paths = test_paths(&temporary);
+    let catalog_artifact = runtime_artifact(
+        "fixture.legacy-catalog",
+        "fixture.legacy-catalog-capability",
+        "catalog",
+        None,
+    );
+    let pending_artifact = runtime_artifact(
+        "fixture.legacy-pending",
+        "fixture.legacy-pending-capability",
+        "pending",
+        None,
+    );
+    let catalog_registration = RuntimeArtifactRegistration {
+        request_id: Uuid::new_v4(),
+        artifact: catalog_artifact.clone(),
+        source: ModuleSource::User,
+    };
+    let pending_intent = PendingArtifactInstall {
+        schema_version: RUNTIME_ARTIFACT_CATALOG_SCHEMA_VERSION,
+        request_id: Uuid::new_v4(),
+        artifact: pending_artifact,
+        source: ModuleSource::User,
+        stage_id: Uuid::new_v4().to_string(),
+    };
+
+    let mut registry = ModuleRegistry::open_writable(&paths).unwrap();
+    registry
+        .register_disabled_artifact(&catalog_registration)
+        .unwrap();
+    assert_eq!(
+        registry
+            .begin_pending_artifact_install(&pending_intent)
+            .unwrap(),
+        PendingArtifactInstallResolution::Pending(pending_intent.clone())
+    );
+    drop(registry);
+
+    let connection = Connection::open(&paths.module_registry_database).unwrap();
+    let (record, canonical_metadata): (String, String) = connection
+        .query_row(
+            "SELECT record_json, canonical_metadata_json
+             FROM runtime_artifact_catalog
+             WHERE module_id = ?1 AND content_digest = ?2",
+            rusqlite::params![
+                catalog_artifact.identity().id,
+                catalog_artifact.identity().content_digest,
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE runtime_artifact_catalog
+             SET record_json = ?3, canonical_metadata_json = ?4
+             WHERE module_id = ?1 AND content_digest = ?2",
+            rusqlite::params![
+                catalog_artifact.identity().id,
+                catalog_artifact.identity().content_digest,
+                with_legacy_ui_contributions(&record, "/manifest"),
+                with_legacy_ui_contributions(&canonical_metadata, "/manifest"),
+            ],
+        )
+        .unwrap();
+    let intent_json: String = connection
+        .query_row(
+            "SELECT intent_json FROM pending_artifact_installs WHERE request_id = ?1",
+            rusqlite::params![pending_intent.request_id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE pending_artifact_installs SET intent_json = ?2 WHERE request_id = ?1",
+            rusqlite::params![
+                pending_intent.request_id.to_string(),
+                with_legacy_ui_contributions(&intent_json, "/artifact/manifest"),
+            ],
+        )
+        .unwrap();
+    connection.pragma_update(None, "user_version", 3).unwrap();
+    drop(connection);
+
+    let registry = ModuleRegistry::open_writable(&paths).unwrap();
+    let snapshot = registry.snapshot().unwrap();
+    assert_eq!(snapshot.runtime_artifacts.len(), 1);
+    assert_eq!(snapshot.runtime_artifacts[0].artifact, catalog_artifact);
+    assert_eq!(
+        registry
+            .pending_artifact_install(pending_intent.request_id)
+            .unwrap(),
+        PendingArtifactInstallResolution::Pending(pending_intent)
+    );
+    drop(registry);
+
+    let connection = Connection::open(&paths.module_registry_database).unwrap();
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, REGISTRY_SCHEMA_VERSION);
+    let migrated_catalog_fields: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM runtime_artifact_catalog
+             WHERE instr(record_json, 'uiContributions') > 0
+                OR instr(canonical_metadata_json, 'uiContributions') > 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(migrated_catalog_fields, 0);
+    let migrated_pending_fields: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM pending_artifact_installs
+             WHERE instr(intent_json, 'uiContributions') > 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(migrated_pending_fields, 0);
 }
 
 #[test]

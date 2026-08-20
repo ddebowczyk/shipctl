@@ -38,12 +38,12 @@ pub use inventory::{
 pub use snapshot::ModuleRegistrySnapshotProvider;
 
 use catalog::{
-    load_capability_catalog, load_runtime_artifact_catalog, migrate_v1_to_v2,
+    load_capability_catalog, load_runtime_artifact_catalog, migrate_v1_to_v2, migrate_v3_to_v4,
     validate_catalog_snapshot,
 };
 use inventory::load_static_inventory;
 
-const REGISTRY_SCHEMA_VERSION: i64 = 3;
+const REGISTRY_SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug)]
 pub struct RegistryError {
@@ -563,10 +563,11 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), RegistryError> {
                             REFERENCES artifacts(module_id, content_digest)
                     );
                     ",
-                )
-                .map_err(migration_error)?;
+            )
+            .map_err(migration_error)?;
             migrate_v1_to_v2(&transaction)?;
             migrate_v2_to_v3(&transaction)?;
+            migrate_v3_to_v4(&transaction)?;
             transaction
                 .pragma_update(None, "user_version", REGISTRY_SCHEMA_VERSION)
                 .map_err(migration_error)?;
@@ -574,12 +575,20 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), RegistryError> {
         1 => {
             migrate_v1_to_v2(&transaction)?;
             migrate_v2_to_v3(&transaction)?;
+            migrate_v3_to_v4(&transaction)?;
             transaction
                 .pragma_update(None, "user_version", REGISTRY_SCHEMA_VERSION)
                 .map_err(migration_error)?;
         }
         2 => {
             migrate_v2_to_v3(&transaction)?;
+            migrate_v3_to_v4(&transaction)?;
+            transaction
+                .pragma_update(None, "user_version", REGISTRY_SCHEMA_VERSION)
+                .map_err(migration_error)?;
+        }
+        3 => {
+            migrate_v3_to_v4(&transaction)?;
             transaction
                 .pragma_update(None, "user_version", REGISTRY_SCHEMA_VERSION)
                 .map_err(migration_error)?;
