@@ -13,11 +13,18 @@ import type { PortInfo } from "../src/types.ts";
 
 type PortsPanelModule = typeof import("../src/PortsPanel.tsx");
 type PortsModuleEntry = typeof import("../src/index.ts");
+type PortsArtifactModule = typeof import("../../artifact/src/index.ts");
+type ModuleApi = typeof import("../../../../module-api/frontend/src/index.ts");
+type RuntimeApi = typeof import("../../../../core/frontend/runtime/cordis/staticPluginRuntime.ts");
+type SemanticRuntime = typeof import("../../../../core/frontend/runtime/semanticServiceRuntime.ts");
 
 let vite: ViteDevServer;
 let portsPanel: PortsPanelModule;
-let portsModule: PortsModuleEntry["portsModule"];
-let PORTS_SURFACE_ID: PortsModuleEntry["PORTS_SURFACE_ID"];
+let ports: PortsModuleEntry;
+let portsArtifact: PortsArtifactModule;
+let pluginApi: ModuleApi;
+let runtimeApi: RuntimeApi;
+let SemanticServiceRegistry: SemanticRuntime["SemanticServiceRegistry"];
 let createFakeProcessesServiceProvider: typeof import("@shipctl/module-api/testing")["createFakeProcessesServiceProvider"];
 let createTestActivationIdentity: typeof import("@shipctl/module-api/testing")["createTestActivationIdentity"];
 let SemanticServiceTestHost: typeof import("@shipctl/module-api/testing")["SemanticServiceTestHost"];
@@ -60,12 +67,22 @@ before(async () => {
   portsPanel = await vite.ssrLoadModule(
     "/modules/ports/frontend/src/PortsPanel.tsx",
   ) as PortsPanelModule;
-  ({ portsModule, PORTS_SURFACE_ID } = await vite.ssrLoadModule(
+  ports = await vite.ssrLoadModule(
     "/modules/ports/frontend/src/index.ts",
-  ) as PortsModuleEntry);
-  ({ processesService } = await vite.ssrLoadModule(
+  ) as PortsModuleEntry;
+  portsArtifact = await vite.ssrLoadModule(
+    "/modules/ports/artifact/src/index.ts",
+  ) as PortsArtifactModule;
+  pluginApi = await vite.ssrLoadModule(
     "/module-api/frontend/src/index.ts",
-  ));
+  ) as ModuleApi;
+  processesService = pluginApi.processesService;
+  runtimeApi = await vite.ssrLoadModule(
+    "/core/frontend/runtime/cordis/staticPluginRuntime.ts",
+  ) as RuntimeApi;
+  ({ SemanticServiceRegistry } = await vite.ssrLoadModule(
+    "/core/frontend/runtime/semanticServiceRuntime.ts",
+  ) as SemanticRuntime);
   ({
     createFakeProcessesServiceProvider,
     createTestActivationIdentity,
@@ -77,13 +94,59 @@ after(async () => {
   await vite.close();
 });
 
-test("Ports owns a global surface and navigation contribution", () => {
-  assert.equal(portsModule.globalSurfaces[0].id, PORTS_SURFACE_ID);
-  assert.equal(portsModule.globalSurfaces[0].moduleId, portsModule.id);
-  assert.deepEqual(
-    portsModule.globalNavigation.map(({ id, surfaceId }) => ({ id, surfaceId })),
-    [{ id: "ports.global-navigation", surfaceId: PORTS_SURFACE_ID }],
+test("Ports owns direct global surface and navigation contributions", () => {
+  assert.equal(ports.PORTS_MODULE_ID, "shipctl.ports");
+  assert.equal(ports.portsContributions.globalSurfaces[0].id, ports.PORTS_SURFACE_ID);
+  assert.equal(
+    ports.portsContributions.globalSurfaces[0].moduleId,
+    ports.PORTS_MODULE_ID,
   );
+  assert.deepEqual(
+    ports.portsContributions.globalNavigation.map(({ id, surfaceId }) => ({ id, surfaceId })),
+    [{ id: "ports.global-navigation", surfaceId: ports.PORTS_SURFACE_ID }],
+  );
+});
+
+test("direct artifact requires only processes and cleans up its registrations", async () => {
+  assert.equal(globalThis.document, undefined);
+  const definition = portsArtifact.createShipctlPlugin({ pluginApi });
+  assert.equal("module" in definition, false);
+  assert.deepEqual(
+    definition.requires?.map(({ id, version }) => ({ id, version })),
+    [{ id: "shipctl.processes", version: 1 }],
+  );
+
+  const activation = await runtimeApi.activatePluginDefinitionsObserved(
+    undefined,
+    [definition],
+    new Map(),
+    new SemanticServiceRegistry([createFakeProcessesServiceProvider({
+      deniedOperations: ["inspect-listening-ports"],
+    })]),
+    false,
+  );
+  assert.deepEqual(activation.failures, []);
+  assert.deepEqual(
+    activation.inspect().contributions.map(({ family, id }) => ({ family, id })),
+    [
+      { family: "global-navigation", id: "ports.global-navigation" },
+      { family: "global-surface", id: "ports.overview" },
+    ],
+  );
+
+  const context = activation.activationContextsByModule.get("shipctl.ports");
+  assert.ok(context);
+  const denied = await context.services.require(processesService).inspectListeningPorts.execute({
+    projectRootMarkers: [],
+    observedProjectFileNames: [],
+  });
+  assert.equal(denied.result.ok, false);
+  if (denied.result.ok) assert.fail("denied process access unexpectedly succeeded");
+  assert.equal(denied.result.error.code, "processes.denied");
+
+  await activation.deactivate();
+  assert.deepEqual(activation.inspect().contributions, []);
+  assert.deepEqual(activation.inspect().effects, []);
 });
 
 test("scan preserves occupied results and represents no listeners as an empty success", async () => {

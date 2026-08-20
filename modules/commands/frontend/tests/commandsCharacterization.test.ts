@@ -13,10 +13,20 @@ import type { CommandConfig, CommandState } from "../src/types.ts";
 
 type CommandsModule = typeof import("../src/index.ts");
 type CommandsDataModule = typeof import("../src/commandsDataClient.ts");
+type CommandsArtifactModule = typeof import("../../artifact/src/index.ts");
+type ModuleApi = typeof import("../../../../module-api/frontend/src/index.ts");
+type RuntimeApi = typeof import("../../../../core/frontend/runtime/cordis/staticPluginRuntime.ts");
+type SemanticRuntime = typeof import("../../../../core/frontend/runtime/semanticServiceRuntime.ts");
+type TestingApi = typeof import("../../../../module-api/frontend/src/testing/pluginData.ts");
 
 let vite: ViteDevServer;
 let commands: CommandsModule;
 let commandsData: CommandsDataModule;
+let commandsArtifact: CommandsArtifactModule;
+let pluginApi: ModuleApi;
+let runtimeApi: RuntimeApi;
+let SemanticServiceRegistry: SemanticRuntime["SemanticServiceRegistry"];
+let createFakePluginDataServiceProvider: TestingApi["createFakePluginDataServiceProvider"];
 
 before(async () => {
   vite = await createServer({
@@ -31,6 +41,21 @@ before(async () => {
   commandsData = await vite.ssrLoadModule(
     "/modules/commands/frontend/src/commandsDataClient.ts",
   ) as CommandsDataModule;
+  commandsArtifact = await vite.ssrLoadModule(
+    "/modules/commands/artifact/src/index.ts",
+  ) as CommandsArtifactModule;
+  pluginApi = await vite.ssrLoadModule(
+    "/module-api/frontend/src/index.ts",
+  ) as ModuleApi;
+  runtimeApi = await vite.ssrLoadModule(
+    "/core/frontend/runtime/cordis/staticPluginRuntime.ts",
+  ) as RuntimeApi;
+  ({ SemanticServiceRegistry } = await vite.ssrLoadModule(
+    "/core/frontend/runtime/semanticServiceRuntime.ts",
+  ) as SemanticRuntime);
+  ({ createFakePluginDataServiceProvider } = await vite.ssrLoadModule(
+    "/module-api/frontend/src/testing/pluginData.ts",
+  ) as TestingApi);
 });
 
 after(async () => {
@@ -139,12 +164,42 @@ function fixtureServices(options: {
   };
 }
 
-test("module identity, panel identity, navigation, and migration metadata are stable", () => {
-  assert.equal(commands.commandsModule.id, "shipctl.commands");
-  assert.equal(commands.commandsModule.panels[0].id, "core.commands");
-  assert.equal(commands.commandsModule.panels[0].shortcut, "⇧⌘C");
-  assert.equal(commands.commandsModule.panels[0].migrationAlias.kind, "commands");
-  assert.equal(commands.commandsModule.projectNavigation[0].panelId, "core.commands");
+test("direct contribution identity, panel identity, navigation, and migration metadata are stable", () => {
+  assert.equal(commands.COMMANDS_MODULE_ID, "shipctl.commands");
+  assert.equal(commands.commandsContributions.panels[0].id, "core.commands");
+  assert.equal(commands.commandsContributions.panels[0].shortcut, "⇧⌘C");
+  assert.equal(commands.commandsContributions.panels[0].migrationAlias.kind, "commands");
+  assert.equal(commands.commandsContributions.projectNavigation[0].panelId, "core.commands");
+});
+
+test("direct artifact registers and cleans up headlessly", async () => {
+  assert.equal(globalThis.document, undefined);
+  const definition = commandsArtifact.createShipctlPlugin({ pluginApi });
+  assert.equal("module" in definition, false);
+  assert.deepEqual(definition.requiredGrants, ["plugin-data.read", "plugin-data.write"]);
+
+  const activation = await runtimeApi.activatePluginDefinitionsObserved(
+    undefined,
+    [definition],
+    new Map(),
+    new SemanticServiceRegistry([createFakePluginDataServiceProvider()]),
+    false,
+  );
+  assert.deepEqual(activation.failures, []);
+  assert.deepEqual(
+    activation.inspect().contributions.map(({ family, id }) => ({ family, id })),
+    [
+      { family: "command", id: "commands.open-panel" },
+      { family: "panel", id: "core.commands" },
+      { family: "project-navigation", id: "commands.project-navigation" },
+    ],
+  );
+  assert.doesNotThrow(() => commandsData.activeCommandsDataClient());
+
+  await activation.deactivate();
+  assert.deepEqual(activation.inspect().contributions, []);
+  assert.deepEqual(activation.inspect().effects, []);
+  assert.throws(() => commandsData.activeCommandsDataClient(), /Commands data service is unavailable/);
 });
 
 test("catalogue parsing and generated names preserve existing behavior", () => {

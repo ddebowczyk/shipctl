@@ -13,7 +13,7 @@ import { checkModuleBoundaries } from "../../modularity/lib/module-boundaries.mj
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
 let api;
 let composition;
-let commandsModule;
+let createCommandsPlugin;
 let createFakePluginDataServiceProvider;
 let runtimeApi;
 let SemanticServiceRegistry;
@@ -45,8 +45,8 @@ before(async () => {
   ({ createFakePluginDataServiceProvider } = await vite.ssrLoadModule(
     "/module-api/frontend/src/testing/pluginData.ts",
   ));
-  ({ commandsModule } = await vite.ssrLoadModule(
-    "/modules/commands/frontend/src/index.ts",
+  ({ createShipctlPlugin: createCommandsPlugin } = await vite.ssrLoadModule(
+    "/modules/commands/artifact/src/index.ts",
   ));
 });
 
@@ -341,6 +341,70 @@ test("architecture.cordis-plugin-role.property", async () => {
   assert.deepEqual(failedRuntime.inspect().contributions, []);
   assert.deepEqual(failedRuntime.inspect().effects, []);
   await failedRuntime.dispose();
+});
+
+test("architecture.direct-plugin-registration.property", async () => {
+  const moduleId = "fixture.direct-registration";
+  const released = [];
+  const definition = api.defineShipctlPlugin({
+    id: moduleId,
+    version: "1.0.0",
+    role: "presentation",
+    requiredGrants: ["fixture.direct.grant"],
+    activate: (context) => {
+      context.contributions.commands.register({
+        id: `${moduleId}.command`,
+        moduleId,
+        label: "Fixture direct command",
+        run: () => undefined,
+      });
+      context.own(() => { released.push("activation"); });
+    },
+  });
+  const admission = Object.freeze({
+    artifact: Object.freeze({
+      contentDigest: "a".repeat(64),
+      entryUrl: `asset://localhost/modules/${"a".repeat(64)}/plugin.mjs`,
+      moduleId,
+      version: "1.0.0",
+    }),
+    effectiveGrants: Object.freeze(["fixture.direct.grant"]),
+  });
+  const runtime = new runtimeApi.CordisStaticPluginRuntime({
+    admissionsByModule: new Map([[moduleId, admission]]),
+  });
+  const activation = await runtime.activateAll([definition]);
+
+  assert.deepEqual(activation.failures, []);
+  assert.deepEqual(
+    activation.contributionsByModule.get(moduleId)?.commands.map(({ id }) => id),
+    [`${moduleId}.command`],
+  );
+  assert.deepEqual(runtime.inspect().contributions.map(({ family, id }) => ({ family, id })), [{
+    family: "command",
+    id: `${moduleId}.command`,
+  }]);
+
+  await activation.deactivate();
+  assert.deepEqual(released, ["activation"]);
+  assert.deepEqual(runtime.inspect().contributions, []);
+  assert.deepEqual(runtime.inspect().effects, []);
+
+  const mismatchedAdmissionRuntime = new runtimeApi.CordisStaticPluginRuntime({
+    admissionsByModule: new Map([[moduleId, Object.freeze({
+      ...admission,
+      effectiveGrants: Object.freeze([]),
+    })]]),
+  });
+  const rejected = await withoutExpectedErrorLogging(
+    () => mismatchedAdmissionRuntime.activateAll([definition]),
+  );
+  assert.deepEqual(rejected.failures, [{
+    moduleId,
+    message: "Plugin activation failed",
+  }]);
+  assert.deepEqual(mismatchedAdmissionRuntime.inspect().contributions, []);
+  await mismatchedAdmissionRuntime.dispose();
 });
 
 test("architecture.candidate-host-services.property", async () => {
@@ -683,15 +747,16 @@ test("architecture.cordis-boundary.property", async () => {
   ), propertyParameters());
 });
 
-test("commands compound module activates through Cordis", async () => {
-  assert.equal(runtimeApi.inferShipctlPluginRole(commandsModule), "compound");
+test("commands direct compound artifact activates through Cordis without host services", async () => {
+  const definition = createCommandsPlugin({ pluginApi: api });
+  assert.equal("module" in definition, false);
+  assert.equal(definition.role, "compound");
   const runtime = new runtimeApi.CordisStaticPluginRuntime({
-    services,
     semanticServices: new SemanticServiceRegistry([
       createFakePluginDataServiceProvider(),
     ]),
   });
-  assert.equal(await runtime.activate(runtimeApi.adaptShipctlModule(commandsModule)), true);
+  assert.equal(await runtime.activate(definition), true);
   assert.deepEqual(
     runtime.inspect().contributions.map(({ family, id }) => ({ family, id })),
     [
@@ -699,6 +764,10 @@ test("commands compound module activates through Cordis", async () => {
       { family: "panel", id: "core.commands" },
       { family: "project-navigation", id: "commands.project-navigation" },
     ],
+  );
+  assert.deepEqual(
+    runtime.inspect().effects.filter(({ kind }) => kind === "background").map(({ id }) => id),
+    ["commands.runtime"],
   );
   await runtime.dispose();
 });

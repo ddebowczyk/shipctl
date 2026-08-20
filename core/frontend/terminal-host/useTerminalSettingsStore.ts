@@ -1,19 +1,20 @@
 import { create } from "zustand";
-import type { TerminalSettings } from "@shipctl/core/platform";
-import { getTerminalSettings, saveTerminalSettings } from "@shipctl/core/platform";
-import { applyTerminalSettingsCommit, RETENTION_DEFAULT_BYTES } from "./terminalRetention.ts";
+import {
+  DEFAULT_TERMINAL_SETTINGS,
+  hostConfigurationRuntime,
+  type TerminalSettings,
+} from "@shipctl/core/configuration";
+import { setTerminalRetention } from "@shipctl/core/platform";
+import { applyTerminalRetentionCommit, RETENTION_DEFAULT_BYTES } from "./terminalRetention.ts";
 
 import { normalizeTerminalFontFamily, TERMINAL_FONT_FAMILY, TERMINAL_FONT_SIZE } from "@shipctl/core/appearance";
 import { ensureFamilyLoaded } from "@shipctl/core/appearance";
 
 const DEFAULT_SETTINGS: TerminalSettings = {
-  cursorStyle: "block",
-  cursorBlink: true,
+  ...DEFAULT_TERMINAL_SETTINGS,
   scrollbackBytes: RETENTION_DEFAULT_BYTES,
   fontFamily: TERMINAL_FONT_FAMILY,
   fontSize: TERMINAL_FONT_SIZE,
-  urlAllowlist: ["http", "https"],
-  confirmUnsafePaste: false,
 };
 
 interface TerminalSettingsStore {
@@ -42,27 +43,30 @@ export const useTerminalSettingsStore = create<TerminalSettingsStore>((set, get)
 
   loadSettings: async () => {
     try {
-      const commit = await getTerminalSettings();
-      const accepted = applyTerminalSettingsCommit(
-        { settings: get().settings, retentionRevision: get().retentionRevision },
-        commit,
-      );
-      if (accepted.retentionRevision !== commit.retentionRevision) return;
-      const { settings, retentionRevision } = accepted;
+      const { value: storedSettings } = await hostConfigurationRuntime().resolve("terminal");
       const normalizedSettings = {
-        ...settings,
-        fontFamily: normalizeTerminalFontFamily(settings.fontFamily),
+        ...storedSettings,
+        fontFamily: normalizeTerminalFontFamily(storedSettings.fontFamily),
       };
       // Load font BEFORE publishing the new family name to the store so that
       // any terminal mounting concurrently doesn't measure against a face that
       // hasn't been registered yet.
       await ensureFamilyLoaded(normalizedSettings.fontFamily);
-      set({ settings: normalizedSettings, retentionRevision, hasLoaded: true, error: null });
-      if (normalizedSettings.fontFamily !== settings.fontFamily) {
-        saveTerminalSettings(normalizedSettings).catch((error) => {
-          set({ error: String(error) });
-        });
+      if (normalizedSettings.fontFamily !== storedSettings.fontFamily) {
+        await hostConfigurationRuntime().update("terminal", normalizedSettings);
       }
+      const commit = await setTerminalRetention(normalizedSettings.scrollbackBytes);
+      const accepted = applyTerminalRetentionCommit(
+        { settings: get().settings, retentionRevision: get().retentionRevision },
+        commit,
+      );
+      if (accepted.retentionRevision !== commit.retentionRevision) return;
+      set({
+        settings: normalizedSettings,
+        retentionRevision: accepted.retentionRevision,
+        hasLoaded: true,
+        error: null,
+      });
     } catch (error) {
       set({ settings: DEFAULT_SETTINGS, hasLoaded: true, error: String(error) });
     }
@@ -82,21 +86,20 @@ export const useTerminalSettingsStore = create<TerminalSettingsStore>((set, get)
       if (next.fontFamily !== prev.fontFamily) {
         await ensureFamilyLoaded(next.fontFamily);
       }
-      // Persist to disk BEFORE committing to the store or applying to
-      // terminals. If the save fails, `prev` remains the committed state —
-      // the UI never shows a value that wasn't written. This avoids the
-      // three-way inconsistency (store / terminals / disk) that the
-      // optimistic pattern exposed on save failure.
-      const commit = await saveTerminalSettings(next);
+      // The TypeScript-owned record is committed before the terminal resource
+      // consumes it. A later resource retry therefore converges to the durable
+      // configuration instead of making native terminal state authoritative.
+      await hostConfigurationRuntime().update("terminal", next);
+      const commit = await setTerminalRetention(next.scrollbackBytes);
       const held = { settings: get().settings, retentionRevision: get().retentionRevision };
-      const accepted = applyTerminalSettingsCommit(held, commit);
+      const accepted = applyTerminalRetentionCommit(held, commit);
       if (accepted === held) {
         // A newer save already committed. Keep the newer state and only clear
         // the in-flight flag.
         set({ isSaving: false });
         return;
       }
-      set({ settings: accepted.settings, retentionRevision: accepted.retentionRevision, isSaving: false });
+      set({ settings: next, retentionRevision: accepted.retentionRevision, isSaving: false });
     } catch (error) {
       // Nothing to roll back: `settings` was never mutated, terminals were
       // never re-applied, and the font (if loaded) sitting in document.fonts

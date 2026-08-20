@@ -15,69 +15,87 @@ things are missing, and they are the whole of this step:
 This step assigns ownership to a bundled workspace plugin and closes the
 operation gap. It does not redesign the document.
 
-## What already exists — do not restate it as work
+## Delivered workspace contract
 
 `module-api/frontend/src/protocol/workspace.ts` (352 lines) is a complete
 renderer-neutral contract:
 
 | Concern | Already contract |
 | --- | --- |
-| Document grammar | `UiWorkspaceDocument`: `instances`, `root` (`WorkspaceStackNode` \| `WorkspaceSplitNode`), `floating`, `maximizedStackId`, `profileId` |
-| View catalogue | `WorkspaceViewDefinition` with `scope`, `cardinality`, `closeBehavior`, `requiredCapabilityIds`, `placement`, `state`, `migrationAliases` |
+| Document grammar | schema-2 `UiWorkspaceDocument`: `instances`, `root` (`WorkspaceStackNode` \| `WorkspaceSplitNode`), `floating`, `maximizedStackId` |
+| View catalogue | `WorkspaceViewDefinition` with `scope`, `cardinality`, `closeBehavior`, `requiredCapabilityIds`, `placement`, and `migrationAliases` |
 | Renderer indirection | `WorkspaceViewPresentationRef { loaderId, exportName }` — no React type in the contract |
 | Unavailable views | `WorkspaceViewAvailability` `missing-definition` with `lastKnownViewTypeId` + `catalogRevision`; `WorkspaceResourceReference` `unavailable` variant |
 | Revision safety | `WorkspaceCommandBase.expectedRevision` + `originId`; `workspace.conflict` |
 | Agent inspection | `WorkspaceInspection` with opt-in `document`, plus `WorkspaceObservation` (`workspace-changed` / `catalog-reconciled`) |
+| Public mutation | Workspace service v2 exposes `validate`, `plan`, atomic `apply`, compatibility `mutate`, and all semantic layout commands |
 | Structured failure | 10-member `WorkspaceErrorCode` |
 | Host-only catalogue | documented on `WorkspaceService`: a plugin "cannot discover, authorize, or activate other plugins" |
 
-The earlier draft's "reuse the existing semantic core" section listed these as
-if they were a starting point to be evolved. They are shipped contract. What
-follows is only what is genuinely absent.
+The bundled `shipctl.workspace` plugin owns this contract, its authority,
+accepted-catalog controller, plugin-data persistence, and renderer-neutral
+bridge lifecycle. The surrounding shell only activates that plugin and consumes
+its snapshots and diagnostics.
 
-## Gap 1 — representable but unreachable states
+## Gap 1 — resolved reachability
 
-`WorkspaceCommand` has exactly seven members: `open`, `close`, `focus`,
-`select`, `move`, `split`, `reset`. Compare against what the document can hold:
+`WorkspaceCommand` now exposes `open`, `close`, `focus`, `select`, `move`,
+`split`, `rename`, `resize-split`, `float`, `update-floating`, `dock`,
+`maximize`, `restore`, `reset`, and ordered `apply`. Every retained mutable
+workspace field now has a public reachability and leavability path:
 
 | Representable in the document | Reachable / leavable by a public command? |
 | --- | --- |
-| `WorkspaceSplitNode.firstShare: number` | **No.** Set implicitly at `split`; no resize command exists. Every non-default ratio is unreachable. |
-| `floating: WorkspaceFloatingStack[]` with `x`, `y`, `width`, `height` | **No.** No float, move-float, resize-float, or dock command exists. A floating stack cannot be created or dismissed. |
-| `maximizedStackId: string \| null` | **No.** No maximize or restore command exists. |
-| `profileId` | **Partially.** `reset` names a `profileId`, but no command creates, switches, or deletes a profile. |
-| `WorkspaceViewInstance.label` | **No.** Set at `open`; no rename. |
-| `WorkspaceViewInstance.stateRef` + `WorkspaceViewStatePolicy {kind:"json"}` | **No.** Set at `open`; no update command, so declared view state is write-once. This is the most consequential of the five — decide whether view state belongs in the workspace document at all, or in the view's own plugin-data namespace. |
+| `WorkspaceSplitNode.firstShare: number` | `resize-split` sets a ratio; a later resize leaves it. |
+| `floating: WorkspaceFloatingStack[]` with `x`, `y`, `width`, `height` | `float` creates, `update-floating` changes bounds, and `dock` removes the floating placement. |
+| `maximizedStackId: string \| null` | `maximize` sets it and `restore` clears it. |
+| `WorkspaceViewInstance.label` | `rename` sets or clears it. |
+| v1 `profileId` and `stateRef` | removed from schema 2; legacy parsing normalizes them away. |
 
 This is proof obligation 7 from Step 00, and it is a correctness problem, not a
 feature wish-list: a renderer that offers drag-resize, float, or maximize today
 must either mutate outside the document or silently lose the change on reload.
 
-Required work: for each row, either add the semantic operation or remove the
-field from the document. Do not add operations for fields the product does not
-want. A field with no operation is a lie in the schema.
+The public-operation architecture test checks these paths through a headless
+semantic service. Invalid operations, including a failed later batch step, leave
+the canonical document and revision unchanged.
 
-Each new operation needs: precondition, deterministic outcome, revision
-behavior, failure code from the existing `WorkspaceErrorCode` union, and a
-property test. An operation that would orphan an instance, produce an invalid
-tree, or target an unavailable definition must fail with the document unchanged.
+### Owner decision — 2026-08-19: view-local state
 
-## Gap 2 — no plan/apply transaction
+**Owner:** Dariusz Debowczyk. **Selected policy:** the shared workspace stores
+only layout and open-view state. Each view-owning plugin stores its own
+view-local data (for example filters and drafts) in its activation-derived
+plugin-data namespace.
 
-`mutateWorkspace` accepts **one command** per call, each advancing the revision.
-An agent-facing `plan`/`apply` over N commands is therefore not atomic today:
-a failure at command 3 of 5 leaves a half-applied document at revision +2.
+The workspace contract therefore removes `WorkspaceViewStatePolicy` and
+`WorkspaceViewInstance.stateRef`. Existing document-schema-v1 values normalize
+one-way by dropping the placeholder `stateRef`: it never had an owner-defined
+record key, schema, update operation, or read path, so it cannot be migrated
+safely into an arbitrary plugin namespace. A view that needs durable local
+state must define and migrate a record in its own namespace.
 
-Two admissible resolutions:
+The implementation maps every remaining mutable document field as follows:
 
-1. Add a batch command carrying an ordered command list, one `expectedRevision`,
-   and all-or-nothing semantics — validated against the reducer before any
-   revision advances.
-2. Restrict agent apply to single commands and state that multi-step layout
-   changes are not transactional.
+| Field | Public semantic operation |
+| --- | --- |
+| split `firstShare` | `resize-split` |
+| floating stack identity and bounds | `float`, `update-floating`, and `dock` |
+| `maximizedStackId` | `maximize` and `restore` |
+| instance `label` | `rename` |
+| schema-1 `profileId` and `stateRef` | removed during one-way normalization |
 
-Option 1 is required if `workspace plan`/`apply` is to mean anything. It is a
-contract change to `shipctl.workspace@1`; version it accordingly.
+Document/workspace identities, schema versions, owner metadata, lifecycle, and
+availability remain authority-managed invariants. `open`, `close`, `focus`,
+`move`, `split`, `reset`, and accepted-catalog reconciliation create, replace,
+or remove those facts through the same validated reducer.
+
+## Gap 2 — resolved plan/apply transaction
+
+Workspace service v2 exposes validation, planning, and an ordered `apply`
+command. The complete batch is parsed and reduced from one starting document
+before its one compare-and-save; a failed step advances neither document nor
+revision. `mutateWorkspace` remains an explicit compatibility alias to one
+`apply` command.
 
 ## Gap 3 — ownership and commit scope
 
@@ -86,17 +104,20 @@ That identity is what gives it a `plugin-data` namespace (Step 05, Option B) and
 what makes it upgradeable and inspectable through the same runtime as every
 other plugin.
 
-**Unresolved and blocking (Step 00, owner decision 2):**
-`docs/4-layer-architecture/12-phase-g-workspace-contributions-and-closure.md:44-51`
-deliberately places workspace catalogue reconciliation *after* the activation
-transaction, accepting a workspace diagnostic rather than a distributed commit.
-This step and Step 11 have been written assuming atomicity across activation and
-workspace reconciliation. Those cannot both stand.
+**Resolved 2026-08-19 — owner Dariusz Debowczyk selected post-commit,
+diagnostic-only reconciliation.** The authoritative Phase G record states that
+activation succeeds when its native route and declared-schedule transaction
+commits and its accepted family is published. Catalogue reconciliation follows
+that commit; failure must surface a structured workspace diagnostic and must not
+unpublish or roll back the accepted family, its routes, schedules, or services.
+An observer can therefore see an active accepted family alongside the last
+successfully reconciled workspace document (or bootstrap state) and its
+diagnostic. Later accepted catalogues may retry reconciliation.
 
-Until the owner decides, implement the recorded behavior: catalogue
-reconciliation is a post-commit reaction observable as `catalog-reconciled`, and
-a reconciliation failure is a diagnostic, not an activation rollback. Do not
-write property tests that assume the stronger guarantee.
+`workspace plan`/`apply` batch atomicity applies only to a single
+workspace-document mutation. It cannot make activation and reconciliation one
+distributed transaction. Step 11 must not add a property that assumes the
+stronger guarantee.
 
 ## Catalogue reconciliation invariants
 
@@ -114,33 +135,27 @@ this step makes them contract-level invariants of the owning plugin:
 
 ## Agent-operable surface
 
-`WorkspaceInspection` already answers inspect. Missing: validate, plan, apply,
-and profile operations. Note that `cli/src/args.rs:37-91` has **no `workspace`
-subcommand**; the agent surface reaches the workspace through the existing
-capability-call and operations plane, which is Step 10's delivery. Do not add a
-bespoke workspace CLI path here.
+`WorkspaceInspection`, `validateWorkspace`, `planWorkspace`, `applyWorkspace`,
+compatibility `mutateWorkspace`, and `observeWorkspace` are public. There are no
+profile operations because schema-2 workspace documents do not model profiles.
+The agent surface reaches the workspace through the capability-call and
+operations plane; it does not add a bespoke workspace CLI path here.
 
 Responses stay machine-readable first, with human rendering only at the CLI
 edge. The first delivery may require reload after apply; semantic inspection,
 validation, and revision-safe persistence may not be deferred.
 
-## Refactoring actions
+## Delivered work
 
-1. Decide, per row of the Gap 1 table, add-operation or remove-field. Write the
-   decision down before implementing.
-2. Resolve the `stateRef` question first — it determines whether the workspace
-   document is a layout document or a layout-plus-state document.
-3. Add the batch/atomic mutation form, or record that apply is single-command.
-4. Package the workspace authority, document validation, catalogue controller,
-   and canvas bridge behind a bundled plugin activation entrypoint with its own
-   module id.
-5. Resolve the workspace record onto that plugin's `plugin-data` namespace, or
-   record the bootstrap-ordering exception (Step 05).
-6. Add property tests for each new operation before any UI control emits it.
-7. Replace the legacy contribution-catalogue conversion with direct view
-   contributions as each artifact migrates (Step 08).
-8. Delete `load_workspace_document` / `save_workspace_document` once the record
-   moves, per the Step 05 decision.
+1. Recorded layout-and-open-views-only ownership; schema-1 `stateRef` and
+   `profileId` normalize away.
+2. Added the atomic batch form and rendererless validate/plan/apply service.
+3. Activated authority, validation, catalog controller, plugin-data persistence,
+   and bridge under bundled `shipctl.workspace` ownership.
+4. Moved the canonical record into that plugin's namespace, proved one-way
+   legacy import/replay/conflict behavior, and removed the native store/commands.
+5. Added headless public-operation and catalog-reconciliation evidence before
+   renderer controls can emit the new semantic commands.
 
 ## Validation and exit criteria
 

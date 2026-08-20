@@ -6,8 +6,8 @@ import fc from "fast-check";
 import { createServer } from "vite";
 
 let vite;
-let createLegacyWorkspaceProjection;
-let legacyWorkspaceAction;
+let createStandardWorkspaceProjection;
+let standardWorkspaceAction;
 let createLaymanWorkspaceState;
 let createLaymanCanvasController;
 let laymanWorkspaceAction;
@@ -28,8 +28,8 @@ before(async () => {
     server: { hmr: false, middlewareMode: true },
     appType: "custom",
   });
-  ({ createLegacyWorkspaceProjection, legacyWorkspaceAction } = await vite.ssrLoadModule(
-    "/core/frontend/canvas/legacy/workspaceProjection.ts",
+  ({ createStandardWorkspaceProjection, standardWorkspaceAction } = await vite.ssrLoadModule(
+    "/core/frontend/canvas/standard/workspaceProjection.ts",
   ));
   ({ createLaymanWorkspaceState } = await vite.ssrLoadModule(
     "/core/frontend/canvas/layman/workspaceProjection.ts",
@@ -50,7 +50,7 @@ after(async () => {
 });
 
 /**
- * The legacy adapter has one representable shape: one root tab stack, no
+ * The standard adapter has one representable shape: one root tab stack, no
  * floating stack, and no maximized stack. This generator is intentionally
  * limited to that declared shared subset. Split and floating behavior remains
  * a separate Phase G closure item rather than false renderer parity.
@@ -78,9 +78,8 @@ const tiledMoveDocument = fc.tuple(
 
 function projectionFrom({ views, selectedIndex }) {
   const rawDocument = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspaceId: "shipctl.property.workspace",
-    profileId: "shipctl.property.shared-stack",
     instances: views.map((view, index) => ({
       instanceId: `instance-${index}`,
       viewTypeId: `shipctl.fixture.view-${index}`,
@@ -88,7 +87,6 @@ function projectionFrom({ views, selectedIndex }) {
       ownerActivationId: "shipctl.fixture@1#canvas",
       resource: { kind: "global" },
       label: `View ${index}`,
-      stateRef: null,
       availability: view.missing
         ? {
             kind: "missing-definition",
@@ -123,7 +121,7 @@ function projectionFrom({ views, selectedIndex }) {
   };
 }
 
-function normalizeLegacy(projection) {
+function normalizeStandard(projection) {
   assert.equal(projection.kind, "stack");
   return {
     viewIds: [...projection.viewIds],
@@ -155,9 +153,8 @@ function tiledMoveProjection({ leftViews, rightViews }) {
     ...rightViews.map((view, index) => ({ ...view, instanceId: `right-${index}` })),
   ];
   const rawDocument = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspaceId: "shipctl.property.workspace",
-    profileId: "shipctl.property.tiled-move",
     instances: entries.map((view) => ({
       instanceId: view.instanceId,
       viewTypeId: `shipctl.fixture.${view.instanceId}`,
@@ -165,7 +162,6 @@ function tiledMoveProjection({ leftViews, rightViews }) {
       ownerActivationId: "shipctl.fixture@1#canvas",
       resource: { kind: "global" },
       label: view.instanceId,
-      stateRef: null,
       availability: view.missing
         ? {
             kind: "missing-definition",
@@ -220,20 +216,20 @@ function tiledMoveProjection({ leftViews, rightViews }) {
 test("architecture.canvas-adapter-parity.property", () => {
   fc.assert(fc.property(sharedStackDocument, (fixture) => {
     const projection = projectionFrom(fixture);
-    const legacy = createLegacyWorkspaceProjection(projection);
+    const standard = createStandardWorkspaceProjection(projection);
     const layman = createLaymanWorkspaceState(projection);
 
-    assert.deepEqual(normalizeLegacy(legacy), normalizeLayman(layman));
+    assert.deepEqual(normalizeStandard(standard), normalizeLayman(layman));
 
-    for (const instanceId of normalizeLegacy(legacy).viewIds) {
-      const legacySelect = legacyWorkspaceAction(legacy, { kind: "select", instanceId });
+    for (const instanceId of normalizeStandard(standard).viewIds) {
+      const standardSelect = standardWorkspaceAction(standard, { kind: "select", instanceId });
       const laymanSelect = laymanAction(projection, { type: "tab.select", tabId: instanceId });
-      assert.deepEqual(laymanSelect.action, legacySelect);
+      assert.deepEqual(laymanSelect.action, standardSelect);
       assert.equal(normalizeLayman(laymanSelect.state).activeViewId, instanceId);
 
-      const legacyClose = legacyWorkspaceAction(legacy, { kind: "close", instanceId });
+      const standardClose = standardWorkspaceAction(standard, { kind: "close", instanceId });
       const laymanClose = laymanAction(projection, { type: "tab.remove", tabId: instanceId });
-      assert.deepEqual(laymanClose.action, legacyClose);
+      assert.deepEqual(laymanClose.action, standardClose);
     }
   }), propertyParameters());
 });

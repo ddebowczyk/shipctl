@@ -1,7 +1,4 @@
 import type {
-  UsageProvider,
-  UsageProviderObservation,
-  UsageProviderWindow,
   UsageSourceDataset,
   UsageSourceRecord,
 } from "@shipctl/module-api";
@@ -15,6 +12,10 @@ import type {
   UsageOverviewProvider,
   UsageProject,
   UsageProjectAliasReviewItem,
+  UsagePresentationDataset,
+  UsageProvider,
+  UsageProviderObservation,
+  UsageProviderWindow,
   UsageTask,
   UsageTimeWindow,
   UsageTrendBucket,
@@ -146,7 +147,7 @@ function localDetails(
   provider: UsageProvider,
   now: number,
 ): LocalUsageDetails {
-  const records = messageRecords(dataset).filter((record) => record.provider === provider);
+  const records = messageRecords(dataset).filter((record) => record.sourceId === provider);
   const t5h = now - FIVE_HOURS;
   const t7d = now - SEVEN_DAYS;
   const t30d = now - THIRTY_DAYS;
@@ -219,10 +220,11 @@ function observationFor(
 }
 
 export function projectUsageSnapshots(
-  dataset: UsageSourceDataset,
+  dataset: UsagePresentationDataset,
+  providers: readonly UsageProvider[] = PROVIDERS,
 ): readonly ProviderUsageSnapshot[] {
   const now = epoch(dataset.capturedAt);
-  return PROVIDERS.map((provider) => {
+  return providers.map((provider) => {
     const details = localDetails(dataset, provider, now);
     const observation = observationFor(dataset.providerObservations, provider);
     const summaryWindows = [...(observation?.summaryWindows ?? [])];
@@ -325,7 +327,7 @@ function projectTrend(
     if (index !== null && index >= 0 && index < buckets.length) buckets[index].records.push(record);
   }
   return buckets.map((bucket) => {
-    const providers = [...groupBy(bucket.records, (record) => record.provider)]
+    const providers = [...groupBy(bucket.records, (record) => record.sourceId)]
       .map(([provider, records]) => {
         const costDetail = groupedUsageCost(records);
         return {
@@ -361,7 +363,7 @@ function namedTrend(
   const values = Array.from({ length: definition.bucketCount }, () => 0);
   for (const record of records) {
     const recordLabel = dimension === "model" ? record.model ?? "unknown" : record.project ?? "unknown";
-    if (record.provider !== provider || recordLabel !== label) continue;
+    if (record.sourceId !== provider || recordLabel !== label) continue;
     const index = bucketIndex(record, definition, start);
     if (index !== null && index >= 0 && index < values.length) values[index] += record.tokensTotal;
   }
@@ -372,7 +374,7 @@ function overviewProviders(
   records: readonly UsageSourceRecord[],
   trend: readonly UsageTrendBucket[],
 ): UsageOverviewProvider[] {
-  const groups = [...groupBy(records, (record) => record.provider)]
+  const groups = [...groupBy(records, (record) => record.sourceId)]
     .map(([provider, grouped]) => ({ provider: provider as UsageProvider, grouped }))
     .sort((left, right) => sum(right.grouped, "tokensTotal") - sum(left.grouped, "tokensTotal"));
   const total = groups.reduce((value, group) => value + sum(group.grouped, "tokensTotal"), 0);
@@ -404,7 +406,7 @@ function breakdown(
   dimension: "model" | "project",
 ): UsageBreakdownItem[] {
   return [...groupBy(detailRecords, (record) => (
-    `${record.provider}\u0000${dimension === "model" ? record.model ?? "unknown" : record.project ?? "unknown"}`
+    `${record.sourceId}\u0000${dimension === "model" ? record.model ?? "unknown" : record.project ?? "unknown"}`
   ))]
     .map(([key, grouped]) => {
       const [provider, label] = key.split("\u0000") as [UsageProvider, string];
@@ -492,7 +494,7 @@ export function projectUsageProjectAliasReview(
   dataset: UsageSourceDataset,
 ): readonly UsageProjectAliasReviewItem[] {
   const records = messageRecords(dataset);
-  return [...groupBy(records, (record) => `${record.provider}\u0000${record.project ?? "unknown"}`)]
+  return [...groupBy(records, (record) => `${record.sourceId}\u0000${record.project ?? "unknown"}`)]
     .map(([key, grouped]) => {
       const [provider, rawLabel] = key.split("\u0000") as [UsageProvider, string];
       return { provider, rawLabel, grouped, resolution: resolveAlias(rawLabel) };

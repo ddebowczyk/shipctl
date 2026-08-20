@@ -1,3 +1,4 @@
+import { Channel, invoke } from "@tauri-apps/api/core";
 import {
   TERMINAL_SESSION_GRANTS,
   TERMINAL_SESSIONS_ERROR_CODES,
@@ -26,11 +27,24 @@ import {
   type TerminalSessionsService,
   type ResizeTerminalInput,
   type StartTerminalSessionInput,
+  type StartManagedTerminalSessionInput,
   type StopTerminalSessionInput,
   type UpdateTerminalSessionInput,
   type WriteTerminalInput,
 } from "@shipctl/module-api";
-import type { ActivationTerminalSessionsRuntime } from "@shipctl/core/terminal-host";
+import type {
+  ActivationTerminalSessionsRuntime,
+  TerminalAttachmentId,
+  TerminalCloseResult,
+  TerminalColorTheme,
+  TerminalDescriptor,
+  TerminalId,
+  TerminalLaunchRequest,
+  TerminalMetadata,
+  TerminalRawAttachmentBootstrap,
+  TerminalRegistryEvent,
+  TerminalRegistrySubscriptionId,
+} from "@shipctl/core/terminal-host";
 
 import {
   createSemanticRequestAdapter,
@@ -41,6 +55,132 @@ export interface TerminalSessionsTransportBinding {
   readonly moduleId: ModuleId;
   readonly activationId: string;
   readonly grants: ReadonlySet<string>;
+}
+
+/** Raw terminal attachment facts for the trusted terminal-host projection. */
+export interface RawTerminalAttachmentHandle {
+  readonly attachmentId: TerminalAttachmentId;
+  readonly live: boolean;
+  readonly descriptor: TerminalDescriptor;
+  readonly sequenceBoundary: number;
+  activate(): void;
+}
+
+/** A native terminal-registry subscription owned by the terminal host. */
+export interface TerminalRegistrySubscription {
+  readonly id: TerminalRegistrySubscriptionId;
+  dispose(): Promise<void>;
+}
+
+/** Creates a native terminal session through the terminal resource port. */
+export function spawnTerminal(request: TerminalLaunchRequest): Promise<TerminalDescriptor> {
+  return invoke("spawn_terminal", { request });
+}
+
+export function listTerminals(): Promise<TerminalDescriptor[]> {
+  return invoke("list_terminals");
+}
+
+export async function subscribeTerminalRegistry(
+  onEvent: (event: TerminalRegistryEvent) => void,
+): Promise<TerminalRegistrySubscription> {
+  const channel = new Channel<TerminalRegistryEvent>();
+  channel.onmessage = onEvent;
+  const id = await invoke<TerminalRegistrySubscriptionId>("subscribe_terminal_registry", {
+    onEvent: channel,
+  });
+  return {
+    id,
+    dispose: () => invoke("unsubscribe_terminal_registry", { subscriptionId: id }),
+  };
+}
+
+export function getTerminal(terminalId: TerminalId): Promise<TerminalDescriptor> {
+  return invoke("get_terminal", { terminalId });
+}
+
+/** Cumulative host observations. They are measurements, not product limits. */
+export interface TerminalPublicationStats {
+  readonly ptyReads: number;
+  readonly screenChanges: number;
+  readonly screenProjections: number;
+  readonly screenEncodes: number;
+  readonly screenEncodedBytes: number;
+  readonly screenRecipientDeliveries: number;
+  readonly effectEvents: number;
+  readonly effectEncodedBytes: number;
+  readonly currentScreenTransactions: number;
+  readonly currentScreenBytesQueued: number;
+  readonly peakScreenBytesQueued: number;
+  readonly currentEffectEventsQueued: number;
+  readonly currentEffectBytesQueued: number;
+  readonly peakEffectEventsQueued: number;
+  readonly peakEffectBytesQueued: number;
+}
+
+export function getTerminalPublicationStats(
+  terminalId: TerminalId,
+): Promise<TerminalPublicationStats> {
+  return invoke("get_terminal_publication_stats", { terminalId });
+}
+
+/**
+ * Attaches exact host PTY bytes without selecting a terminal implementation
+ * transport. Thin-terminal owns their interpretation.
+ */
+export async function attachRawTerminal(
+  terminalId: TerminalId,
+  claimsResize: boolean,
+  bootstrap: TerminalRawAttachmentBootstrap,
+): Promise<RawTerminalAttachmentHandle> {
+  const channel = new Channel<unknown>();
+  channel.onmessage = bootstrap.deliver;
+  const attachment = await invoke<{
+    attachmentId: TerminalAttachmentId;
+    live: boolean;
+    descriptor: TerminalDescriptor;
+    sequenceBoundary: number;
+  }>("attach_raw_terminal", {
+    terminalId,
+    claimsResize,
+    onEvent: channel,
+  });
+  return { ...attachment, activate: bootstrap.activate };
+}
+
+export function detachTerminal(attachmentId: TerminalAttachmentId): Promise<void> {
+  return invoke("detach_terminal", { attachmentId });
+}
+
+const terminalInputEncoder = new TextEncoder();
+
+export function writeTerminal(terminalId: TerminalId, data: string | Uint8Array): Promise<void> {
+  const bytes = typeof data === "string" ? terminalInputEncoder.encode(data) : data;
+  return invoke("write_terminal", { terminalId, data: Array.from(bytes) });
+}
+
+export function updateTerminalColorTheme(colorTheme: TerminalColorTheme): Promise<void> {
+  return invoke("update_terminal_color_theme", { colorTheme });
+}
+
+export function updateTerminalMetadata(
+  terminalId: TerminalId,
+  metadata: TerminalMetadata,
+): Promise<TerminalDescriptor> {
+  return invoke("update_terminal_metadata", { terminalId, metadata });
+}
+
+export function resizeTerminal(
+  terminalId: TerminalId,
+  attachmentId: TerminalAttachmentId,
+  columns: number,
+  rows: number,
+): Promise<void> {
+  return invoke("resize_terminal", { terminalId, attachmentId, columns, rows });
+}
+
+export function closeTerminal(terminalId: TerminalId): Promise<TerminalCloseResult> {
+  return invoke("close_terminal", { terminalId });
 }
 
 export interface TerminalSessionsServiceProviderOptions {
@@ -345,6 +485,10 @@ export function createTerminalSessionsServiceProvider(
           "start", binding, active, TERMINAL_SESSION_GRANTS.start,
           createCorrelationId, options.observeRequest,
           (input) => options.runtime.launch(binding.moduleId, input)),
+        startManagedSession: request<StartManagedTerminalSessionInput, ModuleTerminalSession>(
+          "start-managed", binding, active, TERMINAL_SESSION_GRANTS.start,
+          createCorrelationId, options.observeRequest,
+          (input) => options.runtime.launchManaged(binding.moduleId, input)),
         updateSession: request<UpdateTerminalSessionInput, ModuleTerminalSession>(
           "update", binding, active, TERMINAL_SESSION_GRANTS.start,
           createCorrelationId, options.observeRequest,

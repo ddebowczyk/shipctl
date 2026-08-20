@@ -6,8 +6,8 @@ usage() {
   printf '%s\n' \
     'usage: verify-app-bundle.sh --app PATH --target TRIPLE --version VERSION --product-name NAME --identifier ID' \
     '' \
-    'Checks the two bundled executables, the app metadata, target architecture,' \
-    'and the CLI through the symlink shape installed by a Homebrew cask.'
+    'Checks the bundled UI, CLI, and headless runner; app metadata; target architecture;' \
+    'and CLI-to-runner discovery through the symlink shape installed by a Homebrew cask.'
 }
 
 fail() {
@@ -77,9 +77,18 @@ plist="$app/Contents/Info.plist"
 macos_dir="$app/Contents/MacOS"
 ui="$macos_dir/shipctl-ui"
 cli="$macos_dir/shipctl"
+runner="$macos_dir/shipctl-runtime"
+runner_program="$app/Contents/Resources/shipctl-headless-runtime.mjs"
+runner_admission="$app/Contents/Resources/shipctl-headless-runtime-admission.json"
 [ -f "$plist" ] || fail "app bundle has no Info.plist: $plist"
 [ -x "$ui" ] || fail "app bundle has no executable UI: $ui"
 [ -x "$cli" ] || fail "app bundle has no executable CLI: $cli"
+[ -x "$runner" ] || fail "app bundle has no executable headless runner: $runner"
+[ -f "$runner_program" ] || fail "app bundle has no headless runner program: $runner_program"
+[ -f "$runner_admission" ] || fail "app bundle has no headless runner admission: $runner_admission"
+jq -e \
+  '.schemaVersion == 1 and (.artifact.contentDigest | type == "string") and (.artifact.moduleId | type == "string")' \
+  "$runner_admission" >/dev/null || fail 'app bundle headless runner admission is invalid'
 
 # A raw Mach-O linker signature does not make a valid macOS application bundle.
 # Require a complete bundle signature so that a release cannot pass verification
@@ -112,7 +121,7 @@ bundle_identifier="$(plutil -extract CFBundleIdentifier raw "$plist")" \
 [ "$bundle_identifier" = "$identifier" ] \
   || fail "Info.plist identifier is $bundle_identifier, expected $identifier"
 
-for executable in "$ui" "$cli"; do
+for executable in "$ui" "$cli" "$runner"; do
   architectures="$(lipo -archs "$executable")" \
     || fail "could not read architectures from $executable"
   case " $architectures " in
@@ -126,6 +135,11 @@ case "$cli_version" in
   "shipctl $version (role cli"*) ;;
   *) fail "bundled CLI reports an unexpected version: $cli_version" ;;
 esac
+runner_probe="$($cli __headless-runner-probe)" \
+  || fail 'bundled CLI could not discover and invoke its packaged headless runner'
+printf '%s' "$runner_probe" | jq -e \
+  '.schemaVersion == 1 and .runnerAbi == 1 and .status == "success" and .code == "headless.runner.ready"' \
+  >/dev/null || fail 'bundled CLI headless runner probe returned an invalid response'
 
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/shipctl-cask-layout.XXXXXX")"
 cleanup() {
@@ -133,6 +147,28 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$test_root/bin"
+
+if runner_abi_mismatch="$(
+  jq -cn '{schemaVersion: 1, runnerAbi: 2, operation: "runner.probe"}' \
+    | "$runner" --jitless "$runner_program" --kernel "$cli"
+)"; then
+  fail 'headless runner accepted an incompatible ABI request'
+fi
+printf '%s' "$runner_abi_mismatch" | jq -e \
+  '.schemaVersion == 1 and .runnerAbi == 1 and .operation == "runner.probe" and .status == "failure" and .code == "headless.runner.abi_mismatch"' \
+  >/dev/null || fail 'headless runner ABI mismatch returned an invalid response'
+
+if runner_rejection="$(
+  jq -cn --arg state_root "$test_root/unadmitted-state" \
+    '{schemaVersion: 1, runnerAbi: 1, operation: "runtime.invoke", input: {stateRoot: $state_root, capabilityId: "shipctl.workspace", portId: "shipctl.workspace.execute", payload: {schemaVersion: 1, operation: "workspace.inspect", workspaceId: "shipctl.workspace", includeDocument: true}}}' \
+    | "$runner" --jitless "$runner_program" --kernel "$cli"
+)"; then
+  fail 'headless runner accepted an unadmitted runtime invocation'
+fi
+printf '%s' "$runner_rejection" | jq -e \
+  '.schemaVersion == 1 and .runnerAbi == 1 and .operation == "runtime.invoke" and .status == "failure" and (.code | type == "string") and (.data.message | type == "string")' \
+  >/dev/null || fail 'headless runner rejection lost its runtime-invoke response envelope'
+
 ln -s "$cli" "$test_root/bin/shipctl"
 "$test_root/bin/shipctl" --help >/dev/null \
   || fail 'CLI did not run through a Homebrew-style symlink'
@@ -140,6 +176,11 @@ linked_version="$($test_root/bin/shipctl version)" \
   || fail 'CLI version did not run through a Homebrew-style symlink'
 [ "$linked_version" = "$cli_version" ] \
   || fail 'CLI version changed when invoked through a Homebrew-style symlink'
+linked_probe="$($test_root/bin/shipctl __headless-runner-probe)" \
+  || fail 'CLI could not discover its headless runner through a Homebrew-style symlink'
+printf '%s' "$linked_probe" | jq -e \
+  '.schemaVersion == 1 and .runnerAbi == 1 and .status == "success" and .code == "headless.runner.ready"' \
+  >/dev/null || fail 'symlinked CLI headless runner probe returned an invalid response'
 
 printf '%s\n' \
   "app bundle: $app" \

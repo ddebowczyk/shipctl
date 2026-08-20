@@ -383,16 +383,14 @@ function profileForCleanup(workspaceId, catalog) {
         ? { kind: "project", projectId: "/cleanup/project" }
         : { kind: "global" },
       label: definition.label,
-      stateRef: null,
       availability: { kind: "available" },
       lifecycle: placed ? "placed" : "hidden",
     };
   });
   const placed = instances.filter((instance) => instance.lifecycle === "placed");
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspaceId,
-    profileId: "cleanup.profile",
     instances,
     root: placed.length === 0 ? null : {
       kind: "stack",

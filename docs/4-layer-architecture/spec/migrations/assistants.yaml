@@ -13,7 +13,9 @@ current:
 target:
   roles: [compound]
   responsibilities:
-    - Provide assistant launch and recovery policy as plugin application logic.
+    - >-
+      Provide assistant launch, transcript capture, model discovery, and
+      settings policy as plugin application logic.
     - Publish assistant session views and commands through typed contributions.
   capabilities:
     - processes
@@ -25,16 +27,20 @@ target:
 phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
 prerequisites:
   - Characterize launch, capture, resume, placement, and shutdown behavior.
-  - Define provider-neutral assistant launch and recovery records.
+  - >-
+    Define generic process launch and recovery records with policy-owned
+    provider data.
 compatibility_paths:
   - Keep the built-in module active through the same Cordis activation path.
   - Keep native commands behind typed capability clients during migration.
   - >-
     Phase E packages Assistants as an immutable compound artifact. It declares
-    Assistant Launch, Credential Store, Processes, and Terminal Sessions
-    because those are the services used by current code. Plugin Data and
-    Workspace remain target capabilities; they are not pre-granted before the
-    module consumes them.
+    Assistant Launch (including explicit bounded resource grants), Credential
+    Store, Processes, Terminal Sessions, and Projects because those are the
+    services used by current code. Its
+    activation-owned runtime effect observes the project catalog without a
+    workspace grant. Plugin Data and Workspace remain target capabilities; they
+    are not pre-granted before the module consumes them.
 deletion_gates:
   - id: DELETE-D-NATIVE-MODULE
     proof_ids:

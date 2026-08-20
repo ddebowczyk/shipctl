@@ -1,5 +1,5 @@
 import type { CanvasAdapterView } from "@shipctl/core/canvas/views";
-import type { CanvasAdapterId } from "@shipctl/core/platform";
+import type { CanvasAdapterId } from "@shipctl/core/configuration";
 
 import LaymanCanvasRuntimeAdapter from "./LaymanCanvasRuntimeAdapter.tsx";
 

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "shipctl-artifact:///messages/runtime-operation-response.schema.json",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "status", "operation", "value"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "status": { "const": "ok" },
+        "operation": {
+          "enum": [
+            "workspace.inspect",
+            "workspace.validate",
+            "workspace.plan",
+            "workspace.apply",
+            "workspace.mutate",
+            "configuration.inspect",
+            "configuration.resolve",
+            "configuration.update"
+          ]
+        },
+        "value": true
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "status", "operation", "code", "message"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "status": { "const": "error" },
+        "operation": {
+          "enum": [
+            "workspace.inspect",
+            "workspace.validate",
+            "workspace.plan",
+            "workspace.apply",
+            "workspace.mutate",
+            "configuration.inspect",
+            "configuration.resolve",
+            "configuration.update"
+          ]
+        },
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "details": true
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "status", "operation", "code", "message"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "status": { "const": "unavailable" },
+        "operation": {
+          "enum": [
+            "workspace.inspect",
+            "workspace.validate",
+            "workspace.plan",
+            "workspace.apply",
+            "workspace.mutate",
+            "configuration.inspect",
+            "configuration.resolve",
+            "configuration.update"
+          ]
+        },
+        "code": { "const": "runtime.operation.unavailable" },
+        "message": { "type": "string", "minLength": 1 },
+        "details": true
+      }
+    }
+  ]
+}

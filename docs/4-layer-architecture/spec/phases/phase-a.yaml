@@ -154,7 +154,7 @@ properties:
     runner:
       language: typescript
       library: fast-check
-      test_id: architecture.legacy-composition.property
+      test_id: architecture.module-composition.property
       shrink: required
       replay: required
     tiers: [pr]

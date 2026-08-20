@@ -153,7 +153,7 @@ fn sync_directory(path: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{AssistantProvider, AssistantSessionRecord, CaptureState, SessionMode};
+    use super::super::{AssistantSessionRecord, CaptureState};
     use super::{read, write_atomically, AssistantSessionManifest, MANIFEST_VERSION};
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -173,12 +173,12 @@ mod tests {
     fn sample_record() -> AssistantSessionRecord {
         AssistantSessionRecord {
             record_id: "record-1".to_string(),
-            provider: AssistantProvider::Claude,
+            provider: "fixture".to_string(),
             provider_session_id: Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
             launch_repo_path: "/tmp/launch".to_string(),
             placement_project_path: "/tmp/placement".to_string(),
-            label: "Claude Code".to_string(),
-            session_mode: SessionMode::Standard,
+            label: "Fixture assistant".to_string(),
+            session_mode: "fixture-mode".to_string(),
             model: Some("sonnet".to_string()),
             capture_state: CaptureState::Ready,
             restore_on_next_launch: true,

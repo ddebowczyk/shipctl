@@ -75,7 +75,6 @@ export {
   useProjectFactsMap,
 } from "./projectFacts.ts";
 
-export { ENABLED_MODULES } from "./enabledModules.ts";
 export {
   buildFrontendRuntimeSnapshot,
   MODULE_CONTROL_SCHEMA_VERSION,
@@ -119,6 +118,8 @@ export {
 } from "./moduleComposition.ts";
 export {
   MessageBusBridge,
+  createActivatedDirectMessageActivations,
+  createAdmittedDirectMessageActivations,
   createModuleMessageActivations,
   moduleMessageGrants,
   openModuleMessageBridge,
@@ -148,7 +149,7 @@ export type {
   ModuleMessageHandlers,
   PreparedModuleMessageActivation,
 } from "./moduleMessageContext.ts";
-export { bindTerminalSessionDimensions } from "../terminal-host/terminalSessions.ts";
+export { bindTerminalSessionDimensions } from "@shipctl/core/terminal-host";
 export {
   ModuleArtifactLoadError,
   assertDigestQualifiedArtifactUrl,
@@ -158,13 +159,16 @@ export {
 export type {
   LoadedShipctlModuleArtifact,
   LoadShipctlModuleArtifactRequest,
+  ModuleArtifactDiagnostic,
   ModuleArtifactLoadPhase,
 } from "./moduleArtifactLoader.ts";
 export {
   collectPluginArtifactDeclarations,
   parsePluginArtifactDeclarations,
+  PluginArtifactDeclarationError,
   samePluginArtifactDeclarations,
 } from "./pluginArtifactDeclarations.ts";
+export type { PluginArtifactDeclarationDiagnosticCode } from "./pluginArtifactDeclarations.ts";
 export {
   getRuntimeModuleLoadCatalog,
   loadRuntimeModules,

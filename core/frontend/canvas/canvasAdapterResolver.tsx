@@ -1,6 +1,6 @@
-import type { CanvasAdapterId } from "@shipctl/core/platform";
+import type { CanvasAdapterId } from "@shipctl/core/configuration";
 
-import LegacyCanvas from "./legacy/LegacyCanvas.tsx";
+import StandardWorkspaceCanvas from "./standard/StandardWorkspaceCanvas.tsx";
 import LaymanCanvas from "./layman/LaymanCanvas.tsx";
 import type { CanvasAdapterView } from "./adapterTypes.ts";
 
@@ -8,7 +8,7 @@ import type { CanvasAdapterView } from "./adapterTypes.ts";
 export type CanvasAdapterRegistry = Readonly<Partial<Record<CanvasAdapterId, CanvasAdapterView>>>;
 
 const BUNDLED_CANVAS_ADAPTERS = {
-  legacy: LegacyCanvas,
+  standard: StandardWorkspaceCanvas,
   layman: LaymanCanvas,
 } satisfies Record<CanvasAdapterId, CanvasAdapterView>;
 

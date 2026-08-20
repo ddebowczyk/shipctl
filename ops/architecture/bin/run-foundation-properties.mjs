@@ -65,7 +65,7 @@ const properties = [
   },
   {
     propertyId: "PROP-A-COMPOSITION-001",
-    testId: "architecture.legacy-composition.property",
+    testId: "architecture.module-composition.property",
     classifications: { ownership: ["unique", "duplicate-same-kind", "duplicate-cross-kind"] },
   },
   {

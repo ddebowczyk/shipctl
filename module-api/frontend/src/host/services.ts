@@ -1,8 +1,7 @@
 import type {
   ModuleAppearanceSnapshot,
   ModuleManagedTerminalSessionLaunchRequest,
-  ModuleNotice,
-  ModuleNoticeOptions,
+  ModuleNoticeSink,
   ModuleSettingsSnapshot,
   ModuleSkillsSnapshot,
   ModuleTerminalDimensions,
@@ -28,9 +27,7 @@ export interface ModuleSkillsPort {
   install(projectPath: string, name: string): Promise<void>;
 }
 
-export interface ModuleNoticesPort {
-  push(notice: ModuleNotice, options?: ModuleNoticeOptions): void;
-}
+export interface ModuleNoticesPort extends ModuleNoticeSink {}
 
 export interface ModuleExternalLinksPort {
   open(url: string): Promise<void>;

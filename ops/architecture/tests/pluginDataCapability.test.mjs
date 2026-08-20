@@ -52,6 +52,24 @@ after(async () => {
 
 const jsonValueArbitrary = fc.jsonValue();
 const keyArbitrary = fc.stringMatching(/^[a-z][a-z0-9-]*$/);
+const PLUGIN_DATA_GRANTS = Object.freeze([
+  "plugin-data.read",
+  "plugin-data.write",
+  "plugin-data.migrate",
+]);
+
+function acceptedAdmission(moduleId, effectiveGrants = PLUGIN_DATA_GRANTS) {
+  const contentDigest = "0".repeat(64);
+  return Object.freeze({
+    artifact: Object.freeze({
+      contentDigest,
+      entryUrl: `asset://localhost/${contentDigest}/index.js`,
+      moduleId,
+      version: "1.0.0",
+    }),
+    effectiveGrants: Object.freeze([...effectiveGrants]),
+  });
+}
 
 function recordId(moduleId, scope, key) {
   return JSON.stringify([moduleId, scope, key]);
@@ -160,15 +178,17 @@ class MemoryPluginDataTransport {
 function productionActivation({
   moduleId = "shipctl.usage",
   transport = new MemoryPluginDataTransport(),
-  authorize,
+  grants = PLUGIN_DATA_GRANTS,
 } = {}) {
   const registry = new SemanticServiceRegistry([
-    createPluginDataServiceProvider({ transport, authorize }),
+    createPluginDataServiceProvider({ transport }),
   ]);
   const identity = createTestActivationIdentity(moduleId);
-  const activation = registry.activate(identity);
+  const admission = acceptedAdmission(moduleId, grants);
+  const activation = registry.activate(identity, admission);
   return {
     activation,
+    admission,
     identity,
     service: activation.context.services.require(pluginDataService),
     transport,
@@ -193,7 +213,11 @@ test("architecture.service-adapter.plugin-data.property", async () => {
     assert.equal(written.result.ok, true);
     assert.equal(fixture.transport.requests.length, 1);
     const [, request] = fixture.transport.requests[0];
-    assert.equal(request.activation, fixture.identity);
+    assert.deepEqual(request.activation, {
+      moduleId: fixture.identity.moduleId,
+      activationId: fixture.identity.activationId,
+      effectiveGrants: ["plugin-data.read", "plugin-data.write", "plugin-data.migrate"],
+    });
     assert.equal(request.correlationId, written.correlationId);
     assert.deepEqual(request.input.value, value);
     await fixture.activation.dispose();
@@ -277,27 +301,19 @@ test("architecture.service-request.plugin-data.property", async () => {
     fc.boolean(),
     fc.boolean(),
     async (moduleName, key, admitted, cancelled) => {
-      const authorizations = [];
       const transport = new MemoryPluginDataTransport();
       const fixture = productionActivation({
         moduleId: `shipctl.${moduleName}`,
         transport,
-        authorize: (request) => {
-          authorizations.push(request);
-          return admitted;
-        },
+        grants: admitted ? ["plugin-data.read"] : [],
       });
       const outcome = await fixture.service.readRecord.execute(
         { scope: { kind: "global" }, key },
         { cancellation: { cancelled } },
       );
       assert.equal(outcome.result.ok, admitted && !cancelled);
-      assert.equal(authorizations.length, cancelled ? 0 : 1);
       assert.equal(transport.requests.length, admitted && !cancelled ? 1 : 0);
-      if (authorizations.length > 0) {
-        assert.equal(authorizations[0].activation, fixture.identity);
-        assert.equal(authorizations[0].grant, "plugin-data.read");
-      }
+      assert.equal(fixture.admission.artifact.moduleId, fixture.identity.moduleId);
 
       await fixture.activation.dispose();
       const before = transport.requests.length;
@@ -353,7 +369,10 @@ test("architecture.plugin-data-service-fake.property", async () => {
     async (values) => {
       const fakeProvider = createFakePluginDataServiceProvider();
       const fakeHost = new SemanticServiceTestHost([fakeProvider]);
-      let fakeActivation = fakeHost.activate(createTestActivationIdentity("shipctl.usage"));
+      let fakeActivation = fakeHost.activate(
+        createTestActivationIdentity("shipctl.usage"),
+        acceptedAdmission("shipctl.usage"),
+      );
       let fake = fakeActivation.context.services.require(pluginDataService);
 
       const transport = new MemoryPluginDataTransport();
@@ -395,7 +414,10 @@ test("architecture.plugin-data-service-fake.property", async () => {
       assert.equal(nativeConflict.error.code, fakeConflict.error.code);
 
       await Promise.all([fakeActivation.dispose(), nativeFixture.activation.dispose()]);
-      fakeActivation = fakeHost.activate(createTestActivationIdentity("shipctl.usage"));
+      fakeActivation = fakeHost.activate(
+        createTestActivationIdentity("shipctl.usage"),
+        acceptedAdmission("shipctl.usage"),
+      );
       fake = fakeActivation.context.services.require(pluginDataService);
       nativeFixture = productionActivation({ transport });
       native = nativeFixture.service;
@@ -416,26 +438,17 @@ test("architecture.plugin-data-migration.property", async () => {
     jsonValueArbitrary,
     jsonValueArbitrary,
     async (firstValue, secondValue, changedValue, migratedValue) => {
-      const policies = ["first", "second"].map((key) => ({
-        moduleId: "shipctl.fixture",
-        scope: "global",
-        key,
-        schemaVersions: [1, 2],
-        grants: ["plugin-data.read", "plugin-data.write", "plugin-data.migrate"],
-      }));
       const host = new SemanticServiceTestHost([
-        createFakePluginDataServiceProvider({ policies }),
+        createFakePluginDataServiceProvider(),
       ]);
-      const fakeActivation = host.activate(createTestActivationIdentity("shipctl.fixture"));
+      const fakeActivation = host.activate(
+        createTestActivationIdentity("shipctl.fixture"),
+        acceptedAdmission("shipctl.fixture"),
+      );
       const fake = fakeActivation.context.services.require(pluginDataService);
       const nativeFixture = productionActivation({
         moduleId: "shipctl.fixture",
-        authorize: ({ activation, scope, key, schemaVersion }) => (
-          activation.moduleId === "shipctl.fixture"
-          && scope.kind === "global"
-          && ["first", "second"].includes(key)
-          && (schemaVersion === undefined || [1, 2].includes(schemaVersion))
-        ),
+        grants: PLUGIN_DATA_GRANTS,
       });
       const native = nativeFixture.service;
 

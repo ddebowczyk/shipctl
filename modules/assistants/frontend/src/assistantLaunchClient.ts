@@ -5,7 +5,12 @@ import {
   processesService,
   type AssistantLaunchErrorCode,
   type AssistantLaunchService,
-  type AssistantProviderSettings,
+  type AssistantProcessLaunch,
+  type AssistantResourceExecuteInput,
+  type AssistantResourceExecuteResult,
+  type AssistantResourceReadInput,
+  type AssistantResourceReadResult,
+  type AssistantResourceWriteInput,
   type ModuleActivationContext,
   type ModuleManagedTerminalStartContext,
   type ProcessesErrorCode,
@@ -14,11 +19,16 @@ import {
   type StartedAssistantSession,
 } from "@shipctl/module-api";
 
+import {
+  getAssistantModels,
+  readPiConfig,
+  writePiSettings,
+  type AssistantProviderPolicyResources,
+} from "./assistantProviderPolicy";
 import type {
   AssistantSessionRecord,
   PiConfig,
   PiSettings,
-  RestorableAssistantProvider,
   SessionMode,
 } from "./types";
 
@@ -48,25 +58,28 @@ async function execute<Input, Output, ErrorCode extends AssistantClientErrorCode
   return outcome.result.value;
 }
 
-export interface AssistantLaunchClient {
+export interface AssistantLaunchClient extends AssistantProviderPolicyResources {
   checkCommandExists(command: string): Promise<boolean>;
   getModelsForProvider(provider: string): Promise<readonly string[]>;
   spawnAssistantSession(
     request: {
-      readonly provider: RestorableAssistantProvider;
+      readonly provider: string;
       readonly launchRepoPath: string;
       readonly placementProjectPath: string;
       readonly label: string;
       readonly sessionMode: SessionMode;
       readonly model?: string;
+      readonly launch: AssistantProcessLaunch;
+      readonly initialSessionIdentity?: string;
     },
     context: ModuleManagedTerminalStartContext,
   ): Promise<StartedAssistantSession>;
   resumeAssistantSession(
     recordId: string,
+    launch: AssistantProcessLaunch,
     context: ModuleManagedTerminalStartContext,
   ): Promise<StartedAssistantSession>;
-  tryCaptureSessionIdentity(recordId: string): Promise<AssistantSessionRecord | null>;
+  recordSessionIdentity(recordId: string, providerSessionId: string): Promise<AssistantSessionRecord>;
   failSessionCapture(recordId: string): Promise<AssistantSessionRecord>;
   updateSessionPlacement(recordId: string, projectPath: string): Promise<AssistantSessionRecord>;
   updateSessionLabel(recordId: string, label: string): Promise<AssistantSessionRecord>;
@@ -83,25 +96,36 @@ export function createAssistantLaunchClient(
   service: AssistantLaunchService,
   processes: ProcessesService,
 ): AssistantLaunchClient {
-  const piProvider = assistantProviderId("pi");
+  const resources: AssistantProviderPolicyResources = {
+    readResource: (input: AssistantResourceReadInput): Promise<AssistantResourceReadResult> => (
+      execute(service.readResource, input)
+    ),
+    writeResource: (input: AssistantResourceWriteInput): Promise<void> => (
+      execute(service.writeResource, input)
+    ),
+    executeResource: (input: AssistantResourceExecuteInput): Promise<AssistantResourceExecuteResult> => (
+      execute(service.executeResource, input)
+    ),
+  };
   const client: AssistantLaunchClient = {
+    ...resources,
     checkCommandExists: async (command) => (
       await execute(processes.inspectCommand, { command })
     ).available,
-    getModelsForProvider: async (provider) => (
-      await execute(service.inspectModels, { provider: assistantProviderId(provider) })
-    ).models,
+    getModelsForProvider: (provider) => getAssistantModels(provider, resources),
     spawnAssistantSession: (request, terminal) => execute(service.startSession, {
       ...request,
       provider: assistantProviderId(request.provider),
       terminal,
     }),
-    resumeAssistantSession: (recordId, terminal) => execute(service.resumeSession, {
+    resumeAssistantSession: (recordId, launch, terminal) => execute(service.resumeSession, {
       recordId: assistantSessionId(recordId),
+      launch,
       terminal,
     }),
-    tryCaptureSessionIdentity: (recordId) => execute(service.refreshSessionIdentity, {
+    recordSessionIdentity: (recordId, providerSessionId) => execute(service.recordSessionIdentity, {
       recordId: assistantSessionId(recordId),
+      providerSessionId,
     }),
     failSessionCapture: (recordId) => execute(service.markSessionIdentityFailed, {
       recordId: assistantSessionId(recordId),
@@ -125,18 +149,8 @@ export function createAssistantLaunchClient(
     beginAssistantSessionPreservingShutdown: async () => {
       await execute(service.prepareForShutdown, {});
     },
-    getPiConfig: async () => {
-      const config = await execute(service.inspectProviderConfiguration, {
-        provider: piProvider,
-      });
-      return {
-        settings: config.settings,
-        configuredProviders: config.configuredCredentialProviders,
-      };
-    },
-    savePiSettings: async (settings: AssistantProviderSettings) => {
-      await execute(service.saveProviderConfiguration, { provider: piProvider, settings });
-    },
+    getPiConfig: () => readPiConfig(resources),
+    savePiSettings: (settings) => writePiSettings(settings, resources),
   };
   return Object.freeze(client);
 }

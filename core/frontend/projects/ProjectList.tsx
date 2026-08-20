@@ -14,25 +14,19 @@ import { TerminalList } from "@shipctl/core/terminal-host/views";
 import {
   useProjectFactsMap,
 } from "@shipctl/core/host";
-import type {
-  ActivatedWorkspaceContribution,
-  CanvasProjectNavigationSurface,
-} from "@shipctl/core/host";
 import {
   ModuleProjectNavigationSurfaces,
 } from "@shipctl/core/host/views";
 import { groupProjects } from "@shipctl/core/projects";
-import type {
-  ModuleActivationContext,
-  ModuleId,
-  ProjectActionContribution,
-} from "@shipctl/module-api";
+import type { ContributionId, PanelContribution } from "@shipctl/module-api";
 
 interface ProjectListProps {
   repos: RepoInfo[];
   groups: RepoGroup[];
   activeRepoPath: string | null;
   activeTabId: string | null;
+  activePanelId: ContributionId | null;
+  activePanelProjectPath: string | null;
   projectActivity: Record<string, { terminalCount: number; hasAttention: boolean; hasCrash: boolean; hasActive: boolean }>;
   onSelectRepo: (repoPath: string) => void;
   onAddProject: (repoPath: string) => Promise<void>;
@@ -46,12 +40,8 @@ interface ProjectListProps {
   onRenameGroup: (groupId: string, newName: string) => void;
   onDeleteGroup: (groupId: string) => void;
   onMoveToGroup: (repoPath: string, groupId: string | null) => Promise<void>;
+  onOpenPanel: (panel: PanelContribution) => void | Promise<void>;
   tabDropProjectPath: string | null;
-  projectNavigationContributions: readonly CanvasProjectNavigationSurface[];
-  projectActionContributions: readonly ActivatedWorkspaceContribution<
-    ProjectActionContribution
-  >[];
-  moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
 export default function ProjectList({
@@ -59,6 +49,8 @@ export default function ProjectList({
   groups,
   activeRepoPath,
   activeTabId,
+  activePanelId,
+  activePanelProjectPath,
   projectActivity,
   onSelectRepo,
   onAddProject,
@@ -72,10 +64,8 @@ export default function ProjectList({
   onRenameGroup,
   onDeleteGroup,
   onMoveToGroup,
+  onOpenPanel,
   tabDropProjectPath,
-  projectNavigationContributions,
-  projectActionContributions,
-  moduleActivations,
 }: ProjectListProps) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
     () => new Set(activeRepoPath ? [activeRepoPath] : []),
@@ -231,8 +221,6 @@ export default function ProjectList({
           onClick={() => handleProjectClick(repo.path)}
           onAddProject={onAddProject}
           onMoveToGroup={onMoveToGroup}
-          projectActionContributions={projectActionContributions}
-          moduleActivations={moduleActivations}
           isDropTarget={tabDropProjectPath === repo.path}
           onNewGroupForRepo={(repoPath) => {
             pendingMoveRepoPath.current = repoPath;
@@ -277,10 +265,10 @@ export default function ProjectList({
             </CollapsibleSection>
 
             <ModuleProjectNavigationSurfaces
-              contributions={projectNavigationContributions}
               project={{ id: repo.path, name: repo.name, path: repo.path }}
-              activeTabId={activeTabId}
-              moduleActivations={moduleActivations}
+              activePanelId={activePanelId}
+              activePanelProjectPath={activePanelProjectPath}
+              onOpenPanel={onOpenPanel}
             />
           </div>
         )}

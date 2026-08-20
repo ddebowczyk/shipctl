@@ -15,8 +15,10 @@ target:
   responsibilities:
     - Implement skill discovery and installation workflow policy in TypeScript.
     - Publish skill management views and commands as typed contributions.
+    - Own project-catalog cache lifecycle through the generic Projects service.
   capabilities:
     - skill-installation
+    - projects
     - workspace
 phases: [phase-b, phase-c, phase-d, phase-e, phase-f, phase-g]
 prerequisites:
@@ -31,6 +33,8 @@ compatibility_paths:
   - >-
     Phase E packages Skills as an immutable built-in artifact. The host admits
     and activates it through the same runtime path as user-installed plugins.
+    It directly declares Skill Installation and Projects services, registers its
+    provider and project-action contributions, and owns the catalog lease.
   - >-
     Skills has no durable plugin-owned record. Its per-project Zustand state is
     a render cache of the filesystem-backed Skill Installation capability, so

@@ -41,9 +41,9 @@ async function fixture(files) {
   return root;
 }
 
-test("accepts public composition and inward API imports", async (t) => {
+test("accepts host and module API imports without static composition", async (t) => {
   const root = await fixture({
-    "core/frontend/host/enabledModules.ts": "import alpha from '@shipctl/alpha'; export default alpha;",
+    "core/frontend/host/moduleContract.ts": "import type { ShipctlModule } from '@shipctl/module-api'; export type T = ShipctlModule;",
     "src/main.tsx": "import type { ShipctlModule } from '@shipctl/module-api'; export type T = ShipctlModule;",
     "modules/alpha/frontend/src/index.ts": "import type { ShipctlModule } from '@shipctl/module-api'; export const value: ShipctlModule | null = null;",
   });
@@ -122,7 +122,11 @@ test("requires modules to use the shared contract public root", async (t) => {
 test("reports deterministic host and sibling violations", async (t) => {
   const root = await fixture({
     "src/main.tsx": "import alpha from '@shipctl/alpha'; export default alpha;",
-    "core/frontend/host/enabledModules.ts": "import x from '@shipctl/alpha/src/internal'; export default x;",
+    "core/frontend/host/staticModule.ts": [
+      "import alpha from '@shipctl/alpha';",
+      "import x from '@shipctl/alpha/src/internal';",
+      "export default [alpha, x];",
+    ].join("\n"),
     "modules/alpha/frontend/src/index.ts": "import beta from '@shipctl/beta'; export default beta;",
     "modules/beta/frontend/src/index.ts": "import host from '../../../../src/main'; export default host;",
   });
@@ -132,6 +136,7 @@ test("reports deterministic host and sibling violations", async (t) => {
   assert.deepEqual(
     diagnostics.map(({ rule }) => rule),
     [
+      "host-module-import-outside-composition",
       "host-module-deep-import",
       "module-sibling-import",
       "module-host-import",
@@ -139,6 +144,54 @@ test("reports deterministic host and sibling violations", async (t) => {
     ],
   );
   assert.match(formatDiagnostics(diagnostics), /src\/main\.tsx:1:\d+ \[host-module-import-outside-composition\]/);
+});
+
+test("rejects React, native, presentation, and module imports from runtime", async (t) => {
+  const root = await fixture({
+    "core/frontend/runtime/leaky.ts": [
+      "import React from 'react';",
+      "import { invoke } from '@tauri-apps/api/core';",
+      "import Canvas from '../canvas/Canvas.ts';",
+      "import { App } from '@shipctl/core/shell';",
+      "import alpha from '@shipctl/alpha';",
+      "export default [React, invoke, Canvas, App, alpha];",
+    ].join("\n"),
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  assert.deepEqual(
+    (await checkModuleBoundaries(root)).map(({ rule, specifier }) => ({ rule, specifier })),
+    [
+      { rule: "runtime-import-boundary", specifier: "react" },
+      { rule: "runtime-import-boundary", specifier: "@tauri-apps/api/core" },
+      { rule: "runtime-import-boundary", specifier: "../canvas/Canvas.ts" },
+      { rule: "runtime-import-boundary", specifier: "@shipctl/core/shell" },
+      { rule: "runtime-import-boundary", specifier: "@shipctl/alpha" },
+    ],
+  );
+});
+
+test("rejects Cordis and Tauri type references from module API declarations", async (t) => {
+  const root = await fixture({
+    "module-api/frontend/src/index.ts": [
+      "import type { Context } from 'cordis';",
+      "import type { InvokeArgs } from '@tauri-apps/api/core';",
+      "export type LeakedContext = Context;",
+      "export type LeakedInvokeArgs = InvokeArgs;",
+    ].join("\n"),
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const diagnostics = await checkModuleBoundaries(root);
+  assert.deepEqual(
+    diagnostics
+      .filter(({ rule }) => rule === "module-api-purity")
+      .map(({ rule, specifier }) => ({ rule, specifier })),
+    [
+      { rule: "module-api-purity", specifier: "@tauri-apps/api/core" },
+      { rule: "module-api-purity", specifier: "cordis" },
+    ],
+  );
 });
 
 test("rejects a cross-capability deep import probe", async (t) => {
@@ -193,6 +246,9 @@ test("rejects direct module event and native imports", async (t) => {
   }, {
     rule: "module-entrypoint-side-effect",
     specifier: "@tauri-apps/api/event",
+  }, {
+    rule: "module-direct-tauri-event",
+    specifier: "git-fs-changed",
   }, {
     rule: "module-entrypoint-side-effect",
     specifier: "@tauri-apps/api/event",

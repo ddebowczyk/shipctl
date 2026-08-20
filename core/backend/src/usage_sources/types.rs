@@ -1,24 +1,5 @@
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageProviderWindow {
-    pub provider: String,
-    pub window_id: String,
-    pub window: String,
-    pub label: String,
-    pub scope: String,
-    pub limit: Option<f64>,
-    pub used: Option<f64>,
-    pub source_type: String,
-    pub confidence: String,
-    pub cost_kind: String,
-    pub used_percent: Option<f64>,
-    pub remaining_percent: Option<f64>,
-    pub reset_at: Option<String>,
-    pub token_total: Option<u64>,
-    pub pace_status: Option<String>,
-}
+use serde_json::Value;
 
 /// One normalized transcript row or one durable daily rollup.
 ///
@@ -27,7 +8,7 @@ pub struct UsageProviderWindow {
 #[serde(rename_all = "camelCase")]
 pub struct UsageSourceRecord {
     pub grain: String,
-    pub provider: String,
+    pub source_id: String,
     pub session_id: Option<String>,
     pub date: Option<String>,
     pub project: Option<String>,
@@ -44,24 +25,136 @@ pub struct UsageSourceRecord {
     pub recorded_cost: Option<f64>,
 }
 
-/// Provider-reported quota facts after credential-bound source parsing.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageProviderObservation {
-    pub provider: String,
-    pub available: bool,
-    pub fetched_at: Option<String>,
-    pub summary_windows: Vec<UsageProviderWindow>,
-    pub extra_windows: Vec<UsageProviderWindow>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSourceDataset {
     pub captured_at: String,
     pub records: Vec<UsageSourceRecord>,
-    pub provider_observations: Vec<UsageProviderObservation>,
 }
 
-/// Compatibility name used inside the credential-bound provider parsers.
-pub type UsageWindowSnapshot = UsageProviderWindow;
+/// One plugin-owned replacement for a source's normalized durable facts.
+///
+/// The native provider validates structural bounds and persists opaque facts;
+/// it deliberately does not know how a product provider collected or parsed
+/// those facts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UsageSourceUpdate {
+    pub source_id: String,
+    pub records: Vec<UsageSourceRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UsageSourceResourceReadInput {
+    pub source_id: String,
+    pub request: UsageSourceResourceRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UsageSourceHttpHeader {
+    pub name: String,
+    pub value: String,
+}
+
+/// A bounded, generic native resource read. No variant identifies a product
+/// provider or dictates how a returned payload is interpreted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum UsageSourceResourceRequest {
+    File {
+        resource_id: String,
+        relative_path: String,
+        #[serde(default)]
+        max_bytes: Option<usize>,
+    },
+    Tree {
+        resource_id: String,
+        relative_path: String,
+        #[serde(default)]
+        max_files: Option<usize>,
+        #[serde(default)]
+        max_bytes_per_file: Option<usize>,
+        #[serde(default)]
+        extensions: Option<Vec<String>>,
+    },
+    Sqlite {
+        resource_id: String,
+        relative_path: String,
+        query: String,
+        #[serde(default)]
+        max_rows: Option<usize>,
+    },
+    Processes {
+        resource_id: String,
+    },
+    #[serde(rename = "listening-ports")]
+    ListeningPorts {
+        resource_id: String,
+    },
+    Http {
+        resource_id: String,
+        url: String,
+        method: String,
+        #[serde(default)]
+        headers: Option<Vec<UsageSourceHttpHeader>>,
+        #[serde(default)]
+        body: Option<String>,
+        #[serde(default)]
+        max_bytes: Option<usize>,
+    },
+    #[serde(rename = "keychain-password")]
+    KeychainPassword {
+        resource_id: String,
+        service: String,
+        #[serde(default)]
+        account: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSourceFile {
+    pub relative_path: String,
+    pub content: String,
+}
+
+/// The serializable output of one generic resource read. Errors remain
+/// resource-scoped and are mapped by the service to the stable public error
+/// contract without exposing filesystem roots or credential values.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum UsageSourceResourceResult {
+    File {
+        resource_id: String,
+        content: String,
+    },
+    Tree {
+        resource_id: String,
+        files: Vec<UsageSourceFile>,
+    },
+    Sqlite {
+        resource_id: String,
+        rows: Vec<serde_json::Map<String, Value>>,
+    },
+    Processes {
+        resource_id: String,
+        output: String,
+    },
+    #[serde(rename = "listening-ports")]
+    ListeningPorts {
+        resource_id: String,
+        output: String,
+    },
+    Http {
+        resource_id: String,
+        status: u16,
+        body: String,
+    },
+    #[serde(rename = "keychain-password")]
+    KeychainPassword {
+        resource_id: String,
+        secret: String,
+    },
+}

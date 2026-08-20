@@ -4,9 +4,10 @@ use serde::Deserialize;
 use tauri::State;
 
 use shipctl_core::usage_sources::{
-    InspectUsageSourcesInput, RefreshUsageSourcesInput, UsageSourceDataset, UsageSourcesActor,
-    UsageSourcesError, UsageSourcesRefreshReceipt, UsageSourcesService,
-    USAGE_SOURCES_INVALID_REQUEST, USAGE_SOURCES_TRANSPORT_FAILED,
+    InspectUsageSourcesInput, RefreshUsageSourcesInput, UsageSourceDataset,
+    UsageSourceResourceReadInput, UsageSourceResourceResult, UsageSourcesActor, UsageSourcesError,
+    UsageSourcesRefreshReceipt, UsageSourcesService, USAGE_SOURCES_INVALID_REQUEST,
+    USAGE_SOURCES_TRANSPORT_FAILED,
 };
 
 #[derive(Deserialize)]
@@ -56,6 +57,24 @@ pub async fn refresh_usage_sources(
     .map_err(|error| UsageSourcesError {
         code: USAGE_SOURCES_TRANSPORT_FAILED.to_string(),
         message: format!("Usage source refresh worker failed: {error}"),
+        retryable: false,
+    })?
+}
+
+#[tauri::command]
+pub async fn read_usage_source_resource(
+    request: PrivateUsageSourcesRequest<UsageSourceResourceReadInput>,
+    service: State<'_, UsageSourcesService>,
+) -> Result<UsageSourceResourceResult, UsageSourcesError> {
+    validate_request(&request)?;
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.read_resource(&request.activation, request.input)
+    })
+    .await
+    .map_err(|error| UsageSourcesError {
+        code: USAGE_SOURCES_TRANSPORT_FAILED.to_string(),
+        message: format!("Usage source resource worker failed: {error}"),
         retryable: false,
     })?
 }

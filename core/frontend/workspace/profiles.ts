@@ -8,12 +8,10 @@ import {
 import { parseWorkspaceCatalogSnapshot } from "./catalog.ts";
 import { parseUiWorkspaceDocument } from "./document.ts";
 
-export const CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID = "shipctl.legacy-canvas";
-// This semantic workspace is distinct from Layman's raw snapshot workspace
-// (`shipctl.canvas`). They persist different contracts and must never share a
-// durable record or revision stream.
+// This semantic workspace is distinct from Layman's renderer-local state.
+// They persist different contracts and must never share a durable record or
+// revision stream.
 export const CURRENT_CANVAS_WORKSPACE_ID = "shipctl.workspace";
-export const CURRENT_CANVAS_WORKSPACE_PROFILE_ID = "shipctl.compatibility.v1";
 
 export interface WorkspaceProfileInput {
   readonly workspaceId: string;
@@ -23,77 +21,29 @@ export interface WorkspaceProfileInput {
 export type WorkspaceProfileFactory = (input: WorkspaceProfileInput) => UiWorkspaceDocument;
 
 /**
- * The first semantic catalog expresses the existing one-pane canvas as data.
- * It does not import LegacyCanvas, Layman, React, or an enabled-module list.
+ * The host starts with no private workspace definitions. Every visible
+ * semantic view arrives through an accepted runtime contribution.
  */
-export function createCurrentCanvasWorkspaceCatalog(): WorkspaceCatalogSnapshot {
+export function createDefaultWorkspaceCatalog(): WorkspaceCatalogSnapshot {
   return parseWorkspaceCatalogSnapshot({
     schemaVersion: WORKSPACE_CATALOG_SCHEMA_VERSION,
     revision: 1,
-    definitions: [{
-      viewTypeId: CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
-      ownerModuleId: "shipctl.host",
-      ownerActivationId: "shipctl.host@1#compatibility",
-      label: "Shipctl",
-      scope: "global",
-      cardinality: "singleton",
-      closeBehavior: "forbid",
-      requiredCapabilityIds: [],
-      placement: { defaultRegion: "primary", allowSplit: false },
-      state: { kind: "none" },
-      presentation: {
-        loaderId: "shipctl.canvas.compatibility",
-        exportName: "default",
-      },
-      migrationAliases: [],
-    }],
+    definitions: [],
   });
 }
 
 /**
- * A deterministic profile of today's canvas. If the compatibility definition
- * is not accepted, it returns an empty but valid host workspace instead of
- * trying to load the absent implementation.
+ * A deterministic empty workspace profile. The mount-stable terminal stage is
+ * the standard presentation when no contributed semantic view is selected.
  */
-export function createCurrentCanvasWorkspaceProfile(
+export function createDefaultWorkspaceProfile(
   input: WorkspaceProfileInput,
 ): UiWorkspaceDocument {
-  const definition = input.catalog.definitions.find(
-    (item) => item.viewTypeId === CURRENT_CANVAS_COMPATIBILITY_VIEW_TYPE_ID,
-  );
-  if (!definition) {
-    return parseUiWorkspaceDocument({
-      schemaVersion: WORKSPACE_DOCUMENT_SCHEMA_VERSION,
-      workspaceId: input.workspaceId,
-      profileId: CURRENT_CANVAS_WORKSPACE_PROFILE_ID,
-      instances: [],
-      root: null,
-      floating: [],
-      maximizedStackId: null,
-    });
-  }
-  const instanceId = "shipctl.canvas.compatibility";
   return parseUiWorkspaceDocument({
     schemaVersion: WORKSPACE_DOCUMENT_SCHEMA_VERSION,
     workspaceId: input.workspaceId,
-    profileId: CURRENT_CANVAS_WORKSPACE_PROFILE_ID,
-    instances: [{
-      instanceId,
-      viewTypeId: definition.viewTypeId,
-      ownerModuleId: definition.ownerModuleId,
-      ownerActivationId: definition.ownerActivationId,
-      resource: { kind: "global" },
-      label: definition.label,
-      stateRef: null,
-      availability: { kind: "available" },
-      lifecycle: "placed",
-    }],
-    root: {
-      kind: "stack",
-      stackId: "shipctl.canvas.primary",
-      instanceIds: [instanceId],
-      selectedInstanceId: instanceId,
-    },
+    instances: [],
+    root: null,
     floating: [],
     maximizedStackId: null,
   });

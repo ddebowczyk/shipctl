@@ -1,0 +1,309 @@
+{
+  "id": "shipctl.configuration",
+  "version": "1.0.0",
+  "definitionDigestSha256": "753ba70ee3c1e2dd605e0564a388a720cf5d4169bec3a30be6bd36c160d95dab",
+  "schemas": [
+    {
+      "message": {
+        "id": "shipctl.runtime-operation.request",
+        "version": 1
+      },
+      "schema": {
+        "draft": "https://json-schema.org/draft/2020-12/schema",
+        "root": "messages/runtime-operation-request.schema.json",
+        "resources": {
+          "messages/runtime-operation-request.schema.json": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "shipctl-artifact:///messages/runtime-operation-request.schema.json",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "operation",
+                  "workspaceId",
+                  "includeDocument"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "operation": {
+                    "const": "workspace.inspect"
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "includeDocument": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "operation",
+                  "workspaceId",
+                  "command"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "operation": {
+                    "enum": [
+                      "workspace.validate",
+                      "workspace.plan",
+                      "workspace.apply",
+                      "workspace.mutate"
+                    ]
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "command": true
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "operation",
+                  "key"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "operation": {
+                    "enum": [
+                      "configuration.inspect",
+                      "configuration.resolve"
+                    ]
+                  },
+                  "key": {
+                    "enum": [
+                      "runtime",
+                      "editor",
+                      "projects",
+                      "keybindings",
+                      "terminal",
+                      "sidebar"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "operation",
+                  "key",
+                  "value"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "operation": {
+                    "const": "configuration.update"
+                  },
+                  "key": {
+                    "enum": [
+                      "runtime",
+                      "editor",
+                      "projects",
+                      "keybindings",
+                      "terminal",
+                      "sidebar"
+                    ]
+                  },
+                  "value": true
+                }
+              }
+            ]
+          }
+        },
+        "maxEncodedBytes": 1048576,
+        "redactedFields": [],
+        "compatibleVersions": [
+          1
+        ]
+      }
+    },
+    {
+      "message": {
+        "id": "shipctl.runtime-operation.response",
+        "version": 1
+      },
+      "schema": {
+        "draft": "https://json-schema.org/draft/2020-12/schema",
+        "root": "messages/runtime-operation-response.schema.json",
+        "resources": {
+          "messages/runtime-operation-response.schema.json": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "shipctl-artifact:///messages/runtime-operation-response.schema.json",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "status",
+                  "operation",
+                  "value"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "status": {
+                    "const": "ok"
+                  },
+                  "operation": {
+                    "enum": [
+                      "workspace.inspect",
+                      "workspace.validate",
+                      "workspace.plan",
+                      "workspace.apply",
+                      "workspace.mutate",
+                      "configuration.inspect",
+                      "configuration.resolve",
+                      "configuration.update"
+                    ]
+                  },
+                  "value": true
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "status",
+                  "operation",
+                  "code",
+                  "message"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "status": {
+                    "const": "error"
+                  },
+                  "operation": {
+                    "enum": [
+                      "workspace.inspect",
+                      "workspace.validate",
+                      "workspace.plan",
+                      "workspace.apply",
+                      "workspace.mutate",
+                      "configuration.inspect",
+                      "configuration.resolve",
+                      "configuration.update"
+                    ]
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "details": true
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "status",
+                  "operation",
+                  "code",
+                  "message"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "status": {
+                    "const": "unavailable"
+                  },
+                  "operation": {
+                    "enum": [
+                      "workspace.inspect",
+                      "workspace.validate",
+                      "workspace.plan",
+                      "workspace.apply",
+                      "workspace.mutate",
+                      "configuration.inspect",
+                      "configuration.resolve",
+                      "configuration.update"
+                    ]
+                  },
+                  "code": {
+                    "const": "runtime.operation.unavailable"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "details": true
+                }
+              }
+            ]
+          }
+        },
+        "maxEncodedBytes": 1048576,
+        "redactedFields": [],
+        "compatibleVersions": [
+          1
+        ]
+      }
+    }
+  ],
+  "ports": [
+    {
+      "id": "shipctl.configuration.execute",
+      "kind": "command",
+      "request": {
+        "id": "shipctl.runtime-operation.request",
+        "version": 1
+      },
+      "response": {
+        "id": "shipctl.runtime-operation.response",
+        "version": 1
+      }
+    }
+  ],
+  "events": [],
+  "topics": [],
+  "streams": [],
+  "providerCardinality": "exclusive",
+  "selection": "priority",
+  "scopes": [
+    "instance",
+    "workspace"
+  ],
+  "agentAccess": {
+    "inspect": true,
+    "invoke": [
+      "shipctl.configuration.execute"
+    ],
+    "watch": {
+      "events": [],
+      "topics": []
+    },
+    "attach": []
+  }
+}

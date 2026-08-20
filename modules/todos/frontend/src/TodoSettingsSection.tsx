@@ -1,6 +1,18 @@
 import { useState, useSyncExternalStore } from "react";
 import type { SettingsContributionProps } from "@shipctl/module-api";
 
+import {
+  refreshActiveTodos,
+} from "./pluginContributions.ts";
+import {
+  updateTodoPreferences,
+  useTodoPreferencesStore,
+} from "./todoPreferences.ts";
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function InfoTip({ text }: { readonly text: string }) {
   const [show, setShow] = useState(false);
   return (
@@ -25,8 +37,27 @@ export default function TodoSettingsSection({
     services.settings.subscribe,
     services.settings.getSnapshot,
   );
-  const showTodos = settings.values.showTodos !== false;
-  const fileStyle = settings.values.todoFileStyle === "list" ? "list" : "kanban";
+  const preferences = useTodoPreferencesStore((state) => state.preferences);
+  const legacyPreferences = {
+    showTodos: settings.values.showTodos !== false,
+    todoFileStyle: settings.values.todoFileStyle === "list" ? "list" : "kanban" as const,
+  };
+  const showTodos = preferences?.showTodos ?? legacyPreferences.showTodos;
+  const fileStyle = preferences?.todoFileStyle ?? legacyPreferences.todoFileStyle;
+  const update = (patch: Partial<typeof legacyPreferences>) => {
+    const next = { ...(preferences ?? legacyPreferences), ...patch };
+    void updateTodoPreferences(next)
+      .then(async () => {
+        if (next.showTodos) await refreshActiveTodos();
+      })
+      .catch((error) => {
+        services.notices.push({
+          tone: "error",
+          title: "Couldn't save to-do preferences",
+          message: getErrorMessage(error),
+        });
+      });
+  };
 
   return (
     <section className="settings-section">
@@ -39,8 +70,7 @@ export default function TodoSettingsSection({
         </span>
         <button
           onClick={() => {
-            const enabling = !showTodos;
-            void services.settings.update({ showTodos: enabling });
+            update({ showTodos: !showTodos });
           }}
           className={`option-card option-card--compact ${showTodos ? "selected" : ""}`}
         >
@@ -55,13 +85,13 @@ export default function TodoSettingsSection({
         </span>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => void services.settings.update({ todoFileStyle: "kanban" })}
+            onClick={() => update({ todoFileStyle: "kanban" })}
             className={`option-card option-card--compact ${fileStyle === "kanban" ? "selected" : ""}`}
           >
             Kanban board
           </button>
           <button
-            onClick={() => void services.settings.update({ todoFileStyle: "list" })}
+            onClick={() => update({ todoFileStyle: "list" })}
             className={`option-card option-card--compact ${fileStyle === "list" ? "selected" : ""}`}
           >
             Simple list

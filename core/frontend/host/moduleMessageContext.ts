@@ -4,6 +4,8 @@ import {
   type CapabilityPortHandler,
   type DirectedMessageHandler,
   type MessageDeclarations,
+  type ModuleMessageContributions,
+  type ModuleScheduledTask,
   type ShipctlModule,
 } from "@shipctl/module-api";
 import type {
@@ -15,9 +17,17 @@ import type {
 } from "../platform/runtimeMessages.ts";
 
 export interface ModuleMessageActivation {
-  readonly module: ShipctlModule;
+  readonly moduleId: string;
   readonly activationId: string;
   readonly grants: readonly string[];
+  /**
+   * The immutable declaration accepted before activation. It is intentionally
+   * separate from executable handlers, which only exist after direct plugin
+   * activation has completed.
+   */
+  readonly declarations: MessageDeclarations;
+  readonly messages?: ModuleMessageContributions;
+  readonly scheduledTasks?: readonly ModuleScheduledTask[];
 }
 
 export interface ModuleMessageHandlers {
@@ -93,11 +103,11 @@ export function messageDeclarations(module: ShipctlModule): MessageDeclarations 
 export function prepareModuleMessageActivation(
   activation: ModuleMessageActivation,
 ): PreparedModuleMessageActivation {
-  const messages = activation.module.messages;
-  const scheduledTasks = (activation.module.scheduledTasks ?? []).map((task) => {
-    if (task.moduleId !== activation.module.id) {
+  const messages = activation.messages;
+  const scheduledTasks = (activation.scheduledTasks ?? []).map((task) => {
+    if (task.moduleId !== activation.moduleId) {
       throw new Error(
-        `Scheduled task ${task.id} belongs to ${task.moduleId}, not ${activation.module.id}`,
+        `Scheduled task ${task.id} belongs to ${task.moduleId}, not ${activation.moduleId}`,
       );
     }
     return {
@@ -106,14 +116,14 @@ export function prepareModuleMessageActivation(
     };
   });
   return {
-    moduleId: activation.module.id,
+    moduleId: activation.moduleId,
     activationId: activation.activationId,
     grants: new Set(activation.grants),
     registration: {
-      moduleId: activation.module.id,
+      moduleId: activation.moduleId,
       activationId: activation.activationId,
       grants: activation.grants.map((id) => ({ id, effective: true })),
-      declarations: messageDeclarations(activation.module),
+      declarations: activation.declarations,
       scheduledTasks,
     },
     handlers: {

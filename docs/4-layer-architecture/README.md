@@ -7,7 +7,7 @@ The architecture is approved and implementation is in progress under epic
 [`spec/program.yaml`](spec/program.yaml). Its indexed phase, capability, and
 module-disposition records are schema-validated before implementation work.
 Phases A through G are source-complete: the repository has passive entrypoint
-enforcement, a reviewed source and legacy-composition baseline, a semantic
+enforcement, a reviewed runtime-artifact source baseline, a semantic
 service wall, Tauri-free native providers, immutable artifacts, live
 reconciliation, and workspace contributions with replayable TypeScript and Rust
 property evidence. Phase H is the final architecture closure: it reruns the
@@ -51,12 +51,13 @@ declarations before activation. The frontend loader supplies host singleton
 identities and activates admitted code through the same Cordis lifecycle used
 by built-ins. `commands`, `ports`, `todos`, `git`, `skills`, `thin-terminal`,
 `semantic-terminal`, `assistants`, and `usage` are cut over: the app seeds their
-artifacts, loads them
-by digest, and has no static host import or root package dependency for these
-modules. Skills remains DOM-free and declares only the public Skill
-Installation service; its project state is a render cache, not a durable Plugin
-Data record. Thin Terminal supplies the first artifact-owned stylesheet and
-declares only Terminal Sessions plus its three attachment grants. Semantic
+artifacts, loads them by digest, and has no static host import or root package
+dependency for these
+modules. Skills remains DOM-free and declares the public Skill Installation
+and Projects services; its activation-owned catalog lifecycle keeps project
+state as a render cache, not a durable Plugin Data record. Thin Terminal
+supplies the first artifact-owned stylesheet and declares only Terminal Sessions
+plus its three attachment grants. Semantic
 Terminal declares Terminal Sessions, Semantic Terminals, its six grants, and
 one terminal presentation. Neither terminal has a static host import.
 Assistants declares Assistant Launch, Credential Store, Processes, and Terminal

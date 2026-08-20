@@ -9,6 +9,7 @@ import {
   type TerminalSessionsService,
 } from "../protocol/terminalSessions.ts";
 import type {
+  ModuleManagedTerminalSessionLaunchRequest,
   ModuleTerminalId,
   ModuleTerminalSession,
   ModuleTerminalSessionLifecycleEvent,
@@ -36,6 +37,7 @@ export type FakeTerminalSessionsOperation =
   | "dimensions"
   | "inspect"
   | "start"
+  | "start-managed"
   | "update"
   | "focus"
   | "stop"
@@ -297,6 +299,43 @@ export class FakeTerminalSessionsHost {
           label: input.label,
           ownerMetadata: input.ownerMetadata,
           presentation: input.presentation,
+        };
+        this.#sessions.set(id, session);
+        this.#drivers.set(session.terminalId, "semantic-terminal" as TerminalDriverId);
+        await this.#publish(session.moduleId, { type: "launched", session });
+        return session;
+      }),
+      startManagedSession: operation("start-managed", TERMINAL_SESSION_GRANTS.start, async (
+        input: ModuleManagedTerminalSessionLaunchRequest,
+      ) => {
+        if (!input.moduleSessionId || !input.ownerKey || !input.cwd) {
+          throw new FakeTerminalSessionsFailure(
+            TERMINAL_SESSIONS_ERROR_CODES.invalidRequest,
+            "Managed terminal launch fields cannot be empty",
+          );
+        }
+        const started = await input.start({
+          moduleSessionId: input.moduleSessionId,
+          columns: dimensions(this.#options.columns, 80),
+          rows: dimensions(this.#options.rows, 24),
+          environment: {},
+          colorTheme: { foreground: "#fff", background: "#000", palette: [] },
+        });
+        const id = `fake-session-${this.#nextSession}`;
+        this.#nextSession += 1;
+        const session: ModuleTerminalSession = {
+          id,
+          terminalId: started.terminalId,
+          moduleId: context.activation.moduleId,
+          projectPath: input.projectPath,
+          ownerKey: input.ownerKey,
+          label: input.label,
+          ...(started.ownerMetadata === undefined && input.ownerMetadata === undefined
+            ? {}
+            : { ownerMetadata: started.ownerMetadata ?? input.ownerMetadata }),
+          ...(started.presentation === undefined && input.presentation === undefined
+            ? {}
+            : { presentation: started.presentation ?? input.presentation }),
         };
         this.#sessions.set(id, session);
         this.#drivers.set(session.terminalId, "semantic-terminal" as TerminalDriverId);

@@ -1,42 +1,16 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
-export interface RuntimeModuleDescriptor {
-  readonly schemaVersion: 1;
-  readonly moduleId: string;
-  readonly version: string;
-  readonly contentDigest: string;
-  readonly entryPath: string;
-  readonly stylePaths: readonly string[];
-  readonly manifest: {
-    readonly schemaVersion: number;
-    readonly application?: unknown;
-    readonly lifecycle: "live" | "drain_required" | "restart_required" | "unsupported";
-    readonly messages: unknown;
-    readonly requestedGrants: unknown;
-    readonly [key: string]: unknown;
-  };
-  readonly capabilities: {
-    readonly definitions: readonly unknown[];
-    readonly [key: string]: unknown;
-  };
-}
+import type {
+  ModuleRegistryRevisionEvent,
+  RuntimeModuleCatalog,
+} from "@shipctl/core/runtime";
 
-export interface RuntimeModuleCatalog {
-  readonly schemaVersion: 1;
-  readonly registryRevision: number;
-  readonly modules: readonly RuntimeModuleDescriptor[];
-  readonly lastApplied?: AppliedRuntimeModuleCatalog;
-}
-
-export interface AppliedRuntimeModuleCatalog {
-  readonly registryRevision: number;
-  readonly modules: readonly RuntimeModuleDescriptor[];
-}
-
-export interface ModuleRegistryRevisionEvent {
-  readonly schemaVersion: 1;
-  readonly registryRevision: number;
-}
+export type {
+  AppliedRuntimeModuleCatalog,
+  ModuleRegistryRevisionEvent,
+  RuntimeModuleCatalog,
+  RuntimeModuleDescriptor,
+} from "@shipctl/core/runtime";
 
 interface RevisionChannel {
   onmessage: ((event: ModuleRegistryRevisionEvent) => void) | null;

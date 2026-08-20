@@ -2,10 +2,7 @@ import { Component, lazy, Suspense, useMemo, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import type {
   ContributionId,
-  ModuleHostServices,
-  ModuleActivationContext,
   ModuleActivationId,
-  ModuleId,
   PanelContribution,
   ProjectRef,
 } from "@shipctl/module-api";
@@ -14,21 +11,20 @@ import {
   canvasSurfaceComponentKey,
   currentCanvasSurfaceActivation,
 } from "./acceptedWorkspaceContributionEntries.ts";
+import { useAcceptedWorkspaceContributionRuntime } from "./AcceptedWorkspaceContributionRuntime.tsx";
+import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";
 
 type ActivationOwnedPanelContribution = PanelContribution & {
   readonly ownerActivationId?: ModuleActivationId;
 };
 
 interface PanelHostProps {
-  readonly contribution: ActivationOwnedPanelContribution | undefined;
   readonly panelId: ContributionId;
   readonly instanceId: string;
   readonly project: ProjectRef | null;
   readonly visible: boolean;
   readonly close: () => void;
   readonly setTitle: (title: string | null) => void;
-  readonly services: ModuleHostServices;
-  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
 interface PanelRenderBoundaryProps {
@@ -84,16 +80,17 @@ function PanelUnavailable({
 }
 
 export default function PanelHost({
-  contribution,
   panelId,
   instanceId,
   project,
   visible,
   close,
   setTitle,
-  services,
-  moduleActivations,
 }: PanelHostProps) {
+  const { catalog, moduleActivations } = useAcceptedWorkspaceContributionRuntime();
+  const contribution: ActivationOwnedPanelContribution | undefined = (
+    catalog.canvasSurfaceCatalog.panel(panelId)
+  );
   const [loadAttempt, setLoadAttempt] = useState(0);
   const Panel = useMemo(
     () => contribution ? lazy(contribution.load) : null,
@@ -148,7 +145,7 @@ export default function PanelHost({
           close={close}
           setTitle={setTitle}
           activation={activation}
-          services={services}
+          services={MODULE_HOST_SERVICES}
         />
       </Suspense>
     </PanelRenderBoundary>

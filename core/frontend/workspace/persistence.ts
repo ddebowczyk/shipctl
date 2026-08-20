@@ -20,6 +20,45 @@ export interface WorkspacePersistencePort {
 }
 
 /**
+ * Explicitly represents a runtime that could start without durable storage.
+ * It is deliberately not an in-memory fallback: reads permit an empty
+ * projection, while every attempted write fails with a stable error.
+ */
+export class WorkspacePersistenceUnavailableError extends Error {
+  readonly code = "workspace.persistence-unavailable";
+
+  constructor(message = "Workspace persistence is unavailable.") {
+    super(message);
+    this.name = "WorkspacePersistenceUnavailableError";
+  }
+}
+
+export class UnavailableWorkspacePersistence implements WorkspacePersistencePort {
+  readonly #message: string;
+
+  constructor(message?: string) {
+    this.#message = message ?? "Workspace persistence is unavailable.";
+  }
+
+  async load(_workspaceId: string): Promise<WorkspacePersistedRecord | undefined> {
+    // Starting a runtime remains possible for inspection and recovery. A
+    // write can never be mistaken for a durable success in this mode.
+    return undefined;
+  }
+
+  async compareAndSave(_input: {
+    readonly workspaceId: string;
+    readonly expectedRevision: WorkspaceRevision;
+    readonly record: WorkspacePersistedRecord;
+  }): Promise<
+    | { readonly status: "saved"; readonly record: WorkspacePersistedRecord }
+    | { readonly status: "conflict"; readonly current: WorkspacePersistedRecord | undefined }
+  > {
+    throw new WorkspacePersistenceUnavailableError(this.#message);
+  }
+}
+
+/**
  * A deterministic test and headless-host persistence port. It models the
  * exact conflict behavior required from the eventual Tauri adapter.
  */

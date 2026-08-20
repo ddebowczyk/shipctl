@@ -1,7 +1,4 @@
-use super::config::{
-    CanvasAdapter, EditorSettings, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo,
-    RepoInfo, SidebarSettings, TerminalSettings, WorkspaceConfig,
-};
+use super::config::{GroupEntry, RegisteredRepo, RepoInfo, WorkspaceConfig};
 use super::loader;
 use crate::state::paths::ShipctlPaths;
 use crate::state::DurableWriteBarrier;
@@ -27,14 +24,6 @@ impl WorkspaceManager {
         loader::migrate_old_projects(&self.store)
     }
 
-    pub fn backfill_global_config_defaults(&self) -> Result<(), String> {
-        loader::backfill_global_config_defaults(&self.store)
-    }
-
-    pub fn load_canvas_adapter(&self) -> Result<CanvasAdapter, String> {
-        Ok(loader::load_global_config(&self.store)?.ui.canvas)
-    }
-
     pub fn list_repos(&self) -> Result<Vec<RepoInfo>, String> {
         loader::list_repos(&self.store)
     }
@@ -55,42 +44,6 @@ impl WorkspaceManager {
         loader::save_repo_workspace(repo_path, config)
     }
 
-    pub fn load_editor_settings(&self) -> Result<EditorSettings, String> {
-        loader::load_editor_settings(&self.store)
-    }
-
-    pub fn load_project_settings(&self) -> Result<ProjectSettings, String> {
-        loader::load_project_settings(&self.store)
-    }
-
-    pub fn save_editor_settings(&self, settings: &EditorSettings) -> Result<(), String> {
-        loader::save_editor_settings(&self.store, settings)
-    }
-
-    pub fn save_project_settings(&self, settings: &ProjectSettings) -> Result<(), String> {
-        loader::save_project_settings(&self.store, settings)
-    }
-
-    pub fn load_keybinding_settings(&self) -> Result<KeybindingSettings, String> {
-        loader::load_keybinding_settings(&self.store)
-    }
-
-    pub fn save_keybinding_settings(&self, settings: &KeybindingSettings) -> Result<(), String> {
-        loader::save_keybinding_settings(&self.store, settings)
-    }
-
-    pub fn load_terminal_settings(&self) -> Result<TerminalSettings, String> {
-        loader::load_terminal_settings(&self.store)
-    }
-
-    pub fn save_terminal_settings(&self, settings: &TerminalSettings) -> Result<(), String> {
-        loader::save_terminal_settings(&self.store, settings)
-    }
-
-    pub fn load_sidebar_settings(&self) -> Result<SidebarSettings, String> {
-        loader::load_sidebar_settings(&self.store)
-    }
-
     pub fn load_global_capability_data(
         &self,
         capability_id: &str,
@@ -104,6 +57,25 @@ impl WorkspaceManager {
         value: serde_json::Value,
     ) -> Result<(), String> {
         loader::replace_global_capability_data(&self.store, capability_id, value)
+    }
+
+    /// Compatibility-only opaque legacy read for TypeScript configuration
+    /// migration. This is not a native configuration API.
+    pub fn read_global_configuration_value(
+        &self,
+        key: &str,
+    ) -> Result<Option<serde_json::Value>, String> {
+        loader::read_global_configuration_value(&self.store, key)
+    }
+
+    /// Temporary workspace bootstrap compatibility read. Delete once the
+    /// workspace plugin imports existing documents into plugin-data.
+    pub fn read_project_configuration_value(
+        &self,
+        repo_path: &str,
+        key: &str,
+    ) -> Result<Option<serde_json::Value>, String> {
+        loader::read_project_configuration_value(repo_path, key)
     }
 
     pub fn list_groups(&self) -> Result<Vec<GroupEntry>, String> {

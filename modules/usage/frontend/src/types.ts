@@ -1,16 +1,40 @@
-import type {
-  UsageConfidence,
-  UsageCostKind,
-  UsageProvider,
-  UsageProviderWindow,
-} from "@shipctl/module-api";
+import type { UsageSourceDataset, UsageSourceId } from "@shipctl/module-api";
 
-export type {
-  UsageConfidence,
-  UsageCostKind,
-  UsageProvider,
-  UsageSourceType,
-} from "@shipctl/module-api";
+/** Product source identities and quota presentation belong to this artifact. */
+export type UsageProvider = UsageSourceId;
+export type UsageSourceType = "provider" | "local";
+export type UsageConfidence = "official" | "observed" | "estimated";
+export type UsageCostKind = "recorded" | "estimated" | "included" | "free" | "mixed" | "unknown";
+
+export interface UsageProviderWindow {
+  provider: UsageProvider;
+  windowId: string;
+  window: string;
+  label: string;
+  scope: "session" | "plan" | "billing" | "reporting";
+  limit: number | null;
+  used: number | null;
+  sourceType: UsageSourceType;
+  confidence: UsageConfidence;
+  costKind: UsageCostKind;
+  usedPercent: number | null;
+  remainingPercent: number | null;
+  resetAt: string | null;
+  tokenTotal: number | null;
+  paceStatus: string | null;
+}
+
+export interface UsageProviderObservation {
+  readonly provider: UsageProvider;
+  readonly available: boolean;
+  readonly fetchedAt: string | null;
+  readonly summaryWindows: readonly UsageProviderWindow[];
+  readonly extraWindows: readonly UsageProviderWindow[];
+}
+
+export interface UsagePresentationDataset extends UsageSourceDataset {
+  readonly providerObservations: readonly UsageProviderObservation[];
+}
 
 export type UsageTimeWindow = "5h" | "7d" | "30d" | "365d";
 export type UsageCostBasis = "provider" | "local-pricing" | "subscription" | "gateway" | "none";

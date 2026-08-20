@@ -11,10 +11,6 @@ import {
   type LaymanTree,
 } from "react-layman";
 
-export interface LaymanLegacyCanvasPaneData {
-  readonly kind: "shipctl.legacy-canvas";
-}
-
 /** Data needed by the Layman adapter to render one semantic workspace tab. */
 export interface LaymanWorkspaceViewPaneData {
   readonly kind: "shipctl.workspace-view";
@@ -25,9 +21,7 @@ export interface LaymanWorkspaceViewPaneData {
   readonly splitAllowed: boolean;
 }
 
-export type LaymanCanvasPaneData =
-  | LaymanLegacyCanvasPaneData
-  | LaymanWorkspaceViewPaneData;
+export type LaymanCanvasPaneData = LaymanWorkspaceViewPaneData;
 
 export const LAYMAN_WORKSPACE_STACK_PREFIX = "shipctl.workspace.stack:";
 export const LAYMAN_WORKSPACE_SPLIT_PREFIX = "shipctl.workspace.split:";

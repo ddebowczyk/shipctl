@@ -1,0 +1,12 @@
+---
+schema_version: 1
+id: runtime-operations
+frontend:
+  package: "@shipctl/module-runtime-operations"
+  path: modules/runtime-operations/frontend
+  delivery: runtime-artifact
+  artifact: modules/runtime-operations/artifact
+profile: null
+tests:
+  frontend: modules/runtime-operations/frontend/tests
+  backend: null

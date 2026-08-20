@@ -4,9 +4,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::config::{
-    normalize_sidebar_settings, normalize_terminal_settings, CommandConfig, EditorSettings,
-    GlobalConfig, GroupEntry, KeybindingSettings, ProjectSettings, RegisteredRepo, RepoEntry,
-    RepoInfo, SidebarSettings, TerminalSettings, WorkspaceConfig,
+    GlobalConfig, GroupEntry, RegisteredRepo, RepoEntry, RepoInfo, WorkspaceConfig,
 };
 use crate::state::paths::ShipctlPaths;
 use crate::state::DurableWriteBarrier;
@@ -153,92 +151,22 @@ fn mutate_global_config_at<T>(
     Ok(result)
 }
 
-pub fn backfill_global_config_defaults(store: &GlobalStore) -> Result<(), String> {
-    let path = &store.paths.global_config;
-    if !path.exists() {
-        return save_global_config(store, &GlobalConfig::default());
-    }
-
-    let content =
-        fs::read_to_string(&path).map_err(|e| format!("Failed to read global config: {e}"))?;
-    let needs_url_allowlist = !content.contains("urlAllowlist:");
-    let needs_sidebar = !content.contains("sidebar:");
-
-    if !needs_url_allowlist && !needs_sidebar {
-        return Ok(());
-    }
-
-    mutate_global_config(store, |config| {
-        normalize_terminal_settings(&mut config.terminal);
-        normalize_sidebar_settings(&mut config.sidebar);
-        Ok(())
-    })
-}
-
-pub fn load_editor_settings(store: &GlobalStore) -> Result<EditorSettings, String> {
-    Ok(load_global_config(store)?.editor)
-}
-
-pub fn load_project_settings(store: &GlobalStore) -> Result<ProjectSettings, String> {
-    Ok(load_global_config(store)?.projects)
-}
-
-pub fn save_editor_settings(store: &GlobalStore, settings: &EditorSettings) -> Result<(), String> {
-    mutate_global_config(store, |config| {
-        config.editor = settings.clone();
-        Ok(())
-    })
-}
-
-pub fn save_project_settings(
-    store: &GlobalStore,
-    settings: &ProjectSettings,
-) -> Result<(), String> {
-    mutate_global_config(store, |config| {
-        config.projects = settings.clone();
-        Ok(())
-    })
-}
-
-pub fn load_keybinding_settings(store: &GlobalStore) -> Result<KeybindingSettings, String> {
-    Ok(load_global_config(store)?.keybindings)
-}
-
-pub fn save_keybinding_settings(
-    store: &GlobalStore,
-    settings: &KeybindingSettings,
-) -> Result<(), String> {
-    mutate_global_config(store, |config| {
-        config.keybindings = settings.clone();
-        Ok(())
-    })
-}
-
-pub fn load_terminal_settings(store: &GlobalStore) -> Result<TerminalSettings, String> {
-    Ok(load_global_config(store)?.terminal)
-}
-
-pub fn save_terminal_settings(
-    store: &GlobalStore,
-    settings: &TerminalSettings,
-) -> Result<(), String> {
-    mutate_global_config(store, |config| {
-        config.terminal = settings.clone();
-        Ok(())
-    })
-}
-
-pub fn load_sidebar_settings(store: &GlobalStore) -> Result<SidebarSettings, String> {
-    let mut settings = load_global_config(store)?.sidebar;
-    normalize_sidebar_settings(&mut settings);
-    Ok(settings)
-}
-
 pub fn load_global_capability_data(
     store: &GlobalStore,
     capability_id: &str,
 ) -> Result<Option<serde_json::Value>, String> {
     load_global_config(store)?.capability_value(capability_id)
+}
+
+/// Read an opaque legacy global configuration value for the one-way
+/// TypeScript migration. This intentionally bypasses the generic
+/// capability-data reservation: it is a compatibility source, not a new
+/// authority or a typed native settings API.
+pub fn read_global_configuration_value(
+    store: &GlobalStore,
+    key: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    Ok(load_global_config(store)?.capability_data.get(key).cloned())
 }
 
 pub fn replace_global_capability_data(
@@ -320,6 +248,24 @@ pub fn load_repo_workspace(repo_path: &str) -> Result<WorkspaceConfig, String> {
     load_or_default_workspace(repo_path)
 }
 
+/// Read an opaque legacy project configuration value for the documented
+/// temporary bootstrap exception. The workspace plugin will import these
+/// values into its plugin-data namespace before this compatibility reader is
+/// deleted.
+pub fn read_project_configuration_value(
+    repo_path: &str,
+    key: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    let workspace = load_or_default_workspace(repo_path)?;
+    let Some(value) = workspace.capability_data.get(key) else {
+        return Ok(None);
+    };
+
+    serde_json::to_value(value)
+        .map(Some)
+        .map_err(|error| format!("Failed to encode legacy project configuration {key}: {error}"))
+}
+
 pub fn save_repo_workspace(repo_path: &str, config: &WorkspaceConfig) -> Result<(), String> {
     ensure_repo_shipctl_dir(repo_path)?;
 
@@ -366,7 +312,10 @@ pub fn migrate_old_projects(store: &GlobalStore) -> Result<(), String> {
             Err(_) => continue,
         };
 
-        // Parse old format (has cwd and tasks fields)
+        // Parse the predecessor document. Only `cwd` and `name` belonged to
+        // the migration envelope; every other top-level value stays opaque so
+        // its owning TypeScript capability can migrate it without a native
+        // product grammar.
         let old_config: serde_yaml::Value = match serde_yaml::from_str(&content) {
             Ok(v) => v,
             Err(_) => continue,
@@ -388,12 +337,18 @@ pub fn migrate_old_projects(store: &GlobalStore) -> Result<(), String> {
             .unwrap_or("")
             .to_string();
 
-        // Convert tasks -> commands
-        let commands: Vec<CommandConfig> = if let Some(tasks) = old_config.get("tasks") {
-            serde_yaml::from_value::<Vec<CommandConfig>>(tasks.clone()).unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        let capability_data = old_config
+            .as_mapping()
+            .map(|mapping| {
+                mapping
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        let key = key.as_str()?;
+                        (!matches!(key, "cwd" | "name")).then(|| (key.to_string(), value.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let workspace = WorkspaceConfig {
             name: if name.is_empty() {
@@ -405,8 +360,7 @@ pub fn migrate_old_projects(store: &GlobalStore) -> Result<(), String> {
             } else {
                 name
             },
-            commands,
-            capability_data: Default::default(),
+            capability_data,
         };
 
         // Write to repo's .shipctl/workspace.yml
@@ -568,7 +522,6 @@ fn load_or_default_workspace(repo_path: &str) -> Result<WorkspaceConfig, String>
 
         let config = WorkspaceConfig {
             name,
-            commands: Vec::new(),
             capability_data: Default::default(),
         };
 
@@ -613,7 +566,10 @@ mod tests {
         let first_cache = Arc::clone(&cache);
         let first = thread::spawn(move || {
             mutate_global_config_at(&first_path, &first_cache, |config| {
-                config.editor.preferred_editor = Some("zed".to_string());
+                config.repos.push(crate::workspace::config::RepoEntry {
+                    path: "/tmp/first-repo".to_string(),
+                    group: None,
+                });
                 first_entered_tx.send(()).unwrap();
                 release_first_rx.recv().unwrap();
                 Ok(())
@@ -657,7 +613,10 @@ mod tests {
         second.join().unwrap().unwrap();
 
         let final_config = load_global_config_at(&path, &mut cache.lock().unwrap()).unwrap();
-        assert_eq!(final_config.editor.preferred_editor.as_deref(), Some("zed"));
+        assert!(final_config
+            .repos
+            .iter()
+            .any(|repo| repo.path == "/tmp/first-repo"));
         assert_eq!(
             final_config.capability_value("exampleCapability").unwrap(),
             Some(serde_json::json!({ "enabled": true }))

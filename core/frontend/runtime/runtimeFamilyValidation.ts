@@ -8,7 +8,10 @@ import type {
 import { RuntimeReconciliationError } from "./liveReconciler.ts";
 
 export interface RuntimeFamilyValidationInput {
-  readonly modules: readonly ShipctlModule[];
+  /** Legacy adapter view retained while artifacts migrate one by one. */
+  readonly modules?: readonly ShipctlModule[];
+  /** Direct activation identity set. Supersedes static module shape walking. */
+  readonly moduleIds?: readonly string[];
   readonly activationContextsByModule: ReadonlyMap<ModuleId, ModuleActivationContext>;
   readonly inspection: PluginRuntimeInspection;
   readonly expectedActivationIdsByModule: ReadonlyMap<string, string>;
@@ -26,15 +29,19 @@ function fail(
 /** Validate the complete static plus dynamic graph before it can become public. */
 export function assertCompleteRuntimeFamily(input: RuntimeFamilyValidationInput): void {
   const moduleIds = new Set<string>();
-  for (const module of input.modules) {
-    if (moduleIds.has(module.id)) {
+  const declaredModuleIds = input.moduleIds ?? input.modules?.map(({ id }) => id);
+  if (declaredModuleIds === undefined) {
+    throw new Error("Runtime family validation requires module identities");
+  }
+  for (const moduleId of declaredModuleIds) {
+    if (moduleIds.has(moduleId)) {
       fail(
         "module.runtime.duplicate_module",
-        `Runtime family contains module ${module.id} more than once`,
-        module.id,
+        `Runtime family contains module ${moduleId} more than once`,
+        moduleId,
       );
     }
-    moduleIds.add(module.id);
+    moduleIds.add(moduleId);
   }
 
   const activeByModule = new Map<string, string>();

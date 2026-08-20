@@ -39,7 +39,9 @@ let artifact;
 let vite;
 let api;
 let loader;
+let runtimeLoader;
 let runtimeApi;
+let declarationRuntime;
 let semanticRuntime;
 let testingApi;
 let commandsSource;
@@ -387,28 +389,32 @@ before(async () => {
   });
   api = await vite.ssrLoadModule("/module-api/frontend/src/index.ts");
   loader = await vite.ssrLoadModule("/core/frontend/host/moduleArtifactLoader.ts");
+  runtimeLoader = await vite.ssrLoadModule("/core/frontend/host/runtimeModuleLoader.ts");
   runtimeApi = await vite.ssrLoadModule(
     "/core/frontend/runtime/cordis/staticPluginRuntime.ts",
+  );
+  declarationRuntime = await vite.ssrLoadModule(
+    "/core/frontend/runtime/pluginArtifactDeclarations.ts",
   );
   semanticRuntime = await vite.ssrLoadModule(
     "/core/frontend/runtime/semanticServiceRuntime.ts",
   );
   testingApi = await vite.ssrLoadModule("/module-api/frontend/src/testing.ts");
-  commandsSource = await vite.ssrLoadModule("/modules/commands/frontend/src/index.ts");
-  portsSource = await vite.ssrLoadModule("/modules/ports/frontend/src/index.ts");
-  todosSource = await vite.ssrLoadModule("/modules/todos/frontend/src/index.ts");
-  gitSource = await vite.ssrLoadModule("/modules/git/frontend/src/index.ts");
-  skillsSource = await vite.ssrLoadModule("/modules/skills/frontend/src/index.ts");
+  commandsSource = await vite.ssrLoadModule("/modules/commands/artifact/src/index.ts");
+  portsSource = await vite.ssrLoadModule("/modules/ports/artifact/src/index.ts");
+  todosSource = await vite.ssrLoadModule("/modules/todos/artifact/src/index.ts");
+  gitSource = await vite.ssrLoadModule("/modules/git/artifact/src/index.ts");
+  skillsSource = await vite.ssrLoadModule("/modules/skills/artifact/src/index.ts");
   thinTerminalSource = await vite.ssrLoadModule(
-    "/modules/thin-terminal/frontend/src/index.ts",
+    "/modules/thin-terminal/artifact/src/index.ts",
   );
   semanticTerminalSource = await vite.ssrLoadModule(
-    "/modules/semantic-terminal/frontend/src/index.ts",
+    "/modules/semantic-terminal/artifact/src/index.ts",
   );
   assistantsSource = await vite.ssrLoadModule(
-    "/modules/assistants/frontend/src/index.ts",
+    "/modules/assistants/artifact/src/index.ts",
   );
-  usageSource = await vite.ssrLoadModule("/modules/usage/frontend/src/index.ts");
+  usageSource = await vite.ssrLoadModule("/modules/usage/artifact/src/index.ts");
 });
 
 after(async () => {
@@ -588,12 +594,102 @@ test("architecture.artifact-externals.property", async () => {
   }), propertyParameters());
 });
 
-function commandsCatalog(module) {
+test("architecture.post-package-plugin-deployment.property", async () => {
+  const externalArtifact = fc.record({
+    moduleSuffix: fc.integer({ min: 1, max: 1_000_000 }),
+    digest: fc.array(fc.constantFrom(..."0123456789abcdef"), {
+      minLength: 64,
+      maxLength: 64,
+    }).map((characters) => characters.join("")),
+    styleIndexes: fc.uniqueArray(fc.integer({ min: 0, max: 9_999 }), { maxLength: 3 }),
+  });
+
+  await fc.assert(fc.asyncProperty(externalArtifact, async ({
+    moduleSuffix,
+    digest,
+    styleIndexes,
+  }) => {
+    const moduleId = `fixture.post-package-${moduleSuffix}`;
+    const version = `1.0.${moduleSuffix}`;
+    const entryPath = `/external/post-package/${digest}/dist/plugin-${moduleSuffix}.mjs`;
+    const stylePaths = styleIndexes.map(
+      (index) => `/external/post-package/${digest}/styles/style-${index}.css`,
+    );
+    const application = {
+      schemaVersion: 1,
+      role: "headless",
+      requiredServices: [],
+      providedServices: [],
+      backgroundEffects: [],
+      contributions: [],
+    };
+    const definition = {
+      id: moduleId,
+      version,
+      role: "headless",
+      requiredGrants: [],
+      activate: () => undefined,
+    };
+    const resolved = [];
+    const imported = [];
+    const catalog = {
+      schemaVersion: 1,
+      registryRevision: moduleSuffix,
+      modules: [{
+        schemaVersion: 1,
+        moduleId,
+        version,
+        contentDigest: digest,
+        entryPath,
+        stylePaths,
+        manifest: {
+          schemaVersion: 2,
+          lifecycle: "live",
+          application,
+          messages: EMPTY_MESSAGES,
+          requestedGrants: [],
+        },
+        capabilities: { definitions: [] },
+      }],
+    };
+
+    const loaded = await runtimeLoader.loadRuntimeModules(catalog, {
+      resolveArtifactUrl: (artifactPath, contentDigest) => {
+        resolved.push({ artifactPath, contentDigest });
+        return loader.moduleArtifactUrl(
+          artifactPath,
+          contentDigest,
+          (file) => `asset://localhost/${encodeURIComponent(file)}`,
+        );
+      },
+      importModule: async (entryUrl) => {
+        imported.push(entryUrl);
+        return { createShipctlPlugin: () => definition };
+      },
+    });
+
+    const expectedEntryUrl = `asset://localhost/${encodeURIComponent(entryPath)}`;
+    assert.deepEqual(loaded.failures, []);
+    assert.equal(loaded.definitions.length, 1);
+    assert.equal(loaded.definitions[0]?.id, moduleId);
+    assert.deepEqual(imported, [expectedEntryUrl]);
+    assert.deepEqual(resolved, [
+      { artifactPath: entryPath, contentDigest: digest },
+      ...stylePaths.map((artifactPath) => ({ artifactPath, contentDigest: digest })),
+    ]);
+    assert.deepEqual(loaded.admissionsByModule.get(moduleId)?.artifact, {
+      contentDigest: digest,
+      entryUrl: expectedEntryUrl,
+      moduleId,
+      version,
+    });
+  }), propertyParameters());
+});
+
+function commandsCatalog(contributions) {
   return {
-    id: module.id,
-    version: module.version,
-    commands: (module.commands ?? []).map(({ id, moduleId, label }) => ({ id, moduleId, label })),
-    panels: (module.panels ?? []).map((panel) => ({
+    commands: contributions.commands.map(({ id, moduleId, label }) => ({ id, moduleId, label })),
+    panels: contributions.panels.map((panel) => ({
       id: panel.id,
       moduleId: panel.moduleId,
       scope: panel.scope,
@@ -605,82 +701,13 @@ function commandsCatalog(module) {
       unavailable: panel.unavailable,
       migrationAlias: panel.migrationAlias,
     })),
-    projectNavigation: (module.projectNavigation ?? []).map((navigation) => ({
+    projectNavigation: contributions.projectNavigation.map((navigation) => ({
       id: navigation.id,
       moduleId: navigation.moduleId,
       panelId: navigation.panelId,
       order: navigation.order,
     })),
-    projectLifecycle: Object.keys(module.projectLifecycle ?? {}).sort(),
   };
-}
-
-function commandsServices({ launchResult }) {
-  const terminalCalls = [];
-  const notices = [];
-  let listener = null;
-  const services = {
-    panels: {
-      open: () => "fixture-panel",
-      reveal: () => undefined,
-      close: () => undefined,
-    },
-    appearance: {
-      getSnapshot: () => ({ themeId: "fixture", background: "#000" }),
-      subscribe: () => () => undefined,
-    },
-    terminalSessions: {
-      list: () => [],
-      getDimensions: () => ({ columns: 132, rows: 42 }),
-      launch: async (request) => {
-        terminalCalls.push(["launch", request]);
-        if (launchResult === "failure") throw new Error("fixture launch failed");
-        const session = {
-          id: request.moduleSessionId,
-          terminalId: "00000000-0000-4000-8000-000000000001",
-          moduleId: "commands",
-          projectPath: request.projectPath,
-          ownerKey: request.ownerKey,
-          label: request.label,
-          ownerMetadata: request.ownerMetadata,
-        };
-        listener?.({ type: "launched", session });
-        return session;
-      },
-      launchManaged: async () => { throw new Error("not used"); },
-      update: async () => { throw new Error("not used"); },
-      stop: async (sessionId) => { terminalCalls.push(["stop", sessionId]); },
-      focus: async (sessionId) => { terminalCalls.push(["focus", sessionId]); },
-      subscribe: (next) => {
-        listener = next;
-        return () => { if (listener === next) listener = null; };
-      },
-    },
-    settings: {
-      getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
-      subscribe: () => () => undefined,
-      update: async () => undefined,
-    },
-    skills: {
-      getSnapshot: () => ({ byProject: {} }),
-      subscribe: () => () => undefined,
-      install: async () => undefined,
-    },
-    notices: { push: (notice) => notices.push(notice) },
-    externalLinks: { open: async () => undefined },
-  };
-  return { notices, services, terminalCalls };
-}
-
-function normalizedTerminalCalls(calls) {
-  return calls.map(([operation, request]) => operation !== "launch"
-    ? [operation, request]
-    : [operation, {
-        ...request,
-        moduleSessionId: "<generated>",
-        ownerKey: "<generated>",
-        ownerMetadata: { ...request.ownerMetadata, invocationId: "<generated>" },
-      }]);
 }
 
 function normalizedInspection(inspection) {
@@ -704,61 +731,43 @@ function normalizedInspection(inspection) {
   };
 }
 
-async function runCommandsDefinition({ definition, projectPath, savedCommands, launchResult }) {
-  const dataTrace = [];
+async function runCommandsDefinition({ definition, admission, projectPath }) {
   const semanticServices = new semanticRuntime.SemanticServiceRegistry([
-    testingApi.createFakePluginDataServiceProvider({
-      records: [{
-        ownerModuleId: "shipctl.commands",
-        scope: { kind: "project", projectId: projectPath },
-        key: "commands",
-        schemaVersion: 1,
-        value: savedCommands,
-      }],
-      trace: dataTrace,
-    }),
+    testingApi.createFakePluginDataServiceProvider(),
   ]);
-  const fixture = commandsServices({ launchResult });
   const activation = await runtimeApi.activatePluginDefinitionsObserved(
-    fixture.services,
+    undefined,
     [definition],
     new Map(),
     semanticServices,
+    false,
+    new Map([["shipctl.commands", admission]]),
   );
   assert.deepEqual(activation.failures, []);
-  const context = activation.activationContextsByModule.get("shipctl.commands");
-  assert.ok(context);
+  const contributions = activation.contributionsByModule.get("shipctl.commands");
+  assert.ok(contributions);
   const panelActions = [];
-  const command = definition.module.commands.find(({ id }) => id === "commands.open-panel");
+  const command = contributions.commands.find(({ id }) => id === "commands.open-panel");
   assert.ok(command);
   assert.equal(command.isEnabled({ activeProjectId: projectPath }), true);
   command.run({
     activeProjectId: projectPath,
     openPanel: (panelId) => panelActions.push(panelId),
   });
-  await definition.module.projectLifecycle.onProjectOpened(
-    projectPath,
-    fixture.services,
-    context,
+  assert.ok(admission.application);
+  const runtimeDeclarations = declarationRuntime.collectPluginArtifactDeclarations(
+    definition,
+    activation.inspect().contributions,
+  );
+  assert.equal(
+    declarationRuntime.samePluginArtifactDeclarations(admission.application, runtimeDeclarations),
+    true,
   );
   const result = {
-    catalog: commandsCatalog(definition.module),
-    dataTrace: dataTrace.map(({ operation, activation: owner, scope, key }) => ({
-      operation,
-      moduleId: owner.moduleId,
-      scope,
-      key,
-    })),
+    catalog: commandsCatalog(contributions),
     inspection: normalizedInspection(activation.inspect()),
-    notices: fixture.notices,
     panelActions,
-    terminalCalls: normalizedTerminalCalls(fixture.terminalCalls),
   };
-  await definition.module.projectLifecycle.onProjectRemoved(
-    projectPath,
-    fixture.services,
-    context,
-  );
   await activation.deactivate();
   await activation.deactivate();
   const disposed = activation.inspect();
@@ -806,65 +815,86 @@ test("architecture.commands-artifact-parity.property", async () => {
       )).href),
     });
     assert.deepEqual(links, [], "artifact loading must remain passive");
-    const staticDefinition = runtimeApi.adaptShipctlModule(commandsSource.commandsModule);
-    assert.deepEqual(commandsCatalog(loaded.module), commandsCatalog(commandsSource.commandsModule));
-
-    const commands = fc.uniqueArray(
-      fc.record({
-        key: fc.integer(),
-        command: fc.constantFrom("pnpm dev", "pnpm test", "cargo check"),
-        cwd: fc.option(fc.constantFrom("apps/web", "./tools", "../shared"), { nil: null }),
-        environmentValue: fc.string(),
-      }),
-      { minLength: 1, selector: ({ key }) => key },
-    );
-    await fc.assert(fc.asyncProperty(
-      fc.record({
-        projectKey: fc.integer(),
-        commands,
-        launchResult: fc.constantFrom("success", "failure"),
-      }),
-      async ({ projectKey, commands: generated, launchResult }) => {
-        const projectPath = `/workspace/project-${projectKey}`;
-        const savedCommands = generated.map(({ key, command, cwd, environmentValue }) => ({
-          name: `command-${key}`,
-          command,
-          autostart: true,
-          env: { FIXTURE: environmentValue },
-          cwd,
-        }));
-        const sourceResult = await runCommandsDefinition({
-          definition: staticDefinition,
-          projectPath,
-          savedCommands,
-          launchResult,
-        });
-        const artifactResult = await runCommandsDefinition({
-          definition: loaded.definition,
-          projectPath,
-          savedCommands,
-          launchResult,
-        });
-        assert.deepEqual(artifactResult, sourceResult);
-        assert.deepEqual(links, [], "artifact styles must leave with their activation");
+    assert.equal(loaded.module, undefined);
+    assert.equal("module" in loaded.definition, false);
+    const sourceDefinition = commandsSource.createShipctlPlugin({ pluginApi: api });
+    assert.equal("module" in sourceDefinition, false);
+    assert.deepEqual(
+      {
+        id: loaded.definition.id,
+        version: loaded.definition.version,
+        role: loaded.definition.role,
+        requiredGrants: loaded.definition.requiredGrants,
+        backgroundEffects: loaded.definition.backgroundEffects,
       },
-    ), propertyParameters());
+      {
+        id: sourceDefinition.id,
+        version: sourceDefinition.version,
+        role: sourceDefinition.role,
+        requiredGrants: sourceDefinition.requiredGrants,
+        backgroundEffects: sourceDefinition.backgroundEffects,
+      },
+    );
+
+    await fc.assert(fc.asyncProperty(fc.integer(), async (projectKey) => {
+      const result = await runCommandsDefinition({
+        definition: loaded.definition,
+        admission: loaded.admission,
+        projectPath: `/workspace/project-${projectKey}`,
+      });
+      assert.deepEqual(result.catalog, {
+        commands: [{
+          id: "commands.open-panel",
+          moduleId: "shipctl.commands",
+          label: "New Commands Panel",
+        }],
+        panels: [{
+          id: "core.commands",
+          moduleId: "shipctl.commands",
+          scope: "project",
+          label: "Commands",
+          icon: { name: "list", label: "Commands" },
+          shortcut: "⇧⌘C",
+          singleton: "per-project",
+          order: 20,
+          unavailable: {
+            title: "Commands panel unavailable",
+            description: "The project command runner module could not be loaded.",
+          },
+          migrationAlias: { kind: "commands", label: "Commands" },
+        }],
+        projectNavigation: [{
+          id: "commands.project-navigation",
+          moduleId: "shipctl.commands",
+          panelId: "core.commands",
+          order: 20,
+        }],
+      });
+      assert.deepEqual(result.panelActions, ["core.commands"]);
+      assert.deepEqual(
+        result.inspection.contributions,
+        [
+          { moduleId: "shipctl.commands", family: "command", id: "commands.open-panel" },
+          { moduleId: "shipctl.commands", family: "panel", id: "core.commands" },
+          { moduleId: "shipctl.commands", family: "project-navigation", id: "commands.project-navigation" },
+        ],
+      );
+      assert.deepEqual(links, [], "artifact styles must leave with their activation");
+    }), propertyParameters());
   } finally {
     if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
     else Reflect.deleteProperty(globalThis, "document");
   }
 });
 
-function portsCatalog(module) {
+function portsCatalog(contributions) {
   return {
-    id: module.id,
-    version: module.version,
-    globalSurfaces: (module.globalSurfaces ?? []).map((surface) => ({
+    globalSurfaces: contributions.globalSurfaces.map((surface) => ({
       id: surface.id,
       moduleId: surface.moduleId,
       unavailable: surface.unavailable,
     })),
-    globalNavigation: (module.globalNavigation ?? []).map((navigation) => ({
+    globalNavigation: contributions.globalNavigation.map((navigation) => ({
       id: navigation.id,
       moduleId: navigation.moduleId,
       surfaceId: navigation.surfaceId,
@@ -875,7 +905,13 @@ function portsCatalog(module) {
   };
 }
 
-async function runPortsDefinition({ definition, inspections, deniedOperation, projectPaths }) {
+async function runPortsDefinition({
+  definition,
+  admission,
+  inspections,
+  deniedOperation,
+  projectPaths,
+}) {
   const trace = [];
   const semanticServices = new semanticRuntime.SemanticServiceRegistry([
     testingApi.createFakeProcessesServiceProvider({
@@ -885,24 +921,37 @@ async function runPortsDefinition({ definition, inspections, deniedOperation, pr
     }),
   ]);
   const activation = await runtimeApi.activatePluginDefinitionsObserved(
-    { panels: {} },
+    undefined,
     [definition],
     new Map(),
     semanticServices,
+    false,
+    new Map([["shipctl.ports", admission]]),
   );
   assert.deepEqual(activation.failures, []);
   const context = activation.activationContextsByModule.get("shipctl.ports");
   assert.ok(context);
+  const contributions = activation.contributionsByModule.get("shipctl.ports");
+  assert.ok(contributions);
 
-  const surfaceModule = await definition.module.globalSurfaces[0].load();
+  const surfaceModule = await contributions.globalSurfaces[0].load();
   assert.equal(typeof surfaceModule.default, "function");
   const processes = context.services.require(api.processesService);
   const scan = await surfaceModule.scanPorts(processes, projectPaths);
   const stop = scan.status === "ready" && scan.ports.length > 0
     ? await surfaceModule.stopPort(scan.ports[0], processes)
     : null;
+  assert.ok(admission.application);
+  const runtimeDeclarations = declarationRuntime.collectPluginArtifactDeclarations(
+    definition,
+    activation.inspect().contributions,
+  );
+  assert.equal(
+    declarationRuntime.samePluginArtifactDeclarations(admission.application, runtimeDeclarations),
+    true,
+  );
   const result = {
-    catalog: portsCatalog(definition.module),
+    catalog: portsCatalog(contributions),
     inspection: normalizedInspection(activation.inspect()),
     scan,
     stop,
@@ -935,8 +984,24 @@ test("architecture.ports-artifact-parity.property", async () => {
     admittedMessages: portsArtifact.manifest.messages,
     admittedGrants: portsArtifact.manifest.requestedGrants,
   });
-  const staticDefinition = runtimeApi.adaptShipctlModule(portsSource.portsModule);
-  assert.deepEqual(portsCatalog(loaded.module), portsCatalog(portsSource.portsModule));
+  assert.equal(loaded.module, undefined);
+  assert.equal("module" in loaded.definition, false);
+  const sourceDefinition = portsSource.createShipctlPlugin({ pluginApi: api });
+  assert.equal("module" in sourceDefinition, false);
+  assert.deepEqual(
+    {
+      id: loaded.definition.id,
+      version: loaded.definition.version,
+      role: loaded.definition.role,
+      requires: loaded.definition.requires?.map(({ id, version }) => ({ id, version })),
+    },
+    {
+      id: sourceDefinition.id,
+      version: sourceDefinition.version,
+      role: sourceDefinition.role,
+      requires: sourceDefinition.requires?.map(({ id, version }) => ({ id, version })),
+    },
+  );
   assert.equal(loaded.definition.role, "presentation");
   assert.deepEqual(
     portsArtifact.manifest.application.requiredServices,
@@ -980,17 +1045,31 @@ test("architecture.ports-artifact-parity.property", async () => {
       deniedOperation: failure,
       projectPaths: ["/workspace", projectPath],
     };
-    const sourceResult = await runPortsDefinition({ definition: staticDefinition, ...request });
-    const artifactResult = await runPortsDefinition({ definition: loaded.definition, ...request });
+    const sourceResult = await runPortsDefinition({
+      definition: sourceDefinition,
+      admission: loaded.admission,
+      ...request,
+    });
+    const artifactResult = await runPortsDefinition({
+      definition: loaded.definition,
+      admission: loaded.admission,
+      ...request,
+    });
     assert.deepEqual(artifactResult, sourceResult);
   }), propertyParameters());
 });
 
-function todosCatalog(module) {
+function todosCatalog(contributions) {
   return {
-    id: module.id,
-    version: module.version,
-    panels: (module.panels ?? []).map((panel) => ({
+    configuration: contributions.configuration.map((configuration) => ({
+      id: configuration.id,
+      moduleId: configuration.moduleId,
+      scope: configuration.scope,
+      key: configuration.key,
+      schemaVersion: configuration.schemaVersion,
+      defaults: configuration.defaults,
+    })),
+    panels: contributions.panels.map((panel) => ({
       id: panel.id,
       moduleId: panel.moduleId,
       scope: panel.scope,
@@ -1001,23 +1080,30 @@ function todosCatalog(module) {
       unavailable: panel.unavailable,
       migrationAlias: panel.migrationAlias,
     })),
-    projectNavigation: (module.projectNavigation ?? []).map((navigation) => ({
+    projectNavigation: contributions.projectNavigation.map((navigation) => ({
       id: navigation.id,
       moduleId: navigation.moduleId,
       panelId: navigation.panelId,
       order: navigation.order,
     })),
-    settings: (module.settings ?? []).map((settings) => ({
+    settings: contributions.settings.map((settings) => ({
       id: settings.id,
       moduleId: settings.moduleId,
       order: settings.order,
     })),
-    lifecycle: Object.keys(module.projectLifecycle ?? {}).sort(),
   };
 }
 
-async function runTodosDefinition({ definition, enabled, projectPaths, denied }) {
+async function runTodosDefinition({
+  definition,
+  admission,
+  projectPaths,
+  denied,
+  styleLinks,
+}) {
   const trace = [];
+  const projectTrace = [];
+  const projects = new testingApi.FakeProjectsChangeController(projectPaths);
   const semanticServices = new semanticRuntime.SemanticServiceRegistry([
     testingApi.createFakeProjectDocumentsServiceProvider({
       documents: projectPaths.map((projectId, index) => ({
@@ -1028,55 +1114,64 @@ async function runTodosDefinition({ definition, enabled, projectPaths, denied })
       deniedOperations: denied ? ["discover"] : [],
       trace,
     }),
+    testingApi.createFakeProjectsServiceProvider({ changes: projects, trace: projectTrace }),
+    testingApi.createFakePluginDataServiceProvider(),
   ]);
-  const services = {
-    panels: {},
-    settings: {
-      getSnapshot: () => ({ values: { showTodos: enabled } }),
-      subscribe: () => () => undefined,
-      update: async () => undefined,
-    },
-  };
   const activation = await runtimeApi.activatePluginDefinitionsObserved(
-    services,
+    undefined,
     [definition],
     new Map(),
     semanticServices,
+    false,
+    new Map([["shipctl.todos", admission]]),
   );
   assert.deepEqual(activation.failures, []);
-  const context = activation.activationContextsByModule.get("shipctl.todos");
-  assert.ok(context);
+  const contributions = activation.contributionsByModule.get("shipctl.todos");
+  assert.ok(contributions);
 
   const loadedContributions = await Promise.all([
-    definition.module.panels[0].load(),
-    definition.module.projectNavigation[0].load(),
-    definition.module.settings[0].load(),
+    contributions.panels[0].load(),
+    contributions.projectNavigation[0].load(),
+    contributions.settings[0].load(),
   ]);
   assert.equal(loadedContributions.every(({ default: contribution }) => (
     typeof contribution === "function"
   )), true);
-  definition.module.projectLifecycle.onProjectsChanged(projectPaths, services, context);
-  await new Promise((resolve) => setImmediate(resolve));
-  definition.module.projectLifecycle.onFilesystemChanged(projectPaths, services, context);
-  await new Promise((resolve) => setImmediate(resolve));
+  await projects.publishFilesystemChanged(projectPaths);
+  await projects.setProjects(projectPaths.slice(1));
+  assert.ok(admission.application);
+  const runtimeDeclarations = declarationRuntime.collectPluginArtifactDeclarations(
+    definition,
+    activation.inspect().contributions,
+  );
+  assert.equal(
+    declarationRuntime.samePluginArtifactDeclarations(admission.application, runtimeDeclarations),
+    true,
+  );
+  if (styleLinks !== undefined) {
+    assert.equal(styleLinks.length > 0, true, "artifact styles attach with the activation");
+  }
 
   const inspection = normalizedInspection(activation.inspect());
   const result = {
-    catalog: todosCatalog(definition.module),
+    catalog: todosCatalog(contributions),
     inspection: {
-      activations: inspection.activations,
-      contributions: inspection.contributions,
-      services: inspection.services,
+      ...inspection,
+      // Artifact style attachment is an intentionally opaque activation-owned
+      // lease. Source and packaged behavior must agree on public effects.
+      effects: inspection.effects.filter(({ kind }) => kind !== "owned-lease"),
     },
     trace: trace.map(({ operation, request }) => ({
       operation,
       moduleId: request.activation.moduleId,
       input: request.input,
     })),
+    projectTrace: projectTrace.map(({ operation, request }) => ({
+      operation,
+      moduleId: request.activation.moduleId,
+      input: request.input,
+    })),
   };
-  for (const projectPath of projectPaths) {
-    definition.module.projectLifecycle.onProjectRemoved(projectPath);
-  }
   await activation.deactivate();
   await activation.deactivate();
   const disposed = activation.inspect();
@@ -1125,32 +1220,61 @@ test("architecture.todos-artifact-parity.property", async () => {
       )).href),
     });
     assert.deepEqual(links, [], "artifact loading must remain passive");
-    const staticDefinition = runtimeApi.adaptShipctlModule(todosSource.todosModule);
-    assert.deepEqual(todosCatalog(loaded.module), todosCatalog(todosSource.todosModule));
+    assert.equal(loaded.module, undefined);
+    assert.equal("module" in loaded.definition, false);
+    const sourceDefinition = todosSource.createShipctlPlugin({ pluginApi: api });
+    assert.equal("module" in sourceDefinition, false);
+    assert.deepEqual(
+      {
+        id: loaded.definition.id,
+        version: loaded.definition.version,
+        role: loaded.definition.role,
+        requiredGrants: loaded.definition.requiredGrants,
+        requires: loaded.definition.requires?.map(({ id, version }) => ({ id, version })),
+        backgroundEffects: loaded.definition.backgroundEffects,
+      },
+      {
+        id: sourceDefinition.id,
+        version: sourceDefinition.version,
+        role: sourceDefinition.role,
+        requiredGrants: sourceDefinition.requiredGrants,
+        requires: sourceDefinition.requires?.map(({ id, version }) => ({ id, version })),
+        backgroundEffects: sourceDefinition.backgroundEffects,
+      },
+    );
     assert.equal(loaded.definition.role, "compound");
     assert.deepEqual(
       todosArtifact.manifest.application.requiredServices,
-      [{ id: "shipctl.project-documents", version: 1 }],
+      [
+        { id: "shipctl.plugin-data", version: 1 },
+        { id: "shipctl.project-documents", version: 1 },
+        { id: "shipctl.projects", version: 1 },
+      ],
     );
+    assert.deepEqual(todosArtifact.manifest.requestedGrants, [
+      "plugin-data.read",
+      "plugin-data.write",
+    ]);
 
     await fc.assert(fc.asyncProperty(
       fc.record({
-        enabled: fc.boolean(),
         denied: fc.boolean(),
         projectKeys: fc.uniqueArray(fc.integer(), { minLength: 1, maxLength: 4 }),
       }),
-      async ({ enabled, denied, projectKeys }) => {
+      async ({ denied, projectKeys }) => {
         const request = {
-          enabled,
           denied,
           projectPaths: projectKeys.map((key) => `/workspace/project-${key}`),
         };
         const sourceResult = await runTodosDefinition({
-          definition: staticDefinition,
+          definition: sourceDefinition,
+          admission: loaded.admission,
           ...request,
         });
         const artifactResult = await runTodosDefinition({
           definition: loaded.definition,
+          admission: loaded.admission,
+          styleLinks: links,
           ...request,
         });
         assert.deepEqual(artifactResult, sourceResult);
@@ -1163,11 +1287,17 @@ test("architecture.todos-artifact-parity.property", async () => {
   }
 });
 
-function gitCatalog(module) {
+function gitCatalog(contributions) {
   return {
-    id: module.id,
-    version: module.version,
-    panels: (module.panels ?? []).map((panel) => ({
+    configuration: contributions.configuration.map((configuration) => ({
+      id: configuration.id,
+      moduleId: configuration.moduleId,
+      scope: configuration.scope,
+      key: configuration.key,
+      schemaVersion: configuration.schemaVersion,
+      defaults: configuration.defaults,
+    })),
+    panels: contributions.panels.map((panel) => ({
       id: panel.id,
       moduleId: panel.moduleId,
       scope: panel.scope,
@@ -1179,59 +1309,43 @@ function gitCatalog(module) {
       unavailable: panel.unavailable,
       migrationAlias: panel.migrationAlias,
     })),
-    projectNavigation: (module.projectNavigation ?? []).map((navigation) => ({
+    projectNavigation: contributions.projectNavigation.map((navigation) => ({
       id: navigation.id,
       moduleId: navigation.moduleId,
       panelId: navigation.panelId,
       order: navigation.order,
     })),
-    projectLayout: (module.projectLayout ?? []).map(({ id, moduleId, slot, order }) => ({
+    projectLayout: contributions.projectLayouts.map(({ id, moduleId, slot, order }) => ({
       id,
       moduleId,
       slot,
       order,
     })),
-    projectActions: (module.projectActions ?? []).map(({ id, moduleId, order }) => ({
+    projectActions: contributions.projectActions.map(({ id, moduleId, order }) => ({
       id,
       moduleId,
       order,
     })),
-    projectFactsProvider: module.projectFactsProvider === undefined ? null : {
-      id: module.projectFactsProvider.id,
-      moduleId: module.projectFactsProvider.moduleId,
-    },
-    projectImport: module.projectImport === undefined ? null : {
-      id: module.projectImport.id,
-      moduleId: module.projectImport.moduleId,
-    },
-    settings: (module.settings ?? []).map(({ id, moduleId, order }) => ({
+    projectFacts: contributions.projectFacts.map(({ id, moduleId }) => ({ id, moduleId })),
+    projectImports: contributions.projectImports.map(({ id, moduleId }) => ({ id, moduleId })),
+    settings: contributions.settings.map(({ id, moduleId, order }) => ({
       id,
       moduleId,
       order,
     })),
-    lifecycle: Object.keys(module.projectLifecycle ?? {}).sort(),
-  };
-}
-
-function gitHostServices(autoImportWorktrees) {
-  return {
-    panels: {},
-    settings: {
-      getSnapshot: () => ({ values: { autoImportWorktrees } }),
-      subscribe: () => () => undefined,
-      update: async () => undefined,
-    },
   };
 }
 
 async function runGitDefinition({
   definition,
+  admission,
   projectPath,
   branchName,
   dirty,
   denied,
   autoImportWorktrees,
   expandRelated,
+  styleLinks,
 }) {
   const linkedPath = `${projectPath}-linked`;
   const worktrees = [
@@ -1239,6 +1353,9 @@ async function runGitDefinition({
     { projectId: linkedPath, branchName: `${branchName}-linked`, isMain: false },
   ];
   const trace = [];
+  const projectTrace = [];
+  const projects = new testingApi.FakeProjectsChangeController([projectPath, linkedPath]);
+  const gitChanges = new testingApi.FakeGitChangeController();
   const semanticServices = new semanticRuntime.SemanticServiceRegistry([
     testingApi.createFakeGitServiceProvider({
       repositories: [
@@ -1259,57 +1376,80 @@ async function runGitDefinition({
       ],
       deniedOperations: denied ? ["inspect-status"] : [],
       trace,
+      changes: gitChanges,
+    }),
+    testingApi.createFakeProjectsServiceProvider({ changes: projects, trace: projectTrace }),
+    testingApi.createFakePluginDataServiceProvider({
+      records: [{
+        ownerModuleId: "shipctl.git",
+        scope: { kind: "global" },
+        key: "preferences",
+        schemaVersion: 1,
+        value: { autoImportWorktrees },
+      }],
     }),
   ]);
-  const services = gitHostServices(autoImportWorktrees);
   const activation = await runtimeApi.activatePluginDefinitionsObserved(
-    services,
+    undefined,
     [definition],
     new Map(),
     semanticServices,
+    false,
+    new Map([["shipctl.git", admission]]),
   );
   assert.deepEqual(activation.failures, []);
   const context = activation.activationContextsByModule.get("shipctl.git");
   assert.ok(context);
+  const contributions = activation.contributionsByModule.get("shipctl.git");
+  assert.ok(contributions);
 
-  const relatedPaths = await definition.module.projectImport.relatedPaths(
+  const relatedPaths = await contributions.projectImports[0].relatedPaths(
     projectPath,
     { expandRelated },
-    services,
+    {},
     context,
   );
-  await definition.module.projectLifecycle.onProjectsChanged(
-    [projectPath, linkedPath],
-    services,
-    context,
-  );
-  await definition.module.projectLifecycle.onFilesystemChanged(
-    [projectPath],
-    services,
-    context,
-  );
+  await gitChanges.publish(projectPath);
+  await projects.publishFilesystemChanged([projectPath]);
+  await projects.setProjects([projectPath]);
+  await gitChanges.publish(linkedPath);
   const project = { id: projectPath, path: projectPath, label: projectPath };
-  const facts = definition.module.projectFactsProvider.getFacts(project);
+  const facts = contributions.projectFacts[0].getFacts(project);
+  assert.ok(admission.application);
+  const runtimeDeclarations = declarationRuntime.collectPluginArtifactDeclarations(
+    definition,
+    activation.inspect().contributions,
+  );
+  assert.equal(
+    declarationRuntime.samePluginArtifactDeclarations(admission.application, runtimeDeclarations),
+    true,
+  );
+  if (styleLinks !== undefined) {
+    assert.equal(styleLinks.length > 0, true, "artifact styles attach with the activation");
+  }
   const inspection = normalizedInspection(activation.inspect());
   const result = {
-    catalog: gitCatalog(definition.module),
+    catalog: gitCatalog(contributions),
     facts,
     relatedPaths,
     inspection: {
-      activations: inspection.activations,
-      contributions: inspection.contributions,
-      services: inspection.services,
+      ...inspection,
+      // Artifact style attachment is an intentionally opaque activation-owned
+      // lease. Source and packaged behavior must agree on public effects.
+      effects: inspection.effects.filter(({ kind }) => kind !== "owned-lease"),
     },
     trace: trace.map(({ operation, request }) => ({
       operation,
       moduleId: request.activation.moduleId,
       input: request.input,
     })),
+    projectTrace: projectTrace.map(({ operation, request }) => ({
+      operation,
+      moduleId: request.activation.moduleId,
+      input: request.input,
+    })),
   };
 
-  definition.module.projectLifecycle.onProjectRemoved(projectPath, services, context);
-  definition.module.projectLifecycle.onProjectRemoved(linkedPath, services, context);
-  assert.equal(definition.module.projectFactsProvider.getFacts(project), null);
   await activation.deactivate();
   await activation.deactivate();
   const disposed = activation.inspect();
@@ -1358,13 +1498,41 @@ test("architecture.git-artifact-parity.property", async () => {
       )).href),
     });
     assert.deepEqual(links, [], "artifact loading must remain passive");
-    const staticDefinition = runtimeApi.adaptShipctlModule(gitSource.gitModule);
-    assert.deepEqual(gitCatalog(loaded.module), gitCatalog(gitSource.gitModule));
+    assert.equal(loaded.module, undefined);
+    assert.equal("module" in loaded.definition, false);
+    const sourceDefinition = gitSource.createShipctlPlugin({ pluginApi: api });
+    assert.equal("module" in sourceDefinition, false);
+    assert.deepEqual(
+      {
+        id: loaded.definition.id,
+        version: loaded.definition.version,
+        role: loaded.definition.role,
+        requiredGrants: loaded.definition.requiredGrants,
+        requires: loaded.definition.requires?.map(({ id, version }) => ({ id, version })),
+        backgroundEffects: loaded.definition.backgroundEffects,
+      },
+      {
+        id: sourceDefinition.id,
+        version: sourceDefinition.version,
+        role: sourceDefinition.role,
+        requiredGrants: sourceDefinition.requiredGrants,
+        requires: sourceDefinition.requires?.map(({ id, version }) => ({ id, version })),
+        backgroundEffects: sourceDefinition.backgroundEffects,
+      },
+    );
     assert.equal(loaded.definition.role, "compound");
     assert.deepEqual(
       gitArtifact.manifest.application.requiredServices,
-      [{ id: "shipctl.git", version: 1 }],
+      [
+        { id: "shipctl.git", version: 1 },
+        { id: "shipctl.projects", version: 1 },
+        { id: "shipctl.plugin-data", version: 1 },
+      ],
     );
+    assert.deepEqual(gitArtifact.manifest.requestedGrants, [
+      "plugin-data.read",
+      "plugin-data.write",
+    ]);
 
     await fc.assert(fc.asyncProperty(
       fc.record({
@@ -1378,11 +1546,14 @@ test("architecture.git-artifact-parity.property", async () => {
       async ({ projectKey, ...request }) => {
         const input = { projectPath: `/workspace/project-${projectKey}`, ...request };
         const sourceResult = await runGitDefinition({
-          definition: staticDefinition,
+          definition: sourceDefinition,
+          admission: loaded.admission,
           ...input,
         });
         const artifactResult = await runGitDefinition({
           definition: loaded.definition,
+          admission: loaded.admission,
+          styleLinks: links,
           ...input,
         });
         assert.deepEqual(artifactResult, sourceResult);
@@ -1395,20 +1566,14 @@ test("architecture.git-artifact-parity.property", async () => {
   }
 });
 
-function skillsCatalog(module) {
+function skillsCatalog(contributions) {
   return {
-    id: module.id,
-    version: module.version,
-    projectActions: (module.projectActions ?? []).map(({ id, moduleId, order }) => ({
+    projectActions: contributions.projectActions.map(({ id, moduleId, order }) => ({
       id,
       moduleId,
       order,
     })),
-    skillsProvider: module.skillsProvider === undefined ? null : {
-      id: module.skillsProvider.id,
-      moduleId: module.skillsProvider.moduleId,
-    },
-    lifecycle: Object.keys(module.projectLifecycle ?? {}).sort(),
+    skillsProviders: contributions.skillsProviders.map(({ id, moduleId }) => ({ id, moduleId })),
   };
 }
 
@@ -1469,6 +1634,7 @@ function cloneSkillsSnapshot(snapshot) {
 
 async function runSkillsDefinition({
   definition,
+  admission,
   projectPaths,
   installedTodos,
   installedOrchestrate,
@@ -1476,6 +1642,7 @@ async function runSkillsDefinition({
   action,
 }) {
   const trace = [];
+  const projects = new testingApi.FakeProjectsChangeController(projectPaths);
   const semanticServices = new semanticRuntime.SemanticServiceRegistry([
     testingApi.createFakeSkillInstallationServiceProvider({
       projects: projectPaths.map((projectId) => ({
@@ -1485,6 +1652,7 @@ async function runSkillsDefinition({
       deniedOperations: deniedOperation === "none" ? [] : [deniedOperation],
       trace,
     }),
+    testingApi.createFakeProjectsServiceProvider({ changes: projects }),
   ]);
   const notices = [];
   const services = {
@@ -1496,31 +1664,27 @@ async function runSkillsDefinition({
     [definition],
     new Map(),
     semanticServices,
+    false,
+    new Map([["shipctl.skills", admission]]),
   );
   assert.deepEqual(activation.failures, []);
   const context = activation.activationContextsByModule.get("shipctl.skills");
   assert.ok(context);
-
-  await definition.module.projectLifecycle.onProjectsChanged(
-    projectPaths,
-    services,
-    context,
-  );
-  await definition.module.projectLifecycle.onFilesystemChanged(
-    projectPaths,
-    services,
-    context,
-  );
+  const contributions = activation.contributionsByModule.get("shipctl.skills");
+  assert.ok(contributions);
+  const provider = contributions.skillsProviders[0];
+  const projectActions = contributions.projectActions;
+  await projects.publishFilesystemChanged(projectPaths);
   const project = {
     id: projectPaths[0],
     name: projectPaths[0],
     path: projectPaths[0],
   };
-  const group = definition.module.projectActions[0].getGroup(project, services, context);
+  const group = projectActions[0].getGroup(project, services, context);
   let actionOutcome = "not-run";
   try {
     if (action === "provider-install-todos") {
-      await definition.module.skillsProvider.port.install(project.path, "shipctl-todos");
+      await provider.port.install(project.path, "shipctl-todos");
       actionOutcome = "success";
     } else if (action !== "none" && group !== null) {
       const actionId = action === "toggle-todos"
@@ -1533,10 +1697,19 @@ async function runSkillsDefinition({
     actionOutcome = error instanceof Error ? error.message : String(error);
   }
 
+  assert.ok(admission.application);
+  const runtimeDeclarations = declarationRuntime.collectPluginArtifactDeclarations(
+    definition,
+    activation.inspect().contributions,
+  );
+  assert.equal(
+    declarationRuntime.samePluginArtifactDeclarations(admission.application, runtimeDeclarations),
+    true,
+  );
   const inspection = normalizedInspection(activation.inspect());
   const result = {
     actionOutcome,
-    catalog: skillsCatalog(definition.module),
+    catalog: skillsCatalog(contributions),
     group: group === null ? null : {
       label: group.label,
       actions: group.actions.map(({ id, label, selected, keepOpen }) => ({
@@ -1548,15 +1721,13 @@ async function runSkillsDefinition({
     },
     inspection,
     notices,
-    snapshot: cloneSkillsSnapshot(definition.module.skillsProvider.port.getSnapshot()),
+    snapshot: cloneSkillsSnapshot(provider.port.getSnapshot()),
     trace: normalizedSkillTrace(trace),
   };
 
-  for (const projectPath of projectPaths) {
-    definition.module.projectLifecycle.onProjectRemoved(projectPath, services, context);
-  }
+  await projects.setProjects([]);
   assert.deepEqual(
-    cloneSkillsSnapshot(definition.module.skillsProvider.port.getSnapshot()),
+    cloneSkillsSnapshot(provider.port.getSnapshot()),
     {},
   );
   await activation.deactivate();
@@ -1567,7 +1738,7 @@ async function runSkillsDefinition({
   assert.deepEqual(disposed.services, []);
   assert.equal(disposed.activations[0].status, "disposed");
   await assert.rejects(
-    definition.module.skillsProvider.port.install(project.path, "shipctl-todos"),
+    provider.port.install(project.path, "shipctl-todos"),
     /Skills module is not active/,
   );
   return result;
@@ -1589,13 +1760,37 @@ test("architecture.skills-artifact-parity.property", async () => {
     admittedMessages: skillsArtifact.manifest.messages,
     admittedGrants: skillsArtifact.manifest.requestedGrants,
   });
-  const staticDefinition = runtimeApi.adaptShipctlModule(skillsSource.skillsModule);
-  assert.deepEqual(skillsCatalog(loaded.module), skillsCatalog(skillsSource.skillsModule));
+  assert.equal(loaded.module, undefined);
+  assert.equal("module" in loaded.definition, false);
+  const sourceDefinition = skillsSource.createShipctlPlugin({ pluginApi: api });
+  assert.equal("module" in sourceDefinition, false);
+  assert.deepEqual(
+    {
+      id: loaded.definition.id,
+      version: loaded.definition.version,
+      role: loaded.definition.role,
+      requiredGrants: loaded.definition.requiredGrants,
+      requires: loaded.definition.requires?.map(({ id, version }) => ({ id, version })),
+      backgroundEffects: loaded.definition.backgroundEffects,
+    },
+    {
+      id: sourceDefinition.id,
+      version: sourceDefinition.version,
+      role: sourceDefinition.role,
+      requiredGrants: sourceDefinition.requiredGrants,
+      requires: sourceDefinition.requires?.map(({ id, version }) => ({ id, version })),
+      backgroundEffects: sourceDefinition.backgroundEffects,
+    },
+  );
   assert.equal(loaded.definition.role, "compound");
   assert.deepEqual(
     skillsArtifact.manifest.application.requiredServices,
-    [{ id: "shipctl.skill-installation", version: 2 }],
+    [
+      { id: "shipctl.skill-installation", version: 2 },
+      { id: "shipctl.projects", version: 1 },
+    ],
   );
+  assert.deepEqual(skillsArtifact.manifest.application.backgroundEffects, ["skills.runtime"]);
 
   await fc.assert(fc.asyncProperty(
     fc.record({
@@ -1625,11 +1820,13 @@ test("architecture.skills-artifact-parity.property", async () => {
         ],
       };
       const sourceResult = await runSkillsDefinition({
-        definition: staticDefinition,
+        definition: sourceDefinition,
+        admission: loaded.admission,
         ...input,
       });
       const artifactResult = await runSkillsDefinition({
         definition: loaded.definition,
+        admission: loaded.admission,
         ...input,
       });
       assert.deepEqual(artifactResult, sourceResult);
@@ -1637,22 +1834,17 @@ test("architecture.skills-artifact-parity.property", async () => {
   ), propertyParameters());
 });
 
-function terminalPresentationCatalog(module) {
-  return {
-    id: module.id,
-    version: module.version,
-    requiredGrants: [...module.requiredGrants ?? []],
-    terminalPresentations: (module.terminalPresentations ?? []).map((presentation) => ({
-      moduleId: presentation.moduleId,
-      driverId: presentation.driverId,
-      requiredServices: presentation.requiredServices.map(({ id, version }) => ({ id, version })),
-      presentationType: typeof presentation.Presentation,
-    })),
-  };
+function terminalPresentationContributionCatalog(contributions) {
+  return contributions.terminalPresentations.map((presentation) => ({
+    moduleId: presentation.moduleId,
+    driverId: presentation.driverId,
+    requiredServices: presentation.requiredServices.map(({ id, version }) => ({ id, version })),
+    presentationType: typeof presentation.Presentation,
+  }));
 }
 
-function terminalPresentationElement(module, props) {
-  const presentation = module.terminalPresentations[0];
+function terminalPresentationContributionElement(contributions, props) {
+  const presentation = contributions.terminalPresentations[0];
   const element = presentation.Presentation(props);
   return {
     elementKind: String(element.$$typeof),
@@ -1716,27 +1908,80 @@ test("architecture.thin-terminal-artifact-parity.property", async () => {
       )).href),
     });
     assert.deepEqual(links, [], "artifact import and validation must remain passive");
+    assert.equal(loaded.module, undefined);
+    assert.equal("module" in loaded.definition, false);
+    const sourceDefinition = thinTerminalSource.createShipctlPlugin({ pluginApi: api });
+    assert.equal("module" in sourceDefinition, false);
     assert.deepEqual(
-      terminalPresentationCatalog(loaded.module),
-      terminalPresentationCatalog(thinTerminalSource.thinTerminalModule),
+      {
+        id: loaded.definition.id,
+        version: loaded.definition.version,
+        role: loaded.definition.role,
+        requiredGrants: loaded.definition.requiredGrants,
+        requires: loaded.definition.requires?.map(({ id, version }) => ({ id, version })),
+      },
+      {
+        id: sourceDefinition.id,
+        version: sourceDefinition.version,
+        role: sourceDefinition.role,
+        requiredGrants: sourceDefinition.requiredGrants,
+        requires: sourceDefinition.requires?.map(({ id, version }) => ({ id, version })),
+      },
     );
     assert.equal(loaded.definition.role, "presentation");
 
+    const sourceFixture = testingApi.createFakeTerminalSessionsServiceProvider();
+    const sourceActivation = await runtimeApi.activatePluginDefinitionsObserved(
+      undefined,
+      [sourceDefinition],
+      new Map(),
+      new semanticRuntime.SemanticServiceRegistry([sourceFixture.provider]),
+      false,
+      new Map([["shipctl.thin-terminal", loaded.admission]]),
+    );
+    assert.deepEqual(sourceActivation.failures, []);
+    const sourceContext = sourceActivation.activationContextsByModule.get("shipctl.thin-terminal");
+    const sourceContributions = sourceActivation.contributionsByModule.get("shipctl.thin-terminal");
+    assert.ok(sourceContext);
+    assert.ok(sourceContributions);
+
     const terminalFixture = testingApi.createFakeTerminalSessionsServiceProvider();
-    const semanticServices = new semanticRuntime.SemanticServiceRegistry([
-      terminalFixture.provider,
-    ]);
     const activation = await runtimeApi.activatePluginDefinitionsObserved(
-      { panels: {} },
+      undefined,
       [loaded.definition],
       new Map(),
-      semanticServices,
+      new semanticRuntime.SemanticServiceRegistry([terminalFixture.provider]),
+      false,
+      new Map([["shipctl.thin-terminal", loaded.admission]]),
     );
     assert.deepEqual(activation.failures, []);
     assert.equal(links.length, 1);
     assert.equal(links[0].dataset.shipctlModule, "shipctl.thin-terminal");
     const context = activation.activationContextsByModule.get("shipctl.thin-terminal");
+    const contributions = activation.contributionsByModule.get("shipctl.thin-terminal");
     assert.ok(context);
+    assert.ok(contributions);
+    assert.deepEqual(
+      terminalPresentationContributionCatalog(contributions),
+      terminalPresentationContributionCatalog(sourceContributions),
+    );
+    assert.ok(thinTerminalArtifact.manifest.application);
+    for (const [definition, observed] of [
+      [sourceDefinition, sourceActivation],
+      [loaded.definition, activation],
+    ]) {
+      const declarations = declarationRuntime.collectPluginArtifactDeclarations(
+        definition,
+        observed.inspect().contributions,
+      );
+      assert.equal(
+        declarationRuntime.samePluginArtifactDeclarations(
+          thinTerminalArtifact.manifest.application,
+          declarations,
+        ),
+        true,
+      );
+    }
     const services = { notices: { push: () => undefined } };
 
     await fc.assert(fc.asyncProperty(
@@ -1749,8 +1994,11 @@ test("architecture.thin-terminal-artifact-parity.property", async () => {
           visible,
         };
         assert.deepEqual(
-          terminalPresentationElement(loaded.module, props),
-          terminalPresentationElement(thinTerminalSource.thinTerminalModule, props),
+          terminalPresentationContributionElement(contributions, props),
+          terminalPresentationContributionElement(sourceContributions, {
+            ...props,
+            activation: sourceContext,
+          }),
         );
       },
     ), propertyParameters());
@@ -1759,6 +2007,9 @@ test("architecture.thin-terminal-artifact-parity.property", async () => {
       activation.inspect().contributions.map(({ family, id }) => ({ family, id })),
       [{ family: "terminal-presentation", id: "thin-terminal" }],
     );
+    await sourceActivation.deactivate();
+    await sourceActivation.deactivate();
+    assert.deepEqual(sourceActivation.inspect().contributions, []);
     await activation.deactivate();
     await activation.deactivate();
     assert.deepEqual(links, [], "artifact styles must leave with their activation");
@@ -1829,11 +2080,47 @@ test("architecture.semantic-terminal-artifact-parity.property", async () => {
       )).href),
     });
     assert.deepEqual(links, [], "artifact import and validation must remain passive");
+    assert.equal(loaded.module, undefined);
+    assert.equal("module" in loaded.definition, false);
+    const sourceDefinition = semanticTerminalSource.createShipctlPlugin({ pluginApi: api });
+    assert.equal("module" in sourceDefinition, false);
     assert.deepEqual(
-      terminalPresentationCatalog(loaded.module),
-      terminalPresentationCatalog(semanticTerminalSource.semanticTerminalModule),
+      {
+        id: loaded.definition.id,
+        version: loaded.definition.version,
+        role: loaded.definition.role,
+        requiredGrants: loaded.definition.requiredGrants,
+        requires: loaded.definition.requires?.map(({ id, version }) => ({ id, version })),
+      },
+      {
+        id: sourceDefinition.id,
+        version: sourceDefinition.version,
+        role: sourceDefinition.role,
+        requiredGrants: sourceDefinition.requiredGrants,
+        requires: sourceDefinition.requires?.map(({ id, version }) => ({ id, version })),
+      },
     );
     assert.equal(loaded.definition.role, "presentation");
+
+    const sourceTerminalFixture = testingApi.createFakeTerminalSessionsServiceProvider();
+    const sourceSemanticTerminalFixture =
+      testingApi.createFakeSemanticTerminalsServiceProvider();
+    const sourceActivation = await runtimeApi.activatePluginDefinitionsObserved(
+      undefined,
+      [sourceDefinition],
+      new Map(),
+      new semanticRuntime.SemanticServiceRegistry([
+        sourceTerminalFixture.provider,
+        sourceSemanticTerminalFixture.provider,
+      ]),
+      false,
+      new Map([["shipctl.semantic-terminal", loaded.admission]]),
+    );
+    assert.deepEqual(sourceActivation.failures, []);
+    const sourceContext = sourceActivation.activationContextsByModule.get("shipctl.semantic-terminal");
+    const sourceContributions = sourceActivation.contributionsByModule.get("shipctl.semantic-terminal");
+    assert.ok(sourceContext);
+    assert.ok(sourceContributions);
 
     const terminalFixture = testingApi.createFakeTerminalSessionsServiceProvider();
     const semanticTerminalFixture =
@@ -1847,12 +2134,37 @@ test("architecture.semantic-terminal-artifact-parity.property", async () => {
       [loaded.definition],
       new Map(),
       semanticServices,
+      false,
+      new Map([["shipctl.semantic-terminal", loaded.admission]]),
     );
     assert.deepEqual(activation.failures, []);
     assert.equal(links.length, 1);
     assert.equal(links[0].dataset.shipctlModule, "shipctl.semantic-terminal");
     const context = activation.activationContextsByModule.get("shipctl.semantic-terminal");
+    const contributions = activation.contributionsByModule.get("shipctl.semantic-terminal");
     assert.ok(context);
+    assert.ok(contributions);
+    assert.deepEqual(
+      terminalPresentationContributionCatalog(contributions),
+      terminalPresentationContributionCatalog(sourceContributions),
+    );
+    assert.ok(semanticTerminalArtifact.manifest.application);
+    for (const [definition, observed] of [
+      [sourceDefinition, sourceActivation],
+      [loaded.definition, activation],
+    ]) {
+      const declarations = declarationRuntime.collectPluginArtifactDeclarations(
+        definition,
+        observed.inspect().contributions,
+      );
+      assert.equal(
+        declarationRuntime.samePluginArtifactDeclarations(
+          semanticTerminalArtifact.manifest.application,
+          declarations,
+        ),
+        true,
+      );
+    }
     const services = { notices: { push: () => undefined } };
 
     await fc.assert(fc.asyncProperty(
@@ -1865,8 +2177,11 @@ test("architecture.semantic-terminal-artifact-parity.property", async () => {
           visible,
         };
         assert.deepEqual(
-          terminalPresentationElement(loaded.module, props),
-          terminalPresentationElement(semanticTerminalSource.semanticTerminalModule, props),
+          terminalPresentationContributionElement(contributions, props),
+          terminalPresentationContributionElement(sourceContributions, {
+            ...props,
+            activation: sourceContext,
+          }),
         );
       },
     ), propertyParameters());
@@ -1875,6 +2190,9 @@ test("architecture.semantic-terminal-artifact-parity.property", async () => {
       activation.inspect().contributions.map(({ family, id }) => ({ family, id })),
       [{ family: "terminal-presentation", id: "semantic-terminal" }],
     );
+    await sourceActivation.deactivate();
+    await sourceActivation.deactivate();
+    assert.deepEqual(sourceActivation.inspect().contributions, []);
     await activation.deactivate();
     await activation.deactivate();
     assert.deepEqual(links, [], "artifact styles must leave with their activation");
@@ -1889,12 +2207,14 @@ test("architecture.semantic-terminal-artifact-parity.property", async () => {
   }
 });
 
-function assistantsCatalog(module) {
+function assistantsCatalog(definition, contributions) {
   return {
-    id: module.id,
-    version: module.version,
-    requiredGrants: [...module.requiredGrants ?? []],
-    panels: (module.panels ?? []).map((panel) => ({
+    id: definition.id,
+    version: definition.version,
+    requiredGrants: [...definition.requiredGrants ?? []],
+    requires: (definition.requires ?? []).map(({ id, version }) => ({ id, version })),
+    backgroundEffects: [...definition.backgroundEffects ?? []],
+    panels: contributions.panels.map((panel) => ({
       id: panel.id,
       moduleId: panel.moduleId,
       scope: panel.scope,
@@ -1907,9 +2227,8 @@ function assistantsCatalog(module) {
       unavailable: panel.unavailable,
       migrationAlias: panel.migrationAlias,
     })),
-    lifecycle: Object.keys(module.projectLifecycle ?? {}).sort(),
-    hasActivate: typeof module.activate === "function",
-    hasBeforeShutdown: typeof module.beforeShutdown === "function",
+    hasActivate: typeof definition.activate === "function",
+    hasBeforeShutdown: typeof definition.beforeShutdown === "function",
   };
 }
 
@@ -1918,14 +2237,9 @@ function assistantsHostServices() {
   return {
     trace,
     services: {
-      panels: {},
-      terminalSessions: {
-        subscribe: () => {
-          trace.push("subscribe");
-          return () => trace.push("unsubscribe");
-        },
+      notices: {
+        push: (notice) => trace.push(["notice", notice.tone, notice.title, notice.message]),
       },
-      notices: { push: (notice) => trace.push(["notice", notice]) },
     },
   };
 }
@@ -1950,21 +2264,21 @@ function normalizedCredentialTrace(trace) {
 
 async function runAssistantsDefinition({
   definition,
+  admission,
   commandAvailable,
   configuredCredential,
   provider,
-  models,
 }) {
   const assistantTrace = [];
   const credentialTrace = [];
   const processTrace = [];
   const terminalTrace = [];
+  const projectTrace = [];
   const terminalFixture = testingApi.createFakeTerminalSessionsServiceProvider({
     traces: terminalTrace,
   });
   const semanticServices = new semanticRuntime.SemanticServiceRegistry([
     testingApi.createFakeAssistantLaunchServiceProvider({
-      models: { [provider]: models },
       trace: assistantTrace,
     }),
     testingApi.createFakeCredentialStoreServiceProvider({
@@ -1978,6 +2292,7 @@ async function runAssistantsDefinition({
       trace: processTrace,
     }),
     terminalFixture.provider,
+    testingApi.createFakeProjectsServiceProvider({ trace: projectTrace }),
   ]);
   const host = assistantsHostServices();
   const activation = await runtimeApi.activatePluginDefinitionsObserved(
@@ -1985,40 +2300,42 @@ async function runAssistantsDefinition({
     [definition],
     new Map(),
     semanticServices,
+    false,
+    new Map([["shipctl.assistants", admission]]),
   );
   assert.deepEqual(activation.failures, []);
   const context = activation.activationContextsByModule.get("shipctl.assistants");
   assert.ok(context);
 
-  const panelNamespace = await definition.module.panels[0].load();
+  const contributions = activation.contributionsByModule.get("shipctl.assistants");
+  assert.ok(contributions);
+  const panelNamespace = await contributions.panels[0].load();
   const processOutcome = await context.services.require(api.processesService)
     .inspectCommand.execute({ command: provider });
-  const modelOutcome = await context.services.require(api.assistantLaunchService)
-    .inspectModels.execute({ provider: api.assistantProviderId(provider) });
   const credentialOutcome = await context.services.require(api.credentialStoreService)
     .hasCredential.execute({ credentialId: api.credentialId("pi.api-key", provider) });
   const terminalOutcome = await context.services.require(api.terminalSessionsService)
     .inspectSessions.execute({ owner: "activation" });
-  await definition.module.beforeShutdown(host.services, context);
+  await activation.beforeShutdown();
 
   const result = {
     assistantTrace: normalizedRequestTrace(assistantTrace),
-    catalog: assistantsCatalog(definition.module),
+    catalog: assistantsCatalog(definition, contributions),
     credentialResult: credentialOutcome.result,
     credentialTrace: normalizedCredentialTrace(credentialTrace),
     inspection: normalizedInspection(activation.inspect()),
-    modelResult: modelOutcome.result,
     panelExports: Object.keys(panelNamespace).sort(),
     panelType: typeof panelNamespace.default,
     processResult: processOutcome.result,
     processTrace: normalizedRequestTrace(processTrace),
+    projectTrace: normalizedRequestTrace(projectTrace),
     terminalResult: terminalOutcome.result,
     terminalTrace: normalizedRequestTrace(terminalTrace),
   };
 
   await activation.deactivate();
   await activation.deactivate();
-  assert.deepEqual(host.trace, ["subscribe", "unsubscribe"]);
+  assert.deepEqual(host.trace, []);
   const disposed = activation.inspect();
   assert.deepEqual(disposed.contributions, []);
   assert.deepEqual(disposed.effects, []);
@@ -2027,9 +2344,10 @@ async function runAssistantsDefinition({
   return result;
 }
 
-async function runAssistantsRestoreOnce(definition) {
+async function runAssistantsRestoreOnce(definition, admission) {
   const assistantTrace = [];
   const terminalFixture = testingApi.createFakeTerminalSessionsServiceProvider();
+  const projects = new testingApi.FakeProjectsChangeController(["/workspace/restore-project"]);
   const semanticServices = new semanticRuntime.SemanticServiceRegistry([
     testingApi.createFakeAssistantLaunchServiceProvider({
       startupWarning: "Fixture restore warning",
@@ -2038,6 +2356,7 @@ async function runAssistantsRestoreOnce(definition) {
     testingApi.createFakeCredentialStoreServiceProvider(),
     testingApi.createFakeProcessesServiceProvider(),
     terminalFixture.provider,
+    testingApi.createFakeProjectsServiceProvider({ changes: projects }),
   ]);
   const host = assistantsHostServices();
   const activation = await runtimeApi.activatePluginDefinitionsObserved(
@@ -2045,20 +2364,17 @@ async function runAssistantsRestoreOnce(definition) {
     [definition],
     new Map(),
     semanticServices,
+    false,
+    new Map([["shipctl.assistants", admission]]),
   );
   assert.deepEqual(activation.failures, []);
-  const context = activation.activationContextsByModule.get("shipctl.assistants");
-  assert.ok(context);
-  await definition.module.projectLifecycle.onProjectsChanged(
-    ["/workspace/restore-project"],
-    host.services,
-    context,
-  );
   const result = {
     assistantTrace: normalizedRequestTrace(assistantTrace),
     hostTrace: host.trace.filter((entry) => Array.isArray(entry)),
   };
   await activation.deactivate();
+  assert.deepEqual(activation.inspect().contributions, []);
+  assert.deepEqual(activation.inspect().effects, []);
   return result;
 }
 
@@ -2072,16 +2388,23 @@ test("architecture.assistants-artifact-parity.property", async () => {
   assert.deepEqual(assistantsArtifact.manifest.requestedGrants, [
     "assistant.launch",
     "assistant.session-record",
+    "assistant.resource.read",
+    "assistant.resource.write",
+    "assistant.resource.execute",
     "credential.inspect",
     "credential.write",
     "terminal.start",
     "terminal.attach",
   ]);
   assert.deepEqual(assistantsArtifact.manifest.application.requiredServices, [
-    { id: "shipctl.assistant-launch", version: 1 },
+    { id: "shipctl.assistant-launch", version: 2 },
     { id: "shipctl.credential-store", version: 1 },
     { id: "shipctl.processes", version: 1 },
     { id: "shipctl.terminal-sessions", version: 1 },
+    { id: "shipctl.projects", version: 1 },
+  ]);
+  assert.deepEqual(assistantsArtifact.manifest.application.backgroundEffects, [
+    "assistants.runtime",
   ]);
   assert.deepEqual(assistantsArtifact.manifest.application.contributions, [
     { family: "panel", id: "assistants.launcher", schemaVersion: 1 },
@@ -2097,24 +2420,19 @@ test("architecture.assistants-artifact-parity.property", async () => {
     admittedMessages: assistantsArtifact.manifest.messages,
     admittedGrants: assistantsArtifact.manifest.requestedGrants,
   });
-  const staticDefinition = api.defineShipctlPlugin({
-    module: assistantsSource.assistantsModule,
-    role: "compound",
-    requires: [
-      api.assistantLaunchService,
-      api.credentialStoreService,
-      api.processesService,
-      api.terminalSessionsService,
-    ],
-  });
+  const sourceDefinition = assistantsSource.createShipctlPlugin({ pluginApi: api });
+  assert.equal(loaded.module, undefined);
+  assert.equal(sourceDefinition.id, "shipctl.assistants");
+  assert.deepEqual(sourceDefinition.requiredGrants, assistantsArtifact.manifest.requestedGrants);
   assert.deepEqual(
-    assistantsCatalog(loaded.module),
-    assistantsCatalog(assistantsSource.assistantsModule),
+    sourceDefinition.requires.map(({ id, version }) => ({ id, version })),
+    assistantsArtifact.manifest.application.requiredServices,
   );
+  assert.deepEqual(sourceDefinition.backgroundEffects, ["assistants.runtime"]);
   assert.equal(loaded.definition.role, "compound");
   assert.deepEqual(
-    await runAssistantsRestoreOnce(loaded.definition),
-    await runAssistantsRestoreOnce(staticDefinition),
+    await runAssistantsRestoreOnce(loaded.definition, loaded.admission),
+    await runAssistantsRestoreOnce(sourceDefinition, loaded.admission),
   );
 
   await fc.assert(fc.asyncProperty(
@@ -2122,15 +2440,16 @@ test("architecture.assistants-artifact-parity.property", async () => {
       commandAvailable: fc.boolean(),
       configuredCredential: fc.boolean(),
       provider: fc.constantFrom("claude", "codex", "antigravity", "opencode", "pi"),
-      models: fc.uniqueArray(fc.stringMatching(/^[a-z][a-z0-9._-]{0,15}$/)),
     }),
     async (input) => {
       const sourceResult = await runAssistantsDefinition({
-        definition: staticDefinition,
+        definition: sourceDefinition,
+        admission: loaded.admission,
         ...input,
       });
       const artifactResult = await runAssistantsDefinition({
         definition: loaded.definition,
+        admission: loaded.admission,
         ...input,
       });
       assert.deepEqual(artifactResult, sourceResult);
@@ -2138,7 +2457,7 @@ test("architecture.assistants-artifact-parity.property", async () => {
   ), propertyParameters());
 });
 
-function usageCatalog(module) {
+function usageCatalog(definition, contributions) {
   const presentation = (values) => (values ?? []).map((value) => ({
     id: value.id,
     moduleId: value.moduleId,
@@ -2150,16 +2469,18 @@ function usageCatalog(module) {
     unavailable: value.unavailable,
     hasLoader: typeof value.load === "function",
   }));
-  const messages = module.messages ?? EMPTY_MESSAGES;
+  const messages = contributions.messages[0] ?? EMPTY_MESSAGES;
   return {
-    id: module.id,
-    version: module.version,
-    requiredGrants: [...module.requiredGrants ?? []],
-    globalSurfaces: presentation(module.globalSurfaces),
-    globalNavigation: presentation(module.globalNavigation),
-    sidebar: presentation(module.sidebar),
-    settings: presentation(module.settings),
-    scheduledTasks: (module.scheduledTasks ?? []).map(({ id, moduleId, schedule }) => ({
+    id: definition.id,
+    version: definition.version,
+    requiredGrants: [...definition.requiredGrants ?? []],
+    requires: (definition.requires ?? []).map(({ id, version }) => ({ id, version })),
+    backgroundEffects: [...definition.backgroundEffects ?? []],
+    globalSurfaces: presentation(contributions.globalSurfaces),
+    globalNavigation: presentation(contributions.globalNavigation),
+    sidebar: presentation(contributions.sidebars),
+    settings: presentation(contributions.settings),
+    scheduledTasks: contributions.scheduledTasks.map(({ id, moduleId, schedule }) => ({
       id,
       moduleId,
       schedule,
@@ -2184,7 +2505,7 @@ function usageCatalog(module) {
         hasHandler: typeof value.handle === "function",
       })),
     },
-    hasActivate: typeof module.activate === "function",
+    hasActivate: typeof definition.activate === "function",
   };
 }
 
@@ -2198,28 +2519,14 @@ function normalizedPluginDataTrace(trace) {
   }));
 }
 
-function normalizedMessageTrace(trace) {
-  return trace.map(({ operation, activation, envelope }) => ({
-    operation,
-    moduleId: activation.moduleId,
-    envelope: {
-      schemaVersion: envelope.schemaVersion,
-      endpoint: envelope.endpoint,
-      message: envelope.message,
-      payload: envelope.payload,
-    },
-  }));
-}
-
 async function settleUsageActivation() {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-async function runUsageDefinition({ definition, provider, settings }) {
+async function runUsageDefinition({ definition, admission, provider, settings }) {
   const activationId = "shipctl.usage@0.0.0#artifact-parity";
   const usageTrace = [];
   const dataTrace = [];
-  const messageTrace = [];
   const schedulerTrace = [];
   const changes = new testingApi.FakeUsageSourceChangeController();
   const semanticServices = new semanticRuntime.SemanticServiceRegistry([
@@ -2237,10 +2544,9 @@ async function runUsageDefinition({ definition, provider, settings }) {
     testingApi.createFakeMessagesServiceProvider({
       registrations: [{
         activation: { moduleId: "shipctl.usage", activationId },
-        grants: definition.module.requiredGrants ?? [],
-        messages: definition.module.messages ?? EMPTY_MESSAGES,
+        grants: definition.requiredGrants ?? [],
+        messages: EMPTY_MESSAGES,
       }],
-      trace: messageTrace,
     }),
     testingApi.createFakeSchedulerServiceProvider({ trace: schedulerTrace }),
   ]);
@@ -2249,37 +2555,45 @@ async function runUsageDefinition({ definition, provider, settings }) {
     [definition],
     new Map([["shipctl.usage", activationId]]),
     semanticServices,
+    false,
+    new Map([["shipctl.usage", admission]]),
   );
   assert.deepEqual(activation.failures, []);
-  const context = activation.activationContextsByModule.get("shipctl.usage");
-  assert.ok(context);
+  const contributions = activation.contributionsByModule.get("shipctl.usage");
+  assert.ok(contributions);
+  assert.equal(contributions.messages.length, 1);
   await settleUsageActivation();
 
-  const channel = definition.module.messages?.handles?.[0]?.channel;
+  const messages = contributions.messages[0];
+  const channel = messages?.handles?.[0]?.channel;
   assert.ok(channel);
-  const messageOutcome = await context.services.require(api.messagesService)
-    .sendMessage.execute({ channel, payload: {} });
-  assert.equal(messageOutcome.result.ok, true);
+  const scheduledTask = contributions.scheduledTasks[0];
+  assert.ok(scheduledTask);
+  assert.equal(scheduledTask.schedule.target.kind, "channel");
+  assert.equal(scheduledTask.schedule.target.endpoint.id, channel.id);
+  await messages.handles[0].handle(scheduledTask.schedule.payload);
   await changes.publish([provider]);
   await settleUsageActivation();
 
   const presentation = {};
-  for (const family of ["globalSurfaces", "sidebar", "settings"]) {
-    const contribution = definition.module[family]?.[0];
+  for (const [key, family] of [
+    ["globalSurfaces", "globalSurfaces"],
+    ["sidebar", "sidebars"],
+    ["settings", "settings"],
+  ]) {
+    const contribution = contributions[family]?.[0];
     assert.ok(contribution);
     const namespace = await contribution.load();
-    presentation[family] = {
+    presentation[key] = {
       exports: Object.keys(namespace).sort(),
       defaultType: typeof namespace.default,
     };
   }
 
   const result = {
-    catalog: usageCatalog(definition.module),
+    catalog: usageCatalog(definition, contributions),
     dataTrace: normalizedPluginDataTrace(dataTrace),
     inspection: normalizedInspection(activation.inspect()),
-    messageResult: messageOutcome.result,
-    messageTrace: normalizedMessageTrace(messageTrace),
     presentation,
     schedulerTrace: normalizedRequestTrace(schedulerTrace),
     usageTrace: normalizedRequestTrace(usageTrace),
@@ -2315,11 +2629,12 @@ test("architecture.usage-artifact-parity.property", async () => {
     "schedule.register",
   ]);
   assert.deepEqual(usageArtifact.manifest.application.requiredServices, [
-    { id: "shipctl.usage-sources", version: 2 },
+    { id: "shipctl.usage-sources", version: 3 },
     { id: "shipctl.plugin-data", version: 1 },
     { id: "shipctl.messages", version: 1 },
     { id: "shipctl.scheduler", version: 1 },
   ]);
+  assert.deepEqual(usageArtifact.manifest.application.backgroundEffects, ["usage.runtime"]);
   assert.deepEqual(usageArtifact.manifest.application.contributions, [
     { family: "global-surface", id: "core.usage", schemaVersion: 1 },
     { family: "global-navigation", id: "usage.global-navigation", schemaVersion: 1 },
@@ -2338,18 +2653,18 @@ test("architecture.usage-artifact-parity.property", async () => {
     admittedMessages: usageArtifact.manifest.messages,
     admittedGrants: usageArtifact.manifest.requestedGrants,
   });
-  const staticDefinition = api.defineShipctlPlugin({
-    module: usageSource.usageModule,
-    role: "compound",
-    requires: [
-      api.usageSourcesService,
-      api.pluginDataService,
-      api.messagesService,
-      api.schedulerService,
-    ],
-  });
+  const sourceDefinition = usageSource.createShipctlPlugin({ pluginApi: api });
+  assert.equal(loaded.module, undefined);
+  assert.equal("module" in loaded.definition, false);
+  assert.equal("module" in sourceDefinition, false);
+  assert.equal(sourceDefinition.id, "shipctl.usage");
+  assert.deepEqual(sourceDefinition.requiredGrants, usageArtifact.manifest.requestedGrants);
+  assert.deepEqual(
+    sourceDefinition.requires.map(({ id, version }) => ({ id, version })),
+    usageArtifact.manifest.application.requiredServices,
+  );
+  assert.deepEqual(sourceDefinition.backgroundEffects, ["usage.runtime"]);
   assert.equal(loaded.definition.role, "compound");
-  assert.deepEqual(usageCatalog(loaded.module), usageCatalog(usageSource.usageModule));
 
   await fc.assert(fc.asyncProperty(
     fc.record({
@@ -2367,11 +2682,13 @@ test("architecture.usage-artifact-parity.property", async () => {
         },
       };
       const sourceResult = await runUsageDefinition({
-        definition: staticDefinition,
+        definition: sourceDefinition,
+        admission: loaded.admission,
         ...input,
       });
       const artifactResult = await runUsageDefinition({
         definition: loaded.definition,
+        admission: loaded.admission,
         ...input,
       });
       assert.deepEqual(artifactResult, sourceResult);

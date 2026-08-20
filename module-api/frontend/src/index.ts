@@ -13,6 +13,60 @@ export type { PanelContribution } from "./module/panels";
 
 export type { CommandInvocationContext } from "./host/commands";
 export type { CommandContribution } from "./module/commands";
+export type {
+  ConfigurationContribution,
+  ConfigurationDiagnostic,
+  ConfigurationMigration,
+  ConfigurationScopeKind,
+  ConfigurationValidation,
+  LegacyConfigurationSource,
+} from "./module/configuration";
+export {
+  configurationService,
+  HOST_CONFIGURATION_KEYS,
+  isHostConfigurationKey,
+} from "./protocol/configuration.ts";
+export type {
+  ConfigurationService,
+  ConfigurationServiceErrorCode,
+  HostConfigurationInspection,
+  HostConfigurationKey,
+  HostConfigurationResolution,
+  InspectConfigurationInput,
+  ResolveConfigurationInput,
+  UpdateConfigurationInput,
+} from "./protocol/configuration.ts";
+export {
+  RUNTIME_CONFIGURATION_OPERATIONS,
+  RUNTIME_OPERATION_DIAGNOSTIC_CODES,
+  RUNTIME_OPERATION_SCHEMA_VERSION,
+  RUNTIME_OPERATIONS,
+  RUNTIME_WORKSPACE_OPERATIONS,
+  RuntimeOperationParseError,
+  isConfigurationRuntimeOperation,
+  isRuntimeOperation,
+  isWorkspaceRuntimeOperation,
+  parseRuntimeOperationRequest,
+  parseRuntimeOperationResponse,
+  runtimeOperationFailure,
+  runtimeOperationSuccess,
+  runtimeOperationUnavailable,
+} from "./protocol/runtimeOperations.ts";
+export type {
+  ConfigurationRuntimeOperation,
+  InspectConfigurationRuntimeOperationRequest,
+  InspectWorkspaceRuntimeOperationRequest,
+  RuntimeOperation,
+  RuntimeOperationDiagnosticCode,
+  RuntimeOperationFailure,
+  RuntimeOperationRequest,
+  RuntimeOperationResponse,
+  RuntimeOperationSuccess,
+  RuntimeOperationUnavailable,
+  UpdateConfigurationRuntimeOperationRequest,
+  WorkspaceCommandRuntimeOperationRequest,
+  WorkspaceRuntimeOperation,
+} from "./protocol/runtimeOperations.ts";
 
 export type {
   ModuleAppearanceSnapshot,
@@ -21,6 +75,7 @@ export type {
   ModuleManagedTerminalStartResult,
   ModuleNotice,
   ModuleNoticeAction,
+  ModuleNoticeSink,
   ModuleNoticeOptions,
   ModuleSettingsSnapshot,
   ModuleSkillRef,
@@ -84,6 +139,14 @@ export type {
   SemanticStreamGap,
 } from "./protocol/semanticServices";
 export type {
+  AcceptedPluginAdmission,
+  AcceptedPluginArtifactIdentity,
+} from "./protocol/admission";
+export type {
+  PluginContributionRegistries,
+  PluginContributionRegistry,
+} from "./protocol/pluginContributions";
+export type {
   AnySemanticServiceProvider,
   SemanticServiceProvider,
   SemanticServiceProviderContext,
@@ -110,6 +173,15 @@ export type {
   ReadProjectDocumentInput,
   WriteProjectDocumentInput,
 } from "./protocol/projectDocuments";
+export { projectsService } from "./protocol/projects.ts";
+export type {
+  ListProjectsInput,
+  ProjectCatalog,
+  ProjectCatalogChange,
+  ProjectCatalogScope,
+  ProjectsErrorCode,
+  ProjectsService,
+} from "./protocol/projects";
 export { gitService } from "./protocol/git.ts";
 export type {
   GitBranchInput,
@@ -165,11 +237,18 @@ export type {
   AssistantLaunchErrorCode,
   AssistantLaunchGrant,
   AssistantLaunchService,
-  AssistantModelCatalog,
-  AssistantProviderConfiguration,
   AssistantProviderId,
-  AssistantProviderSettings,
+  AssistantProcessArgument,
+  AssistantProcessLaunch,
   AssistantRecoveryRecord,
+  AssistantResourceExecuteCompletion,
+  AssistantResourceExecuteInput,
+  AssistantResourceExecuteResult,
+  AssistantResourceFile,
+  AssistantResourceReadInput,
+  AssistantResourceReadRequest,
+  AssistantResourceReadResult,
+  AssistantResourceWriteInput,
   AssistantSessionChanged,
   AssistantSessionChangeKind,
   AssistantSessionId,
@@ -177,12 +256,10 @@ export type {
   AssistantSessionMode,
   AssistantSessionObservationScope,
   AssistantTerminalStartContext,
-  InspectAssistantModelsInput,
-  InspectAssistantProviderConfigurationInput,
+  RecordAssistantSessionIdentityInput,
   RecordAssistantLabelInput,
   RecordAssistantPlacementInput,
   ResumeAssistantSessionInput,
-  SaveAssistantProviderConfigurationInput,
   StartAssistantSessionInput,
   StartedAssistantSession,
 } from "./protocol/assistantLaunch";
@@ -190,23 +267,20 @@ export { usageSourcesService } from "./protocol/usageSources.ts";
 export type {
   InspectUsageSourceInput,
   RefreshUsageSourcesInput,
-  UsageConfidence,
-  UsageCostKind,
-  UsageProvider,
-  UsageProviderObservation,
-  UsageProviderWindow,
-  UsageSourceDescriptor,
   UsageSourceDataset,
+  UsageSourceId,
   UsageSourceInspection,
-  UsageSourceKind,
   UsageSourceObservationScope,
   UsageSourceRecord,
+  UsageSourceResourceReadInput,
+  UsageSourceResourceRequest,
+  UsageSourceResourceResult,
   UsageSourceRefreshReceipt,
+  UsageSourceUpdate,
   UsageSourcesChanged,
   UsageSourcesErrorCode,
   UsageSourcesGrant,
   UsageSourcesService,
-  UsageSourceType,
 } from "./protocol/usageSources";
 export { pluginDataService } from "./protocol/pluginData.ts";
 export type {
@@ -265,6 +339,8 @@ export type {
 } from "./module/module";
 export { defineShipctlPlugin } from "./module/plugins.ts";
 export type {
+  DirectShipctlPluginDefinition,
+  LegacyShipctlPluginDefinition,
   PluginArtifactDeclarations,
   PluginActivationInspection,
   PluginActivationStatus,
@@ -305,6 +381,7 @@ export type {
   FocusTerminalSessionInput,
   InspectTerminalSessionsInput,
   ResizeTerminalInput,
+  StartManagedTerminalSessionInput,
   StartTerminalSessionInput,
   StopTerminalSessionInput,
   TerminalByteFrame,
@@ -484,19 +561,45 @@ export {
   workspaceService,
 } from "./services/workspace.ts";
 export type {
+  ApplyWorkspaceCommand,
+  ApplyWorkspaceInput,
   CloseWorkspaceViewCommand,
+  CloseWorkspaceViewStep,
+  DockWorkspaceFloatingCommand,
+  DockWorkspaceFloatingStep,
+  FloatWorkspaceViewCommand,
+  FloatWorkspaceViewStep,
   FocusWorkspaceViewCommand,
+  FocusWorkspaceViewStep,
   InspectWorkspaceInput,
+  MaximizeWorkspaceStackCommand,
+  MaximizeWorkspaceStackStep,
   MoveWorkspaceViewCommand,
+  MoveWorkspaceViewStep,
   MutateWorkspaceInput,
   OpenWorkspaceViewCommand,
+  OpenWorkspaceViewStep,
+  PlanWorkspaceInput,
+  RenameWorkspaceViewCommand,
+  RenameWorkspaceViewStep,
   ResetWorkspaceCommand,
+  ResetWorkspaceStep,
+  RestoreWorkspaceStackCommand,
+  RestoreWorkspaceStackStep,
+  ResizeWorkspaceSplitCommand,
+  ResizeWorkspaceSplitStep,
   SelectWorkspaceViewCommand,
+  SelectWorkspaceViewStep,
   SplitWorkspaceViewCommand,
+  SplitWorkspaceViewStep,
   UiWorkspaceDocument,
+  UpdateWorkspaceFloatingCommand,
+  UpdateWorkspaceFloatingStep,
+  ValidateWorkspaceInput,
   WorkspaceCatalogSnapshot,
   WorkspaceCloseBehavior,
   WorkspaceCommand,
+  WorkspaceCommandStep,
   WorkspaceErrorCode,
   WorkspaceFloatingStack,
   WorkspaceInspection,
@@ -506,11 +609,13 @@ export type {
   WorkspaceObservationScope,
   WorkspacePersistedRecord,
   WorkspacePlacementIntent,
+  WorkspacePlan,
   WorkspaceResourceReference,
   WorkspaceRevision,
   WorkspaceService,
   WorkspaceSplitNode,
   WorkspaceStackNode,
+  WorkspaceValidation,
   WorkspaceViewAvailability,
   WorkspaceViewCardinality,
   WorkspaceViewDefinition,
@@ -519,5 +624,4 @@ export type {
   WorkspaceViewPlacement,
   WorkspaceViewPresentationRef,
   WorkspaceViewScope,
-  WorkspaceViewStatePolicy,
 } from "./services/workspace.ts";

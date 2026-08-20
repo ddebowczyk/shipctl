@@ -30,6 +30,7 @@ let InMemoryWorkspacePersistence;
 let SemanticServiceRegistry;
 let loadRuntimeModules;
 let openModuleMessageBridge;
+let createModuleMessageActivations;
 
 function propertyParameters() {
   const configured = process.env.SHIPCTL_PROPERTY_SEED;
@@ -48,7 +49,7 @@ before(async () => {
     server: { hmr: false, middlewareMode: true },
   });
   ({ LiveModuleSupervisor } = await vite.ssrLoadModule(
-    "/core/frontend/host/liveModuleSupervisor.ts",
+    "/core/frontend/runtime/liveModuleSupervisor.ts",
   ));
   ({ WorkspaceContributionCatalog } = await vite.ssrLoadModule(
     "/core/frontend/host/workspaceContributionCatalog.ts",
@@ -68,7 +69,7 @@ before(async () => {
   ({ loadRuntimeModules } = await vite.ssrLoadModule(
     "/core/frontend/host/runtimeModuleLoader.ts",
   ));
-  ({ openModuleMessageBridge } = await vite.ssrLoadModule(
+  ({ openModuleMessageBridge, createModuleMessageActivations } = await vite.ssrLoadModule(
     "/core/frontend/host/messageBusBridge.ts",
   ));
 });
@@ -209,9 +210,8 @@ function coreWorkspaceProfile(coreActivation) {
     );
     assert(coreDefinition, "the host workspace must retain its core surface");
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       workspaceId,
-      profileId: "absence.core",
       instances: [{
         instanceId: CORE_INSTANCE_ID,
         viewTypeId: CORE_VIEW_TYPE_ID,
@@ -219,7 +219,6 @@ function coreWorkspaceProfile(coreActivation) {
         ownerActivationId: coreActivation.identity.activationId,
         resource: { kind: "global" },
         label: coreDefinition.label,
-        stateRef: null,
         availability: { kind: "available" },
         lifecycle: "placed",
       }],
@@ -352,12 +351,12 @@ test("architecture.plugin-absence.property", async () => {
     let currentCatalog = baselineCatalog;
 
     const supervisor = new LiveModuleSupervisor({
-      staticModules: [],
       services: {},
       createSemanticServices: () => new SemanticServiceRegistry(),
       createWorkspaceContributions: (family) => createWorkspaceContributions(coreActivation, family),
-      openMessageBridge: (modules) => openModuleMessageBridge(
-        modules,
+      createMessageActivations: createModuleMessageActivations,
+      openMessageBridge: () => openModuleMessageBridge(
+        [],
         transport,
         (module) => `${module.id}@${module.version}#static`,
       ),
@@ -449,7 +448,7 @@ test("architecture.plugin-absence.property", async () => {
       assert.equal(rejected.length, 1);
       assert.equal(rejected[0]?.desiredRevision, failedCatalog.registryRevision);
       assert.equal(rejected[0]?.moduleId, failureEntry.moduleId);
-      assert.equal(rejected[0]?.stage, failureKind === "load-failure" ? "prepare" : "validate");
+      assert.equal(rejected[0]?.stage, "prepare");
       assert.deepEqual(currentFamilyIds(supervisor), selectedIds);
       assert.equal(published.length, 1);
       assert.equal(applied.length, 1);
@@ -461,4 +460,212 @@ test("architecture.plugin-absence.property", async () => {
     }
     assert.equal(transport.closes, 1);
   }), propertyParameters());
+});
+
+test("architecture.direct-plugin-manifest-admission.property", async () => {
+  const moduleId = "fixture.direct-manifest";
+  const version = "1.0.0";
+  const contentDigest = digest(moduleId, version, "manifest-admission");
+  const declaredSurfaceId = `${moduleId}.declared-surface`;
+  const registeredSurfaceId = `${moduleId}.registered-surface`;
+  const descriptor = Object.freeze({
+    schemaVersion: 1,
+    moduleId,
+    version,
+    contentDigest,
+    entryPath: `/fixture/modules/${moduleId}/${contentDigest}/dist/plugin.mjs`,
+    stylePaths: [],
+    manifest: {
+      schemaVersion: 2,
+      lifecycle: "live",
+      messages: EMPTY_MESSAGES,
+      requestedGrants: [],
+      application: {
+        schemaVersion: 1,
+        role: "presentation",
+        requiredServices: [],
+        providedServices: [],
+        backgroundEffects: [],
+        contributions: [{
+          family: "global-surface",
+          id: declaredSurfaceId,
+          schemaVersion: 1,
+        }],
+      },
+    },
+    capabilities: { definitions: [] },
+  });
+  const runtimeCatalog = catalog(1, [descriptor]);
+  let activations = 0;
+  let cleanups = 0;
+  const definition = Object.freeze({
+    id: moduleId,
+    version,
+    role: "presentation",
+    activate: (context) => {
+      activations += 1;
+      context.contributions.globalSurfaces.register({
+        id: registeredSurfaceId,
+        moduleId,
+        load: async () => ({ default: () => null }),
+      });
+      context.own(() => { cleanups += 1; });
+    },
+  });
+  const admission = Object.freeze({
+    artifact: Object.freeze({
+      contentDigest,
+      entryUrl: `asset://localhost/modules/${contentDigest}/plugin.mjs`,
+      moduleId,
+      version,
+    }),
+    effectiveGrants: Object.freeze([]),
+    application: descriptor.manifest.application,
+    messages: EMPTY_MESSAGES,
+  });
+  const transport = messageTransport();
+  const published = [];
+  const rejected = [];
+  const supervisor = new LiveModuleSupervisor({
+    services: {},
+    createSemanticServices: () => new SemanticServiceRegistry(),
+    createMessageActivations: createModuleMessageActivations,
+    openMessageBridge: () => openModuleMessageBridge([], transport),
+    loadModules: async () => ({
+      catalog: runtimeCatalog,
+      modules: [],
+      definitions: [definition],
+      admissionsByModule: new Map([[moduleId, admission]]),
+      failures: [],
+    }),
+    getCatalog: async () => runtimeCatalog,
+    observeRevisions: async () => () => undefined,
+    publish: (family) => published.push(family),
+    reportApplied: async () => undefined,
+    reportRejected: async (diagnostic) => { rejected.push(diagnostic); },
+  });
+
+  try {
+    await supervisor.start();
+    assert.equal(activations, 1);
+    assert.equal(cleanups, 1, "a rejected direct candidate must dispose activation-owned leases");
+    assert.equal(supervisor.accepted, null);
+    assert.deepEqual(published, []);
+    assert.deepEqual(rejected.map(({ code, moduleId: rejectedModuleId, stage }) => ({
+      code,
+      moduleId: rejectedModuleId,
+      stage,
+    })), [{
+      code: "module.loader.invalid_artifact",
+      moduleId,
+      stage: "prepare",
+    }]);
+  } finally {
+    await supervisor.dispose();
+  }
+  assert.equal(transport.closes, 1);
+});
+
+test("architecture.direct-plugin-activation-failure-precedes-manifest-comparison.property", async () => {
+  const moduleId = "fixture.direct-activation-failure";
+  const version = "1.0.0";
+  const contentDigest = digest(moduleId, version, "activation-failure");
+  const contributionId = `${moduleId}.surface`;
+  const descriptor = Object.freeze({
+    schemaVersion: 1,
+    moduleId,
+    version,
+    contentDigest,
+    entryPath: `/fixture/modules/${moduleId}/${contentDigest}/dist/plugin.mjs`,
+    stylePaths: [],
+    manifest: {
+      schemaVersion: 2,
+      lifecycle: "live",
+      messages: EMPTY_MESSAGES,
+      requestedGrants: [],
+      application: {
+        schemaVersion: 1,
+        role: "presentation",
+        requiredServices: [],
+        providedServices: [],
+        backgroundEffects: [],
+        contributions: [{
+          family: "global-surface",
+          id: contributionId,
+          schemaVersion: 1,
+        }],
+      },
+    },
+    capabilities: { definitions: [] },
+  });
+  const runtimeCatalog = catalog(1, [descriptor]);
+  let activations = 0;
+  let cleanups = 0;
+  const definition = Object.freeze({
+    id: moduleId,
+    version,
+    role: "presentation",
+    activate: (context) => {
+      activations += 1;
+      context.contributions.globalSurfaces.register({
+        id: contributionId,
+        moduleId,
+        load: async () => ({ default: () => null }),
+      });
+      context.own(() => { cleanups += 1; });
+      throw new Error("fixture activation failed after its contribution registration");
+    },
+  });
+  const admission = Object.freeze({
+    artifact: Object.freeze({
+      contentDigest,
+      entryUrl: `asset://localhost/modules/${contentDigest}/plugin.mjs`,
+      moduleId,
+      version,
+    }),
+    effectiveGrants: Object.freeze([]),
+    application: descriptor.manifest.application,
+    messages: EMPTY_MESSAGES,
+  });
+  const transport = messageTransport();
+  const published = [];
+  const rejected = [];
+  const supervisor = new LiveModuleSupervisor({
+    services: {},
+    createSemanticServices: () => new SemanticServiceRegistry(),
+    createMessageActivations: createModuleMessageActivations,
+    openMessageBridge: () => openModuleMessageBridge([], transport),
+    loadModules: async () => ({
+      catalog: runtimeCatalog,
+      modules: [],
+      definitions: [definition],
+      admissionsByModule: new Map([[moduleId, admission]]),
+      failures: [],
+    }),
+    getCatalog: async () => runtimeCatalog,
+    observeRevisions: async () => () => undefined,
+    publish: (family) => published.push(family),
+    reportApplied: async () => undefined,
+    reportRejected: async (diagnostic) => { rejected.push(diagnostic); },
+  });
+
+  try {
+    await supervisor.start();
+    assert.equal(activations, 1);
+    assert.equal(cleanups, 1, "a failed candidate must dispose activation-owned leases");
+    assert.equal(supervisor.accepted, null);
+    assert.deepEqual(published, []);
+    assert.deepEqual(rejected.map(({ code, moduleId: rejectedModuleId, stage }) => ({
+      code,
+      moduleId: rejectedModuleId,
+      stage,
+    })), [{
+      code: "module.runtime.activation_failed",
+      moduleId,
+      stage: "prepare",
+    }]);
+  } finally {
+    await supervisor.dispose();
+  }
+  assert.equal(transport.closes, 1);
 });

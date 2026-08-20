@@ -1,9 +1,11 @@
 import type {
+  AcceptedPluginAdmission,
   AnySemanticServiceProvider,
   ModuleActivationContext,
   ModuleActivationId,
   ModuleActivationIdentity,
   ModuleId,
+  ModuleNoticeSink,
   SemanticCleanup,
   SemanticLeaseId,
   SemanticOwnedLease,
@@ -12,6 +14,11 @@ import type {
   SemanticServiceReference,
 } from "@shipctl/module-api";
 
+import {
+  createPluginContributionCollector,
+  type PluginContributionCollector,
+} from "./pluginContributionRegistry.ts";
+
 function serviceKey(reference: SemanticServiceReference<unknown>): string {
   return `${reference.id}@${reference.version}`;
 }
@@ -19,6 +26,10 @@ function serviceKey(reference: SemanticServiceReference<unknown>): string {
 function randomIdentity(prefix: string): string {
   return `${prefix}#${crypto.randomUUID()}`;
 }
+
+const NOOP_NOTICE_SINK: ModuleNoticeSink = Object.freeze({
+  push: () => undefined,
+});
 
 export function createModuleActivationIdentity(
   moduleId: ModuleId,
@@ -34,6 +45,7 @@ export function createModuleActivationIdentity(
 
 export interface SemanticActivationController {
   readonly context: ModuleActivationContext;
+  readonly contributions: PluginContributionCollector;
   dispose(): Promise<void>;
 }
 
@@ -69,11 +81,13 @@ class ActivationController implements SemanticActivationController {
   readonly #instances = new Map<string, unknown>();
   readonly #leases: OwnedLease[] = [];
   #disposed = false;
+  readonly contributions: PluginContributionCollector;
   readonly context: ModuleActivationContext;
 
   constructor(
     identity: ModuleActivationIdentity,
     providers: ReadonlyMap<string, AnySemanticServiceProvider>,
+    acceptedAdmission: AcceptedPluginAdmission | null,
   ) {
     this.#identity = identity;
     this.#providers = providers;
@@ -88,6 +102,7 @@ class ActivationController implements SemanticActivationController {
         const controller = this;
         const providerContext: SemanticServiceProviderContext = {
           activation: this.#identity,
+          acceptedAdmission,
           get active() { return !controller.#disposed; },
           own: (cleanup) => this.#own(cleanup),
         };
@@ -97,9 +112,15 @@ class ActivationController implements SemanticActivationController {
       },
     };
     const controller = this;
+    this.contributions = createPluginContributionCollector(
+      identity,
+      (cleanup) => this.#own(cleanup),
+    );
     this.context = Object.freeze({
       identity,
       services: Object.freeze(access),
+      notices: NOOP_NOTICE_SINK,
+      contributions: this.contributions.registries,
       get disposed() { return controller.#disposed; },
       own: (cleanup: SemanticCleanup) => this.#own(cleanup),
     });
@@ -157,11 +178,14 @@ export class SemanticServiceRegistry {
     this.#providers = indexed;
   }
 
-  activate(identity: ModuleActivationIdentity): SemanticActivationController {
+  activate(
+    identity: ModuleActivationIdentity,
+    acceptedAdmission: AcceptedPluginAdmission | null = null,
+  ): SemanticActivationController {
     if (this.#seenActivationIds.has(identity.activationId)) {
       throw new Error(`Module activation identity cannot be reused: ${identity.activationId}`);
     }
     this.#seenActivationIds.add(identity.activationId);
-    return new ActivationController(identity, this.#providers);
+    return new ActivationController(identity, this.#providers, acceptedAdmission);
   }
 }

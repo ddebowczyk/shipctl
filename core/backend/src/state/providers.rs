@@ -6,10 +6,9 @@ use super::{
 };
 
 use crate::plugin_data::PluginDataService;
-use crate::state::workspace_document::WorkspaceDocumentStore;
-use crate::state::workspace_layout::WorkspaceLayoutStore;
 
 const LEGACY_SESSION_RECOVERY_ROOT: &str = "session-recovery";
+const LEGACY_WORKSPACE_DOCUMENT_FILE: &str = "workspace-documents.json";
 
 pub struct WorkspaceSnapshotProvider {
     config_path: PathBuf,
@@ -82,17 +81,29 @@ impl SnapshotProvider for LegacyStateSnapshotProvider {
     }
 
     fn entries(&self) -> Vec<SnapshotEntryDeclaration> {
-        vec![SnapshotEntryDeclaration {
-            id: "session_recovery",
-            classification: SnapshotClassification::ReferenceOnly,
-            source_paths: vec![PathBuf::from(LEGACY_SESSION_RECOVERY_ROOT)],
-            target_path: None,
-            redaction: "legacy recovery exports remain in the source profile and are not restored",
-        }]
+        vec![
+            SnapshotEntryDeclaration {
+                id: "session_recovery",
+                classification: SnapshotClassification::ReferenceOnly,
+                source_paths: vec![PathBuf::from(LEGACY_SESSION_RECOVERY_ROOT)],
+                target_path: None,
+                redaction: "legacy recovery exports remain in the source profile and are not restored",
+            },
+            SnapshotEntryDeclaration {
+                id: "workspace_document_import",
+                classification: SnapshotClassification::ReferenceOnly,
+                source_paths: vec![PathBuf::from(LEGACY_WORKSPACE_DOCUMENT_FILE)],
+                target_path: None,
+                redaction: "the retired workspace document file is a one-way plugin-data migration input and is not restored",
+            },
+        ]
     }
 
     fn capture(&self) -> Result<Vec<CapturedSnapshotEntry>, String> {
-        Ok(vec![excluded_capture("session_recovery")])
+        Ok(vec![
+            excluded_capture("session_recovery"),
+            excluded_capture("workspace_document_import"),
+        ])
     }
 
     fn validate_payload(&self, entry_id: &str, _payload: &[u8]) -> Result<(), String> {
@@ -102,9 +113,10 @@ impl SnapshotProvider for LegacyStateSnapshotProvider {
     }
 
     fn owns_source_path(&self, source_path: &Path) -> bool {
-        source_path
-            .strip_prefix(LEGACY_SESSION_RECOVERY_ROOT)
-            .is_ok()
+        source_path == Path::new(LEGACY_WORKSPACE_DOCUMENT_FILE)
+            || source_path
+                .strip_prefix(LEGACY_SESSION_RECOVERY_ROOT)
+                .is_ok()
     }
 }
 
@@ -112,80 +124,8 @@ pub struct UiSnapshotProvider {
     path: PathBuf,
 }
 
-pub struct WorkspaceLayoutSnapshotProvider {
-    path: PathBuf,
-}
-
-pub struct WorkspaceDocumentSnapshotProvider {
-    path: PathBuf,
-}
-
 pub struct PluginDataSnapshotProvider {
     path: PathBuf,
-}
-
-impl WorkspaceLayoutSnapshotProvider {
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-}
-
-impl WorkspaceDocumentSnapshotProvider {
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-}
-
-impl SnapshotProvider for WorkspaceLayoutSnapshotProvider {
-    fn id(&self) -> &'static str {
-        "host.canvas_layout"
-    }
-
-    fn schema_version(&self) -> u32 {
-        1
-    }
-
-    fn entries(&self) -> Vec<SnapshotEntryDeclaration> {
-        vec![portable_entry("persistence", "workspace-layouts.json")]
-    }
-
-    fn capture(&self) -> Result<Vec<CapturedSnapshotEntry>, String> {
-        Ok(vec![optional_file("persistence", &self.path)?])
-    }
-
-    fn validate_payload(&self, entry_id: &str, payload: &[u8]) -> Result<(), String> {
-        if entry_id != "persistence" {
-            return Err(format!("Unknown host.canvas_layout payload {entry_id}"));
-        }
-        WorkspaceLayoutStore::validate_serialized_document(payload)
-    }
-}
-
-impl SnapshotProvider for WorkspaceDocumentSnapshotProvider {
-    fn id(&self) -> &'static str {
-        "host.workspace_document"
-    }
-
-    fn schema_version(&self) -> u32 {
-        1
-    }
-
-    fn entries(&self) -> Vec<SnapshotEntryDeclaration> {
-        vec![portable_entry("persistence", "workspace-documents.json")]
-    }
-
-    fn capture(&self) -> Result<Vec<CapturedSnapshotEntry>, String> {
-        Ok(vec![optional_file("persistence", &self.path)?])
-    }
-
-    fn validate_payload(&self, entry_id: &str, payload: &[u8]) -> Result<(), String> {
-        if entry_id != "persistence" {
-            return Err(format!(
-                "Unknown host.workspace_document payload {entry_id}"
-            ));
-        }
-        WorkspaceDocumentStore::validate_serialized_document(payload)
-    }
 }
 
 impl PluginDataSnapshotProvider {
@@ -311,13 +251,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_session_recovery_is_classified_but_excluded() {
+    fn legacy_state_is_classified_but_excluded() {
         let provider = LegacyStateSnapshotProvider;
 
         assert!(provider.owns_source_path(Path::new("session-recovery/live-agent-sessions.json")));
+        assert!(provider.owns_source_path(Path::new(LEGACY_WORKSPACE_DOCUMENT_FILE)));
         assert!(!provider.owns_source_path(Path::new("unknown.cache")));
 
-        let declaration = provider.entries().remove(0);
+        let declarations = provider.entries();
+        let declaration = declarations
+            .iter()
+            .find(|entry| entry.id == "session_recovery")
+            .unwrap();
         assert_eq!(
             declaration.classification,
             SnapshotClassification::ReferenceOnly
@@ -328,8 +273,19 @@ mod tests {
         );
         assert!(declaration.target_path.is_none());
 
-        let capture = provider.capture().unwrap().remove(0);
-        assert!(capture.payload.is_none());
-        assert_eq!(capture.decision, "excluded_by_classification");
+        let workspace_import = declarations
+            .iter()
+            .find(|entry| entry.id == "workspace_document_import")
+            .unwrap();
+        assert_eq!(
+            workspace_import.source_paths,
+            vec![PathBuf::from(LEGACY_WORKSPACE_DOCUMENT_FILE)]
+        );
+        assert!(workspace_import.target_path.is_none());
+
+        for capture in provider.capture().unwrap() {
+            assert!(capture.payload.is_none());
+            assert_eq!(capture.decision, "excluded_by_classification");
+        }
     }
 }

@@ -52,8 +52,6 @@ export function validateManifests(root) {
 
   const rootPackagePath = path.join(root, "package.json");
   const rootPackage = existsSync(rootPackagePath) ? readJson(rootPackagePath) : { dependencies: {} };
-  const enabledModulesPath = path.join(root, "core/frontend/host/enabledModules.ts");
-  const enabledModules = existsSync(enabledModulesPath) ? readFileSync(enabledModulesPath, "utf8") : "";
   const cargoPath = path.join(root, "src-tauri/Cargo.toml");
   const cargo = existsSync(cargoPath) ? readStructured(cargoPath, "toml") : null;
   const moduleHostPath = path.join(root, "src-tauri/src/modules/mod.rs");
@@ -98,19 +96,24 @@ export function validateManifests(root) {
     }
 
     if (frontend.composition_symbol) {
-      const compositionPath = fixtureProfile
-        ? path.join(root, "ops/modularity/fixtures/module-fixture/enabledModules.ts")
-        : enabledModulesPath;
-      const composition = fixtureProfile && existsSync(compositionPath)
-        ? readFileSync(compositionPath, "utf8")
-        : enabledModules;
-      const importMarker = `import { ${frontend.composition_symbol} } from "${frontend.package}";`;
-      if (!composition.includes(importMarker)) {
-        fail(id, `${path.relative(root, compositionPath)} must import ${frontend.composition_symbol}`);
-      }
-      const symbolUses = composition.match(new RegExp(`\\b${frontend.composition_symbol}\\b`, "g")) ?? [];
-      if (symbolUses.length < 2) {
-        fail(id, `${path.relative(root, compositionPath)} must compose ${frontend.composition_symbol}`);
+      if (!fixtureProfile) {
+        fail(id, "static composition symbols are allowed only in the module fixture");
+      } else {
+        const compositionPath = path.join(
+          root,
+          "ops/modularity/fixtures/module-fixture/enabledModules.ts",
+        );
+        const composition = existsSync(compositionPath)
+          ? readFileSync(compositionPath, "utf8")
+          : "";
+        const importMarker = `import { ${frontend.composition_symbol} } from "${frontend.package}";`;
+        if (!composition.includes(importMarker)) {
+          fail(id, `${path.relative(root, compositionPath)} must import ${frontend.composition_symbol}`);
+        }
+        const symbolUses = composition.match(new RegExp(`\\b${frontend.composition_symbol}\\b`, "g")) ?? [];
+        if (symbolUses.length < 2) {
+          fail(id, `${path.relative(root, compositionPath)} must compose ${frontend.composition_symbol}`);
+        }
       }
     }
 

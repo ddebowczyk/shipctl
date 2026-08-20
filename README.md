@@ -78,10 +78,10 @@ ops/             build, check, test, modularity, and upstream tooling
 docs/            curated shared reference; local plans remain under docs/plans/
 ```
 
-Two rules are enforced in CI: a module may never import the host, and the host
-reaches modules only through `@shipctl/module-api` and
-`core/frontend/host/enabledModules.ts`. Verify with
-`just modularity plugout <name>`.
+Two rules are enforced in CI: a module may never import the host, and no
+shipping module is statically imported by the host. Modules enter through
+admitted runtime artifacts and the narrow `@shipctl/module-api` contract.
+Verify with `just modularity plugout <name>`.
 
 For a complete, validated map of every root-level item, run
 `just repository map` or read

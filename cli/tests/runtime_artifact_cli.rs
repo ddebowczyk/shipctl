@@ -18,8 +18,8 @@ use shipctl_core::module_control::artifact::{
     CapabilityProviderBinding, CapabilityProviderCardinality, CapabilityProviderSelection,
     CapabilityScope, CapabilityStreamDefinition, CapabilitySurfaceBinding,
     CapabilityTopicDefinition, RuntimeArtifactArchive, RuntimeArtifactManifest,
-    RuntimeUiContribution, ARTIFACT_CONTRACT_SCHEMA_VERSION, ARTIFACT_INTEGRITY_PATH,
-    ARTIFACT_MANIFEST_PATH, CAPABILITY_CONTRACT_SCHEMA_VERSION, PLUGIN_API_VERSION,
+    ARTIFACT_CONTRACT_SCHEMA_VERSION, ARTIFACT_INTEGRITY_PATH, ARTIFACT_MANIFEST_PATH,
+    CAPABILITY_CONTRACT_SCHEMA_VERSION, PLUGIN_API_VERSION,
 };
 use uuid::Uuid;
 
@@ -310,6 +310,54 @@ fn compiled_cli_admits_disabled_runtime_artifacts_and_rejects_unsafe_candidates(
     assert_disabled_report(&module_b["data"]);
     assert_eq!(published_digests(&state_root).len(), 2);
 
+    let registry = assert_success_json(
+        &run_offline(
+            &state_root,
+            &runtime_sentinel,
+            &["modules", "list"],
+            Some("json"),
+        ),
+        "modules.list",
+        "module.registry.listed",
+    );
+    assert!(registry["data"]["snapshot"]["desired"].is_array());
+    assert!(registry["data"]["snapshot"]
+        .get("staticInventory")
+        .is_none());
+    assert!(registry["data"]["snapshot"]
+        .get("staticBuildProvenance")
+        .is_none());
+
+    let enabled = assert_success_json(
+        &run_offline(
+            &state_root,
+            &runtime_sentinel,
+            &["modules", "enable", A_MODULE],
+            Some("json"),
+        ),
+        "modules.enable",
+        "module.operation.accepted",
+    );
+    assert_eq!(enabled["data"]["changed"], true);
+    assert_eq!(enabled["data"]["desired"]["enabled"], true);
+    assert!(enabled["data"]["operation"].is_object());
+
+    let enabled_again = assert_json(
+        &run_offline(
+            &state_root,
+            &runtime_sentinel,
+            &["modules", "enable", A_MODULE],
+            Some("json"),
+        ),
+        "modules.enable",
+        "module.operation.accepted",
+        "no_op",
+    );
+    assert_eq!(enabled_again["data"]["changed"], false);
+    assert_eq!(enabled_again["data"]["desired"]["enabled"], true);
+    assert!(enabled_again["data"]["operation"].is_null());
+    assert_no_runtime_side_effects(&state_root, &runtime_sentinel);
+
     let after_valid_artifacts = tree_fingerprint(&state_root);
     let tampered = tampered_archive(&artifact_a);
     let incompatible = fixture_archive(
@@ -553,11 +601,7 @@ fn fixture_archive(
             scopes: vec![CapabilityScope::Workspace],
         }],
     };
-    let ui_contribution = RuntimeUiContribution {
-        id: format!("{module_id}.panel"),
-        slot: "sidebar".to_string(),
-        entry: "chunks/fixture-panel.mjs".to_string(),
-    };
+    let panel_id = format!("{module_id}.panel");
     let peer_dependencies = peer_dependencies
         .iter()
         .map(|(name, range)| ((*name).to_string(), (*range).to_string()))
@@ -581,11 +625,10 @@ fn fixture_archive(
             "providedServices": [],
             "backgroundEffects": [],
             "contributions": [
-                {"family": "panel", "id": ui_contribution.id, "schemaVersion": 1},
+                {"family": "panel", "id": panel_id, "schemaVersion": 1},
                 {"family": "message-graph", "id": format!("{module_id}.messages"), "schemaVersion": 1}
             ]
         },
-        "uiContributions": [],
         "requestedGrants": requested_grants,
         "nativeAdapters": native_adapters,
         "configurationSchema": {"type": "object"},

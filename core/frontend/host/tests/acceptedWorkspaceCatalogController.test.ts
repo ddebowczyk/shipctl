@@ -36,7 +36,7 @@ const WORKSPACE_ID = "shipctl.workspace";
 
 function catalog(revision: number, includeUsage = true): WorkspaceCatalogSnapshot {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision,
     definitions: includeUsage ? [{
       viewTypeId: "shipctl.usage",
@@ -48,7 +48,6 @@ function catalog(revision: number, includeUsage = true): WorkspaceCatalogSnapsho
       closeBehavior: "hide",
       requiredCapabilityIds: [],
       placement: { defaultRegion: "primary", allowSplit: true },
-      state: { kind: "none" },
       presentation: { loaderId: "shipctl.usage", exportName: "default" },
       migrationAliases: [],
     }] : [],
@@ -57,9 +56,8 @@ function catalog(revision: number, includeUsage = true): WorkspaceCatalogSnapsho
 
 function emptyProfile({ workspaceId }: { readonly workspaceId: string }) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspaceId,
-    profileId: "shipctl.test.empty",
     instances: [],
     root: null,
     floating: [],
@@ -142,7 +140,6 @@ test("bootstrap preserves a matching persisted catalog until the first accepted 
     resource: { kind: "global" },
     placement: { kind: "default" },
     label: null,
-    stateRef: null,
   });
 
   const restored = await WorkspaceAuthority.open({

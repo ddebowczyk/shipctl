@@ -11,14 +11,17 @@ import {
   type SemanticServiceError,
   type SemanticServiceProvider,
   type SemanticServiceProviderContext,
-  type UsageProvider,
   type UsageSourceDataset,
-  type UsageSourceDescriptor,
+  type UsageSourceId,
   type UsageSourceInspection,
   type UsageSourceObservationScope,
+  type UsageSourceRecord,
   type UsageSourceRefreshReceipt,
+  type UsageSourceResourceReadInput,
+  type UsageSourceResourceResult,
   type UsageSourcesChanged,
   type UsageSourcesErrorCode,
+  type UsageSourcesGrant,
   type UsageSourcesService,
 } from "@shipctl/module-api";
 
@@ -31,45 +34,48 @@ import {
 const COMMANDS = {
   inspect: "inspect_usage_sources",
   refresh: "refresh_usage_sources",
+  readResource: "read_usage_source_resource",
   release: "release_usage_sources_activation",
 } as const;
 
 const CHANGED_SOURCE_ID = "shipctl.usage-sources.changed";
+const MAX_SOURCE_IDS = 64;
 
-export const USAGE_PROVIDERS = [
-  "claude",
-  "codex",
-  "antigravity",
-  "gemini",
-  "opencode",
-  "pi",
-] as const satisfies readonly UsageProvider[];
-
-const DESCRIPTORS: readonly UsageSourceDescriptor[] = Object.freeze([
-  { sourceId: "claude", kinds: ["provider-quota", "local-transcript"], authority: "host-managed" },
-  { sourceId: "codex", kinds: ["provider-quota", "local-transcript"], authority: "host-managed" },
-  { sourceId: "antigravity", kinds: ["provider-quota", "local-transcript"], authority: "host-managed" },
-  { sourceId: "gemini", kinds: ["provider-quota", "local-transcript"], authority: "host-managed" },
-  { sourceId: "opencode", kinds: ["local-transcript"], authority: "host-managed" },
-  { sourceId: "pi", kinds: ["local-transcript"], authority: "host-managed" },
+const USAGE_SOURCE_GRANTS = new Set<UsageSourcesGrant>([
+  "usage-source.read",
+  "usage-source.refresh",
+  "usage-source.observe",
 ]);
 
-interface NativeInspectUsageSourcesInput {
-  readonly sourceIds?: readonly UsageProvider[];
-}
-
 type EmptyInput = Readonly<Record<never, never>>;
+
+/**
+ * Private framing adds admission-derived grants before the native command sees
+ * a request. The permanent host has no source registry or product allowlist.
+ */
+export interface NativeUsageSourcesRequest<Input> {
+  readonly activation: {
+    readonly moduleId: string;
+    readonly activationId: string;
+    readonly effectiveGrants: readonly UsageSourcesGrant[];
+  };
+  readonly correlationId: SemanticCorrelationId;
+  readonly input: Input;
+}
 
 /** Private transport seam used by the production adapter and property tests. */
 export interface NativeUsageSourcesTransport {
   inspectSources(
-    request: PrivateSemanticRequestEnvelope<NativeInspectUsageSourcesInput>,
+    request: NativeUsageSourcesRequest<InspectUsageSourceInput>,
   ): Promise<UsageSourceDataset>;
   refreshSources(
-    request: PrivateSemanticRequestEnvelope<RefreshUsageSourcesInput>,
+    request: NativeUsageSourcesRequest<RefreshUsageSourcesInput>,
   ): Promise<UsageSourceRefreshReceipt>;
+  readResource(
+    request: NativeUsageSourcesRequest<UsageSourceResourceReadInput>,
+  ): Promise<UsageSourceResourceResult>;
   releaseActivation(
-    request: PrivateSemanticRequestEnvelope<EmptyInput>,
+    request: NativeUsageSourcesRequest<EmptyInput>,
   ): Promise<boolean>;
 }
 
@@ -81,10 +87,11 @@ export interface UsageSourcesServiceProviderOptions {
 const TAURI_TRANSPORT: NativeUsageSourcesTransport = {
   inspectSources: (request) => invoke(COMMANDS.inspect, { request }),
   refreshSources: (request) => invoke(COMMANDS.refresh, { request }),
+  readResource: (request) => invoke(COMMANDS.readResource, { request }),
   releaseActivation: (request) => invoke(COMMANDS.release, { request }),
 };
 
-type RuntimeChangeListener = (sourceIds: readonly UsageProvider[]) => void;
+type RuntimeChangeListener = (sourceIds: readonly UsageSourceId[]) => void;
 
 class RuntimeUsageSourceChanges {
   readonly #listeners = new Set<RuntimeChangeListener>();
@@ -94,7 +101,7 @@ class RuntimeUsageSourceChanges {
     return () => { this.#listeners.delete(listener); };
   }
 
-  publish(sourceIds: readonly UsageProvider[]): void {
+  publish(sourceIds: readonly UsageSourceId[]): void {
     for (const listener of this.#listeners) listener(sourceIds);
   }
 }
@@ -170,22 +177,97 @@ function request<Input, Output>(
   });
 }
 
-function isProvider(value: string): value is UsageProvider {
-  return (USAGE_PROVIDERS as readonly string[]).includes(value);
+function validSourceId(value: unknown): value is UsageSourceId {
+  return typeof value === "string"
+    && /^[a-z][a-z0-9-]{0,63}$/.test(value);
 }
 
-function sourceIds(
-  input: { readonly sourceIds?: readonly UsageProvider[] },
-): readonly UsageProvider[] | null {
-  const ids = input.sourceIds ?? USAGE_PROVIDERS;
-  return ids.length > 0 && ids.every(isProvider) ? [...new Set(ids)] : null;
+function normalizedSourceIds(value: unknown): readonly UsageSourceId[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SOURCE_IDS) return null;
+  if (!value.every(validSourceId)) return null;
+  const ids = [...new Set(value)];
+  return ids.length === value.length ? ids : null;
 }
 
-function invalidRequest<Output>(message: string): SemanticResult<Output, UsageSourcesErrorCode> {
+function isUsageSourcesGrant(value: string): value is UsageSourcesGrant {
+  return USAGE_SOURCE_GRANTS.has(value as UsageSourcesGrant);
+}
+
+function authorize(
+  context: SemanticServiceProviderContext,
+  grant: UsageSourcesGrant,
+): SemanticResult<never, UsageSourcesErrorCode> | null {
+  const admission = context.acceptedAdmission;
+  return admission !== null
+    && admission.artifact.moduleId === context.activation.moduleId
+    && admission.effectiveGrants.includes(grant)
+    ? null
+    : invalidRequest("Usage source access was denied", "usage-sources.denied");
+}
+
+function nativeRequest<Input>(
+  context: SemanticServiceProviderContext,
+  envelope: PrivateSemanticRequestEnvelope<Input>,
+): NativeUsageSourcesRequest<Input> {
+  const admission = context.acceptedAdmission;
   return {
-    ok: false,
-    error: { code: "usage-sources.invalid-request", message, retryable: false },
+    activation: {
+      moduleId: context.activation.moduleId,
+      activationId: context.activation.activationId,
+      effectiveGrants: admission === null
+        ? []
+        : admission.effectiveGrants.filter(isUsageSourcesGrant),
+    },
+    correlationId: envelope.correlationId,
+    input: envelope.input,
   };
+}
+
+function invalidRequest<Output>(
+  message: string,
+  code: UsageSourcesErrorCode = "usage-sources.invalid-request",
+): SemanticResult<Output, UsageSourcesErrorCode> {
+  return { ok: false, error: { code, message, retryable: false } };
+}
+
+function validRecordScope(
+  dataset: UsageSourceDataset,
+  sourceIds: readonly UsageSourceId[],
+): boolean {
+  return dataset.records.every(({ sourceId }) => sourceIds.includes(sourceId));
+}
+
+function validRefreshInput(input: RefreshUsageSourcesInput): boolean {
+  const sourceIds = normalizedSourceIds(input.sourceIds);
+  if (sourceIds === null || input.updates === undefined) return sourceIds !== null;
+  if (!Array.isArray(input.updates) || input.updates.length !== sourceIds.length) return false;
+  const updateIds = input.updates.map(({ sourceId }) => sourceId);
+  if (normalizedSourceIds(updateIds) === null || updateIds.some((sourceId) => !sourceIds.includes(sourceId))) {
+    return false;
+  }
+  return input.updates.every((update) => (
+    validSourceId(update.sourceId)
+    && Array.isArray(update.records)
+    && update.records.every((record: UsageSourceRecord) => record.sourceId === update.sourceId)
+  ));
+}
+
+function validResourceInput(input: UsageSourceResourceReadInput): boolean {
+  if (!validSourceId(input.sourceId) || typeof input.request !== "object" || input.request === null) {
+    return false;
+  }
+  const request = input.request as { readonly kind?: unknown; readonly resourceId?: unknown };
+  return typeof request.kind === "string"
+    && typeof request.resourceId === "string"
+    && request.resourceId.length > 0
+    && request.resourceId.length <= 128;
+}
+
+function validResourceResult(
+  input: UsageSourceResourceReadInput,
+  result: UsageSourceResourceResult,
+): boolean {
+  return result.kind === input.request.kind && result.resourceId === input.request.resourceId;
 }
 
 function inspectRequest(
@@ -195,31 +277,21 @@ function inspectRequest(
 ) {
   return request<InspectUsageSourceInput, UsageSourceInspection>(context, {
     async request(envelope) {
+      const denied = authorize(context, "usage-source.read");
+      if (denied) return denied;
       if (envelope.input.kind !== "source-dataset") {
         return invalidRequest("Usage source request is invalid");
       }
-      const requested = sourceIds(envelope.input);
-      if (requested === null) {
-        return invalidRequest("Usage source identity is invalid");
-      }
-      const dataset = await transport.inspectSources({
+      const sourceIds = normalizedSourceIds(envelope.input.sourceIds);
+      if (sourceIds === null) return invalidRequest("Usage source identity is invalid");
+      const dataset = await transport.inspectSources(nativeRequest(context, {
         ...envelope,
-        input: { sourceIds: requested },
-      });
-      if (
-        dataset.records.some(({ provider }) => !requested.includes(provider))
-        || dataset.providerObservations.some(({ provider }) => !requested.includes(provider))
-      ) {
+        input: { kind: "source-dataset", sourceIds },
+      }));
+      if (!validRecordScope(dataset, sourceIds)) {
         return invalidRequest("Native usage source response exceeded its requested scope");
       }
-      return {
-        ok: true,
-        value: {
-          kind: "source-dataset",
-          sources: DESCRIPTORS.filter(({ sourceId }) => requested.includes(sourceId)),
-          dataset,
-        },
-      };
+      return { ok: true, value: { kind: "source-dataset", dataset } };
     },
   }, createCorrelationId);
 }
@@ -231,22 +303,45 @@ function refreshRequest(
 ) {
   return request<RefreshUsageSourcesInput, UsageSourceRefreshReceipt>(context, {
     async request(envelope) {
-      const requested = sourceIds(envelope.input);
-      if (requested === null) {
-        return invalidRequest("Usage source identity is invalid");
+      const denied = authorize(context, "usage-source.refresh");
+      if (denied) return denied;
+      if (!validRefreshInput(envelope.input)) {
+        return invalidRequest("Usage source refresh input is invalid");
       }
-      const receipt = await transport.refreshSources({
+      const sourceIds = normalizedSourceIds(envelope.input.sourceIds);
+      if (sourceIds === null) return invalidRequest("Usage source identity is invalid");
+      const receipt = await transport.refreshSources(nativeRequest(context, {
         ...envelope,
-        input: { sourceIds: requested },
-      });
+        input: { ...envelope.input, sourceIds },
+      }));
       if (
-        receipt.acceptedSourceIds.length !== requested.length
-        || receipt.acceptedSourceIds.some((sourceId) => !requested.includes(sourceId))
+        receipt.acceptedSourceIds.length !== sourceIds.length
+        || receipt.acceptedSourceIds.some((sourceId) => !sourceIds.includes(sourceId))
       ) {
         return invalidRequest("Native usage source receipt did not match its request");
       }
       RUNTIME_CHANGES.publish(receipt.acceptedSourceIds);
       return { ok: true, value: receipt };
+    },
+  }, createCorrelationId);
+}
+
+function readResourceRequest(
+  context: SemanticServiceProviderContext,
+  transport: NativeUsageSourcesTransport,
+  createCorrelationId: () => SemanticCorrelationId,
+) {
+  return request<UsageSourceResourceReadInput, UsageSourceResourceResult>(context, {
+    async request(envelope) {
+      const denied = authorize(context, "usage-source.read");
+      if (denied) return denied;
+      if (!validResourceInput(envelope.input)) {
+        return invalidRequest("Usage source resource request is invalid");
+      }
+      const result = await transport.readResource(nativeRequest(context, envelope));
+      return validResourceResult(envelope.input, result)
+        ? { ok: true, value: result }
+        : invalidRequest("Native usage source resource response is invalid");
     },
   }, createCorrelationId);
 }
@@ -259,12 +354,15 @@ function sourceChanges(context: SemanticServiceProviderContext) {
       listener: (event: SemanticEventRecord<UsageSourcesChanged>) => void | Promise<void>,
     ): Promise<SemanticEventLease> {
       if (!context.active) throw new Error(DISPOSED_ERROR.message);
-      const requested = sourceIds(scope);
-      if (requested === null) throw new Error("Usage source scope is invalid");
+      if (authorize(context, "usage-source.observe")) {
+        throw new Error("Usage source observation was denied");
+      }
+      const sourceIds = normalizedSourceIds(scope.sourceIds);
+      if (sourceIds === null) throw new Error("Usage source scope is invalid");
       let active = true;
       let queue = Promise.resolve();
       const unsubscribe = RUNTIME_CHANGES.subscribe((changed) => {
-        const matching = changed.filter((sourceId) => requested.includes(sourceId));
+        const matching = changed.filter((sourceId) => sourceIds.includes(sourceId));
         if (!active || !context.active || matching.length === 0) return;
         sequence += 1;
         const record = {
@@ -286,10 +384,14 @@ function sourceChanges(context: SemanticServiceProviderContext) {
 }
 
 function releaseEnvelope(
-  activation: ModuleActivationIdentity,
+  context: SemanticServiceProviderContext,
   createCorrelationId: () => SemanticCorrelationId,
-): PrivateSemanticRequestEnvelope<EmptyInput> {
-  return { activation, correlationId: createCorrelationId(), input: {} };
+): NativeUsageSourcesRequest<EmptyInput> {
+  return nativeRequest(context, {
+    activation: context.activation as ModuleActivationIdentity,
+    correlationId: createCorrelationId(),
+    input: {},
+  });
 }
 
 /** Trusted adapter for the permanent native Usage Sources provider. */
@@ -302,11 +404,12 @@ export function createUsageSourcesServiceProvider(
     service: usageSourcesService,
     bind(context) {
       context.own(() => transport.releaseActivation(
-        releaseEnvelope(context.activation, createCorrelationId),
+        releaseEnvelope(context, createCorrelationId),
       ).then(() => undefined));
       return Object.freeze({
         inspectSource: inspectRequest(context, transport, createCorrelationId),
         refreshSources: refreshRequest(context, transport, createCorrelationId),
+        readResource: readResourceRequest(context, transport, createCorrelationId),
         observeSource: sourceChanges(context),
       });
     },

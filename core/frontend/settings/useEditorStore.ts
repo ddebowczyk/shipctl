@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import type { EditorSettings, PreferredEditor } from "@shipctl/core/platform";
-import { getEditorSettings, saveEditorSettings } from "@shipctl/core/platform";
-
-const DEFAULT_SETTINGS: EditorSettings = {
-  preferredEditor: null,
-};
+import {
+  DEFAULT_EDITOR_SETTINGS,
+  hostConfigurationRuntime,
+  type EditorSettings,
+  type PreferredEditor,
+} from "@shipctl/core/configuration";
 
 interface EditorStore {
   settings: EditorSettings;
@@ -17,18 +17,18 @@ interface EditorStore {
 }
 
 export const useEditorStore = create<EditorStore>((set) => ({
-  settings: DEFAULT_SETTINGS,
+  settings: DEFAULT_EDITOR_SETTINGS,
   hasLoaded: false,
   isSaving: false,
   error: null,
 
   loadSettings: async () => {
     try {
-      const settings = await getEditorSettings();
+      const { value: settings } = await hostConfigurationRuntime().resolve("editor");
       set({ settings, hasLoaded: true, error: null });
     } catch (error) {
       set({
-        settings: DEFAULT_SETTINGS,
+        settings: DEFAULT_EDITOR_SETTINGS,
         hasLoaded: true,
         error: String(error),
       });
@@ -39,7 +39,7 @@ export const useEditorStore = create<EditorStore>((set) => ({
     const nextSettings = { preferredEditor: editor };
     set({ isSaving: true, error: null });
     try {
-      await saveEditorSettings(nextSettings);
+      await hostConfigurationRuntime().update("editor", nextSettings);
       set({
         settings: nextSettings,
         isSaving: false,

@@ -102,8 +102,8 @@ Convert in increasing blast radius, one artifact per commit:
 | 1 | `commands` | compound, no native service | proves headless activation and contribution registration with no React and no port |
 | 2 | `ports` | presentation, one service (`processes`) | smallest presentation case: one navigation item, one surface |
 | 3 | `todos` | compound (`project documents`) | adds project-scoped state |
-| 4 | `git` | compound | adds the `MODULE_PLATFORM_EVENT_LISTENERS` exception (`git-fs-changed`); resolve or carry it explicitly |
-| 5 | `skills` | compound | adds a provider contribution |
+| 4 | `git` | compound | proves activation-owned repository-change leases, generic project catalog, and durable preferences while raw `git-fs-changed` remains confined to the trusted platform adapter |
+| 5 | `skills` | compound | adds provider contribution and generic project-catalog lifecycle |
 | 6 | `thin-terminal`, `semantic-terminal` | presentation | high-frequency presentation; keeps `terminal-presentation` contributions and mount stability (Step 07) |
 | 7 | `assistants` | compound | credentials, processes, terminal sessions |
 | 8 | `usage` | compound | nine grants, schedules, messages, background effects — the full surface |

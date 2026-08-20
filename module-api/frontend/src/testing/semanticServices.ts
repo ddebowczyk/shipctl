@@ -23,6 +23,9 @@ import type {
   SemanticStreamDelivery,
   SemanticStreamFrame,
 } from "../protocol/semanticServices";
+import type { AcceptedPluginAdmission } from "../protocol/admission";
+import type { PluginContributionRegistries } from "../protocol/pluginContributions";
+import type { ModuleNoticeSink } from "../protocol/services";
 import type {
   AnySemanticServiceProvider,
   SemanticServiceProviderContext,
@@ -33,6 +36,10 @@ function key(reference: SemanticServiceReference<unknown>): string {
 }
 
 let nextTestIdentity = 1;
+
+const NOOP_NOTICE_SINK: ModuleNoticeSink = Object.freeze({
+  push: () => undefined,
+});
 
 function testIdentity(prefix: string): string {
   const value = nextTestIdentity;
@@ -77,6 +84,32 @@ export interface TestActivationController {
   dispose(): Promise<void>;
 }
 
+function testContributionRegistries(
+  own: (cleanup: SemanticCleanup) => SemanticOwnedLease,
+): PluginContributionRegistries {
+  const register = <Contribution>(_contribution: Contribution): SemanticOwnedLease =>
+    own(() => undefined);
+  const registry = Object.freeze({ register });
+  return Object.freeze({
+    commands: registry,
+    configuration: registry,
+    globalNavigation: registry,
+    globalSurfaces: registry,
+    messages: registry,
+    panels: registry,
+    projectActions: registry,
+    projectFacts: registry,
+    projectImports: registry,
+    projectLayouts: registry,
+    projectNavigation: registry,
+    scheduledTasks: registry,
+    settings: registry,
+    sidebars: registry,
+    skillsProviders: registry,
+    terminalPresentations: registry,
+  });
+}
+
 class TestActivation implements TestActivationController {
   readonly #providers: ReadonlyMap<string, AnySemanticServiceProvider>;
   readonly #instances = new Map<string, unknown>();
@@ -87,6 +120,7 @@ class TestActivation implements TestActivationController {
   constructor(
     identity: ModuleActivationIdentity,
     providers: ReadonlyMap<string, AnySemanticServiceProvider>,
+    acceptedAdmission: AcceptedPluginAdmission | null,
   ) {
     this.#providers = providers;
     const access: SemanticServiceAccess = {
@@ -100,6 +134,7 @@ class TestActivation implements TestActivationController {
         const activation = this;
         const providerContext: SemanticServiceProviderContext = {
           activation: identity,
+          acceptedAdmission,
           get active() { return !activation.#disposed; },
           own: (cleanup) => this.#own(identity, cleanup),
         };
@@ -109,9 +144,14 @@ class TestActivation implements TestActivationController {
       },
     };
     const activation = this;
+    const contributions = testContributionRegistries(
+      (cleanup) => this.#own(identity, cleanup),
+    );
     this.context = Object.freeze({
       identity,
       services: Object.freeze(access),
+      notices: NOOP_NOTICE_SINK,
+      contributions,
       get disposed() { return activation.#disposed; },
       own: (cleanup: SemanticCleanup) => this.#own(identity, cleanup),
     });
@@ -154,12 +194,15 @@ export class SemanticServiceTestHost {
     this.#providers = indexed;
   }
 
-  activate(identity: ModuleActivationIdentity): TestActivationController {
+  activate(
+    identity: ModuleActivationIdentity,
+    acceptedAdmission: AcceptedPluginAdmission | null = null,
+  ): TestActivationController {
     if (this.#seen.has(identity.activationId)) {
       throw new Error(`Test activation identity cannot be reused: ${identity.activationId}`);
     }
     this.#seen.add(identity.activationId);
-    return new TestActivation(identity, this.#providers);
+    return new TestActivation(identity, this.#providers, acceptedAdmission);
   }
 }
 

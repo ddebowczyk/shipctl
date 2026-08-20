@@ -5,13 +5,16 @@ import {
   type AssistantLaunchErrorCode,
   type AssistantLaunchGrant,
   type AssistantLaunchService,
-  type AssistantProviderConfiguration,
   type AssistantRecoveryRecord,
+  type AssistantResourceExecuteInput,
+  type AssistantResourceExecuteResult,
+  type AssistantResourceReadInput,
+  type AssistantResourceReadResult,
+  type AssistantResourceWriteInput,
   type AssistantSessionChanged,
   type AssistantSessionId,
   type AssistantSessionObservationScope,
   type ModuleTerminalId,
-  type SaveAssistantProviderConfigurationInput,
 } from "../protocol/assistantLaunch";
 import type {
   SemanticEventLease,
@@ -31,7 +34,7 @@ import {
 export type FakeAssistantLaunchOperation =
   | "start-session"
   | "resume-session"
-  | "refresh-session-identity"
+  | "record-session-identity"
   | "mark-session-identity-failed"
   | "record-session-placement"
   | "record-session-label"
@@ -40,9 +43,9 @@ export type FakeAssistantLaunchOperation =
   | "inspect-restorable-sessions"
   | "take-startup-warning"
   | "prepare-for-shutdown"
-  | "inspect-models"
-  | "inspect-provider-configuration"
-  | "save-provider-configuration";
+  | "read-resource"
+  | "write-resource"
+  | "execute-resource";
 
 export interface FakeAssistantLaunchTrace {
   readonly operation: FakeAssistantLaunchOperation;
@@ -52,11 +55,17 @@ export interface FakeAssistantLaunchTrace {
 
 export interface FakeAssistantLaunchProviderOptions {
   readonly records?: readonly AssistantRecoveryRecord[];
-  readonly models?: Readonly<Record<string, readonly string[]>>;
-  readonly configurations?: Readonly<Record<string, AssistantProviderConfiguration>>;
   readonly startupWarning?: string | null;
   readonly deniedGrants?: readonly AssistantLaunchGrant[];
-  readonly captureReady?: boolean;
+  readonly readResource?: (
+    input: AssistantResourceReadInput,
+  ) => AssistantResourceReadResult | Promise<AssistantResourceReadResult>;
+  readonly writeResource?: (
+    input: AssistantResourceWriteInput,
+  ) => void | Promise<void>;
+  readonly executeResource?: (
+    input: AssistantResourceExecuteInput,
+  ) => AssistantResourceExecuteResult | Promise<AssistantResourceExecuteResult>;
   readonly trace?: FakeAssistantLaunchTrace[];
   readonly changes?: FakeAssistantSessionChangeController;
 }
@@ -255,7 +264,7 @@ function sessionRecord(
     label: requiredText(input.label),
     sessionMode: input.sessionMode,
     model: input.model ?? null,
-    captureState: "pending",
+    captureState: input.initialSessionIdentity === undefined ? "pending" : "ready",
     restoreOnNextLaunch: false,
     startedAt: now,
     updatedAt: now,
@@ -271,19 +280,6 @@ export function createFakeAssistantLaunchServiceProvider(
     bind(context) {
       const records = new Map<AssistantSessionId, AssistantRecoveryRecord>(
         (options.records ?? []).map((record) => [record.recordId, cloneRecord(record)]),
-      );
-      const models = new Map(Object.entries(options.models ?? {}));
-      const configurations = new Map(
-        Object.entries(options.configurations ?? {}).map(([provider, config]) => [
-          provider,
-          Object.freeze({
-            ...config,
-            settings: Object.freeze({ ...config.settings }),
-            configuredCredentialProviders: Object.freeze([
-              ...config.configuredCredentialProviders,
-            ]),
-          }),
-        ]),
       );
       const changes = options.changes ?? new FakeAssistantSessionChangeController();
       let startupWarning = options.startupWarning ?? null;
@@ -314,6 +310,7 @@ export function createFakeAssistantLaunchServiceProvider(
       return Object.freeze({
         startSession: operation(context, "start-session", "assistant.launch", options, async (input) => {
           requiredText(input.terminal.moduleSessionId);
+          requiredText(input.launch.program);
           const record = sessionRecord(input);
           await changed("started", record);
           return {
@@ -323,6 +320,7 @@ export function createFakeAssistantLaunchServiceProvider(
         }),
         resumeSession: operation(context, "resume-session", "assistant.launch", options, async (input) => {
           requiredText(input.terminal.moduleSessionId);
+          requiredText(input.launch.program);
           const current = requireRecord(input.recordId);
           if (current.captureState !== "ready" || !current.restoreOnNextLaunch) {
             throw new FakeAssistantLaunchFailure(
@@ -341,15 +339,20 @@ export function createFakeAssistantLaunchServiceProvider(
             record,
           };
         }),
-        refreshSessionIdentity: operation(
+        recordSessionIdentity: operation(
           context,
-          "refresh-session-identity",
+          "record-session-identity",
           "assistant.session-record",
           options,
-          async ({ recordId }) => {
+          async ({ recordId, providerSessionId }) => {
             const current = requireRecord(recordId);
-            if (current.captureState !== "pending") return current;
-            if (options.captureReady === false) return null;
+            requiredText(providerSessionId);
+            if (current.captureState !== "pending") {
+              throw new FakeAssistantLaunchFailure(
+                "assistant-launch.session-not-recoverable",
+                "Assistant session identity is no longer pending",
+              );
+            }
             const record = Object.freeze({
               ...current,
               captureState: "ready" as const,
@@ -482,42 +485,34 @@ export function createFakeAssistantLaunchServiceProvider(
             }
           },
         ),
-        inspectModels: operation(
+        readResource: operation(
           context,
-          "inspect-models",
-          "assistant.launch",
+          "read-resource",
+          "assistant.resource.read",
           options,
-          ({ provider }) => ({ provider, models: [...(models.get(provider) ?? [])] }),
+          async (input) => options.readResource?.(input) ?? (
+            input.request.kind === "file"
+              ? { kind: "file", resourceId: input.request.resourceId, content: "" }
+              : { kind: "tree", resourceId: input.request.resourceId, files: [] }
+          ),
         ),
-        inspectProviderConfiguration: operation(
+        writeResource: operation(
           context,
-          "inspect-provider-configuration",
-          "assistant.session-record",
+          "write-resource",
+          "assistant.resource.write",
           options,
-          ({ provider }) => configurations.get(provider) ?? {
-            provider,
-            settings: {
-              defaultProvider: null,
-              defaultModel: null,
-              defaultThinkingLevel: null,
-            },
-            configuredCredentialProviders: [],
-          },
+          async (input) => { await options.writeResource?.(input); },
         ),
-        saveProviderConfiguration: operation(
+        executeResource: operation(
           context,
-          "save-provider-configuration",
-          "assistant.session-record",
+          "execute-resource",
+          "assistant.resource.execute",
           options,
-          (input: SaveAssistantProviderConfigurationInput) => {
-            const previous = configurations.get(input.provider);
-            configurations.set(input.provider, Object.freeze({
-              provider: input.provider,
-              settings: Object.freeze({ ...input.settings }),
-              configuredCredentialProviders: Object.freeze([
-                ...(previous?.configuredCredentialProviders ?? []),
-              ]),
-            }));
+          async (input) => options.executeResource?.(input) ?? {
+            resourceId: input.resourceId,
+            stdout: "",
+            stderr: "",
+            status: 0,
           },
         ),
         observeSessions: Object.freeze({

@@ -32,7 +32,7 @@ commands:
       mixed-source property evidence.
     lane: slow
   - name: inspect
-    summary: Emit the current source and legacy-composition snapshot as JSON.
+    summary: Emit the current runtime-artifact source snapshot as JSON.
     lane: fast
   - name: baseline
     summary: Compare the generated architecture with the reviewed baseline.

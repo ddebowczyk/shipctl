@@ -3,7 +3,7 @@ import type {
   ModuleSettingsSnapshot,
 } from "@shipctl/module-api";
 
-import type { ProjectSettings } from "@shipctl/core/platform";
+import type { ProjectSettingsPatch } from "@shipctl/core/configuration";
 import { contributedPanelTabId } from "@shipctl/core/platform";
 import {
   openUrl,
@@ -15,7 +15,10 @@ import { useThemeStore } from "../appearance/useThemeStore.ts";
 import { useTerminalStore } from "../terminal-host/useTerminalStore.ts";
 import { modulePanelContributions, moduleSkillsProvider } from "./moduleComposition.ts";
 import { MODULE_TERMINAL_SESSIONS } from "../terminal-host/terminalSessions.ts";
-import { terminalPresentationPort } from "@shipctl/core/terminal-host";
+import {
+  terminalPresentationPort,
+  useTerminalSettingsStore,
+} from "@shipctl/core/terminal-host";
 
 let settingsSource: ReturnType<typeof useProjectSettingsStore.getState> | null = null;
 let settingsSnapshot: ModuleSettingsSnapshot = {
@@ -88,7 +91,7 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
     subscribe: (listener) => useProjectSettingsStore.subscribe(listener),
     update: (values) => useProjectSettingsStore
       .getState()
-      .updateSettings(values as Partial<ProjectSettings>),
+      .updateSettings(values as ProjectSettingsPatch),
   },
   skills: skillsProvider,
   notices: {
@@ -103,6 +106,6 @@ export const MODULE_HOST_SERVICES: ModuleHostServices = {
     },
   },
   externalLinks: {
-    open: openUrl,
+    open: (url) => openUrl(url, useTerminalSettingsStore.getState().settings.urlAllowlist),
   },
 };

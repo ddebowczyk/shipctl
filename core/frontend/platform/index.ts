@@ -1,12 +1,19 @@
-// The host's boundary with the outside world: the Tauri IPC bindings, the
-// shapes those bindings exchange with Rust, and error extraction for them.
-// Capabilities import this entry point; nothing imports its files directly.
+// The host's boundary with the outside world: named native resource adapters,
+// their private wire values, and error extraction. No transport-shaped facade
+// is re-exported here. Capabilities import this entry point; nothing imports
+// its files directly.
 //
 // Extensions are explicit because these are runtime re-exports: the node --test
 // lanes resolve them through Node's ESM resolver, which does not extension-guess.
-export * from "./tauri.ts";
 export * from "./types.ts";
 export * from "./errors.ts";
+export * from "./projects.ts";
+export * from "./configuration.ts";
+export * from "./terminalRetention.ts";
+export * from "./legacyUiState.ts";
+export * from "./fonts.ts";
+export * from "./system.ts";
+export * from "./lifecycle.ts";
 export * from "./runtimeMessages.ts";
 export * from "./semanticServiceAdapter.ts";
 export * from "./processes.ts";
@@ -22,7 +29,6 @@ export * from "./scheduler.ts";
 export * from "./terminalSessions.ts";
 export * from "./semanticTerminals.ts";
 export * from "./moduleControl.ts";
-export * from "./workspacePersistence.ts";
 export * from "./moduleArtifactAssets.ts";
 export * from "./projectSelection.ts";
 export * from "./projectEvents.ts";

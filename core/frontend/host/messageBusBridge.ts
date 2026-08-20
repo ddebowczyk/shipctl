@@ -2,9 +2,14 @@ import {
   MESSAGE_CONTRACT_SCHEMA_VERSION,
   MESSAGE_DIAGNOSTIC_CODES,
   SCHEDULER_REGISTER_GRANT,
+  type AcceptedPluginAdmission,
+  type DirectShipctlPluginDefinition,
   type MessageEnvelope,
+  type MessageDeclarations,
+  type ShipctlPluginDefinition,
   type ShipctlModule,
 } from "@shipctl/module-api";
+import type { RegisteredPluginContributions } from "@shipctl/core/runtime";
 import {
   RUNTIME_MESSAGE_TRANSPORT,
   type HostMessageFrame,
@@ -16,6 +21,7 @@ import type { SchedulerTransportBinding } from "../platform/scheduler.ts";
 import type { TerminalSessionsTransportBinding } from "../platform/terminalSessions.ts";
 import {
   createActivationMessageClient,
+  messageDeclarations,
   prepareModuleMessageActivation,
   type ModuleMessageActivation,
   type PreparedModuleMessageActivation,
@@ -36,6 +42,15 @@ export interface OpenModuleMessageBridge {
 }
 
 export type ModuleMessageBridgeBindings = Omit<OpenModuleMessageBridge, "bridge">;
+
+const EMPTY_MESSAGE_DECLARATIONS: MessageDeclarations = Object.freeze({
+  schemaVersion: MESSAGE_CONTRACT_SCHEMA_VERSION,
+  provides: Object.freeze([]),
+  handles: Object.freeze([]),
+  publishes: Object.freeze([]),
+  subscribes: Object.freeze([]),
+  ports: Object.freeze([]),
+});
 
 function failure(code: string, message: string): MessageBridgeFailure {
   return { code, message };
@@ -77,10 +92,86 @@ export function createModuleMessageActivations(
       || (module.scheduledTasks?.length ?? 0) > 0
       || (module.requiredGrants?.length ?? 0) > 0)
     .map((module) => ({
-      module,
+      moduleId: module.id,
       activationId: activationId(module),
       grants: moduleMessageGrants(module),
+      declarations: messageDeclarations(module),
+      ...(module.messages === undefined ? {} : { messages: module.messages }),
+      ...(module.scheduledTasks === undefined ? {} : { scheduledTasks: module.scheduledTasks }),
     }));
+}
+
+function isDirectDefinition(
+  definition: ShipctlPluginDefinition,
+): definition is DirectShipctlPluginDefinition {
+  return !("module" in definition);
+}
+
+function directActivation(
+  definition: DirectShipctlPluginDefinition,
+  admissionsByModule: ReadonlyMap<string, AcceptedPluginAdmission>,
+  activationIdsByModule: ReadonlyMap<string, string>,
+  contributions?: RegisteredPluginContributions,
+): ModuleMessageActivation {
+  const admission = admissionsByModule.get(definition.id);
+  const activationId = activationIdsByModule.get(definition.id);
+  if (admission === undefined || activationId === undefined) {
+    throw new Error(`Direct plugin ${definition.id} has no accepted message admission.`);
+  }
+  if (contributions !== undefined && contributions.messages.length > 1) {
+    throw new Error(`Direct plugin ${definition.id} registered multiple message graphs.`);
+  }
+  return {
+    moduleId: definition.id,
+    activationId,
+    grants: admission.effectiveGrants,
+    declarations: admission.messages ?? EMPTY_MESSAGE_DECLARATIONS,
+    ...(contributions?.messages[0] === undefined ? {} : { messages: contributions.messages[0] }),
+    ...(contributions === undefined || contributions.scheduledTasks.length === 0
+      ? {}
+      : { scheduledTasks: contributions.scheduledTasks }),
+  };
+}
+
+/**
+ * Direct artifacts get a private bridge client from their already-admitted
+ * declarations. No executable handler is exposed until activation succeeds.
+ */
+export function createAdmittedDirectMessageActivations(
+  definitions: readonly ShipctlPluginDefinition[],
+  admissionsByModule: ReadonlyMap<string, AcceptedPluginAdmission>,
+  activationIdsByModule: ReadonlyMap<string, string>,
+): readonly ModuleMessageActivation[] {
+  return definitions
+    .filter(isDirectDefinition)
+    .map((definition) => directActivation(definition, admissionsByModule, activationIdsByModule));
+}
+
+/**
+ * Replaces private admission placeholders with the accepted activation's own
+ * handlers and schedules. The declaration remains the immutable manifest
+ * value, so executable code cannot widen a native route during publication.
+ */
+export function createActivatedDirectMessageActivations(
+  definitions: readonly ShipctlPluginDefinition[],
+  admissionsByModule: ReadonlyMap<string, AcceptedPluginAdmission>,
+  activationIdsByModule: ReadonlyMap<string, string>,
+  contributionsByModule: ReadonlyMap<string, RegisteredPluginContributions>,
+): readonly ModuleMessageActivation[] {
+  return definitions
+    .filter(isDirectDefinition)
+    .map((definition) => {
+      const contributions = contributionsByModule.get(definition.id);
+      if (contributions === undefined) {
+        throw new Error(`Direct plugin ${definition.id} has no activated contribution snapshot.`);
+      }
+      return directActivation(
+        definition,
+        admissionsByModule,
+        activationIdsByModule,
+        contributions,
+      );
+    });
 }
 
 export class MessageBusBridge {

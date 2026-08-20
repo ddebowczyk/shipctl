@@ -174,9 +174,9 @@ implemented Phase A operations are:
 - `just architecture validate` validates schemas, indexes, references,
   dependency graphs, property coverage, test status, and deletion proofs;
 - `just architecture test` runs negative examples and the generated
-  specification, passive-import, legacy-composition, and replay properties;
-- `just architecture inspect` emits the current source and normalized legacy
-  composition snapshot as JSON;
+  specification, passive-import, module-composition, and replay properties;
+- `just architecture inspect` emits the current runtime-artifact source
+  snapshot as JSON;
 - `just architecture baseline` compares current source facts with the reviewed
   `spec/baseline/source-architecture.json` file;
 - `just architecture boundaries` enforces dependency boundaries and passive

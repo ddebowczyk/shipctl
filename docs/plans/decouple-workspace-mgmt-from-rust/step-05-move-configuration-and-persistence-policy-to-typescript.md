@@ -32,27 +32,15 @@ which is implemented, admitted, granted, and in use:
 plugins" — is already answered by `migrateRecords`. Delete the question; test
 the existing primitive instead.
 
-### The current adapter is not yet dynamic
+### Dynamic authorization boundary
 
-`createPluginDataServiceProvider` is still guarded by `DEFAULT_AUTHORIZE`
-(`core/frontend/platform/pluginData.ts:99-114`), which recognizes only
-`shipctl.usage` global `settings` and `shipctl.commands` project `commands` at
-schema version 1. Its test fake mirrors the same two identities. This is a
-temporary product table in the host, not a durable-storage guarantee.
-
-Before any configuration namespace migrates, Step 02 must carry the already
-admitted grants to the private provider-binding context and replace both tables.
-The adapter then admits an active activation holding the requested
-`plugin-data.*` grant and binds the native record to that activation's own
-namespace. It retains validation of scope, key, revision, and JSON shape; it
-does not decide which plugin key or schema version is legitimate. Those are
-TypeScript-owned configuration declarations and migrations.
-
-The public protocol already has `plugin-data.migrate`, but native artifact
-admission presently supports only `plugin-data.read` and `.write`. Align that
-stable capability vocabulary once (Step 04) before a configuration migration
-requests it; otherwise the plan would promise an atomic operation no admitted
-artifact can use.
+`createPluginDataServiceProvider` now binds an activation's effective
+`plugin-data.read` / `.write` / `.migrate` grants to its private native request.
+The native store validates only the stable grant vocabulary, record identity,
+revision, schema-version positivity, and JSON integrity. It does not contain a
+product table for a module id, key, schema, registered project, or legacy
+fallback. Configuration declarations and migrations in TypeScript decide which
+records are meaningful.
 
 ### The one real gap in that authority
 
@@ -76,6 +64,13 @@ does not cover host bootstrap. Whichever is chosen, record it here — the
 `depends_on: [plugin-data]`, so the workspace half of this decision is
 half-made and should not be left implicit.
 
+**Implemented decision — Option A.** The trusted TypeScript runtime activates
+the reserved `shipctl.host` identity internally, with all three plugin-data
+grants. No admitted plugin receives that activation or can select its namespace.
+`core/frontend/configuration/` owns the schemas, defaults, validation,
+inspection, migration ids, and revision-aware apply path for runtime, editor,
+projects, keybindings, terminal, and sidebar records.
+
 ## What Rust actually owns today
 
 `core/backend/src/workspace/config.rs` — `GlobalConfig` fields:
@@ -86,11 +81,11 @@ half-made and should not be left implicit.
 | `repos`, `groups` | project registry — durable native resource identity | keep in Rust; expose via the projects service (Step 04) |
 | `ui: UiSettings { canvas: CanvasAdapter }` | **renderer selection** | **delete** — see below |
 | `editor`, `keybindings`, `terminal`, `sidebar`, `projects` | user-facing settings grammar | move to TypeScript namespaces |
-| `capability_data` (`#[serde(flatten)]`) | namespaced escape hatch | keep as the human-facing surface; it is the migration target |
+| `capability_data` (`#[serde(flatten)]`) | opaque legacy import source | keep only for compatibility reads; current durable configuration lives in plugin-data |
 
-`capability_value` / `replace_capability_value` (`config.rs:86-103`) already give
-capabilities a namespaced slot in `~/.shipctl/config.yml` without expanding the
-host schema. This is the mechanism to migrate onto — not a new one.
+The legacy keys are permanently reserved after typed-field removal, so generic
+capability-data calls cannot repurpose `editor`, `projects`, `keybindings`,
+`terminal`, `sidebar`, or `ui` while the compatibility import remains.
 
 **Hazard to handle explicitly:** `assert_capability_id` (`config.rs:105+`)
 rejects a capability id that collides with a host-owned field by serialising
@@ -119,37 +114,25 @@ Sequencing note: this depends on Step 03 having moved runtime construction out o
 `AppShell`, and it is a prerequisite for Step 07's renderer composition. Do not
 attempt it before Step 03 lands.
 
-## The workspace-document question this step must answer
+## Workspace durable record — delivered
 
-Two native durable stores exist for workspace state:
+The selected owner is the trusted bundled `shipctl.workspace` plugin. Its
+canonical workspace record lives in the generic plugin-data namespace under the
+global key `workspace-document:<workspaceId>`. The schema-2 opaque owner value
+contains the document, origin, and `catalogRevision`; native plugin-data keeps
+only generic record identity, revision, integrity, and grant checks.
 
-- `core/backend/src/state/workspace_document.rs` — payload-opaque, but the
-  envelope carries a workspace-specific `catalog_revision` field, and the
-  commands are named `load_workspace_document` / `save_workspace_document`;
-- `core/backend/src/state/workspace_layout.rs` — raw Layman snapshots,
-  **already dead**, deleted in Step 01.
+`workspace-documents.json` is now a read-only generic legacy-record-map source,
+not a second active workspace store. If a canonical plugin-data record is
+absent, the source exposes its old value at schema 1 and virtual revision zero.
+The workspace plugin migrates that value once with
+`workspace-document-record-v1-to-plugin-data-v2`; replay returns the same
+canonical record, and a stale competing migration cannot overwrite it. The
+canonical record then shadows the legacy source permanently.
 
-`core/frontend/workspace/persistence.ts:10-20` defines
-`WorkspacePersistencePort { load, compareAndSave }` — already generic in shape.
-Only the two command names and the `catalog_revision` envelope field are
-workspace-specific.
-
-Decide and record one of:
-
-1. **Converge.** Workspace records become plugin-data records under the
-   workspace plugin's namespace; `workspace-documents.json` becomes a one-way
-   import; the two commands are deleted. `catalog_revision` moves inside the
-   opaque payload.
-2. **Keep separate, justify.** The workspace store stays because it must be
-   readable before plugin activation (a bootstrap ordering argument, not a
-   convenience one), and `catalog_revision` stays in the envelope because the
-   native side needs it for a stated reason.
-
-Option 1 is the plan's stated direction (Step 00: "exactly one durable-record
-authority"). Option 2 is admissible only with the bootstrap-ordering argument
-written down. Silence is not admissible — two durable authorities with
-overlapping semantics is exactly the permanent half-transition this plan exists
-to prevent.
+The native workspace-document store, its `load_workspace_document` /
+`save_workspace_document` commands, and the temporary bootstrap exception are
+deleted. Raw Layman snapshot persistence was already deleted independently.
 
 ## Configuration model
 

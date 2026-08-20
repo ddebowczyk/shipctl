@@ -5,8 +5,8 @@ import type {
   ProjectFactsProviderContribution,
   ProjectRef,
 } from "@shipctl/module-api";
+import type { ProjectFactsByPath } from "@shipctl/core/projects";
 
-import type { ProjectFactsByPath } from "../projects/projectFacts.ts";
 import { enabledProjectFactsProvider } from "./moduleComposition.ts";
 import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";
 

@@ -29,10 +29,16 @@
       {
         "id": "shipctl.skill-installation",
         "version": 2
+      },
+      {
+        "id": "shipctl.projects",
+        "version": 1
       }
     ],
     "providedServices": [],
-    "backgroundEffects": [],
+    "backgroundEffects": [
+      "skills.runtime"
+    ],
     "contributions": [
       {
         "family": "project-action",
@@ -46,7 +52,6 @@
       }
     ]
   },
-  "uiContributions": [],
   "requestedGrants": [],
   "nativeAdapters": [],
   "secretReferences": [],

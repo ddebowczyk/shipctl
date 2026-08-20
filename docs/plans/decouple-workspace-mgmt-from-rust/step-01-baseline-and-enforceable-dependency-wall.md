@@ -92,14 +92,13 @@ cannot fail meaningfully is noise in the checker.
 ## Exceptions are the ledger
 
 `ops/modularity/lib/module-boundaries.mjs` carries the migration's real debt as
-three literal sets. They are the honest inventory; a separate ledger document
+two literal sets. They are the honest inventory; a separate ledger document
 would duplicate them and drift.
 
 | Constant | Current contents | Removal condition |
 | --- | --- | --- |
 | `CORE_DEEP_IMPORT_EXCEPTIONS` (7) | 5 exist only for `core/frontend/host/moduleHostServices.ts` reaching `appearance`, `projects` (×2), and `terminal-host` (×2) stores. 2 for `host/index.ts` and `host/projectFacts.ts`. | Deleting `ModuleHostServices` (Step 02) removes exactly 5. This is the step's deletion proof — not a count target, a named set. |
 | `COMPOSITION_FILES` (1) | `core/frontend/host/enabledModules.ts` | This step, once `ENABLED_MODULES` is gone. |
-| `MODULE_PLATFORM_EVENT_LISTENERS` (1) | `@shipctl/module-git` → `git-fs-changed` | Step 09, when Git repository observation is delivered as a semantic event source rather than a raw Tauri event. |
 
 Every future exception must name the step that removes it, in a comment beside
 the entry. A permanent exception is a boundary decision and belongs in a

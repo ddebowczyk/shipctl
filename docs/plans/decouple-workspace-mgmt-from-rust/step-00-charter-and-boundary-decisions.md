@@ -188,9 +188,16 @@ resolve them.
    transaction, accepting a workspace diagnostic instead of a distributed
    commit. Steps 06 and 11 assume atomicity across both. Either the plan adopts
    the recorded decision, or the decision is re-opened with an owner.
-2. **Legacy canvas retirement.** `spec/phases/phase-h.yaml` states the legacy
-   canvas is removed "only after a separate product decision authorizes it".
-   Step 07's deletion gate depends on that decision existing.
-3. **Headless execution realm.** Whether the offline runtime is a bundled
-   sidecar or a compiled executable is a packaging decision with signing and
-   update consequences (Step 10). It requires measured evidence and an owner.
+2. **Legacy canvas retirement — resolved 2026-08-19.** Dariusz Debowczyk
+   authorized retirement through `DELETE-H-LEGACY-CANVAS` after its stated
+   parity and recovery evidence passes. This is not authorization to remove
+   the fallback before the deletion gate proves the replacement.
+3. **Headless execution realm — resolved 2026-08-20.** Dariusz Debowczyk
+   selected a bundled Node runtime sidecar plus a bundled TypeScript program.
+   The installed CLI locates the signed runtime beside itself and passes the
+   program from the application Resources directory over a versioned local
+   runner protocol. Shipctl must not depend on a user-installed Node.js or
+   link Tauri into the CLI. A future compiled runner is permitted only when it
+   preserves the same executable location, request/response ABI, diagnostics,
+   and one-package update relationship. Step 10 records the measured package
+   evidence and signing result for this choice.

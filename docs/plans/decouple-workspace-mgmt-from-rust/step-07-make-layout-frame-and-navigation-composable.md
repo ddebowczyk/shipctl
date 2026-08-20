@@ -125,11 +125,12 @@ renderer or desktop menu adapter projects accepted items.
 
 ## Legacy canvas retirement
 
-`docs/4-layer-architecture/spec/phases/phase-h.yaml:21` states the legacy canvas
-is removed "only after a separate product decision authorizes it". That decision
-does not exist yet (Step 00, owner decision 3).
+`docs/4-layer-architecture/spec/phases/phase-h.yaml` records the 2026-08-19
+authorization by Dariusz Debowczyk to retire the legacy canvas. It authorizes
+deletion only after the named parity and recovery evidence passes; it is not
+permission to remove the fallback before that proof exists.
 
-Therefore this step's deletion gate is conditional, and must be written as a
+Therefore this step's deletion gate is active but conditional, and is written as a
 `deletion_gates` entry naming:
 
 - the artifacts deleted together — `canvas/legacy/*` (~1 100 lines across
@@ -141,10 +142,10 @@ Therefore this step's deletion gate is conditional, and must be written as a
 - the parity evidence required before deletion;
 - the owner and the date the product decision was recorded.
 
-Until that decision exists, the legacy canvas stays — but `CanvasActions` must
-still shrink with every converted region. Retirement of the *renderer* and
-dissolution of the *model* are separate gates; conflating them is what would
-make this permanent.
+Until the evidence threshold passes, the legacy canvas stays — but
+`CanvasActions` must still shrink with every converted region. Retirement of
+the *renderer* and dissolution of the *model* are separate gates; conflating
+them is what would make this permanent.
 
 ## Refactoring actions
 

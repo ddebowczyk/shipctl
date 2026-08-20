@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 
-import type { CanvasAdapterId } from "@shipctl/core/platform";
+import type { CanvasAdapterId } from "@shipctl/core/configuration";
 
 const CanvasAdapterRuntimeContext = createContext<CanvasAdapterId | null>(null);
 

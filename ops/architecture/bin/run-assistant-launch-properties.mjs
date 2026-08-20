@@ -36,6 +36,7 @@ const { stdout, stderr } = await exec("pnpm", [
   "--test",
   "--test-concurrency=1",
   "ops/architecture/tests/assistantLaunchCapability.test.mjs",
+  "ops/architecture/tests/assistantCaptureMeasurement.test.mjs",
   "modules/assistants/frontend/tests/assistantsCharacterization.test.ts",
   "modules/assistants/frontend/tests/assistantProvidersCharacterization.test.ts",
 ], {

@@ -6,27 +6,61 @@ import type {
   ModuleActivationContext,
   ModuleId,
   ProjectRef,
+  ShipctlModule,
 } from "@shipctl/module-api";
-import { gitModule } from "@shipctl/module-git";
-import { skillsModule } from "@shipctl/module-skills";
+import {
+  gitContributions,
+  GIT_MODULE_ID,
+  GIT_PLUGIN_VERSION,
+} from "@shipctl/module-git";
+import {
+  activateSkillsRuntime,
+  skillsContributions,
+  SKILLS_MODULE_ID,
+  SKILLS_PLUGIN_VERSION,
+} from "@shipctl/module-skills";
 
 import "@shipctl/core/appearance/globals.css";
 import PanelHost from "../../../../core/frontend/host/PanelHost";
-import { createEnabledPanelRegistry } from "../../../../core/frontend/host/moduleComposition";
-import { MODULE_HOST_SERVICES } from "../../../../core/frontend/host/moduleHostServices";
+import { WorkspaceContributionCatalog } from "../../../../core/frontend/host";
+import { AcceptedWorkspaceContributionRuntimeProvider } from "../../../../core/frontend/host/views";
 import { createGitServiceProvider } from "../../../../core/frontend/platform/git";
 import { createSkillInstallationServiceProvider } from "../../../../core/frontend/platform/skillInstallation";
 import {
   createModuleActivationIdentity,
   SemanticServiceRegistry,
 } from "../../../../core/frontend/runtime/semanticServiceRuntime";
-import { useRepoStore } from "@shipctl/core/projects";
+import { createProjectsServiceProvider, useRepoStore } from "@shipctl/core/projects";
 
 const PROJECT_PATH = "/smoke/shipctl";
 const PROJECT: ProjectRef = {
   id: "smoke-shipctl",
   name: "Shipctl smoke fixture",
   path: PROJECT_PATH,
+};
+
+const smokePanel = {
+  id: "smoke.crash" as ContributionId,
+  moduleId: "smoke",
+  scope: "project" as const,
+  label: "Crashing fixture",
+  icon: { name: "triangle-alert" },
+  singleton: "per-project" as const,
+  unavailable: {
+    title: "Crash contained",
+    description: "The host caught the fixture failure.",
+  },
+  load: async () => ({
+    default: function CrashingPanel() {
+      throw new Error("intentional smoke failure");
+    },
+  }),
+};
+
+const smokeModule: ShipctlModule = {
+  id: "smoke",
+  version: "1.0.0",
+  panels: [smokePanel],
 };
 
 mockWindows("main");
@@ -100,56 +134,63 @@ useRepoStore.setState({
 });
 const semanticServices = new SemanticServiceRegistry([
   createGitServiceProvider(),
+  createProjectsServiceProvider(),
   createSkillInstallationServiceProvider(),
 ]);
 const gitActivation = semanticServices.activate(
-  createModuleActivationIdentity(gitModule.id, gitModule.version),
+  createModuleActivationIdentity(GIT_MODULE_ID, GIT_PLUGIN_VERSION),
 );
 const skillsActivation = semanticServices.activate(
-  createModuleActivationIdentity(skillsModule.id, skillsModule.version),
+  createModuleActivationIdentity(SKILLS_MODULE_ID, SKILLS_PLUGIN_VERSION),
+);
+const smokeActivation = semanticServices.activate(
+  createModuleActivationIdentity(smokeModule.id, smokeModule.version),
 );
 const moduleActivations = new Map<ModuleId, ModuleActivationContext>([
-  [gitModule.id, gitActivation.context],
-  [skillsModule.id, skillsActivation.context],
+  [GIT_MODULE_ID, gitActivation.context],
+  [SKILLS_MODULE_ID, skillsActivation.context],
+  [smokeModule.id, smokeActivation.context],
 ]);
-await gitModule.projectLifecycle.onProjectsChanged(
-  [PROJECT_PATH],
-  MODULE_HOST_SERVICES,
-  gitActivation.context,
+skillsActivation.context.own(
+  await activateSkillsRuntime(skillsActivation.context),
+  "skills.runtime",
 );
-await skillsModule.projectLifecycle.onProjectsChanged(
-  [PROJECT_PATH],
-  MODULE_HOST_SERVICES,
-  skillsActivation.context,
-);
+for (const provider of skillsContributions.skillsProviders) {
+  skillsActivation.context.contributions.skillsProviders.register(provider);
+}
+for (const action of skillsContributions.projectActions) {
+  skillsActivation.context.contributions.projectActions.register(action);
+}
 
-const registry = createEnabledPanelRegistry();
-registry.register({
-  id: "smoke.crash",
-  moduleId: "smoke",
-  scope: "project",
-  label: "Crashing fixture",
-  icon: { name: "triangle-alert" },
-  singleton: "per-project",
-  unavailable: {
-    title: "Crash contained",
-    description: "The host caught the fixture failure.",
-  },
-  load: async () => ({
-    default: function CrashingPanel() {
-      throw new Error("intentional smoke failure");
+const workspaceContributions = WorkspaceContributionCatalog.create({
+  registryRevision: 1,
+  modules: [smokeModule],
+  activationContextsByModule: moduleActivations,
+  runtimeContributions: [
+    {
+      moduleId: GIT_MODULE_ID,
+      activation: gitActivation.context,
+      panels: gitContributions.panels,
+      projectNavigation: gitContributions.projectNavigation,
+      projectLayout: gitContributions.projectLayout,
+      projectActions: gitContributions.projectActions,
+      settings: gitContributions.settings,
     },
-  }),
+    {
+      moduleId: SKILLS_MODULE_ID,
+      activation: skillsActivation.context,
+      projectActions: skillsContributions.projectActions,
+    },
+  ],
 });
 
 const panelChoices = [
-  ...registry.list().map(({ id, label }) => ({ id, label })),
-  { id: "smoke.crash" as ContributionId, label: "Crash fixture" },
+  ...workspaceContributions.canvasSurfaceCatalog.panels().map(({ id, label }) => ({ id, label })),
   { id: "missing.panel" as ContributionId, label: "Missing fixture" },
 ] as const;
 
 function SmokeApp() {
-  const [panelId, setPanelId] = useState<ContributionId>(gitModule.panels[0].id);
+  const [panelId, setPanelId] = useState<ContributionId>(gitContributions.panels[0].id);
   const [removedCount, setRemovedCount] = useState(0);
   const [title, setTitle] = useState<string | null>(null);
 
@@ -176,15 +217,12 @@ function SmokeApp() {
         </nav>
         <section className="relative min-w-0 flex-1" aria-label="Hosted panel">
           <PanelHost
-            contribution={registry.panel(panelId)}
             panelId={panelId}
             instanceId={`smoke:${panelId}`}
             project={PROJECT}
             visible
             close={() => setRemovedCount((count) => count + 1)}
             setTitle={setTitle}
-            services={MODULE_HOST_SERVICES}
-            moduleActivations={moduleActivations}
           />
         </section>
     </main>
@@ -193,6 +231,11 @@ function SmokeApp() {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <SmokeApp />
+    <AcceptedWorkspaceContributionRuntimeProvider
+      catalog={workspaceContributions}
+      moduleActivations={moduleActivations}
+    >
+      <SmokeApp />
+    </AcceptedWorkspaceContributionRuntimeProvider>
   </React.StrictMode>,
 );

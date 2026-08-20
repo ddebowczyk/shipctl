@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 2,
+  "id": "fixture.post-package-deployment",
+  "name": "Post-package deployment fixture",
+  "version": "1.0.0",
+  "apiRange": "^1.0.0",
+  "runtimeKind": "frontend_esm",
+  "entry": "dist/plugin.mjs",
+  "styles": [],
+  "assets": [],
+  "messages": {
+    "schemaVersion": 1,
+    "provides": [],
+    "handles": [],
+    "publishes": [],
+    "subscribes": [],
+    "ports": []
+  },
+  "capabilities": {
+    "schemaVersion": 1,
+    "definitions": [],
+    "providers": [],
+    "consumers": []
+  },
+  "application": {
+    "schemaVersion": 1,
+    "role": "presentation",
+    "requiredServices": [
+      {
+        "id": "shipctl.plugin-data",
+        "version": 1
+      }
+    ],
+    "providedServices": [],
+    "backgroundEffects": [],
+    "contributions": [
+      {
+        "family": "command",
+        "id": "fixture.post-package-deployment.command",
+        "schemaVersion": 1
+      }
+    ]
+  },
+  "requestedGrants": [
+    "plugin-data.read",
+    "plugin-data.write"
+  ],
+  "nativeAdapters": [],
+  "secretReferences": [],
+  "peerDependencies": {},
+  "supportedScopes": [
+    "instance"
+  ],
+  "lifecycle": "live",
+  "sourceProvenance": {
+    "builder": "ops/architecture/bin/build-plugin-artifact.mjs",
+    "fixture": "phase-h-post-package-deployment"
+  }
+}

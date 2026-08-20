@@ -10,7 +10,7 @@ test("a deliberate declaration mismatch fails manifest validation", async (t) =>
   const root = await mkdtemp(path.join(tmpdir(), "shipctl-manifests-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, "modules/probe/frontend"), { recursive: true });
-  await mkdir(path.join(root, "core/frontend/host"), { recursive: true });
+  await mkdir(path.join(root, "modules/probe/artifact/src"), { recursive: true });
   await writeFile(
     path.join(root, "modules/probe/module.yaml"),
     `---
@@ -19,7 +19,8 @@ id: probe
 frontend:
   package: "@shipctl/module-probe"
   path: modules/probe/frontend
-  composition_symbol: probeModule
+  delivery: runtime-artifact
+  artifact: modules/probe/artifact
 profile: null
 tests:
   frontend: null
@@ -31,15 +32,25 @@ tests:
     JSON.stringify({ name: "@shipctl/module-probe" }),
   );
   await writeFile(
-    path.join(root, "core/frontend/host/enabledModules.ts"),
-    'import { probeModule } from "@shipctl/module-probe";\nexport const modules = [probeModule];\n',
+    path.join(root, "modules/probe/artifact/module.template.json"),
+    "{}\n",
   );
+  await writeFile(
+    path.join(root, "modules/probe/artifact/src/index.ts"),
+    "export {};\n",
+  );
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({ dependencies: {} }),
+  );
+
+  assert.deepEqual(validateManifests(root), []);
   await writeFile(
     path.join(root, "package.json"),
     JSON.stringify({ dependencies: { "@shipctl/module-probe": "workspace:*" } }),
   );
-
-  assert.deepEqual(validateManifests(root), []);
-  await writeFile(path.join(root, "package.json"), JSON.stringify({ dependencies: {} }));
-  assert.match(validateManifests(root).join("\n"), /must depend on @shipctl\/module-probe/);
+  assert.match(
+    validateManifests(root).join("\n"),
+    /must not statically depend on runtime artifact @shipctl\/module-probe/,
+  );
 });

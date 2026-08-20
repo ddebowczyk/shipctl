@@ -1,0 +1,43 @@
+---
+$schema: ../schema/capability.v1.schema.yaml
+schema_version: capability/v1
+id: projects
+version: 1.0.0
+title: Host project catalog and lifecycle
+status: implemented
+layer: application-runtime
+consumers: [todos, git]
+current_implementations:
+  - module-api/frontend/src/protocol/projects.ts
+  - module-api/frontend/src/testing/projects.ts
+  - core/frontend/projects/projectsService.ts
+  - modules/todos/frontend/src/pluginContributions.ts
+  - modules/git/frontend/src/pluginContributions.ts
+target_owners:
+  provider: core/frontend/projects/projectsService.ts
+  tauri_adapter: Not applicable; this is an application-runtime service.
+  typescript_client: module-api/frontend/src/protocol/projects.ts
+operations:
+  - id: listProjects
+    kind: request
+    contract: Return the host-known stable project identities.
+  - id: observeProjects
+    kind: event
+    contract: >-
+      Observe catalog, filesystem, and removal changes for host-known project
+      identities.
+required_grants: []
+ownership:
+  authority: >-
+    The application runtime owns catalog identity and event delivery; plugins
+    cannot manufacture projects.
+  resources: >-
+    Project identities resolve to host-owned project entries. Plugins retain
+    only activation-local derived state.
+  activation_scope: >-
+    Subscriptions attach to the caller activation and release when that
+    activation is disposed.
+depends_on: []
+property_ids:
+  - PROP-E-TODOS-PARITY-001
+  - PROP-E-GIT-PARITY-001

@@ -5,16 +5,19 @@ import {
   type WorkspaceCatalogSnapshot,
   type WorkspaceCloseBehavior,
   type WorkspaceCommand,
+  type WorkspaceCommandStep,
   type WorkspaceFloatingStack,
   type WorkspaceInspection,
   type WorkspaceMutationResult,
   type WorkspaceNode,
   type WorkspaceObservation,
+  type WorkspacePlan,
   type WorkspacePersistedRecord,
   type WorkspacePlacementIntent,
   type WorkspaceResourceReference,
   type WorkspaceRevision,
   type WorkspaceStackNode,
+  type WorkspaceValidation,
   type WorkspaceViewDefinition,
   type WorkspaceViewInstance,
 } from "@shipctl/module-api";
@@ -34,15 +37,15 @@ import {
 } from "./document.ts";
 import {
   hasIdentity,
+  hasFiniteNumber,
   hasOnlyKeys,
   hasSafeNonNegativeInteger,
   hasWorkspaceName,
   isPlainRecord,
-  jsonSafe,
 } from "./internal.ts";
 import type { WorkspacePersistencePort } from "./persistence.ts";
 import {
-  createCurrentCanvasWorkspaceProfile,
+  createDefaultWorkspaceProfile,
   type WorkspaceProfileFactory,
 } from "./profiles.ts";
 
@@ -74,6 +77,19 @@ interface WorkspaceState {
   readonly originId: string;
   readonly catalogRevision: number;
   readonly document: UiWorkspaceDocument;
+}
+
+interface WorkspaceReduction {
+  readonly document: UiWorkspaceDocument;
+  readonly affectedInstanceIds: readonly string[];
+  readonly affectedStackIds: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+interface WorkspaceEvaluation {
+  readonly command: WorkspaceCommand;
+  readonly document: UiWorkspaceDocument;
+  readonly mutation: WorkspaceMutationResult;
 }
 
 export interface WorkspaceAuthorityOptions {
@@ -130,6 +146,16 @@ function exactCommand(
   fields: readonly string[],
 ): void {
   if (!hasOnlyKeys(value, ["kind", "expectedRevision", "originId", ...fields])) {
+    invalidRequest(`${kind} workspace command has unsupported fields.`);
+  }
+}
+
+function exactStep(
+  value: Record<string, unknown>,
+  kind: string,
+  fields: readonly string[],
+): void {
+  if (!hasOnlyKeys(value, ["kind", ...fields])) {
     invalidRequest(`${kind} workspace command has unsupported fields.`);
   }
 }
@@ -207,64 +233,60 @@ function parsePlacement(value: unknown): WorkspacePlacementIntent {
   return invalidRequest("Workspace placement is invalid.");
 }
 
-/** Runtime validation for commands that can arrive through an agent transport. */
-export function parseWorkspaceCommand(value: unknown): WorkspaceCommand {
+/** Runtime validation for one reducer step that can arrive through an agent transport. */
+export function parseWorkspaceCommandStep(value: unknown): WorkspaceCommandStep {
   const candidate = exact(value, "Workspace command", [
     "kind",
-    "expectedRevision",
-    "originId",
     "instanceId",
     "viewTypeId",
     "resource",
     "placement",
     "label",
-    "stateRef",
     "targetStackId",
     "position",
     "relativeInstanceId",
     "splitId",
     "newStackId",
     "axis",
-    "profileId",
+    "firstShare",
+    "floatingId",
+    "stackId",
+    "x",
+    "y",
+    "width",
+    "height",
   ]);
-  const expectedRevision = assertRevision(candidate.expectedRevision);
-  const originId = assertIdentity(candidate.originId, "Workspace origin ID");
-  const base = { expectedRevision, originId };
   switch (candidate.kind) {
     case "open":
-      exactCommand(candidate, "Open", ["instanceId", "viewTypeId", "resource", "placement", "label", "stateRef"]);
+      exactStep(candidate, "Open", ["instanceId", "viewTypeId", "resource", "placement", "label"]);
       if (
         !hasIdentity(candidate.instanceId)
         || !hasWorkspaceName(candidate.viewTypeId)
         || (candidate.label !== null && !hasIdentity(candidate.label))
-        || !jsonSafe(candidate.stateRef)
       ) invalidRequest("Open workspace command is invalid.");
       return Object.freeze({
-        ...base,
         kind: "open" as const,
         instanceId: candidate.instanceId,
         viewTypeId: candidate.viewTypeId,
         resource: parseResource(candidate.resource),
         placement: parsePlacement(candidate.placement),
         label: candidate.label,
-        stateRef: candidate.stateRef,
       });
     case "close":
     case "select":
-      exactCommand(candidate, candidate.kind === "close" ? "Close" : "Select", ["instanceId"]);
+      exactStep(candidate, candidate.kind === "close" ? "Close" : "Select", ["instanceId"]);
       if (!hasIdentity(candidate.instanceId)) invalidRequest(`${candidate.kind} workspace command is invalid.`);
-      return Object.freeze({ ...base, kind: candidate.kind, instanceId: candidate.instanceId });
+      return Object.freeze({ kind: candidate.kind, instanceId: candidate.instanceId });
     case "focus":
-      exactCommand(candidate, "Focus", ["instanceId", "placement"]);
+      exactStep(candidate, "Focus", ["instanceId", "placement"]);
       if (!hasIdentity(candidate.instanceId)) invalidRequest("Focus workspace command is invalid.");
       return Object.freeze({
-        ...base,
         kind: "focus" as const,
         instanceId: candidate.instanceId,
         placement: parsePlacement(candidate.placement),
       });
     case "move":
-      exactCommand(candidate, "Move", ["instanceId", "targetStackId", "position", "relativeInstanceId"]);
+      exactStep(candidate, "Move", ["instanceId", "targetStackId", "position", "relativeInstanceId"]);
       if (
         !hasIdentity(candidate.instanceId)
         || !hasIdentity(candidate.targetStackId)
@@ -275,7 +297,6 @@ export function parseWorkspaceCommand(value: unknown): WorkspaceCommand {
         || (candidate.relativeInstanceId !== null && !hasIdentity(candidate.relativeInstanceId))
       ) invalidRequest("Move workspace command is invalid.");
       return Object.freeze({
-        ...base,
         kind: "move" as const,
         instanceId: candidate.instanceId,
         targetStackId: candidate.targetStackId,
@@ -283,7 +304,7 @@ export function parseWorkspaceCommand(value: unknown): WorkspaceCommand {
         relativeInstanceId: candidate.relativeInstanceId,
       });
     case "split":
-      exactCommand(candidate, "Split", ["instanceId", "targetStackId", "splitId", "newStackId", "axis", "position"]);
+      exactStep(candidate, "Split", ["instanceId", "targetStackId", "splitId", "newStackId", "axis", "position"]);
       const splitId = candidate.splitId === undefined
         ? undefined
         : assertIdentity(candidate.splitId, "Workspace split ID");
@@ -298,7 +319,6 @@ export function parseWorkspaceCommand(value: unknown): WorkspaceCommand {
         || (candidate.position !== "before" && candidate.position !== "after")
       ) invalidRequest("Split workspace command is invalid.");
       return Object.freeze({
-        ...base,
         kind: "split" as const,
         instanceId: candidate.instanceId,
         targetStackId: candidate.targetStackId,
@@ -306,13 +326,136 @@ export function parseWorkspaceCommand(value: unknown): WorkspaceCommand {
         axis: candidate.axis,
         position: candidate.position,
       });
+    case "rename":
+      exactStep(candidate, "Rename", ["instanceId", "label"]);
+      if (!hasIdentity(candidate.instanceId) || (candidate.label !== null && !hasIdentity(candidate.label))) {
+        invalidRequest("Rename workspace command is invalid.");
+      }
+      return Object.freeze({ kind: "rename" as const, instanceId: candidate.instanceId, label: candidate.label });
+    case "resize-split":
+      exactStep(candidate, "Resize split", ["splitId", "firstShare"]);
+      if (
+        !hasIdentity(candidate.splitId)
+        || !hasFiniteNumber(candidate.firstShare)
+        || candidate.firstShare <= 0
+        || candidate.firstShare >= 1
+      ) invalidRequest("Resize split workspace command is invalid.");
+      return Object.freeze({
+        kind: "resize-split" as const,
+        splitId: candidate.splitId,
+        firstShare: candidate.firstShare,
+      });
+    case "float":
+      exactStep(candidate, "Float", ["instanceId", "floatingId", "stackId", "x", "y", "width", "height"]);
+      if (
+        !hasIdentity(candidate.instanceId)
+        || !hasIdentity(candidate.floatingId)
+        || !hasIdentity(candidate.stackId)
+        || !hasFiniteNumber(candidate.x)
+        || !hasFiniteNumber(candidate.y)
+        || !hasFiniteNumber(candidate.width)
+        || !hasFiniteNumber(candidate.height)
+        || candidate.width <= 0
+        || candidate.height <= 0
+      ) invalidRequest("Float workspace command is invalid.");
+      return Object.freeze({
+        kind: "float" as const,
+        instanceId: candidate.instanceId,
+        floatingId: candidate.floatingId,
+        stackId: candidate.stackId,
+        x: candidate.x,
+        y: candidate.y,
+        width: candidate.width,
+        height: candidate.height,
+      });
+    case "update-floating":
+      exactStep(candidate, "Update floating", ["floatingId", "x", "y", "width", "height"]);
+      if (
+        !hasIdentity(candidate.floatingId)
+        || !hasFiniteNumber(candidate.x)
+        || !hasFiniteNumber(candidate.y)
+        || !hasFiniteNumber(candidate.width)
+        || !hasFiniteNumber(candidate.height)
+        || candidate.width <= 0
+        || candidate.height <= 0
+      ) invalidRequest("Update floating workspace command is invalid.");
+      return Object.freeze({
+        kind: "update-floating" as const,
+        floatingId: candidate.floatingId,
+        x: candidate.x,
+        y: candidate.y,
+        width: candidate.width,
+        height: candidate.height,
+      });
+    case "dock":
+      exactStep(candidate, "Dock", ["floatingId", "targetStackId"]);
+      if (!hasIdentity(candidate.floatingId) || (candidate.targetStackId !== null && !hasIdentity(candidate.targetStackId))) {
+        invalidRequest("Dock workspace command is invalid.");
+      }
+      return Object.freeze({
+        kind: "dock" as const,
+        floatingId: candidate.floatingId,
+        targetStackId: candidate.targetStackId as string | null,
+      });
+    case "maximize":
+      exactStep(candidate, "Maximize", ["stackId"]);
+      if (!hasIdentity(candidate.stackId)) invalidRequest("Maximize workspace command is invalid.");
+      return Object.freeze({ kind: "maximize" as const, stackId: candidate.stackId });
+    case "restore":
+      exactStep(candidate, "Restore", []);
+      return Object.freeze({ kind: "restore" as const });
     case "reset":
-      exactCommand(candidate, "Reset", ["profileId"]);
-      if (!hasIdentity(candidate.profileId)) invalidRequest("Reset workspace command is invalid.");
-      return Object.freeze({ ...base, kind: "reset" as const, profileId: candidate.profileId });
+      exactStep(candidate, "Reset", []);
+      return Object.freeze({ kind: "reset" as const });
     default:
       return invalidRequest("Workspace command kind is invalid.");
   }
+}
+
+/** Runtime validation for a revisioned command that can arrive through an agent transport. */
+export function parseWorkspaceCommand(value: unknown): WorkspaceCommand {
+  const candidate = exact(value, "Workspace command", [
+    "kind",
+    "expectedRevision",
+    "originId",
+    "commands",
+    "instanceId",
+    "viewTypeId",
+    "resource",
+    "placement",
+    "label",
+    "targetStackId",
+    "position",
+    "relativeInstanceId",
+    "splitId",
+    "newStackId",
+    "axis",
+    "firstShare",
+    "floatingId",
+    "stackId",
+    "x",
+    "y",
+    "width",
+    "height",
+  ]);
+  const expectedRevision = assertRevision(candidate.expectedRevision);
+  const originId = assertIdentity(candidate.originId, "Workspace origin ID");
+  if (candidate.kind === "apply") {
+    exactCommand(candidate, "Apply", ["commands"]);
+    if (!Array.isArray(candidate.commands)) invalidRequest("Apply workspace command is invalid.");
+    return Object.freeze({
+      kind: "apply" as const,
+      expectedRevision,
+      originId,
+      commands: Object.freeze(candidate.commands.map(parseWorkspaceCommandStep)),
+    });
+  }
+  const { expectedRevision: _expectedRevision, originId: _originId, ...step } = candidate;
+  return Object.freeze({
+    ...parseWorkspaceCommandStep(step),
+    expectedRevision,
+    originId,
+  }) as WorkspaceCommand;
 }
 
 function scopeMatches(
@@ -369,7 +512,10 @@ function removeInstance(document: UiWorkspaceDocument, instanceId: string): UiWo
     }
     floating.push({ ...item, stack: next });
   }
-  return { ...document, root, floating };
+  const next = { ...document, root, floating };
+  return next.maximizedStackId !== null && !workspaceStack(next, next.maximizedStackId)
+    ? { ...next, maximizedStackId: null }
+    : next;
 }
 
 function updateStackInNode(
@@ -560,6 +706,125 @@ function splitStack(
   }));
 }
 
+function updateSplitInNode(
+  node: WorkspaceNode,
+  splitId: string,
+  firstShare: number,
+): { readonly node: WorkspaceNode; readonly updated: boolean } {
+  if (node.kind === "stack") return { node, updated: false };
+  if (node.nodeId === splitId) {
+    return {
+      node: { ...node, firstShare },
+      updated: true,
+    };
+  }
+  const first = updateSplitInNode(node.first, splitId, firstShare);
+  const second = updateSplitInNode(node.second, splitId, firstShare);
+  if (!first.updated && !second.updated) return { node, updated: false };
+  return {
+    node: { ...node, first: first.node, second: second.node },
+    updated: true,
+  };
+}
+
+function resizeSplit(
+  document: UiWorkspaceDocument,
+  splitId: string,
+  firstShare: number,
+): UiWorkspaceDocument {
+  if (document.root === null) notFound(`Workspace split ${splitId} does not exist.`);
+  const updated = updateSplitInNode(document.root, splitId, firstShare);
+  if (!updated.updated) notFound(`Workspace split ${splitId} does not exist.`);
+  return { ...document, root: updated.node };
+}
+
+function floatInstance(
+  document: UiWorkspaceDocument,
+  input: Extract<WorkspaceCommandStep, { readonly kind: "float" }>,
+): UiWorkspaceDocument {
+  const source = workspaceStacks(document).find((stack) => stack.instanceIds.includes(input.instanceId));
+  if (!source) notFound(`Workspace instance ${input.instanceId} is not placed.`);
+  if (workspaceNodeIds(document).has(input.stackId)) {
+    invalidRequest(`Workspace stack ${input.stackId} already exists.`);
+  }
+  if (document.floating.some((item) => item.floatingId === input.floatingId)) {
+    invalidRequest(`Workspace floating stack ${input.floatingId} already exists.`);
+  }
+  const removed = removeInstance(document, input.instanceId);
+  return {
+    ...removed,
+    floating: [
+      ...removed.floating,
+      {
+        floatingId: input.floatingId,
+        stack: {
+          kind: "stack",
+          stackId: input.stackId,
+          instanceIds: [input.instanceId],
+          selectedInstanceId: input.instanceId,
+        },
+        x: input.x,
+        y: input.y,
+        width: input.width,
+        height: input.height,
+      },
+    ],
+  };
+}
+
+function updateFloating(
+  document: UiWorkspaceDocument,
+  input: Extract<WorkspaceCommandStep, { readonly kind: "update-floating" }>,
+): UiWorkspaceDocument {
+  const floating = document.floating.find((item) => item.floatingId === input.floatingId);
+  if (!floating) notFound(`Workspace floating stack ${input.floatingId} does not exist.`);
+  return {
+    ...document,
+    floating: document.floating.map((item) => item.floatingId === input.floatingId
+      ? { ...item, x: input.x, y: input.y, width: input.width, height: input.height }
+      : item),
+  };
+}
+
+function dockFloating(
+  document: UiWorkspaceDocument,
+  input: Extract<WorkspaceCommandStep, { readonly kind: "dock" }>,
+): UiWorkspaceDocument {
+  const floating = document.floating.find((item) => item.floatingId === input.floatingId);
+  if (!floating) notFound(`Workspace floating stack ${input.floatingId} does not exist.`);
+  const withoutFloating = {
+    ...document,
+    floating: document.floating.filter((item) => item.floatingId !== input.floatingId),
+  };
+  if (input.targetStackId === null) {
+    if (withoutFloating.root !== null) {
+      invalidRequest("Workspace floating stack can only become an empty tiled root.");
+    }
+    return {
+      ...withoutFloating,
+      root: floating.stack,
+    };
+  }
+  if (input.targetStackId === floating.stack.stackId) {
+    invalidRequest("Workspace floating stack cannot dock into itself.");
+  }
+  if (!workspaceStack(withoutFloating, input.targetStackId)) {
+    notFound(`Workspace stack ${input.targetStackId} does not exist.`);
+  }
+  const maximizedStackId = document.maximizedStackId === floating.stack.stackId
+    ? input.targetStackId
+    : document.maximizedStackId;
+  return updateStack(
+    { ...withoutFloating, maximizedStackId },
+    input.targetStackId,
+    (stack) => ({
+      ...stack,
+      instanceIds: [...stack.instanceIds, ...floating.stack.instanceIds],
+      selectedInstanceId: floating.stack.selectedInstanceId,
+    }),
+  );
+}
+
 function instanceDefinition(
   catalog: WorkspaceCatalogSnapshot,
   instance: WorkspaceViewInstance,
@@ -662,7 +927,7 @@ export class WorkspaceAuthority {
   ) {
     this.#workspaceId = options.workspaceId;
     this.#persistence = options.persistence;
-    this.#defaultProfile = options.defaultProfile ?? createCurrentCanvasWorkspaceProfile;
+    this.#defaultProfile = options.defaultProfile ?? createDefaultWorkspaceProfile;
     this.#catalog = catalog;
     this.#state = state;
     this.#catalogRequiresAcceptedSnapshot =
@@ -712,7 +977,7 @@ export class WorkspaceAuthority {
       }
       return authority;
     }
-    const profile = options.defaultProfile ?? createCurrentCanvasWorkspaceProfile;
+    const profile = options.defaultProfile ?? createDefaultWorkspaceProfile;
     let document: UiWorkspaceDocument;
     try {
       document = parseUiWorkspaceDocument(profile({ workspaceId: options.workspaceId, catalog }));
@@ -758,7 +1023,6 @@ export class WorkspaceAuthority {
       revision: this.#state.revision,
       originId: this.#state.originId,
       catalogRevision: this.#state.catalogRevision,
-      profileId: document.profileId,
       viewDefinitions: Object.freeze([...this.#catalog.definitions]),
       instances: Object.freeze(document.instances.map((item) => Object.freeze({
         instanceId: item.instanceId,
@@ -767,7 +1031,6 @@ export class WorkspaceAuthority {
         resource: item.resource,
         lifecycle: item.lifecycle,
         availability: item.availability,
-        hasState: item.stateRef !== null,
       }))),
       rootStackId,
       floatingStackIds: Object.freeze(document.floating.map((item) => item.stack.stackId)),
@@ -776,15 +1039,83 @@ export class WorkspaceAuthority {
     });
   }
 
+  /** Validate a command against the current revision without writing durable state. */
+  validate(rawCommand: WorkspaceCommand): WorkspaceValidation {
+    return this.#validation(this.#evaluate(rawCommand));
+  }
+
+  /** Return the exact normalized next document without writing durable state. */
+  plan(rawCommand: WorkspaceCommand): WorkspacePlan {
+    const evaluation = this.#evaluate(rawCommand);
+    const validation = this.#validation(evaluation);
+    return Object.freeze({ ...validation, document: evaluation.document });
+  }
+
+  /** Apply one command or an ordered batch in one compare-and-save revision. */
+  async apply(rawCommand: WorkspaceCommand): Promise<WorkspaceMutationResult> {
+    const evaluation = this.#evaluate(rawCommand);
+    if (evaluation.mutation.status === "no-change") return evaluation.mutation;
+    return this.#commit({
+      document: evaluation.document,
+      catalogRevision: this.#catalog.revision,
+      originId: evaluation.command.originId,
+      kind: "workspace-changed",
+      affectedInstances: evaluation.mutation.affectedInstanceIds,
+      affectedStacks: evaluation.mutation.affectedStackIds,
+      warnings: evaluation.mutation.warnings,
+    });
+  }
+
+  /** Backward-compatible mutation entrypoint; it has the same atomic behavior as apply. */
   async mutate(rawCommand: WorkspaceCommand): Promise<WorkspaceMutationResult> {
+    return this.apply(rawCommand);
+  }
+
+  #evaluate(rawCommand: WorkspaceCommand): WorkspaceEvaluation {
     const command = parseWorkspaceCommand(rawCommand);
     ensureExpectedRevision(this.#state, command.expectedRevision);
     const before = this.#state.document;
-    let next = before;
-    let affectedInstances: readonly string[] = [];
-    let affectedStacks: readonly string[] = [];
-    let warnings: readonly string[] = [];
+    const steps: readonly WorkspaceCommandStep[] = command.kind === "apply"
+      ? command.commands
+      : [command];
+    let document = before;
+    const affectedInstanceIds: string[] = [];
+    const affectedStackIds: string[] = [];
+    const warnings: string[] = [];
+    for (const step of steps) {
+      const reduction = this.#reduce(document, step);
+      document = parseUiWorkspaceDocument(reduction.document);
+      affectedInstanceIds.push(...reduction.affectedInstanceIds);
+      affectedStackIds.push(...reduction.affectedStackIds);
+      warnings.push(...reduction.warnings);
+    }
+    return {
+      command,
+      document,
+      mutation: result(
+        workspaceDocumentEqual(before, document) ? "no-change" : "applied",
+        this.#state.revision,
+        affectedInstanceIds,
+        affectedStackIds,
+        warnings,
+      ),
+    };
+  }
 
+  #validation(evaluation: WorkspaceEvaluation): WorkspaceValidation {
+    return Object.freeze({
+      status: evaluation.mutation.status === "applied" ? "valid" : "no-change",
+      revision: this.#state.revision,
+      nextRevision: evaluation.mutation.status === "applied"
+        ? nextRevision(this.#state.revision)
+        : this.#state.revision,
+      affectedInstanceIds: evaluation.mutation.affectedInstanceIds,
+      affectedStackIds: evaluation.mutation.affectedStackIds,
+      warnings: evaluation.mutation.warnings,
+    });
+  }
+
+  #reduce(document: UiWorkspaceDocument, command: WorkspaceCommandStep): WorkspaceReduction {
     switch (command.kind) {
       case "open": {
         const definition = findWorkspaceViewDefinition(this.#catalog, command.viewTypeId);
@@ -792,7 +1123,7 @@ export class WorkspaceAuthority {
         if (!scopeMatches(definition, command.resource)) {
           invalidRequest(`Workspace resource does not match ${definition.viewTypeId}.`);
         }
-        const matching = before.instances.find((item) => (
+        const matching = document.instances.find((item) => (
           item.viewTypeId === definition.viewTypeId
           && (definition.cardinality === "singleton"
             || (definition.cardinality === "one-per-resource"
@@ -800,21 +1131,24 @@ export class WorkspaceAuthority {
             || (definition.cardinality === "multiple" && item.instanceId === command.instanceId))
         ));
         if (matching) {
-          next = matching.lifecycle === "hidden"
+          const next = matching.lifecycle === "hidden"
             ? placeInIntent({
-                ...before,
-                instances: before.instances.map((item) => item.instanceId === matching.instanceId
+                ...document,
+                instances: document.instances.map((item) => item.instanceId === matching.instanceId
                   ? { ...item, lifecycle: "placed" as const }
                   : item),
               }, matching.instanceId, command.placement)
-            : selectInstance(before, matching.instanceId);
-          affectedInstances = [matching.instanceId];
-          affectedStacks = workspaceStacks(next)
-            .filter((stack) => stack.instanceIds.includes(matching.instanceId))
-            .map((stack) => stack.stackId);
-          break;
+            : selectInstance(document, matching.instanceId);
+          return {
+            document: next,
+            affectedInstanceIds: [matching.instanceId],
+            affectedStackIds: workspaceStacks(next)
+              .filter((stack) => stack.instanceIds.includes(matching.instanceId))
+              .map((stack) => stack.stackId),
+            warnings: [],
+          };
         }
-        if (before.instances.some((item) => item.instanceId === command.instanceId)) {
+        if (document.instances.some((item) => item.instanceId === command.instanceId)) {
           invalidRequest(`Workspace instance ${command.instanceId} is already used.`);
         }
         const created: WorkspaceViewInstance = {
@@ -824,119 +1158,196 @@ export class WorkspaceAuthority {
           ownerActivationId: definition.ownerActivationId,
           resource: command.resource,
           label: command.label ?? definition.label,
-          stateRef: command.stateRef,
           availability: { kind: "available" },
           lifecycle: "placed",
         };
-        next = placeInIntent({ ...before, instances: [...before.instances, created] }, created.instanceId, command.placement);
-        affectedInstances = [created.instanceId];
-        affectedStacks = workspaceStacks(next)
-          .filter((stack) => stack.instanceIds.includes(created.instanceId))
-          .map((stack) => stack.stackId);
-        break;
+        const next = placeInIntent({ ...document, instances: [...document.instances, created] }, created.instanceId, command.placement);
+        return {
+          document: next,
+          affectedInstanceIds: [created.instanceId],
+          affectedStackIds: workspaceStacks(next)
+            .filter((stack) => stack.instanceIds.includes(created.instanceId))
+            .map((stack) => stack.stackId),
+          warnings: [],
+        };
       }
       case "close": {
-        const item = before.instances.find((candidate) => candidate.instanceId === command.instanceId);
+        const item = document.instances.find((candidate) => candidate.instanceId === command.instanceId);
         if (!item) notFound(`Workspace instance ${command.instanceId} does not exist.`);
         const behavior = closeBehavior(this.#catalog, item);
         if (behavior === "forbid") {
           throw new WorkspaceAuthorityError("workspace.forbidden", `Workspace view ${item.viewTypeId} cannot be closed.`);
         }
-        next = removeInstance(before, item.instanceId);
-        if (behavior === "hide") {
-          next = {
-            ...next,
-            instances: next.instances.map((candidate) => candidate.instanceId === item.instanceId
-              ? { ...candidate, lifecycle: "hidden" as const }
-              : candidate),
-          };
-        } else {
-          next = { ...next, instances: next.instances.filter((candidate) => candidate.instanceId !== item.instanceId) };
-        }
-        affectedInstances = [item.instanceId];
-        break;
+        let next = removeInstance(document, item.instanceId);
+        next = behavior === "hide"
+          ? {
+              ...next,
+              instances: next.instances.map((candidate) => candidate.instanceId === item.instanceId
+                ? { ...candidate, lifecycle: "hidden" as const }
+                : candidate),
+            }
+          : { ...next, instances: next.instances.filter((candidate) => candidate.instanceId !== item.instanceId) };
+        return {
+          document: next,
+          affectedInstanceIds: [item.instanceId],
+          affectedStackIds: [],
+          warnings: [],
+        };
       }
       case "focus": {
-        const item = before.instances.find((candidate) => candidate.instanceId === command.instanceId);
+        const item = document.instances.find((candidate) => candidate.instanceId === command.instanceId);
         if (!item) notFound(`Workspace instance ${command.instanceId} does not exist.`);
-        next = item.lifecycle === "hidden"
+        const next = item.lifecycle === "hidden"
           ? placeInIntent({
-              ...before,
-              instances: before.instances.map((candidate) => candidate.instanceId === item.instanceId
+              ...document,
+              instances: document.instances.map((candidate) => candidate.instanceId === item.instanceId
                 ? { ...candidate, lifecycle: "placed" as const }
                 : candidate),
             }, item.instanceId, command.placement)
-          : selectInstance(before, item.instanceId);
-        affectedInstances = [item.instanceId];
-        affectedStacks = workspaceStacks(next)
-          .filter((stack) => stack.instanceIds.includes(item.instanceId))
-          .map((stack) => stack.stackId);
-        break;
+          : selectInstance(document, item.instanceId);
+        return {
+          document: next,
+          affectedInstanceIds: [item.instanceId],
+          affectedStackIds: workspaceStacks(next)
+            .filter((stack) => stack.instanceIds.includes(item.instanceId))
+            .map((stack) => stack.stackId),
+          warnings: [],
+        };
       }
       case "select": {
-        if (!before.instances.some((candidate) => candidate.instanceId === command.instanceId)) {
+        if (!document.instances.some((candidate) => candidate.instanceId === command.instanceId)) {
           notFound(`Workspace instance ${command.instanceId} does not exist.`);
         }
-        next = selectInstance(before, command.instanceId);
-        affectedInstances = [command.instanceId];
-        affectedStacks = workspaceStacks(next)
-          .filter((stack) => stack.instanceIds.includes(command.instanceId))
-          .map((stack) => stack.stackId);
-        break;
+        const next = selectInstance(document, command.instanceId);
+        return {
+          document: next,
+          affectedInstanceIds: [command.instanceId],
+          affectedStackIds: workspaceStacks(next)
+            .filter((stack) => stack.instanceIds.includes(command.instanceId))
+            .map((stack) => stack.stackId),
+          warnings: [],
+        };
       }
       case "move":
-        next = moveInstance(
-          before,
-          command.instanceId,
-          command.targetStackId,
-          command.position,
-          command.relativeInstanceId,
-        );
-        affectedInstances = [command.instanceId];
-        affectedStacks = [command.targetStackId];
-        break;
-      case "split":
+        return {
+          document: moveInstance(
+            document,
+            command.instanceId,
+            command.targetStackId,
+            command.position,
+            command.relativeInstanceId,
+          ),
+          affectedInstanceIds: [command.instanceId],
+          affectedStackIds: [command.targetStackId],
+          warnings: [],
+        };
+      case "split": {
         const identity = command.splitId === undefined
-          ? allocateWorkspaceSplitIdentity(before)
+          ? allocateWorkspaceSplitIdentity(document)
           : { splitId: command.splitId, newStackId: command.newStackId! };
-        next = splitStack(
-          before,
-          command.instanceId,
-          command.targetStackId,
-          identity.splitId,
-          identity.newStackId,
-          command.axis,
-          command.position,
-        );
-        affectedInstances = [command.instanceId];
-        affectedStacks = [command.targetStackId, identity.newStackId];
-        break;
-      case "reset":
-        if (command.profileId !== this.#state.document.profileId) {
-          notFound(`Workspace profile ${command.profileId} is not available.`);
+        return {
+          document: splitStack(
+            document,
+            command.instanceId,
+            command.targetStackId,
+            identity.splitId,
+            identity.newStackId,
+            command.axis,
+            command.position,
+          ),
+          affectedInstanceIds: [command.instanceId],
+          affectedStackIds: [command.targetStackId, identity.newStackId],
+          warnings: [],
+        };
+      }
+      case "rename": {
+        if (!document.instances.some((item) => item.instanceId === command.instanceId)) {
+          notFound(`Workspace instance ${command.instanceId} does not exist.`);
         }
-        next = parseUiWorkspaceDocument(this.#defaultProfile({
+        return {
+          document: {
+            ...document,
+            instances: document.instances.map((item) => item.instanceId === command.instanceId
+              ? { ...item, label: command.label }
+              : item),
+          },
+          affectedInstanceIds: [command.instanceId],
+          affectedStackIds: [],
+          warnings: [],
+        };
+      }
+      case "resize-split": {
+        const next = resizeSplit(document, command.splitId, command.firstShare);
+        return {
+          document: next,
+          affectedInstanceIds: [],
+          affectedStackIds: workspaceStacks(next).map((stack) => stack.stackId),
+          warnings: [],
+        };
+      }
+      case "float": {
+        const next = floatInstance(document, command);
+        return {
+          document: next,
+          affectedInstanceIds: [command.instanceId],
+          affectedStackIds: [command.stackId],
+          warnings: [],
+        };
+      }
+      case "update-floating": {
+        const next = updateFloating(document, command);
+        const floating = next.floating.find((item) => item.floatingId === command.floatingId)!;
+        return {
+          document: next,
+          affectedInstanceIds: [...floating.stack.instanceIds],
+          affectedStackIds: [floating.stack.stackId],
+          warnings: [],
+        };
+      }
+      case "dock": {
+        const floating = document.floating.find((item) => item.floatingId === command.floatingId);
+        if (!floating) notFound(`Workspace floating stack ${command.floatingId} does not exist.`);
+        const next = dockFloating(document, command);
+        return {
+          document: next,
+          affectedInstanceIds: [...floating.stack.instanceIds],
+          affectedStackIds: [floating.stack.stackId, ...(command.targetStackId === null ? [floating.stack.stackId] : [command.targetStackId])],
+          warnings: [],
+        };
+      }
+      case "maximize":
+        if (!workspaceStack(document, command.stackId)) {
+          notFound(`Workspace stack ${command.stackId} does not exist.`);
+        }
+        return {
+          document: { ...document, maximizedStackId: command.stackId },
+          affectedInstanceIds: [],
+          affectedStackIds: [command.stackId],
+          warnings: [],
+        };
+      case "restore":
+        return {
+          document: { ...document, maximizedStackId: null },
+          affectedInstanceIds: [],
+          affectedStackIds: document.maximizedStackId === null ? [] : [document.maximizedStackId],
+          warnings: [],
+        };
+      case "reset": {
+        const next = parseUiWorkspaceDocument(this.#defaultProfile({
           workspaceId: this.#workspaceId,
           catalog: this.#catalog,
         }));
-        affectedInstances = next.instances.map((item) => item.instanceId);
-        affectedStacks = workspaceStacks(next).map((stack) => stack.stackId);
-        break;
+        if (next.workspaceId !== this.#workspaceId) {
+          throw new WorkspaceAuthorityError("workspace.invalid-document", "Workspace profile returned another workspace.");
+        }
+        return {
+          document: next,
+          affectedInstanceIds: next.instances.map((item) => item.instanceId),
+          affectedStackIds: workspaceStacks(next).map((stack) => stack.stackId),
+          warnings: [],
+        };
+      }
     }
-
-    next = parseUiWorkspaceDocument(next);
-    if (workspaceDocumentEqual(before, next)) {
-      return result("no-change", this.#state.revision, affectedInstances, affectedStacks, warnings);
-    }
-    return this.#commit({
-      document: next,
-      catalogRevision: this.#catalog.revision,
-      originId: command.originId,
-      kind: "workspace-changed",
-      affectedInstances,
-      affectedStacks,
-      warnings,
-    });
   }
 
   async reconcileCatalog(input: ReconcileWorkspaceCatalogInput): Promise<WorkspaceMutationResult> {

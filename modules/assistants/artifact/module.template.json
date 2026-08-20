@@ -28,7 +28,7 @@
     "requiredServices": [
       {
         "id": "shipctl.assistant-launch",
-        "version": 1
+        "version": 2
       },
       {
         "id": "shipctl.credential-store",
@@ -41,10 +41,16 @@
       {
         "id": "shipctl.terminal-sessions",
         "version": 1
+      },
+      {
+        "id": "shipctl.projects",
+        "version": 1
       }
     ],
     "providedServices": [],
-    "backgroundEffects": [],
+    "backgroundEffects": [
+      "assistants.runtime"
+    ],
     "contributions": [
       {
         "family": "panel",
@@ -53,10 +59,12 @@
       }
     ]
   },
-  "uiContributions": [],
   "requestedGrants": [
     "assistant.launch",
     "assistant.session-record",
+    "assistant.resource.read",
+    "assistant.resource.write",
+    "assistant.resource.execute",
     "credential.inspect",
     "credential.write",
     "terminal.start",

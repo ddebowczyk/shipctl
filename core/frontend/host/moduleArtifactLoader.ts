@@ -1,7 +1,12 @@
 import * as PluginApi from "@shipctl/module-api";
 import {
+  type AcceptedPluginAdmission,
+  type DirectShipctlPluginDefinition,
+  type LegacyShipctlPluginDefinition,
+  type ModuleActivationContext,
   parseMessageDeclarations,
   type MessageDeclarations,
+  type PluginArtifactDeclarations,
   type ShipctlModule,
   type ShipctlPluginDefinition,
 } from "@shipctl/module-api";
@@ -16,7 +21,9 @@ import { moduleArtifactAssetUrl } from "@shipctl/core/platform";
 import { messageDeclarations } from "./moduleMessageContext.ts";
 import {
   collectPluginArtifactDeclarations,
+  PluginArtifactDeclarationError,
   parsePluginArtifactDeclarations,
+  samePluginArtifactDeclarationMetadata,
   samePluginArtifactDeclarations,
 } from "./pluginArtifactDeclarations.ts";
 
@@ -53,14 +60,24 @@ export interface LoadShipctlModuleArtifactRequest {
 export interface LoadedShipctlModuleArtifact {
   readonly digest: string;
   readonly entryUrl: string;
-  readonly module: ShipctlModule;
+  /** Present only while this artifact still uses the temporary static adapter. */
+  readonly module?: ShipctlModule;
   readonly definition: ShipctlPluginDefinition;
+  /** Immutable host-side admission carried into provider bindings at activation. */
+  readonly admission: AcceptedPluginAdmission;
+}
+
+export interface ModuleArtifactDiagnostic {
+  readonly code: string;
+  readonly subject: string;
+  readonly message: string;
 }
 
 export class ModuleArtifactLoadError extends Error {
   readonly code: string;
   readonly phase: ModuleArtifactLoadPhase;
   readonly cause: unknown;
+  readonly diagnostic: ModuleArtifactDiagnostic | undefined;
 
   constructor(
     phase: ModuleArtifactLoadPhase,
@@ -74,6 +91,13 @@ export class ModuleArtifactLoadError extends Error {
     this.code = phase === "validate"
       ? "module.loader.invalid_artifact"
       : `module.loader.${phase}_failed`;
+    this.diagnostic = cause instanceof PluginArtifactDeclarationError
+      ? Object.freeze({
+          code: cause.code,
+          subject: cause.subject,
+          message: cause.message,
+        })
+      : undefined;
   }
 }
 
@@ -154,6 +178,26 @@ function sameMessages(left: MessageDeclarations, right: MessageDeclarations): bo
 
 const LEGACY_HEADLESS_MODULE_KEYS = new Set(["id", "version", "messages", "activate"]);
 
+function isLegacyDefinition(
+  definition: ShipctlPluginDefinition,
+): definition is LegacyShipctlPluginDefinition {
+  return "module" in definition;
+}
+
+function definitionIdentity(
+  definition: ShipctlPluginDefinition,
+): { readonly id: string; readonly version: string } {
+  return isLegacyDefinition(definition)
+    ? { id: definition.module.id, version: definition.module.version }
+    : { id: definition.id, version: definition.version };
+}
+
+function definitionGrants(definition: ShipctlPluginDefinition): readonly string[] {
+  return isLegacyDefinition(definition)
+    ? definition.module.requiredGrants ?? []
+    : definition.requiredGrants ?? [];
+}
+
 function installModuleArtifactHost(): ModuleArtifactHost {
   const host = Object.freeze({
     react: React,
@@ -194,44 +238,72 @@ function withActivationOwnedStyles(
   styleUrls: readonly string[],
 ): ShipctlPluginDefinition {
   if (styleUrls.length === 0) return definition;
-  const original = definition.module.activate;
-  return {
-    ...definition,
-    module: {
-      ...definition.module,
-      activate(host) {
-        if (typeof document === "undefined" || document.head === null) {
-          throw new Error("A presentation artifact requires a document to attach its styles");
-        }
-        const styles = styleUrls.map((href) => {
-          const link = document.createElement("link");
-          link.rel = "stylesheet";
-          link.href = href;
-          link.dataset.shipctlModule = definition.module.id;
-          document.head.append(link);
-          return link;
-        });
-        const detach = () => {
-          for (const style of styles) style.remove();
-        };
-        try {
-          const deactivation = original?.(host);
-          return {
-            async deactivate() {
-              try {
-                await deactivation?.deactivate();
-              } finally {
-                detach();
-              }
-            },
-          };
-        } catch (error) {
-          detach();
-          throw error;
-        }
+  const attachStyles = (moduleId: string) => {
+    if (typeof document === "undefined" || document.head === null) {
+      throw new Error("A presentation artifact requires a document to attach its styles");
+    }
+    const styles = styleUrls.map((href) => {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = href;
+      link.dataset.shipctlModule = moduleId;
+      document.head.append(link);
+      return link;
+    });
+    return () => {
+      for (const style of styles) style.remove();
+    };
+  };
+  if (isLegacyDefinition(definition)) {
+    const original = definition.module.activate;
+    return {
+      ...definition,
+      module: {
+        ...definition.module,
+        activate(host) {
+          const detach = attachStyles(definition.module.id);
+          try {
+            const deactivation = original?.(host);
+            return {
+              async deactivate() {
+                try {
+                  await deactivation?.deactivate();
+                } finally {
+                  detach();
+                }
+              },
+            };
+          } catch (error) {
+            detach();
+            throw error;
+          }
+        },
       },
+    };
+  }
+  const original = definition.activate;
+  const styled: DirectShipctlPluginDefinition = {
+    ...definition,
+    async activate(context: ModuleActivationContext) {
+      const detach = attachStyles(definition.id);
+      try {
+        const deactivation = await original(context);
+        return {
+          async deactivate() {
+            try {
+              await deactivation?.deactivate();
+            } finally {
+              detach();
+            }
+          },
+        };
+      } catch (error) {
+        detach();
+        throw error;
+      }
     },
   };
+  return styled;
 }
 
 /** Load and validate one admitted runtime module without activating it. */
@@ -282,26 +354,42 @@ export async function loadShipctlModuleArtifact({
   } catch (error) {
     throw new ModuleArtifactLoadError("validate", "Module artifact declaration factory failed", error);
   }
-  if (!definition || typeof definition !== "object" || !("module" in definition)) {
+  if (!definition || typeof definition !== "object") {
     throw new ModuleArtifactLoadError(
       "validate",
       "Module artifact did not return a plugin definition",
     );
   }
-  const { module } = definition;
-  if (!module || module.id !== expectedModuleId || module.version !== expectedVersion) {
+  const identity = definitionIdentity(definition);
+  if (identity.id !== expectedModuleId || identity.version !== expectedVersion) {
     throw new ModuleArtifactLoadError(
       "validate",
       "Module artifact identity does not match its admitted manifest",
     );
   }
+  const legacyModule = isLegacyDefinition(definition) ? definition.module : undefined;
+  const legacyDefinition = legacyModule !== undefined;
+  let parsedApplication: PluginArtifactDeclarations | undefined;
   if (usesApplicationContract) {
-    let admitted;
+    let admitted: PluginArtifactDeclarations;
     try {
       admitted = parsePluginArtifactDeclarations(admittedApplication);
-      const runtime = collectPluginArtifactDeclarations(definition);
-      if (!samePluginArtifactDeclarations(admitted, runtime)) {
-        throw new Error("Application declarations differ");
+      parsedApplication = admitted;
+      if (legacyDefinition) {
+        const runtime = collectPluginArtifactDeclarations(definition);
+        if (!samePluginArtifactDeclarations(admitted, runtime)) {
+          throw new PluginArtifactDeclarationError(
+            "module.declaration.inconsistent",
+            "Application declarations",
+            "Application declarations differ",
+          );
+        }
+      } else if (!samePluginArtifactDeclarationMetadata(admitted, definition)) {
+        throw new PluginArtifactDeclarationError(
+          "module.declaration.inconsistent",
+          "Application declarations",
+          "Application declaration metadata differs",
+        );
       }
     } catch (error) {
       throw new ModuleArtifactLoadError(
@@ -311,7 +399,13 @@ export async function loadShipctlModuleArtifact({
       );
     }
   } else {
-    const unsupported = Object.keys(module).filter(
+    if (legacyModule === undefined) {
+      throw new ModuleArtifactLoadError(
+        "validate",
+        "Schema version 1 artifacts must use the legacy module declaration",
+      );
+    }
+    const unsupported = Object.keys(legacyModule).filter(
       (key) => !LEGACY_HEADLESS_MODULE_KEYS.has(key),
     );
     if (unsupported.length > 0) {
@@ -321,26 +415,34 @@ export async function loadShipctlModuleArtifact({
       );
     }
   }
+  let parsedMessages: MessageDeclarations | undefined;
   if (admittedMessages !== undefined) {
     let admitted: MessageDeclarations;
-    let runtime: MessageDeclarations;
     try {
       admitted = parseMessageDeclarations(admittedMessages);
-      runtime = parseMessageDeclarations(messageDeclarations(module));
+      parsedMessages = admitted;
     } catch (error) {
       throw new ModuleArtifactLoadError("validate", "Runtime message declarations are invalid", error);
     }
-    if (!sameMessages(admitted, runtime)) {
-      throw new ModuleArtifactLoadError(
-        "validate",
-        "Runtime message declarations do not match the admitted manifest",
-      );
+    if (legacyModule !== undefined) {
+      let runtime: MessageDeclarations;
+      try {
+        runtime = parseMessageDeclarations(messageDeclarations(legacyModule));
+      } catch (error) {
+        throw new ModuleArtifactLoadError("validate", "Runtime message declarations are invalid", error);
+      }
+      if (!sameMessages(admitted, runtime)) {
+        throw new ModuleArtifactLoadError(
+          "validate",
+          "Runtime message declarations do not match the admitted manifest",
+        );
+      }
     }
   }
+  const effectiveGrants = admittedGrants === undefined ? [] : parseGrants(admittedGrants);
   if (admittedGrants !== undefined) {
-    const admitted = parseGrants(admittedGrants);
-    const runtime = [...module.requiredGrants ?? []].sort();
-    if (!sameJson(admitted, runtime)) {
+    const runtime = [...definitionGrants(definition)].sort();
+    if (!sameJson(effectiveGrants, runtime)) {
       throw new ModuleArtifactLoadError(
         "validate",
         "Runtime grants do not match the admitted manifest",
@@ -348,10 +450,22 @@ export async function loadShipctlModuleArtifact({
     }
   }
   const loadableDefinition = withActivationOwnedStyles(definition, styleUrls);
+  const admission: AcceptedPluginAdmission = Object.freeze({
+    artifact: Object.freeze({
+      contentDigest: digest,
+      entryUrl,
+      moduleId: expectedModuleId,
+      version: expectedVersion,
+    }),
+    effectiveGrants: Object.freeze([...effectiveGrants]),
+    ...(parsedApplication === undefined ? {} : { application: parsedApplication }),
+    ...(parsedMessages === undefined ? {} : { messages: parsedMessages }),
+  });
   return {
     digest,
     entryUrl,
-    module: loadableDefinition.module,
     definition: loadableDefinition,
+    admission,
+    ...(isLegacyDefinition(loadableDefinition) ? { module: loadableDefinition.module } : {}),
   };
 }

@@ -9,7 +9,7 @@ import { assistantLogoSrc, getAssistantLogoClass } from "./branding";
 import { launchAssistant } from "./runtime";
 import { piCredentialClientFor } from "./credentialStoreClient";
 
-export default function SessionLauncher({ project, close, activation, services }: ModulePanelProps) {
+export default function SessionLauncher({ project, close, activation }: ModulePanelProps) {
   const activeRepoPath = project?.path ?? null;
 
   const [selectedAssistant, setSelectedAssistant] = useState<CodingAssistant | null>(null);
@@ -195,7 +195,7 @@ export default function SessionLauncher({ project, close, activation, services }
       selectedAssistant.id,
       mode,
       selectedModel ?? undefined,
-      services,
+      activation,
       assistantClient,
     );
     if (started) close();

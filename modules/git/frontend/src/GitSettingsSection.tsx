@@ -1,5 +1,15 @@
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import type { SettingsContributionProps } from "@shipctl/module-api";
+
+import {
+  DEFAULT_GIT_PREFERENCES,
+  updateGitPreferences,
+  useGitPreferencesStore,
+} from "./gitPreferences.ts";
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function InfoTip({ text }: { readonly text: string }) {
   const [show, setShow] = useState(false);
@@ -19,11 +29,18 @@ function InfoTip({ text }: { readonly text: string }) {
 }
 
 export default function GitSettingsSection({ services }: SettingsContributionProps) {
-  const settings = useSyncExternalStore(
-    services.settings.subscribe,
-    services.settings.getSnapshot,
-  );
-  const enabled = settings.values.autoImportWorktrees !== false;
+  const preferences = useGitPreferencesStore((state) => state.preferences);
+  const enabled = preferences?.autoImportWorktrees ?? DEFAULT_GIT_PREFERENCES.autoImportWorktrees;
+
+  const update = () => {
+    void updateGitPreferences({ autoImportWorktrees: !enabled }).catch((error) => {
+      services.notices.push({
+        tone: "error",
+        title: "Couldn't save Git preferences",
+        message: getErrorMessage(error),
+      });
+    });
+  };
 
   return (
     <section className="settings-section">
@@ -34,7 +51,7 @@ export default function GitSettingsSection({ services }: SettingsContributionPro
           <InfoTip text="When enabled, adding a main repo also imports its existing Git worktrees. Adding a worktree directly still adds its main repo so the relationship stays intact." />
         </span>
         <button
-          onClick={() => void services.settings.update({ autoImportWorktrees: !enabled })}
+          onClick={update}
           className={`option-card option-card--compact ${enabled ? "selected" : ""}`}
         >
           {enabled ? "On" : "Off"}

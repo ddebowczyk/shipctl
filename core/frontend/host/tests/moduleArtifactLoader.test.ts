@@ -14,6 +14,7 @@ import {
 } from "../moduleArtifactLoader.ts";
 import {
   collectPluginArtifactDeclarations,
+  PluginArtifactDeclarationError,
   parsePluginArtifactDeclarations,
 } from "../pluginArtifactDeclarations.ts";
 import { loadRuntimeModules } from "../runtimeModuleLoader.ts";
@@ -162,11 +163,78 @@ test("contribution IDs follow their public domain contracts", () => {
       schemaVersion: 1,
     }],
   } as const;
-  assert.throws(() => parsePluginArtifactDeclarations(declarations));
-  assert.throws(() => parsePluginArtifactDeclarations({
-    ...declarations,
-    contributions: [{ ...declarations.contributions[0], family: "panel", id: "thin-terminal" }],
-  }));
+  assert.throws(
+    () => parsePluginArtifactDeclarations(declarations),
+    (error: unknown) => error instanceof PluginArtifactDeclarationError
+      && error.code === "module.declaration.invalid_value"
+      && error.subject === "Contribution declarations",
+  );
+  assert.throws(
+    () => parsePluginArtifactDeclarations({
+      ...declarations,
+      contributions: [{ ...declarations.contributions[0], family: "panel", id: "thin-terminal" }],
+    }),
+    (error: unknown) => error instanceof PluginArtifactDeclarationError
+      && error.code === "module.declaration.invalid_value"
+      && error.subject === "Contribution declarations",
+  );
+});
+
+test("runtime loader reports malformed product declarations before activation", async () => {
+  const moduleId = "fixture.malformed-declarations";
+  let activationCalls = 0;
+  const definition = {
+    id: moduleId,
+    version: "1.0.0",
+    role: "presentation",
+    activate() {
+      activationCalls += 1;
+    },
+  } satisfies PluginApi.DirectShipctlPluginDefinition;
+  const malformedApplication = {
+    schemaVersion: 1,
+    role: "presentation",
+    requiredServices: [],
+    providedServices: [],
+    backgroundEffects: [],
+    contributions: [{
+      family: "future-contribution-family",
+      id: "fixture.malformed-declarations.contribution",
+      schemaVersion: 1,
+    }],
+  } as const;
+
+  const loaded = await loadRuntimeModules({
+    schemaVersion: 1,
+    registryRevision: 1,
+    modules: [{
+      schemaVersion: 1,
+      moduleId,
+      version: "1.0.0",
+      contentDigest: DIGEST_A,
+      entryPath: `/isolated/modules/${DIGEST_A}/module.mjs`,
+      stylePaths: [],
+      manifest: {
+        schemaVersion: 2,
+        lifecycle: "live",
+        application: malformedApplication,
+        messages: EMPTY_MESSAGES,
+        requestedGrants: [],
+      },
+      capabilities: { definitions: [] },
+    }],
+  }, {
+    resolveArtifactUrl: (path) => `asset://localhost/${DIGEST_A}/${path.split("/").at(-1)}`,
+    importModule: async () => ({ createShipctlPlugin: () => definition }),
+  });
+
+  assert.deepEqual(loaded.definitions, []);
+  assert.equal(loaded.failures.length, 1);
+  assert.equal(loaded.failures[0]?.phase, "validate");
+  assert.equal(loaded.failures[0]?.code, "module.loader.invalid_artifact");
+  assert.equal(loaded.failures[0]?.diagnostic?.code, "module.declaration.invalid_value");
+  assert.equal(loaded.failures[0]?.diagnostic?.subject, "Contribution declarations");
+  assert.equal(activationCalls, 0);
 });
 
 test("schema v2 loading seeds exact host singletons and remains passive", async () => {
@@ -239,6 +307,71 @@ test("schema v2 loading seeds exact host singletons and remains passive", async 
   assert.equal(loaded.module, module);
   assert.equal(declarationFactoryCalls, 1);
   assert.equal(activationCalls, 0);
+});
+
+test("schema v2 direct declarations retain admission without static module wiring", async () => {
+  const moduleId = "fixture.direct-artifact";
+  const version = "1.2.3";
+  let activationCalls = 0;
+  const definition = {
+    id: moduleId,
+    version,
+    role: "presentation",
+    requiredGrants: ["fixture.grant"],
+    activate: (context) => {
+      activationCalls += 1;
+      context.contributions.commands.register({
+        id: `${moduleId}.command`,
+        moduleId,
+        label: "Fixture direct command",
+        run: () => undefined,
+      });
+    },
+  } satisfies PluginApi.DirectShipctlPluginDefinition;
+  const application = {
+    schemaVersion: 1,
+    role: "presentation",
+    requiredServices: [],
+    providedServices: [],
+    backgroundEffects: [],
+    contributions: [{
+      family: "command",
+      id: `${moduleId}.command`,
+      schemaVersion: 1,
+    }],
+  } as const;
+
+  const loaded = await loadShipctlModuleArtifact({
+    digest: DIGEST_A,
+    entryUrl: `asset://localhost/modules/${DIGEST_A}/module.mjs`,
+    expectedModuleId: moduleId,
+    expectedVersion: version,
+    admittedApplication: application,
+    admittedMessages: EMPTY_MESSAGES,
+    admittedGrants: ["fixture.grant"],
+    importModule: async () => ({ createShipctlPlugin: () => definition }),
+  });
+
+  assert.equal(loaded.definition, definition);
+  assert.equal(loaded.module, undefined);
+  assert.equal(loaded.admission.artifact.moduleId, moduleId);
+  assert.deepEqual(loaded.admission.effectiveGrants, ["fixture.grant"]);
+  assert.equal(activationCalls, 0);
+
+  await assert.rejects(
+    () => loadShipctlModuleArtifact({
+      digest: DIGEST_A,
+      entryUrl: `asset://localhost/modules/${DIGEST_A}/module.mjs`,
+      expectedModuleId: moduleId,
+      expectedVersion: version,
+      admittedApplication: { ...application, role: "headless" },
+      admittedMessages: EMPTY_MESSAGES,
+      admittedGrants: ["fixture.grant"],
+      importModule: async () => ({ createShipctlPlugin: () => definition }),
+    }),
+    (error: unknown) => error instanceof ModuleArtifactLoadError
+      && error.code === "module.loader.invalid_artifact",
+  );
 });
 
 test("artifact styles are passive until activation and leave with their owner", async () => {

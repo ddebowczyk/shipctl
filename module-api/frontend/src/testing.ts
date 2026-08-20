@@ -24,6 +24,14 @@ export type {
   FakeProjectDocumentsTrace,
 } from "./testing/projectDocuments.ts";
 export {
+  createFakeProjectsServiceProvider,
+  FakeProjectsChangeController,
+} from "./testing/projects.ts";
+export type {
+  FakeProjectsProviderOptions,
+  FakeProjectsTrace,
+} from "./testing/projects.ts";
+export {
   createFakeGitServiceProvider,
   FakeGitChangeController,
 } from "./testing/git.ts";
@@ -61,7 +69,6 @@ export type {
 export { createFakePluginDataServiceProvider } from "./testing/pluginData.ts";
 export type {
   FakePluginDataOperation,
-  FakePluginDataPolicy,
   FakePluginDataProviderOptions,
   FakePluginDataRecordSeed,
   FakePluginDataTrace,

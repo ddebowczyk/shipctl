@@ -1,12 +1,14 @@
-//! Private Tauri transport for the public Assistant Launch semantic service.
+//! Private Tauri transport for the generic Assistant Launch semantic service.
 
 use serde::Deserialize;
 use tauri::State;
 
 use shipctl_core::assistant_launch::{
-    AssistantLaunchActor, AssistantLaunchError, AssistantLaunchService, AssistantSessionRecord,
-    PiConfig, PiSettings, ResumeAssistantSessionInput, StartAssistantSessionInput,
-    StartedAssistantSession, ASSISTANT_LAUNCH_INVALID_REQUEST, ASSISTANT_LAUNCH_TRANSPORT_FAILED,
+    AssistantLaunchActor, AssistantLaunchError, AssistantLaunchService,
+    AssistantResourceExecuteInput, AssistantResourceExecuteResult, AssistantResourceReadInput,
+    AssistantResourceReadResult, AssistantResourceWriteInput, AssistantSessionRecord,
+    ResumeAssistantSessionInput, StartAssistantSessionInput, StartedAssistantSession,
+    ASSISTANT_LAUNCH_INVALID_REQUEST, ASSISTANT_LAUNCH_TRANSPORT_FAILED,
 };
 
 #[derive(Deserialize)]
@@ -41,6 +43,13 @@ pub struct AssistantSessionInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RecordAssistantSessionIdentityInput {
+    record_id: String,
+    provider_session_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RecordAssistantPlacementInput {
     record_id: String,
     placement_project_path: String,
@@ -51,25 +60,6 @@ pub struct RecordAssistantPlacementInput {
 pub struct RecordAssistantLabelInput {
     record_id: String,
     label: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct InspectAssistantModelsInput {
-    provider: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct InspectAssistantProviderConfigurationInput {
-    provider: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SaveAssistantProviderConfigurationInput {
-    provider: String,
-    settings: PiSettings,
 }
 
 #[derive(Deserialize)]
@@ -95,12 +85,16 @@ pub fn resume_assistant_session(
 }
 
 #[tauri::command]
-pub fn refresh_assistant_session_identity(
-    request: PrivateAssistantLaunchRequest<AssistantSessionInput>,
+pub fn record_assistant_session_identity(
+    request: PrivateAssistantLaunchRequest<RecordAssistantSessionIdentityInput>,
     service: State<'_, AssistantLaunchService>,
-) -> Result<Option<AssistantSessionRecord>, AssistantLaunchError> {
+) -> Result<AssistantSessionRecord, AssistantLaunchError> {
     validate_request(&request)?;
-    service.refresh_session_identity(&request.activation, &request.input.record_id)
+    service.record_session_identity(
+        &request.activation,
+        &request.input.record_id,
+        request.input.provider_session_id,
+    )
 }
 
 #[tauri::command]
@@ -184,43 +178,45 @@ pub fn prepare_assistant_sessions_for_shutdown(
 }
 
 #[tauri::command]
-pub async fn inspect_assistant_models(
-    request: PrivateAssistantLaunchRequest<InspectAssistantModelsInput>,
+pub async fn read_assistant_launch_resource(
+    request: PrivateAssistantLaunchRequest<AssistantResourceReadInput>,
     service: State<'_, AssistantLaunchService>,
-) -> Result<Vec<String>, AssistantLaunchError> {
+) -> Result<AssistantResourceReadResult, AssistantLaunchError> {
     validate_request(&request)?;
     let service = service.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        service.inspect_models(&request.activation, &request.input.provider)
+        service.read_resource(&request.activation, request.input)
     })
     .await
-    .map_err(|error| AssistantLaunchError {
-        code: ASSISTANT_LAUNCH_TRANSPORT_FAILED.to_string(),
-        message: format!("Assistant model inspection worker failed: {error}"),
-        retryable: false,
-    })?
+    .map_err(resource_worker_error)?
 }
 
 #[tauri::command]
-pub fn inspect_assistant_provider_configuration(
-    request: PrivateAssistantLaunchRequest<InspectAssistantProviderConfigurationInput>,
-    service: State<'_, AssistantLaunchService>,
-) -> Result<PiConfig, AssistantLaunchError> {
-    validate_request(&request)?;
-    service.inspect_provider_configuration(&request.activation, &request.input.provider)
-}
-
-#[tauri::command]
-pub fn save_assistant_provider_configuration(
-    request: PrivateAssistantLaunchRequest<SaveAssistantProviderConfigurationInput>,
+pub async fn write_assistant_launch_resource(
+    request: PrivateAssistantLaunchRequest<AssistantResourceWriteInput>,
     service: State<'_, AssistantLaunchService>,
 ) -> Result<(), AssistantLaunchError> {
     validate_request(&request)?;
-    service.save_provider_configuration(
-        &request.activation,
-        &request.input.provider,
-        request.input.settings,
-    )
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.write_resource(&request.activation, request.input)
+    })
+    .await
+    .map_err(resource_worker_error)?
+}
+
+#[tauri::command]
+pub async fn execute_assistant_launch_resource(
+    request: PrivateAssistantLaunchRequest<AssistantResourceExecuteInput>,
+    service: State<'_, AssistantLaunchService>,
+) -> Result<AssistantResourceExecuteResult, AssistantLaunchError> {
+    validate_request(&request)?;
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.execute_resource(&request.activation, request.input)
+    })
+    .await
+    .map_err(resource_worker_error)?
 }
 
 #[tauri::command]
@@ -230,4 +226,12 @@ pub fn release_assistant_launch_activation(
 ) -> Result<bool, AssistantLaunchError> {
     validate_request(&request)?;
     service.release_activation(&request.activation)
+}
+
+fn resource_worker_error(error: tauri::Error) -> AssistantLaunchError {
+    AssistantLaunchError {
+        code: ASSISTANT_LAUNCH_TRANSPORT_FAILED.to_string(),
+        message: format!("Assistant resource worker failed: {error}"),
+        retryable: false,
+    }
 }

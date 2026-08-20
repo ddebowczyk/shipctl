@@ -16,6 +16,7 @@ const repositoryRoot = path.resolve(fileURLToPath(new URL("../../../", import.me
 const generatedRoot = path.join(repositoryRoot, "src-tauri/generated");
 const archiveRoot = path.join(generatedRoot, "modules");
 const rustIndex = path.join(generatedRoot, "bundled_modules.rs");
+const headlessAdmissionPath = path.join(generatedRoot, "shipctl-headless-runtime-admission.json");
 
 async function manifest(relativePath) {
   const { stdout } = await exec("yq", ["-o=json", ".", relativePath], {
@@ -42,6 +43,7 @@ async function packageArtifact({ sourceDirectory, outputPath, shipctlPath }) {
     const packageReport = JSON.parse(packaged.stdout);
     assert.equal(packageReport.status, "success");
     assert.equal(packageReport.code, "module.artifact.packed");
+    return packageReport.data;
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
@@ -76,12 +78,12 @@ for (const { declaration, manifestPath } of runtimeModules) {
     "utf8",
   ));
   const archiveName = `${template.id}.shipctl-module`;
-  await packageArtifact({
+  const packageReport = await packageArtifact({
     sourceDirectory: path.join(repositoryRoot, artifactSource),
     outputPath: path.join(archiveRoot, archiveName),
     shipctlPath: path.join(repositoryRoot, "target/debug/shipctl"),
   });
-  rows.push({ id: template.id, archiveName });
+  rows.push({ id: template.id, archiveName, packageReport });
 }
 
 const generated = [
@@ -99,9 +101,39 @@ const generated = [
 ].join("\n");
 await writeFile(rustIndex, generated);
 
+const headless = rows.find(({ id }) => id === "shipctl.runtime-operations");
+assert(headless, "The packaged headless runtime requires shipctl.runtime-operations");
+const headlessManifest = headless.packageReport?.artifact?.canonical?.manifest;
+const identity = headless.packageReport?.artifact?.identity;
+assert.equal(typeof identity?.contentDigest, "string", "Headless artifact must have a content digest");
+assert.equal(typeof identity?.id, "string", "Headless artifact must have a module id");
+assert.equal(typeof identity?.version, "string", "Headless artifact must have a version");
+assert.equal(identity.id, headless.id, "Headless artifact identity must match its packaged module");
+assert.equal(typeof headlessManifest?.application, "object", "Headless artifact must declare application metadata");
+assert.equal(typeof headlessManifest?.messages, "object", "Headless artifact must declare message metadata");
+assert.equal(typeof headlessManifest?.capabilities, "object", "Headless artifact must declare capabilities");
+assert.equal(Array.isArray(headlessManifest?.requestedGrants), true, "Headless artifact must declare grants");
+await writeFile(headlessAdmissionPath, `${JSON.stringify({
+  schemaVersion: 1,
+  artifact: {
+    contentDigest: identity.contentDigest,
+    entryUrl: `shipctl://headless/${identity.id}/${identity.contentDigest}/plugin.mjs`,
+    moduleId: identity.id,
+    version: identity.version,
+  },
+  effectiveGrants: headlessManifest.requestedGrants,
+  application: headlessManifest.application,
+  messages: headlessManifest.messages,
+  capabilities: headlessManifest.capabilities,
+}, null, 2)}\n`);
+
 process.stdout.write(`${JSON.stringify({
   schemaVersion: 1,
   operation: "build.prepare-bundled-modules",
   status: "success",
   modules: rows.map(({ id }) => id),
+  headlessArtifact: {
+    moduleId: identity.id,
+    contentDigest: identity.contentDigest,
+  },
 })}\n`);

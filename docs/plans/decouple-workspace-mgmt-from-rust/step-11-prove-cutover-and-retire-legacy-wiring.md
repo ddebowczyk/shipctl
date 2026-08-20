@@ -42,8 +42,7 @@ in the existing `phase/v1` schema, with the same `id` / generator / oracle shape
 
 | Proposed id | Property | Introduced by | Oracle |
 | --- | --- | --- | --- |
-| `PROP-*-REACHABILITY-001` | Every field of `UiWorkspaceDocument` is reachable and leavable through a public `WorkspaceCommand` | Step 06 | enumerate document fields; each maps to at least one command that can set and unset it. A field with no command fails. This is the fix for `firstShare`, `floating`, `maximizedStackId`, `profileId`, `label`, `stateRef`. |
-| `PROP-*-BATCH-ATOMIC-001` | A multi-command workspace apply lands entirely or advances no revision | Step 06 (only if the batch form is adopted) | inject a failure at command *k* of *n*; assert the document and revision are byte-identical to the pre-apply state |
+| `PROP-G-WORKSPACE-OPERATIONS-001` | The rendererless public workspace service reaches every retained mutable layout/open-view field, validates and plans without writing, and commits a complete apply batch once or not at all | Step 06 | use public service operations; reject a later batch step and assert the document/revision are byte-identical to the pre-apply state. `profileId` and `stateRef` are removed during v1 normalization rather than treated as mutable fields. |
 | `PROP-*-CONFIG-MIGRATE-001` | Configuration migration is idempotent, atomic, and never commits an invalid document | Step 05 | replay the same `migrationId`; assert `replayed: true`, no revision advance, and identical records. Feed an invalid legacy value; assert nothing is written. |
 | `PROP-*-CONFIG-RESOLVE-001` | Configuration resolution is deterministic and identical in UI and headless | Steps 05, 10 | same fixture → byte-equal resolved result in both runtimes |
 | `PROP-*-PARITY-001` | Compatible agent operations produce equivalent semantic results and diagnostics online and offline | Step 10 | shared fixture; diff structured responses excluding an explicit live-only allow-list. **The allow-list is part of the property**, not an escape hatch. |
@@ -52,8 +51,14 @@ in the existing `phase/v1` schema, with the same `id` / generator / oracle shape
 | `PROP-*-PERSISTENCE-DEGRADED-001` | With the durable port unavailable, workspace writes fail loudly and no write lands in memory | Step 03 | remove the persistence port; assert the accepted snapshot reports the degraded mode and every write returns a structured error |
 | `PROP-*-POST-PACKAGE-PLUGIN-DEPLOY-001` | A plugin artifact created after a host package is built installs and activates after restart without changing the host package | Step 09 | build/package host, record native and host-frontend hashes, pack an independent fixture artifact outside bundled seeding, install/enable through the public registry, restart, and assert inspection plus one operation/contribution/configuration write; unchanged hashes and no build/release action are required |
 
-`PROP-*-PERSISTENCE-DEGRADED-001` is the highest-value addition: it is the only
-one that closes an existing data-loss path (`AppShell.tsx:443-456`).
+The 2026-08-19 owner decision in Phase G fixes the activation boundary:
+workspace catalogue reconciliation is post-commit and diagnostic-only. The
+batch property above proves one workspace-document transaction only; it must not
+assert that a reconciliation failure rolls back, unpublishes, or otherwise
+changes an already accepted runtime family.
+
+`PROP-*-PERSISTENCE-DEGRADED-001` remains a high-value addition because it
+closes the pre-extraction data-loss path without silently falling back to memory.
 
 Failures shrink into a saved fixture — document, manifest graph, operation
 sequence, runtime revision — reproducible by a developer or an agent.

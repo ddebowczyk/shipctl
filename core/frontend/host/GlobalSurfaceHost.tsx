@@ -3,28 +3,24 @@ import type { ErrorInfo, ReactNode } from "react";
 import type {
   ContributionId,
   GlobalSurfaceContribution,
-  ModuleActivationContext,
   ModuleActivationId,
-  ModuleHostServices,
-  ModuleId,
 } from "@shipctl/module-api";
+import { useRepoStore } from "@shipctl/core/projects";
 
 import {
   canvasSurfaceComponentKey,
   currentCanvasSurfaceActivation,
 } from "./acceptedWorkspaceContributionEntries.ts";
+import { useAcceptedWorkspaceContributionRuntime } from "./AcceptedWorkspaceContributionRuntime.tsx";
+import { MODULE_HOST_SERVICES } from "./moduleHostServices.ts";
 
 type ActivationOwnedGlobalSurfaceContribution = GlobalSurfaceContribution & {
   readonly ownerActivationId?: ModuleActivationId;
 };
 
 interface GlobalSurfaceHostProps {
-  readonly contribution: ActivationOwnedGlobalSurfaceContribution | undefined;
   readonly surfaceId: ContributionId;
   readonly close: () => void;
-  readonly projectPaths: readonly string[];
-  readonly services: ModuleHostServices;
-  readonly moduleActivations: ReadonlyMap<ModuleId, ModuleActivationContext>;
 }
 
 class GlobalSurfaceBoundary extends Component<
@@ -74,13 +70,15 @@ function GlobalSurfaceUnavailable({
 }
 
 export default function GlobalSurfaceHost({
-  contribution,
   surfaceId,
   close,
-  projectPaths,
-  services,
-  moduleActivations,
 }: GlobalSurfaceHostProps) {
+  const { catalog, moduleActivations } = useAcceptedWorkspaceContributionRuntime();
+  const repos = useRepoStore((state) => state.repos);
+  const projectPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
+  const contribution: ActivationOwnedGlobalSurfaceContribution | undefined = (
+    catalog.canvasSurfaceCatalog.globalSurface(surfaceId)
+  );
   const [loadAttempt, setLoadAttempt] = useState(0);
   const Surface = useMemo(
     () => contribution ? lazy(contribution.load) : null,
@@ -133,7 +131,7 @@ export default function GlobalSurfaceHost({
           close={close}
           projectPaths={projectPaths}
           activation={activation}
-          services={services}
+          services={MODULE_HOST_SERVICES}
         />
       </Suspense>
     </GlobalSurfaceBoundary>

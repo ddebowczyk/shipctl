@@ -114,10 +114,12 @@ test("snapshot and persisted-settings stores bound success and failure behavior"
 
 test("Usage remains global across project switches and refreshes through its declared route", () => {
   const shell = source("../../../../core/frontend/shell/AppShell.tsx");
-  const staticProfile = source("../../../../core/frontend/host/enabledModules.ts");
+  const runtimeLoader = source("../../../../core/frontend/host/runtimeModuleLoader.ts");
   const rootPackage = source("../../../../package.json");
   const manifest = source("../../module.yaml");
   const adapter = source("../src/index.ts");
+  const contributions = source("../src/pluginContributions.ts");
+  const artifact = source("../../artifact/src/index.ts");
   const client = source("../src/usageSourcesClient.ts");
   const dataClient = source("../src/usageSettingsDataClient.ts");
   const completion = source("../src/ingestCompleted.ts");
@@ -126,53 +128,59 @@ test("Usage remains global across project switches and refreshes through its dec
 
   assert.doesNotMatch(store, /useRepoStore|activeRepoPath|projectPath/);
   assert.doesNotMatch(shell, /useUsageStore|useUsageSettingsStore|refreshUsageData/);
-  assert.doesNotMatch(staticProfile, /module-usage|usageModule/);
+  assert.doesNotMatch(runtimeLoader, /module-usage|usageModule/);
   assert.doesNotMatch(rootPackage, /@shipctl\/module-usage/);
   assert.match(manifest, /delivery: runtime-artifact/);
   assert.match(manifest, /artifact: modules\/usage\/artifact/);
   assert.match(manifest, /profile: null/);
-  assert.match(adapter, /useUsageSettingsStore\.getState\(\)\.loadSettings\(\)/);
-  assert.match(adapter, /cron: "\* \* \* \* \* Etc\/UTC"/);
-  assert.match(adapter, /target: \{ kind: "channel", endpoint: USAGE_REFRESH_CHANNEL \}/);
-  assert.doesNotMatch(adapter, /delayMs|intervalMs|setTimeout|setInterval/);
-  assert.match(adapter, /await activeUsageSourcesClient\(\)\.refreshUsageData\(\);[\s\S]*await fetchUsageSnapshots\(\)/);
-  assert.match(adapter, /const usageSources = usageSourcesClientFor\(activation\)/);
-  assert.match(adapter, /configureUsageSourcesClient\(usageSources\)/);
-  assert.match(adapter, /usageSources\.subscribeChanges/);
-  assert.match(adapter, /configureUsageSourcesClient\(null\)/);
+  assert.doesNotMatch(adapter, /ShipctlModule|usageModule/);
+  assert.match(contributions, /useUsageSettingsStore\.getState\(\)\.loadSettings\(\)/);
+  assert.match(contributions, /cron: "\* \* \* \* \* Etc\/UTC"/);
+  assert.match(contributions, /target: \{ kind: "channel", endpoint: USAGE_REFRESH_CHANNEL \}/);
+  assert.doesNotMatch(contributions, /delayMs|intervalMs|setTimeout|setInterval/);
+  assert.match(contributions, /await activeUsageSourcesClient\(\)\.refreshUsageData\(\);[\s\S]*await fetchUsageSnapshots\(\)/);
+  assert.match(contributions, /const usageSources = usageSourcesClientFor\(activation\)/);
+  assert.match(contributions, /configureUsageSourcesClient\(usageSources\)/);
+  assert.match(contributions, /sourceSubscription = await usageSources\.subscribeChanges/);
+  assert.match(contributions, /await sourceSubscription\?\.dispose\(\)/);
+  assert.match(contributions, /configureUsageSourcesClient\(null\)/);
   assert.match(client, /activation\.services\.require\(usageSourcesService\)/);
   assert.match(dataClient, /activation\.services\.require\(pluginDataService\)/);
   assert.doesNotMatch(dataClient, /@tauri-apps|invoke\(/);
-  assert.match(adapter, /usage\.ingest-completed/);
-  assert.match(adapter, /publishes:[\s\S]*usage\.ingest-completed/);
-  assert.match(adapter, /semantic Usage Sources observer performs the refresh/);
+  assert.match(contributions, /usage\.ingest-completed/);
+  assert.match(contributions, /publishes:[\s\S]*usage\.ingest-completed/);
+  assert.match(contributions, /semantic Usage Sources observer performs the refresh/);
   assert.match(panel, /subscribeUsageIngestCompleted\(fetchOverview\)/);
-  assert.doesNotMatch(adapter, /["']usage-ingest-complete["']/);
+  assert.doesNotMatch(contributions, /["']usage-ingest-complete["']/);
   assert.match(completion, /Promise\.allSettled/);
-  assert.match(adapter, /USAGE_SURFACE_ID = "core\.usage"/);
-  assert.match(adapter, /surfaceId: USAGE_SURFACE_ID/);
-  assert.match(adapter, /slot: "terminal\.after"/);
+  assert.match(contributions, /USAGE_SURFACE_ID = "core\.usage"/);
+  assert.match(contributions, /surfaceId: USAGE_SURFACE_ID/);
+  assert.match(contributions, /slot: "terminal\.after"/);
+  assert.match(artifact, /DirectShipctlPluginDefinition/);
+  assert.match(artifact, /context\.own\(await activateUsageRuntime\(context\), USAGE_RUNTIME_EFFECT_ID\)/);
+  assert.match(artifact, /context\.contributions\.scheduledTasks\.register/);
+  assert.match(artifact, /context\.contributions\.messages\.register/);
 });
 
 test("usage refresh exposes a strict, bounded scheduler-directed message contract", () => {
-  const adapter = source("../src/index.ts");
+  const contributions = source("../src/pluginContributions.ts");
   const manifest = source("../../module.yaml");
   const schema = JSON.parse(
     source("../../messages/refresh-request.schema.json"),
   ) as Record<string, unknown>;
 
-  assert.match(adapter, /USAGE_REFRESH_CHANNEL: DirectedChannel<UsageRefreshRequest>/);
-  assert.match(adapter, /id: "usage\.refresh-request"/);
-  assert.match(adapter, /provides: \[USAGE_INGEST_COMPLETED_CONTRACT, USAGE_REFRESH_REQUEST_CONTRACT\]/);
+  assert.match(contributions, /USAGE_REFRESH_CHANNEL: DirectedChannel<UsageRefreshRequest>/);
+  assert.match(contributions, /id: "usage\.refresh-request"/);
+  assert.match(contributions, /provides: \[USAGE_INGEST_COMPLETED_CONTRACT, USAGE_REFRESH_REQUEST_CONTRACT\]/);
   assert.match(
-    adapter,
+    contributions,
     /handles: \[\{[\s\S]*channel: USAGE_REFRESH_CHANNEL,[\s\S]*capacity: 1,[\s\S]*requiredGrant: "message\.send\.usage\.refresh-request",[\s\S]*schedulerAllowed: true,[\s\S]*handle: refreshUsageAndSnapshots,/,
   );
   assert.match(
-    adapter,
-    /async function refreshUsageAndSnapshots\(\) \{\s*await activeUsageSourcesClient\(\)\.refreshUsageData\(\);\s*await fetchUsageSnapshots\(\);\s*\}/,
+    contributions,
+    /export async function refreshUsageAndSnapshots\(\): Promise<void> \{\s*await activeUsageSourcesClient\(\)\.refreshUsageData\(\);\s*await fetchUsageSnapshots\(\);\s*\}/,
   );
-  assert.match(adapter, /one pending[\s\S]*refresh coalescing semantics/);
+  assert.match(contributions, /one pending[\s\S]*refresh coalescing semantics/);
 
   assert.deepEqual(schema, {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -190,18 +198,27 @@ test("usage refresh exposes a strict, bounded scheduler-directed message contrac
   );
 });
 
-test("native cache, unavailable states, and capability-owned config remain bounded", () => {
+test("generic native resource bounds leave source policy and presentation in the Usage artifact", () => {
   const usage = source("../../../../core/backend/src/usage_sources/mod.rs");
+  const resources = source("../../../../core/backend/src/usage_sources/collection.rs");
+  const policy = source("../src/usageSourcePolicy.ts");
   const projection = source("../src/usageProjection.ts");
   const config = source("../../../../core/backend/src/workspace/config.rs");
   const loader = source("../../../../core/backend/src/workspace/loader.rs");
 
-  assert.match(usage, /COOLDOWN_SUCCESS_SECS: u64 = 300/);
-  assert.match(usage, /COOLDOWN_ERROR_BASE_SECS: u64 = 30/);
-  assert.match(usage, /COOLDOWN_ERROR_MAX_SECS: u64 = 300/);
-  assert.match(usage, /consecutive_errors: u32/);
-  assert.match(usage, /Usage provider refresh failed/);
+  assert.match(usage, /UsageSourcesGrant/);
+  assert.match(usage, /effective_grants/);
+  assert.match(resources, /home_relative_path/);
+  assert.match(resources, /is_read_only_sqlite_query/);
+  assert.match(resources, /read_keychain_password/);
+  assert.match(policy, /Claude Code-credentials/);
+  assert.match(policy, /\.codex\/auth\.json/);
+  assert.match(policy, /retrieveUserQuota/);
+  assert.match(policy, /opencode\.db/);
+  assert.match(policy, /\.pi\/agent\/sessions/);
   assert.match(projection, /observation\?\.available \? "ready" : "partial"/);
+
+  assert.doesNotMatch(usage, /UsageProvider|provider_windows|codex_provider_windows|claude_provider_windows/);
 
   assert.doesNotMatch(config, /pub usage: UsageSettings|struct UsageSettings|ProviderBudgetConfig/);
   assert.match(config, /fn usage_document_is_opaque_capability_data/);
@@ -209,14 +226,14 @@ test("native cache, unavailable states, and capability-owned config remain bound
   assert.doesNotMatch(loader, /load_usage_settings|save_usage_settings/);
 });
 
-test("native ownership seam includes ingestion, query DB, and provider subprocess access", () => {
+test("native ownership seam exposes only the generic resource port", () => {
   const host = source("../../../../src-tauri/src/lib.rs");
   const installer = source("../../../../src-tauri/src/modules/mod.rs");
   const adapter = source("../../../../core/tauri/src/usage_sources.rs");
   const commands = [
     "platform",
     "projects",
-    "settings",
+    "configuration",
     "terminal_host",
     "appearance",
   ].map((capability) => source(`../../../../core/tauri/src/${capability}.rs`)).join("\n");
@@ -224,7 +241,8 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
   const trustedAdapter = source("../../../../core/frontend/platform/usageSources.ts");
   const packageManifest = source("../package.json");
   const provider = source("../../../../core/backend/src/usage_sources/mod.rs");
-  const providers = source("../../../../core/backend/src/usage_sources/providers.rs");
+  const resourceBoundary = source("../../../../core/backend/src/usage_sources/collection.rs");
+  const policy = source("../src/usageSourcePolicy.ts");
   const projection = source("../src/usageProjection.ts");
 
   assert.match(host, /UsageSourcesService::open_at/);
@@ -232,16 +250,21 @@ test("native ownership seam includes ingestion, query DB, and provider subproces
   assert.doesNotMatch(installer, /usage/i);
   assert.match(adapter, /inspect_usage_sources/);
   assert.match(adapter, /refresh_usage_sources/);
-  assert.match(provider, /"core" \| "shipctl\.usage"/);
+  assert.match(adapter, /read_usage_source_resource/);
+  assert.match(provider, /UsageSourcesGrant/);
   assert.match(provider, /pub fn release_activation/);
   assert.match(client, /activation\.services\.require\(usageSourcesService\)/);
   assert.doesNotMatch(client, /@tauri-apps|invoke\(/);
   assert.doesNotMatch(packageManifest, /@tauri-apps\/api/);
   assert.match(trustedAdapter, /inspect_usage_sources/);
   assert.match(trustedAdapter, /refresh_usage_sources/);
+  assert.match(trustedAdapter, /read_usage_source_resource/);
   assert.match(projection, /projectUsageOverview/);
   assert.match(projection, /projectUsageSnapshots/);
   assert.doesNotMatch(commands, /get_all_usage_snapshots|get_usage_settings|refresh_usage_data/);
-  assert.match(providers, /run_command\(\s*"curl"/);
-  assert.match(providers, /find-generic-password/);
+  assert.match(resourceBoundary, /bounded_command\("curl"/);
+  assert.match(resourceBoundary, /find-generic-password/);
+  assert.match(policy, /UsageSourceResourceReader/);
+  assert.match(policy, /createUsageSourcePolicy/);
+  assert.doesNotMatch(provider, /UsageProvider|provider_windows|codex_provider_windows|claude_provider_windows/);
 });

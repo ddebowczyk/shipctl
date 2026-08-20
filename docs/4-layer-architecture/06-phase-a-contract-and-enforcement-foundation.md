@@ -79,7 +79,7 @@ improves architecture enforcement and regression replay.
 
 ### PROP-A-COMPOSITION-001
 
-- **Claim:** For every generated ordered set of distinct legacy modules, the
+- **Claim:** For every generated ordered set of distinct modules, the
   characterized contribution inventory equals the independent model of the
   same declared contributions and rejects the same duplicate ownership cases.
 - **Shape:** differential.
@@ -89,10 +89,9 @@ improves architecture enforcement and regression replay.
 - **Preconditions:** generated values satisfy current TypeScript contracts.
 - **Oracle:** a test-only normalized inventory model retains the declarations
   and applies only the documented ownership rules.
-- **Failure value:** the Cordis bridge later drops a settings contribution that
-  static composition supplied.
+- **Failure value:** runtime composition later drops a settings contribution.
 - **Tier:** pull request.
-- **Current status/test ID:** implemented / `architecture.legacy-composition.property`.
+- **Current status/test ID:** implemented / `architecture.module-composition.property`.
 
 ### PROP-A-REPLAY-001
 
@@ -130,15 +129,15 @@ same required facts.
 
 Phase A is implemented without changing an application runtime path:
 
-- `ops/architecture/bin/inspect.mjs` emits the current nine-module source and
-  legacy-composition snapshot. The reviewed baseline is
+- `ops/architecture/bin/inspect.mjs` emits the current nine-module
+  runtime-artifact source snapshot. The reviewed baseline is
   `spec/baseline/source-architecture.json`.
 - The existing modularity AST scanner resolves the public entrypoint's static
   dependency closure and rejects filesystem, network, timer, registry, and
   Tauri work evaluated anywhere in that closure.
 - Fresh-process import probes and the static scanner independently classify
   generated passive and active entrypoints.
-- The legacy composition property compares generated module projections and
+- The module-composition property compares generated module projections and
   duplicate-owner outcomes with an independent model.
 - `fast-check` and `proptest` deliberate failures shrink, emit schema-valid
   evidence under ignored `target/architecture-evidence/`, and replay in a new

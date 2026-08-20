@@ -275,6 +275,10 @@ export const PROPERTY_EVIDENCE_RUNNERS = Object.freeze([
   {
     id: "plugin-artifacts",
     phaseId: "phase-e",
+    propertyPhaseIds: {
+      "PROP-H-NATIVE-PLUGIN-SEMANTICS-001": "phase-h",
+      "PROP-H-POST-PACKAGE-PLUGIN-DEPLOY-001": "phase-h",
+    },
     script: "ops/architecture/bin/run-plugin-artifact-properties.mjs",
     evidenceDirectory: "target/architecture-evidence/plugin-artifacts",
     propertyIds: [
@@ -293,6 +297,8 @@ export const PROPERTY_EVIDENCE_RUNNERS = Object.freeze([
       "PROP-E-USAGE-PARITY-001",
       "PROP-E-COMPATIBILITY-001",
       "PROP-E-HEADLESS-001",
+      "PROP-H-NATIVE-PLUGIN-SEMANTICS-001",
+      "PROP-H-POST-PACKAGE-PLUGIN-DEPLOY-001",
     ],
   },
   {
@@ -322,6 +328,7 @@ export const PROPERTY_EVIDENCE_RUNNERS = Object.freeze([
       "PROP-G-LAYMAN-MOVE-001",
       "PROP-G-LAYMAN-SPLIT-001",
       "PROP-G-LAYOUT-001",
+      "PROP-G-WORKSPACE-OPERATIONS-001",
       "PROP-G-CONTRIBUTION-SCHEMA-001",
       "PROP-G-CONTRIBUTION-CLEANUP-001",
       "PROP-G-ABSENCE-001",

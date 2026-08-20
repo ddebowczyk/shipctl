@@ -7,8 +7,6 @@ pub mod providers;
 pub mod snapshot;
 mod snapshot_types;
 pub mod ui;
-pub mod workspace_document;
-pub mod workspace_layout;
 
 pub use durable_write::DurableWriteBarrier;
 pub use snapshot::SnapshotProvider;

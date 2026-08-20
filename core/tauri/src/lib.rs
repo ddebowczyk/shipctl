@@ -6,6 +6,7 @@
 
 pub mod appearance;
 pub mod assistant_launch;
+pub mod configuration;
 pub mod credentials;
 pub mod git;
 pub mod instance;
@@ -20,12 +21,10 @@ pub mod projects;
 mod projects_watcher;
 pub mod scheduler;
 pub mod semantic_terminal;
-pub mod settings;
 pub mod skill_installation;
 pub mod state;
 pub mod terminal_host;
 pub mod usage_sources;
-pub mod workspace;
 
 pub use message_bridge::MessageBusBridgeService;
 pub use projects_watcher::GitWatcher;

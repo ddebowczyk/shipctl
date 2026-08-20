@@ -6,5 +6,6 @@
 export * from "./projectGrouping.ts";
 export * from "./projectFacts.ts";
 export * from "./useRepoStore.ts";
+export * from "./projectsService.ts";
 export * from "./useProjectSettingsStore.ts";
 export * from "./useProjectWatcher.ts";

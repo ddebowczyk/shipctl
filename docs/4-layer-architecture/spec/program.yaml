@@ -50,6 +50,7 @@ records:
     - capabilities/plugin-data.yaml
     - capabilities/processes.yaml
     - capabilities/project-documents.yaml
+    - capabilities/projects.yaml
     - capabilities/scheduler.yaml
     - capabilities/semantic-terminals.yaml
     - capabilities/skill-installation.yaml

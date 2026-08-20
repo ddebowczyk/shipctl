@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import type { ProjectSettings } from "@shipctl/core/platform";
-import { getProjectSettings, saveProjectSettings } from "@shipctl/core/platform";
-
-const DEFAULT_SETTINGS: ProjectSettings = {
-  showAgentSessionsInSidebar: true,
-};
+import {
+  DEFAULT_PROJECT_SETTINGS,
+  hostConfigurationRuntime,
+  type ProjectSettings,
+  type ProjectSettingsPatch,
+} from "@shipctl/core/configuration";
 
 interface ProjectSettingsStore {
   settings: ProjectSettings;
@@ -12,21 +12,21 @@ interface ProjectSettingsStore {
   isSaving: boolean;
   error: string | null;
   loadSettings: () => Promise<void>;
-  updateSettings: (partial: Partial<ProjectSettings>) => Promise<void>;
+  updateSettings: (partial: ProjectSettingsPatch) => Promise<void>;
 }
 
 export const useProjectSettingsStore = create<ProjectSettingsStore>((set, get) => ({
-  settings: DEFAULT_SETTINGS,
+  settings: DEFAULT_PROJECT_SETTINGS,
   hasLoaded: false,
   isSaving: false,
   error: null,
 
   loadSettings: async () => {
     try {
-      const settings = await getProjectSettings();
+      const { value: settings } = await hostConfigurationRuntime().resolve("projects");
       set({ settings, hasLoaded: true, error: null });
     } catch (error) {
-      set({ settings: DEFAULT_SETTINGS, hasLoaded: true, error: String(error) });
+      set({ settings: DEFAULT_PROJECT_SETTINGS, hasLoaded: true, error: String(error) });
     }
   },
 
@@ -35,7 +35,7 @@ export const useProjectSettingsStore = create<ProjectSettingsStore>((set, get) =
     const next = { ...prev, ...partial };
     set({ settings: next, isSaving: true, error: null });
     try {
-      await saveProjectSettings(next);
+      await hostConfigurationRuntime().update("projects", next);
       set({ isSaving: false, hasLoaded: true });
     } catch (error) {
       set({ settings: prev, isSaving: false, error: String(error) });

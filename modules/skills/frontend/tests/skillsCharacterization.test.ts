@@ -18,16 +18,17 @@ import type {
 import type { SkillInfo } from "../src/types.ts";
 
 type SkillStoreModule = typeof import("../src/store.ts");
-type SkillsEntryModule = typeof import("../src/index.ts");
+type SkillsRuntimeModule = typeof import("../src/pluginContributions.ts");
 type SkillClientModule = typeof import("../src/skillInstallationClient.ts");
 type ModuleApi = typeof import("@shipctl/module-api");
 type ModuleApiTesting = typeof import("@shipctl/module-api/testing");
 
 let vite: ViteDevServer;
 let useSkillStore: SkillStoreModule["useSkillStore"];
-let skillsModule: SkillsEntryModule["skillsModule"];
+let skillsRuntime: SkillsRuntimeModule;
 let skillInstallationClientFor: SkillClientModule["skillInstallationClientFor"];
 let skillId: ModuleApi["skillId"];
+let testingApi: ModuleApiTesting;
 let createFakeSkillInstallationServiceProvider:
   ModuleApiTesting["createFakeSkillInstallationServiceProvider"];
 let createTestActivationIdentity: ModuleApiTesting["createTestActivationIdentity"];
@@ -73,6 +74,37 @@ function activateSkills(
   return activation.context;
 }
 
+async function activateRuntime(options: {
+  readonly projectIds?: readonly string[];
+  readonly projects?: Parameters<
+    ModuleApiTesting["createFakeSkillInstallationServiceProvider"]
+  >[0]["projects"];
+  readonly deniedOperations?: readonly FakeSkillInstallationOperation[];
+  readonly projectsUnavailable?: boolean;
+  readonly changes?: InstanceType<ModuleApiTesting["FakeProjectsChangeController"]>;
+  readonly trace?: FakeSkillInstallationTrace[];
+} = {}) {
+  const changes = options.changes ?? new testingApi.FakeProjectsChangeController(
+    options.projectIds ?? [],
+  );
+  const host = new SemanticServiceTestHost([
+    createFakeSkillInstallationServiceProvider({
+      projects: options.projects,
+      deniedOperations: options.deniedOperations,
+      trace: options.trace,
+    }),
+    testingApi.createFakeProjectsServiceProvider({
+      changes,
+      unavailable: options.projectsUnavailable,
+    }),
+  ]);
+  const activation = host.activate(createTestActivationIdentity("shipctl.skills"));
+  const cleanup = await skillsRuntime.activateSkillsRuntime(activation.context);
+  activation.context.own(cleanup);
+  cleanups.push(() => activation.dispose());
+  return { activation, changes };
+}
+
 before(async () => {
   vite = await createServer({
     configFile: false,
@@ -83,22 +115,23 @@ before(async () => {
   ({ useSkillStore } = await vite.ssrLoadModule(
     "/modules/skills/frontend/src/store.ts",
   ) as SkillStoreModule);
-  ({ skillsModule } = await vite.ssrLoadModule(
-    "/modules/skills/frontend/src/index.ts",
-  ) as SkillsEntryModule);
+  skillsRuntime = await vite.ssrLoadModule(
+    "/modules/skills/frontend/src/pluginContributions.ts",
+  ) as SkillsRuntimeModule;
   ({ skillInstallationClientFor } = await vite.ssrLoadModule(
     "/modules/skills/frontend/src/skillInstallationClient.ts",
   ) as SkillClientModule);
   ({ skillId } = await vite.ssrLoadModule(
     "/module-api/frontend/src/index.ts",
   ) as ModuleApi);
+  testingApi = await vite.ssrLoadModule(
+    "/module-api/frontend/src/testing.ts",
+  ) as ModuleApiTesting;
   ({
     createFakeSkillInstallationServiceProvider,
     createTestActivationIdentity,
     SemanticServiceTestHost,
-  } = await vite.ssrLoadModule(
-    "/module-api/frontend/src/testing.ts",
-  ) as ModuleApiTesting);
+  } = testingApi);
 });
 
 after(async () => {
@@ -152,13 +185,13 @@ function services(
       subscribe: () => () => undefined,
       update: async () => undefined,
     },
-    skills: skillsModule.skillsProvider.port,
+    skills: skillsRuntime.skillsContributions.skillsProviders[0].port,
     notices: { push: (notice) => notices.push(notice) },
     externalLinks: { open: async () => undefined },
   };
 }
 
-test("Skills module source depends on its semantic contract and not on Tauri", () => {
+test("Skills direct runtime depends on semantic contracts and not on Tauri", () => {
   const sourceDirectory = fileURLToPath(new URL("../src", import.meta.url));
   const source = readdirSync(sourceDirectory, { recursive: true })
     .filter((entry) => typeof entry === "string" && /\.(?:ts|tsx)$/u.test(entry))
@@ -166,6 +199,8 @@ test("Skills module source depends on its semantic contract and not on Tauri", (
     .join("\n");
 
   assert.match(source, /skillInstallationService/);
+  assert.match(source, /projectsService/);
+  assert.doesNotMatch(source, /\bskillsModule\b/);
   assert.doesNotMatch(source, /@tauri-apps\/api|plugin:shipctl-skills\|/);
 });
 
@@ -242,37 +277,38 @@ test("removing a project evicts only its process-local render cache", () => {
   assert.deepEqual(useSkillStore.getState().skillsByRepo, { "/beta": beta });
 });
 
-test("module contributions use the exact activation and contain operation errors", async () => {
+test("direct contributions use the exact activation and contain operation errors", async () => {
   const repoSkills = catalog();
   const trace: FakeSkillInstallationTrace[] = [];
   const notices: Array<{ tone: string; title: string; message?: string }> = [];
   useSkillStore.setState({ skillsByRepo: { "/repo": repoSkills } });
-  const activation = activateSkills(
-    [{ projectId: "/repo", skills: semanticCatalog() }],
-    ["install-skill"],
+  const runtime = await activateRuntime({
+    projectIds: ["/repo"],
+    projects: [{ projectId: "/repo", skills: semanticCatalog() }],
+    deniedOperations: ["install-skill"],
     trace,
-  );
-  const moduleDeactivation = skillsModule.activate({ activation } as never);
-  if (moduleDeactivation) cleanups.push(() => moduleDeactivation.deactivate());
+  });
+  const provider = skillsRuntime.skillsContributions.skillsProviders[0];
+  const projectActions = skillsRuntime.skillsContributions.projectActions;
 
-  assert.equal(skillsModule.id, "shipctl.skills");
-  assert.equal(skillsModule.skillsProvider.id, "skills.provider");
-  assert.equal(skillsModule.projectActions[0].id, "skills.project-actions");
-  assert.equal(
-    skillsModule.skillsProvider.port.getSnapshot().byProject["/repo"],
-    repoSkills,
-  );
+  assert.equal(skillsRuntime.SKILLS_MODULE_ID, "shipctl.skills");
+  assert.equal(provider.id, "skills.provider");
+  assert.equal(projectActions[0].id, "skills.project-actions");
+  assert.deepEqual(provider.port.getSnapshot().byProject["/repo"], repoSkills);
 
-  const group = skillsModule.projectActions[0].getGroup(
+  const group = projectActions[0].getGroup(
     { id: "repo", name: "Repo", path: "/repo" },
     services(notices),
-    activation,
+    runtime.activation.context,
   );
   assert.equal(group?.label, "Agent Skills");
   assert.equal(group?.actions[0].selected, false);
+  const traceBeforeAction = trace.length;
   await group?.actions[0].run();
 
-  assert.deepEqual(trace.map(({ operation }) => operation), ["install-skill"]);
+  assert.deepEqual(trace.slice(traceBeforeAction).map(({ operation }) => operation), [
+    "install-skill",
+  ]);
   assert.deepEqual(notices, [{
     tone: "error",
     title: "Couldn't add agent skill",
@@ -280,30 +316,75 @@ test("module contributions use the exact activation and contain operation errors
   }]);
 });
 
-test("module lifecycle and provider port resolve the activation-owned client", async () => {
+test("direct runtime owns catalog lifecycle and provider activity", async () => {
   const trace: FakeSkillInstallationTrace[] = [];
-  const activation = activateSkills(
-    [{ projectId: "/repo", skills: semanticCatalog() }],
-    [],
+  const runtime = await activateRuntime({
+    projectIds: ["/repo"],
+    projects: [{ projectId: "/repo", skills: semanticCatalog() }],
     trace,
-  );
-  const moduleDeactivation = skillsModule.activate({ activation } as never);
-  if (moduleDeactivation) cleanups.push(() => moduleDeactivation.deactivate());
+  });
+  const provider = skillsRuntime.skillsContributions.skillsProviders[0];
 
-  await skillsModule.projectLifecycle.onProjectsChanged(
-    ["/repo"],
-    services(),
-    activation,
-  );
-  await skillsModule.skillsProvider.port.install("/repo", "shipctl-todos");
+  await runtime.changes.publishFilesystemChanged(["/repo"]);
+  await provider.port.install("/repo", "shipctl-todos");
 
   assert.equal(
-    skillsModule.skillsProvider.port.getSnapshot().byProject["/repo"][0].installed,
+    provider.port.getSnapshot().byProject["/repo"][0].installed,
     true,
   );
   assert.deepEqual(trace.map(({ operation }) => operation), [
     "inspect-skills",
+    "inspect-skills",
     "install-skill",
     "inspect-skills",
   ]);
+
+  await runtime.changes.setProjects([]);
+  assert.deepEqual(provider.port.getSnapshot().byProject, {});
+  await runtime.activation.dispose();
+  await assert.rejects(
+    provider.port.install("/repo", "shipctl-todos"),
+    /Skills module is not active/,
+  );
+});
+
+test("repeated direct activation does not retain Skills catalog listeners", async () => {
+  const changes = new testingApi.FakeProjectsChangeController(["/repo"]);
+  const firstTrace: FakeSkillInstallationTrace[] = [];
+  const first = await activateRuntime({
+    changes,
+    projects: [{ projectId: "/repo", skills: semanticCatalog() }],
+    trace: firstTrace,
+  });
+  await changes.publishFilesystemChanged(["/repo"]);
+  assert.equal(firstTrace.filter(({ operation }) => operation === "inspect-skills").length, 2);
+  await first.activation.dispose();
+  const beforeDetached = firstTrace.length;
+  await changes.publishFilesystemChanged(["/repo"]);
+  assert.equal(firstTrace.length, beforeDetached);
+
+  const secondTrace: FakeSkillInstallationTrace[] = [];
+  await activateRuntime({
+    changes,
+    projects: [{ projectId: "/repo", skills: semanticCatalog("orchestrate") }],
+    trace: secondTrace,
+  });
+  await changes.publishFilesystemChanged(["/repo"]);
+  assert.equal(secondTrace.filter(({ operation }) => operation === "inspect-skills").length, 2);
+  assert.equal(
+    skillsRuntime.skillsContributions.skillsProviders[0].port
+      .getSnapshot().byProject["/repo"][1].installed,
+    true,
+  );
+});
+
+test("an unavailable project catalog leaves the Skills cache unchanged", async () => {
+  const retained = catalog("orchestrate");
+  const trace: FakeSkillInstallationTrace[] = [];
+  useSkillStore.setState({ skillsByRepo: { "/retained": retained } });
+
+  await activateRuntime({ projectsUnavailable: true, trace });
+
+  assert.equal(useSkillStore.getState().skillsByRepo["/retained"], retained);
+  assert.deepEqual(trace, []);
 });

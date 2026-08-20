@@ -12,6 +12,8 @@ import { createServer, type ViteDevServer } from "vite";
 
 type RegistryModule = typeof import("../globalSurfaceRegistry.ts");
 type HostModule = typeof import("../GlobalSurfaceHost.tsx");
+type AcceptedRuntimeModule = typeof import("../AcceptedWorkspaceContributionRuntime.tsx");
+type WorkspaceContributionCatalogModule = typeof import("../workspaceContributionCatalog.ts");
 type UIStoreModule = typeof import("../../shared/useUIStore.ts");
 type RepoStoreModule = typeof import("../../projects/useRepoStore.ts");
 
@@ -19,6 +21,8 @@ let vite: ViteDevServer;
 let GlobalSurfaceRegistry: RegistryModule["GlobalSurfaceRegistry"];
 let GlobalSurfaceRegistrationError: RegistryModule["GlobalSurfaceRegistrationError"];
 let GlobalSurfaceHost: HostModule["default"];
+let AcceptedWorkspaceContributionRuntimeProvider: AcceptedRuntimeModule["AcceptedWorkspaceContributionRuntimeProvider"];
+let WorkspaceContributionCatalog: WorkspaceContributionCatalogModule["WorkspaceContributionCatalog"];
 let useUIStore: UIStoreModule["useUIStore"];
 let useRepoStore: RepoStoreModule["useRepoStore"];
 
@@ -35,50 +39,6 @@ const navigation: GlobalNavigationContribution = {
   icon: { name: "circle" },
 };
 
-const services = {
-  panels: {
-    open: () => "fixture-panel",
-    reveal: () => undefined,
-    close: () => undefined,
-  },
-  appearance: {
-    getSnapshot: () => ({ themeId: "fixture", background: "#000000" }),
-    subscribe: () => () => undefined,
-  },
-  terminalSessions: {
-    list: () => [],
-    getDimensions: () => ({ columns: 80, rows: 24 }),
-    launch: async (request) => ({
-      id: "fixture-session",
-      projectPath: request.projectPath,
-      ownerKey: request.ownerKey,
-      label: request.label,
-    }),
-    launchManaged: async () => { throw new Error("not used"); },
-    update: async (sessionId, patch) => ({
-      id: sessionId,
-      projectPath: "/fixture",
-      ownerKey: "fixture",
-      label: patch.label ?? "fixture",
-    }),
-    stop: async () => undefined,
-    focus: async () => undefined,
-    subscribe: () => () => undefined,
-  },
-  settings: {
-    getSnapshot: () => ({ values: {}, isSaving: false, error: null }),
-    subscribe: () => () => undefined,
-    update: async () => undefined,
-  },
-  skills: {
-    getSnapshot: () => ({ byProject: {} }),
-    subscribe: () => () => undefined,
-    install: async () => undefined,
-  },
-  notices: { push: () => undefined },
-  externalLinks: { open: async () => undefined },
-};
-
 before(async () => {
   vite = await createServer({
     configFile: false,
@@ -92,6 +52,12 @@ before(async () => {
   ({ default: GlobalSurfaceHost } = await vite.ssrLoadModule(
     "/core/frontend/host/GlobalSurfaceHost.tsx",
   ) as HostModule);
+  ({ AcceptedWorkspaceContributionRuntimeProvider } = await vite.ssrLoadModule(
+    "/core/frontend/host/AcceptedWorkspaceContributionRuntime.tsx",
+  ) as AcceptedRuntimeModule);
+  ({ WorkspaceContributionCatalog } = await vite.ssrLoadModule(
+    "/core/frontend/host/workspaceContributionCatalog.ts",
+  ) as WorkspaceContributionCatalogModule);
   ({ useUIStore } = await vite.ssrLoadModule(
     "/core/frontend/shared/useUIStore.ts",
   ) as UIStoreModule);
@@ -181,14 +147,19 @@ test("global surface activation survives project switches", () => {
 });
 
 test("an unknown or disabled surface renders a recoverable host state", () => {
-  const markup = renderToStaticMarkup(createElement(GlobalSurfaceHost, {
-    contribution: undefined,
-    surfaceId: "fixture.disabled",
-    close: () => undefined,
-    projectPaths: [],
-    services,
-    moduleActivations: new Map(),
-  }));
+  const catalog = WorkspaceContributionCatalog.create({
+    registryRevision: 1,
+    modules: [],
+    activationContextsByModule: new Map(),
+  });
+  const markup = renderToStaticMarkup(createElement(
+    AcceptedWorkspaceContributionRuntimeProvider,
+    { catalog, moduleActivations: new Map() },
+    createElement(GlobalSurfaceHost, {
+      surfaceId: "fixture.disabled",
+      close: () => undefined,
+    }),
+  ));
   assert.match(markup, /Surface unavailable/);
   assert.match(markup, /fixture.disabled is not registered in this build/);
   assert.match(markup, />Close</);

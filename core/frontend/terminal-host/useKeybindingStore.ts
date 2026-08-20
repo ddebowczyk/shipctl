@@ -1,12 +1,9 @@
 import { create } from "zustand";
-import type { KeybindingSettings } from "@shipctl/core/platform";
-import { getKeybindingSettings, saveKeybindingSettings } from "@shipctl/core/platform";
-
-const DEFAULT_SETTINGS: KeybindingSettings = {
-  shiftEnterNewline: true,
-  optionDeleteWord: true,
-  cmdKClear: true,
-};
+import {
+  DEFAULT_KEYBINDING_SETTINGS,
+  hostConfigurationRuntime,
+  type KeybindingSettings,
+} from "@shipctl/core/configuration";
 
 interface KeybindingStore {
   settings: KeybindingSettings;
@@ -18,17 +15,17 @@ interface KeybindingStore {
 }
 
 export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
-  settings: DEFAULT_SETTINGS,
+  settings: DEFAULT_KEYBINDING_SETTINGS,
   hasLoaded: false,
   isSaving: false,
   error: null,
 
   loadSettings: async () => {
     try {
-      const settings = await getKeybindingSettings();
+      const { value: settings } = await hostConfigurationRuntime().resolve("keybindings");
       set({ settings, hasLoaded: true, error: null });
     } catch (error) {
-      set({ settings: DEFAULT_SETTINGS, hasLoaded: true, error: String(error) });
+      set({ settings: DEFAULT_KEYBINDING_SETTINGS, hasLoaded: true, error: String(error) });
     }
   },
 
@@ -38,7 +35,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
     // Optimistic update
     set({ settings: next, isSaving: true, error: null });
     try {
-      await saveKeybindingSettings(next);
+      await hostConfigurationRuntime().update("keybindings", next);
       set({ isSaving: false });
     } catch (error) {
       // Rollback

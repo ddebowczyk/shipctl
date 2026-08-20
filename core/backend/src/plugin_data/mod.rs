@@ -1,10 +1,8 @@
 //! Activation-scoped durable records for TypeScript plugins.
 //!
-//! The store owns persistence mechanics and transaction boundaries. Plugins
-//! own record meaning and supply the migrated value. The initial admission
-//! catalog is intentionally exact: it grants only records used by migrated
-//! built-in modules. Dynamic manifest admission replaces this code catalog in
-//! Phase E.
+//! The store owns persistence mechanics, transaction boundaries, and generic
+//! grant enforcement. TypeScript artifact policy owns record names, schema
+//! grammar, defaults, and migrations.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -16,8 +14,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::workspace::manager::WorkspaceManager;
-
 const DOCUMENT_SCHEMA_VERSION: u32 = 1;
 const JAVASCRIPT_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -28,25 +24,13 @@ pub enum PluginDataScope {
     Project { project_id: String },
 }
 
-impl PluginDataScope {
-    fn kind(&self) -> PluginDataScopeKind {
-        match self {
-            Self::Global => PluginDataScopeKind::Global,
-            Self::Project { .. } => PluginDataScopeKind::Project,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PluginDataScopeKind {
-    Global,
-    Project,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PluginDataGrant {
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub enum PluginDataGrant {
+    #[serde(rename = "plugin-data.read")]
     Read,
+    #[serde(rename = "plugin-data.write")]
     Write,
+    #[serde(rename = "plugin-data.migrate")]
     Migrate,
 }
 
@@ -55,6 +39,7 @@ enum PluginDataGrant {
 pub struct PluginDataActor {
     pub module_id: String,
     pub activation_id: String,
+    pub effective_grants: BTreeSet<PluginDataGrant>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -74,7 +59,10 @@ pub struct PluginDataRecord {
     pub schema_version: u32,
     pub revision: u64,
     pub value: Value,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // The TypeScript plugin-data contract requires an explicit array even
+    // when a record has no migration provenance yet. Keep `default` for
+    // backward-compatible reads of documents written by older hosts.
+    #[serde(default)]
     pub migrations: Vec<PluginDataMigrationProvenance>,
 }
 
@@ -114,48 +102,125 @@ pub struct PluginDataMigrationReceipt {
     pub replayed: bool,
 }
 
+/// A read-only, generic record-map input for one-way plugin-data migration.
+///
+/// The source deliberately knows only a JSON envelope with `schemaVersion` and
+/// `records` fields. The composing shell supplies the owner, scope, key prefix,
+/// and path; TypeScript owns the meaning and normalization of each opaque
+/// record value. Once a plugin-data record exists it always shadows this
+/// source, so this type can never become a second writer or durable authority.
 #[derive(Clone, Debug)]
-struct PluginDataPolicy {
-    module_id: &'static str,
-    scope: PluginDataScopeKind,
-    key: &'static str,
-    schema_versions: &'static [u32],
-    grants: &'static [PluginDataGrant],
-    legacy_source: LegacySource,
+pub struct LegacyPluginDataRecordMapSource {
+    path: PathBuf,
+    owner_module_id: String,
+    scope: PluginDataScope,
+    key_prefix: String,
+    source_schema_version: u32,
 }
 
-#[derive(Clone, Copy, Debug)]
-enum LegacySource {
-    #[cfg(test)]
-    None,
-    GlobalCapability(&'static str),
-    ProjectCommands,
+impl LegacyPluginDataRecordMapSource {
+    pub fn new(
+        path: PathBuf,
+        owner_module_id: String,
+        scope: PluginDataScope,
+        key_prefix: String,
+        source_schema_version: u32,
+    ) -> Result<Self, String> {
+        validate_identity(&owner_module_id, "legacy source owner module ID")?;
+        validate_identity(&key_prefix, "legacy source key prefix")?;
+        match &scope {
+            PluginDataScope::Global => {}
+            PluginDataScope::Project { project_id } => {
+                validate_identity(project_id, "legacy source project ID")?;
+            }
+        }
+        validate_schema_version(source_schema_version)?;
+        Ok(Self {
+            path,
+            owner_module_id,
+            scope,
+            key_prefix,
+            source_schema_version,
+        })
+    }
+
+    fn read_record(
+        &self,
+        module_id: &str,
+        scope: &PluginDataScope,
+        key: &str,
+    ) -> Result<Option<PluginDataRecord>, String> {
+        if self.owner_module_id != module_id || self.scope != *scope {
+            return Ok(None);
+        }
+        let Some(record_id) = key.strip_prefix(&self.key_prefix) else {
+            return Ok(None);
+        };
+        if record_id.is_empty() {
+            return Ok(None);
+        }
+        validate_identity(record_id, "legacy source record ID")?;
+        if !self.path.exists() {
+            return Ok(None);
+        }
+        let payload = fs::read(&self.path).map_err(|failure| {
+            error(
+                "storage-failed",
+                format!(
+                    "Could not read legacy plugin data source {}: {failure}",
+                    self.path.display()
+                ),
+            )
+        })?;
+        let document = serde_json::from_slice::<Value>(&payload).map_err(|failure| {
+            error(
+                "storage-failed",
+                format!(
+                    "Legacy plugin data source {} is invalid JSON: {failure}",
+                    self.path.display()
+                ),
+            )
+        })?;
+        let source_schema = document.get("schemaVersion").and_then(Value::as_u64);
+        if source_schema != Some(u64::from(self.source_schema_version)) {
+            return Err(error(
+                "storage-failed",
+                format!(
+                    "Legacy plugin data source {} has unsupported schema version",
+                    self.path.display()
+                ),
+            ));
+        }
+        let records = document
+            .get("records")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                error(
+                    "storage-failed",
+                    format!(
+                        "Legacy plugin data source {} has no records map",
+                        self.path.display()
+                    ),
+                )
+            })?;
+        let Some(value) = records.get(record_id).cloned() else {
+            return Ok(None);
+        };
+        validate_json_value(&value)?;
+        Ok(Some(PluginDataRecord {
+            owner_module_id: module_id.to_string(),
+            scope: scope.clone(),
+            key: key.to_string(),
+            // Revision zero is exclusively the read-only source boundary. A
+            // successful write or migration creates the first durable record
+            // at revision one.
+            schema_version: self.source_schema_version,
+            revision: 0,
+            value,
+            migrations: Vec::new(),
+        }))
+    }
 }
-
-const ALL_GRANTS: &[PluginDataGrant] = &[
-    PluginDataGrant::Read,
-    PluginDataGrant::Write,
-    PluginDataGrant::Migrate,
-];
-
-const DEFAULT_POLICIES: &[PluginDataPolicy] = &[
-    PluginDataPolicy {
-        module_id: "shipctl.usage",
-        scope: PluginDataScopeKind::Global,
-        key: "settings",
-        schema_versions: &[1],
-        grants: ALL_GRANTS,
-        legacy_source: LegacySource::GlobalCapability("usage"),
-    },
-    PluginDataPolicy {
-        module_id: "shipctl.commands",
-        scope: PluginDataScopeKind::Project,
-        key: "commands",
-        schema_versions: &[1],
-        grants: ALL_GRANTS,
-        legacy_source: LegacySource::ProjectCommands,
-    },
-];
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,8 +239,7 @@ struct PluginDataServiceInner {
     path: PathBuf,
     lock: Mutex<()>,
     durable_writes: DurableWriteBarrier,
-    workspace: WorkspaceManager,
-    policies: Vec<PluginDataPolicy>,
+    legacy_record_maps: Vec<LegacyPluginDataRecordMapSource>,
 }
 
 #[derive(Clone)]
@@ -184,27 +248,23 @@ pub struct PluginDataService {
 }
 
 impl PluginDataService {
-    pub fn new_with_barrier(
-        path: PathBuf,
-        workspace: WorkspaceManager,
-        durable_writes: DurableWriteBarrier,
-    ) -> Self {
-        Self::with_policies(path, workspace, durable_writes, DEFAULT_POLICIES.to_vec())
+    pub fn new_with_barrier(path: PathBuf, durable_writes: DurableWriteBarrier) -> Self {
+        Self::with_legacy_record_maps(path, durable_writes, Vec::new())
     }
 
-    fn with_policies(
+    /// Compose generic, read-only migration inputs without teaching the
+    /// plugin-data store any product record grammar or namespace policy.
+    pub fn with_legacy_record_maps(
         path: PathBuf,
-        workspace: WorkspaceManager,
         durable_writes: DurableWriteBarrier,
-        policies: Vec<PluginDataPolicy>,
+        legacy_record_maps: Vec<LegacyPluginDataRecordMapSource>,
     ) -> Self {
         Self {
             inner: Arc::new(PluginDataServiceInner {
                 path,
                 lock: Mutex::new(()),
                 durable_writes,
-                workspace,
-                policies,
+                legacy_record_maps,
             }),
         }
     }
@@ -216,7 +276,7 @@ impl PluginDataService {
         key: &str,
     ) -> Result<Option<PluginDataRecord>, String> {
         self.validate_actor(actor)?;
-        let policy = self.authorize(&actor.module_id, scope, key, PluginDataGrant::Read)?;
+        self.authorize(actor, key, PluginDataGrant::Read)?;
         self.validate_scope(scope)?;
         let _guard = self
             .inner
@@ -227,7 +287,7 @@ impl PluginDataService {
         if let Some(record) = find_record(&document, &actor.module_id, scope, key) {
             return Ok(Some(record.clone()));
         }
-        self.legacy_record(policy, scope)
+        self.legacy_record(actor, scope, key)
     }
 
     pub fn write_record(
@@ -236,14 +296,9 @@ impl PluginDataService {
         write: PluginDataWrite,
     ) -> Result<PluginDataRecord, String> {
         self.validate_actor(actor)?;
-        let policy = self.authorize(
-            &actor.module_id,
-            &write.scope,
-            &write.key,
-            PluginDataGrant::Write,
-        )?;
+        self.authorize(actor, &write.key, PluginDataGrant::Write)?;
         self.validate_scope(&write.scope)?;
-        validate_schema_version(policy, write.schema_version)?;
+        validate_schema_version(write.schema_version)?;
         validate_json_value(&write.value)?;
 
         let _durable_update = self.inner.durable_writes.enter_update()?;
@@ -254,11 +309,10 @@ impl PluginDataService {
             .map_err(|_| error("storage-failed", "Plugin data lock is poisoned"))?;
         let mut document = read_document(&self.inner.path)?;
         let identity = record_identity(&actor.module_id, &write.scope, &write.key);
-        let current = document
-            .records
-            .get(&identity)
-            .cloned()
-            .or(self.legacy_record(policy, &write.scope)?);
+        let current = match document.records.get(&identity).cloned() {
+            Some(record) => Some(record),
+            None => self.legacy_record(actor, &write.scope, &write.key)?,
+        };
         assert_expected_revision(write.expected_revision, current.as_ref())?;
         let revision = next_revision(current.as_ref())?;
         let record = PluginDataRecord {
@@ -290,14 +344,9 @@ impl PluginDataService {
         }
         let mut identities = BTreeSet::new();
         for write in &transaction.records {
-            let policy = self.authorize(
-                &actor.module_id,
-                &write.scope,
-                &write.key,
-                PluginDataGrant::Migrate,
-            )?;
+            self.authorize(actor, &write.key, PluginDataGrant::Migrate)?;
             self.validate_scope(&write.scope)?;
-            validate_schema_version(policy, write.to_schema_version)?;
+            validate_schema_version(write.to_schema_version)?;
             if write.from_schema_version == write.to_schema_version {
                 return Err(error(
                     "invalid-request",
@@ -322,15 +371,12 @@ impl PluginDataService {
         let mut document = read_document(&self.inner.path)?;
         let mut current_records = Vec::with_capacity(transaction.records.len());
         for write in &transaction.records {
-            let policy = self.authorize(
-                &actor.module_id,
-                &write.scope,
-                &write.key,
-                PluginDataGrant::Migrate,
-            )?;
-            let current = find_record(&document, &actor.module_id, &write.scope, &write.key)
-                .cloned()
-                .or(self.legacy_record(policy, &write.scope)?)
+            self.authorize(actor, &write.key, PluginDataGrant::Migrate)?;
+            let current =
+                match find_record(&document, &actor.module_id, &write.scope, &write.key).cloned() {
+                    Some(record) => Some(record),
+                    None => self.legacy_record(actor, &write.scope, &write.key)?,
+                }
                 .ok_or_else(|| error("not-found", "Plugin data record was not found"))?;
             current_records.push(current);
         }
@@ -405,29 +451,6 @@ impl PluginDataService {
         })
     }
 
-    /// Trusted native modules can consume their own record without borrowing
-    /// a renderer activation. This does not grant cross-module access.
-    pub fn read_owned_value(
-        &self,
-        module_id: &str,
-        scope: &PluginDataScope,
-        key: &str,
-    ) -> Result<Option<Value>, String> {
-        let policy = self.authorize(module_id, scope, key, PluginDataGrant::Read)?;
-        self.validate_scope(scope)?;
-        let _guard = self
-            .inner
-            .lock
-            .lock()
-            .map_err(|_| error("storage-failed", "Plugin data lock is poisoned"))?;
-        let document = read_document(&self.inner.path)?;
-        Ok(find_record(&document, module_id, scope, key)
-            .map(|record| record.value.clone())
-            .or(self
-                .legacy_record(policy, scope)?
-                .map(|record| record.value)))
-    }
-
     pub fn validate_serialized_document(payload: &[u8]) -> Result<(), String> {
         decode_document(payload).map(|_| ())
     }
@@ -449,21 +472,15 @@ impl PluginDataService {
 
     fn authorize(
         &self,
-        module_id: &str,
-        scope: &PluginDataScope,
+        actor: &PluginDataActor,
         key: &str,
         grant: PluginDataGrant,
-    ) -> Result<&PluginDataPolicy, String> {
+    ) -> Result<(), String> {
         validate_identity(key, "record key")?;
-        self.inner
-            .policies
-            .iter()
-            .find(|policy| {
-                policy.module_id == module_id
-                    && policy.scope == scope.kind()
-                    && policy.key == key
-                    && policy.grants.contains(&grant)
-            })
+        actor
+            .effective_grants
+            .contains(&grant)
+            .then_some(())
             .ok_or_else(|| error("denied", "Plugin data access was denied"))
     }
 
@@ -472,58 +489,21 @@ impl PluginDataService {
             return Ok(());
         };
         validate_identity(project_id, "project ID")?;
-        if self
-            .inner
-            .workspace
-            .list_repos()?
-            .iter()
-            .any(|repo| repo.path == *project_id)
-        {
-            Ok(())
-        } else {
-            Err(error(
-                "invalid-project",
-                "Plugin data project is not registered",
-            ))
-        }
+        Ok(())
     }
 
     fn legacy_record(
         &self,
-        policy: &PluginDataPolicy,
+        actor: &PluginDataActor,
         scope: &PluginDataScope,
+        key: &str,
     ) -> Result<Option<PluginDataRecord>, String> {
-        let value = match policy.legacy_source {
-            #[cfg(test)]
-            LegacySource::None => None,
-            LegacySource::GlobalCapability(capability_id) => self
-                .inner
-                .workspace
-                .load_global_capability_data(capability_id)?,
-            LegacySource::ProjectCommands => {
-                let PluginDataScope::Project { project_id } = scope else {
-                    return Ok(None);
-                };
-                Some(
-                    serde_json::to_value(self.inner.workspace.load_workspace(project_id)?.commands)
-                        .map_err(|failure| {
-                            error(
-                                "storage-failed",
-                                format!("Could not decode legacy command data: {failure}"),
-                            )
-                        })?,
-                )
+        for source in &self.inner.legacy_record_maps {
+            if let Some(record) = source.read_record(&actor.module_id, scope, key)? {
+                return Ok(Some(record));
             }
-        };
-        Ok(value.map(|value| PluginDataRecord {
-            owner_module_id: policy.module_id.to_string(),
-            scope: scope.clone(),
-            key: policy.key.to_string(),
-            schema_version: policy.schema_versions[0],
-            revision: 0,
-            value,
-            migrations: Vec::new(),
-        }))
+        }
+        Ok(None)
     }
 }
 
@@ -557,11 +537,11 @@ fn validate_identity(value: &str, label: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_schema_version(policy: &PluginDataPolicy, schema_version: u32) -> Result<(), String> {
-    if schema_version == 0 || !policy.schema_versions.contains(&schema_version) {
+fn validate_schema_version(schema_version: u32) -> Result<(), String> {
+    if schema_version == 0 {
         return Err(error(
             "invalid-schema",
-            "Plugin data schema version was not admitted",
+            "Plugin data schema version must be positive",
         ));
     }
     Ok(())
@@ -756,78 +736,112 @@ mod tests {
     use super::*;
     use crate::state::paths::ShipctlPaths;
 
-    fn fixture() -> (tempfile::TempDir, PluginDataService, WorkspaceManager) {
+    fn fixture() -> (tempfile::TempDir, PluginDataService) {
         let root = tempfile::tempdir().unwrap();
         let paths = ShipctlPaths::new(root.path().join("state"), root.path().join("runtime"));
-        let workspace = WorkspaceManager::new(paths.clone());
         let service = PluginDataService::new_with_barrier(
             paths.plugin_data.clone(),
-            workspace.clone(),
             DurableWriteBarrier::default(),
         );
-        (root, service, workspace)
+        (root, service)
     }
 
-    fn actor(module_id: &str) -> PluginDataActor {
+    fn actor(module_id: &str, grants: &[PluginDataGrant]) -> PluginDataActor {
         PluginDataActor {
             module_id: module_id.to_string(),
             activation_id: format!("{module_id}@1.0.0#fixture"),
+            effective_grants: grants.iter().copied().collect(),
         }
     }
 
+    fn full_actor(module_id: &str) -> PluginDataActor {
+        actor(
+            module_id,
+            &[
+                PluginDataGrant::Read,
+                PluginDataGrant::Write,
+                PluginDataGrant::Migrate,
+            ],
+        )
+    }
+
     #[test]
-    fn exact_catalog_denies_cross_namespace_access() {
-        let (_root, service, _workspace) = fixture();
+    fn admitted_artifact_can_own_an_arbitrary_namespace_and_project_scope() {
+        let (_root, service) = fixture();
+        let actor = full_actor("fixture.external-artifact");
+        let scope = PluginDataScope::Project {
+            project_id: "arbitrary-project-identity".to_string(),
+        };
+        let stored = service
+            .write_record(
+                &actor,
+                PluginDataWrite {
+                    scope: scope.clone(),
+                    key: "new-record-without-rust-policy".into(),
+                    expected_revision: None,
+                    schema_version: 42,
+                    value: serde_json::json!({"configured": true}),
+                },
+            )
+            .unwrap();
+        assert_eq!(stored.revision, 1);
+        assert_eq!(
+            serde_json::to_value(&stored).unwrap()["migrations"],
+            serde_json::json!([]),
+            "the native response contract always exposes migration provenance as an array"
+        );
+        assert_eq!(
+            service
+                .read_record(&actor, &scope, "new-record-without-rust-policy")
+                .unwrap()
+                .unwrap()
+                .value,
+            serde_json::json!({"configured": true})
+        );
+    }
+
+    #[test]
+    fn denied_grant_cannot_write_an_arbitrary_record() {
+        let (_root, service) = fixture();
+        let actor = actor("fixture.read-only", &[PluginDataGrant::Read]);
         let failure = service
-            .read_record(
-                &actor("shipctl.commands"),
-                &PluginDataScope::Global,
-                "settings",
+            .write_record(
+                &actor,
+                PluginDataWrite {
+                    scope: PluginDataScope::Global,
+                    key: "settings".into(),
+                    expected_revision: None,
+                    schema_version: 1,
+                    value: serde_json::json!({}),
+                },
             )
             .unwrap_err();
         assert!(failure.starts_with("plugin-data.denied:"));
     }
 
     #[test]
-    fn legacy_global_record_is_revision_zero_then_cuts_over_atomically() {
-        let (_root, service, workspace) = fixture();
-        workspace
-            .replace_global_capability_data("usage", serde_json::json!({"claude": {"show": true}}))
-            .unwrap();
-        let actor = actor("shipctl.usage");
-        let legacy = service
-            .read_record(&actor, &PluginDataScope::Global, "settings")
-            .unwrap()
-            .unwrap();
-        assert_eq!(legacy.revision, 0);
-
-        let stored = service
+    fn schema_version_must_be_positive() {
+        let (_root, service) = fixture();
+        let actor = full_actor("fixture.schema");
+        let failure = service
             .write_record(
                 &actor,
                 PluginDataWrite {
                     scope: PluginDataScope::Global,
                     key: "settings".into(),
-                    expected_revision: Some(0),
-                    schema_version: 1,
-                    value: serde_json::json!({"claude": {"show": false}}),
+                    expected_revision: None,
+                    schema_version: 0,
+                    value: serde_json::json!({}),
                 },
             )
-            .unwrap();
-        assert_eq!(stored.revision, 1);
-        assert_eq!(
-            service
-                .read_record(&actor, &PluginDataScope::Global, "settings")
-                .unwrap()
-                .unwrap()
-                .value,
-            serde_json::json!({"claude": {"show": false}})
-        );
+            .unwrap_err();
+        assert!(failure.starts_with("plugin-data.invalid-schema:"));
     }
 
     #[test]
     fn stale_write_is_rejected_without_changing_the_record() {
-        let (_root, service, _workspace) = fixture();
-        let actor = actor("shipctl.usage");
+        let (_root, service) = fixture();
+        let actor = full_actor("fixture.stale-write");
         let first = service
             .write_record(
                 &actor,
@@ -908,24 +922,8 @@ mod tests {
 
     #[test]
     fn migration_transaction_records_provenance_and_replays_once() {
-        let root = tempfile::tempdir().unwrap();
-        let paths = ShipctlPaths::new(root.path().join("state"), root.path().join("runtime"));
-        let workspace = WorkspaceManager::new(paths.clone());
-        let policies = vec![PluginDataPolicy {
-            module_id: "shipctl.fixture",
-            scope: PluginDataScopeKind::Global,
-            key: "state",
-            schema_versions: &[1, 2],
-            grants: ALL_GRANTS,
-            legacy_source: LegacySource::None,
-        }];
-        let service = PluginDataService::with_policies(
-            paths.plugin_data,
-            workspace,
-            DurableWriteBarrier::default(),
-            policies,
-        );
-        let actor = actor("shipctl.fixture");
+        let (_root, service) = fixture();
+        let actor = full_actor("fixture.migration");
         let first = service
             .write_record(
                 &actor,
@@ -959,27 +957,8 @@ mod tests {
 
     #[test]
     fn migration_batch_rejects_duplicate_and_stale_records_without_partial_commit() {
-        let root = tempfile::tempdir().unwrap();
-        let paths = ShipctlPaths::new(root.path().join("state"), root.path().join("runtime"));
-        let workspace = WorkspaceManager::new(paths.clone());
-        let policies = ["first", "second"]
-            .into_iter()
-            .map(|key| PluginDataPolicy {
-                module_id: "shipctl.fixture",
-                scope: PluginDataScopeKind::Global,
-                key,
-                schema_versions: &[1, 2],
-                grants: ALL_GRANTS,
-                legacy_source: LegacySource::None,
-            })
-            .collect();
-        let service = PluginDataService::with_policies(
-            paths.plugin_data,
-            workspace,
-            DurableWriteBarrier::default(),
-            policies,
-        );
-        let actor = actor("shipctl.fixture");
+        let (_root, service) = fixture();
+        let actor = full_actor("fixture.batch");
         for key in ["first", "second"] {
             service
                 .write_record(
@@ -1060,5 +1039,91 @@ mod tests {
         assert_eq!(untouched.schema_version, 1);
         assert_eq!(untouched.revision, 1);
         assert!(untouched.migrations.is_empty());
+    }
+
+    #[test]
+    fn legacy_record_map_migrates_once_replays_and_never_overwrites_a_stale_candidate() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = ShipctlPaths::new(root.path().join("state"), root.path().join("runtime"));
+        let legacy_path = paths.state_root.join("legacy-records.json");
+        fs::create_dir_all(&paths.state_root).unwrap();
+        fs::write(
+            &legacy_path,
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 1,
+                "records": {
+                    "workspace-one": { "legacy": true }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let source = LegacyPluginDataRecordMapSource::new(
+            legacy_path,
+            "fixture.legacy-source".into(),
+            PluginDataScope::Global,
+            "workspace:".into(),
+            1,
+        )
+        .unwrap();
+        let service = PluginDataService::with_legacy_record_maps(
+            paths.plugin_data,
+            DurableWriteBarrier::default(),
+            vec![source],
+        );
+        let actor = full_actor("fixture.legacy-source");
+        let scope = PluginDataScope::Global;
+        let key = "workspace:workspace-one";
+
+        let source_record = service.read_record(&actor, &scope, key).unwrap().unwrap();
+        assert_eq!(source_record.schema_version, 1);
+        assert_eq!(source_record.revision, 0);
+        assert_eq!(source_record.value, serde_json::json!({ "legacy": true }));
+
+        let migration = PluginDataMigrationTransaction {
+            migration_id: "fixture-source-v1-to-v2".into(),
+            records: vec![PluginDataMigrationWrite {
+                scope: scope.clone(),
+                key: key.into(),
+                expected_revision: 0,
+                from_schema_version: 1,
+                to_schema_version: 2,
+                value: serde_json::json!({ "canonical": true }),
+            }],
+        };
+        let applied = service.migrate_records(&actor, migration.clone()).unwrap();
+        assert!(!applied.replayed);
+        assert_eq!(applied.records[0].revision, 1);
+        assert_eq!(
+            applied.records[0].value,
+            serde_json::json!({ "canonical": true })
+        );
+
+        let replayed = service.migrate_records(&actor, migration).unwrap();
+        assert!(replayed.replayed);
+        assert_eq!(replayed.records, applied.records);
+
+        let stale_failure = service
+            .migrate_records(
+                &actor,
+                PluginDataMigrationTransaction {
+                    migration_id: "fixture-conflicting-source-v2".into(),
+                    records: vec![PluginDataMigrationWrite {
+                        scope: scope.clone(),
+                        key: key.into(),
+                        expected_revision: 0,
+                        from_schema_version: 1,
+                        to_schema_version: 2,
+                        value: serde_json::json!({ "mustNotReplace": true }),
+                    }],
+                },
+            )
+            .unwrap_err();
+        assert!(stale_failure.starts_with("plugin-data.conflict:"));
+        assert_eq!(
+            service.read_record(&actor, &scope, key).unwrap().unwrap(),
+            applied.records[0],
+            "the durable plugin record shadows the read-only source after migration"
+        );
     }
 }

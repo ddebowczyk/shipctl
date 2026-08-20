@@ -3,6 +3,7 @@ import type { ProjectNavigationContributionProps } from "@shipctl/module-api";
 import { ListTodo } from "lucide-react";
 
 import { useTodoStore } from "./store";
+import { useTodoPreferencesStore } from "./todoPreferences.ts";
 
 export default function TodoProjectRow({
   project,
@@ -14,7 +15,8 @@ export default function TodoProjectRow({
     services.settings.subscribe,
     services.settings.getSnapshot,
   );
-  const showTodos = settings.values.showTodos !== false;
+  const preferences = useTodoPreferencesStore((state) => state.preferences);
+  const showTodos = preferences?.showTodos ?? settings.values.showTodos !== false;
   const files = useTodoStore((state) => state.projectTodos[project.path]);
 
   if (!showTodos) return null;

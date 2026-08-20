@@ -89,6 +89,9 @@ live-reconciliation *args:
 live-reconciliation-package *args:
     node bin/run-live-reconciliation-package-proof.mjs {{args}}
 
+post-package-plugin-deployment *args:
+    node bin/run-post-package-plugin-deployment-proof.mjs {{args}}
+
 cordis-runtime *args:
     node bin/build-cordis-runtime.mjs {{args}}
 
