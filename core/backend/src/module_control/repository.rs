@@ -1564,10 +1564,21 @@ mod tests {
     /// than fabricating a validated catalog record. The fixture declares a
     /// new capability and matching typed port, but no live route exists.
     fn fixture_archive() -> RuntimeArtifactArchive {
-        fixture_archive_with_grants(&[])
+        fixture_archive_with_grants_and_name(&[], "Repository fixture")
     }
 
     fn fixture_archive_with_grants(requested_grants: &[&str]) -> RuntimeArtifactArchive {
+        fixture_archive_with_grants_and_name(requested_grants, "Repository fixture")
+    }
+
+    fn fixture_archive_named(name: &str) -> RuntimeArtifactArchive {
+        fixture_archive_with_grants_and_name(&[], name)
+    }
+
+    fn fixture_archive_with_grants_and_name(
+        requested_grants: &[&str],
+        name: &str,
+    ) -> RuntimeArtifactArchive {
         let module_id = "fixture.repository";
         let capability_id = "fixture.repository-capability";
         let request = message_contract("fixture.repository.request");
@@ -1635,7 +1646,7 @@ mod tests {
         let manifest_value = json!({
             "schemaVersion": ARTIFACT_CONTRACT_SCHEMA_VERSION,
             "id": module_id,
-            "name": "Repository fixture",
+            "name": name,
             "version": "1.0.0",
             "apiRange": "^1.0.0",
             "runtimeKind": "frontend_esm",
@@ -1934,6 +1945,76 @@ mod tests {
                 .unwrap()
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn bundled_recovery_admits_revised_content_for_an_exclusively_bundled_module() {
+        let temporary = tempfile::tempdir().unwrap();
+        let paths = ShipctlPaths::new(
+            temporary.path().join("state"),
+            temporary.path().join("runtime"),
+        );
+        let repository = ArtifactRepository::for_offline(paths.clone(), "1.0.0");
+
+        let legacy_archive = write_archive(&fixture_archive_named("Legacy bundled fixture"));
+        let legacy = repository
+            .ensure_bundled_archive(&fs::read(legacy_archive.path()).unwrap())
+            .unwrap();
+
+        let current_archive = fixture_archive_named("Current bundled fixture");
+        let current_file = write_archive(&current_archive);
+        let current = repository.preflight_archive(current_file.path()).unwrap();
+        assert_eq!(legacy.artifact.identity.id, current.identity().id);
+        assert_eq!(legacy.artifact.identity.version, current.identity().version);
+        assert_ne!(
+            legacy.artifact.identity.content_digest,
+            current.identity().content_digest
+        );
+
+        let pending = PendingArtifactInstall {
+            schema_version: MODULE_CONTROL_SCHEMA_VERSION,
+            request_id: Uuid::new_v4(),
+            artifact: current.clone(),
+            source: ModuleSource::Bundled,
+            stage_id: Uuid::new_v4().to_string(),
+        };
+        let mut registry = ModuleRegistry::open_writable(&paths).unwrap();
+        assert!(matches!(
+            registry.begin_pending_artifact_install(&pending).unwrap(),
+            PendingArtifactInstallResolution::Pending(_)
+        ));
+        drop(registry);
+        repository
+            .stage_candidate(&pending.stage_id, &current_archive)
+            .unwrap();
+        repository
+            .publish_stage(&pending.stage_id, &current)
+            .unwrap();
+
+        let recovered = repository
+            .ensure_bundled_archive(&fs::read(current_file.path()).unwrap())
+            .unwrap();
+        assert_eq!(recovered.artifact.identity, current.identity());
+
+        let registry = ModuleRegistry::open_read_only(&paths).unwrap();
+        assert!(registry.pending_artifact_installs().unwrap().is_empty());
+        let snapshot = registry.snapshot().unwrap();
+        let bundled = snapshot
+            .runtime_artifacts
+            .iter()
+            .filter(|artifact| artifact.identity().id == "fixture.repository")
+            .collect::<Vec<_>>();
+        assert_eq!(bundled.len(), 2);
+        assert!(bundled
+            .iter()
+            .all(|artifact| artifact.sources == vec![ModuleSource::Bundled]));
+        assert_eq!(
+            snapshot
+                .effective_desired("fixture.repository")
+                .unwrap()
+                .selected_artifact,
+            Some(legacy.artifact.identity),
         );
     }
 

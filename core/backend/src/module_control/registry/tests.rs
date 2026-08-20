@@ -806,7 +806,7 @@ fn runtime_identity_and_capability_definition_conflicts_leave_catalog_unchanged(
         .register_disabled_artifact(&RuntimeArtifactRegistration {
             request_id: Uuid::new_v4(),
             artifact: runtime_conflict,
-            source: ModuleSource::User,
+            source: ModuleSource::Bundled,
         })
         .unwrap_err();
     assert_eq!(runtime_error.code, REGISTRY_ARTIFACT_IMMUTABLE);

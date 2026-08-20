@@ -968,7 +968,7 @@ fn insert_immutable_artifact(
     acquisition: &ArtifactAcquisition,
 ) -> Result<(), RegistryError> {
     let artifact = &acquisition.identity;
-    catalog::validate_runtime_identity_conflict(transaction, artifact)?;
+    catalog::validate_runtime_identity_conflict(transaction, artifact, acquisition.source)?;
     let identity_json = contract_json(artifact)?;
     let existing: Option<String> = transaction
         .query_row(

@@ -414,7 +414,7 @@ impl ModuleRegistry {
         }
 
         let identity = registration.artifact.identity();
-        validate_runtime_identity_conflict(&transaction, &identity)?;
+        validate_runtime_identity_conflict(&transaction, &identity, registration.source)?;
         validate_capability_definition_conflicts(&transaction, registration)?;
         validate_binding_references(&transaction, registration)?;
 
@@ -949,9 +949,16 @@ fn ensure_same_runtime_artifact(
 /// Enforce the runtime identity rule for both the Phase 3 catalog intake and
 /// the established generic registry mutation path. Static inventory remains
 /// deliberately exempt: it is build membership, not a replaceable archive.
+///
+/// A host-bundled artifact may revise its immutable content while retaining a
+/// module version, provided every conflicting artifact is also exclusively
+/// bundled. The host reconciles that trusted upgrade through its bundled
+/// selection policy. User or development provenance retains the ordinary
+/// version-to-content immutability guarantee.
 pub(super) fn validate_runtime_identity_conflict(
     transaction: &Transaction<'_>,
     identity: &ModuleIdentity,
+    source: ModuleSource,
 ) -> Result<(), RegistryError> {
     if identity.runtime_kind == ModuleRuntimeKind::StaticBuiltin {
         return Ok(());
@@ -967,9 +974,12 @@ pub(super) fn validate_runtime_identity_conflict(
             &stored.map_err(transaction_error)?,
             REGISTRY_ARTIFACT_IMMUTABLE,
         )?;
+        let bundled_revision = source == ModuleSource::Bundled
+            && artifact_is_exclusively_bundled(transaction, &stored)?;
         if stored.runtime_kind != ModuleRuntimeKind::StaticBuiltin
             && stored.version == identity.version
             && stored.content_digest != identity.content_digest
+            && !bundled_revision
         {
             return Err(RegistryError::new(
                 REGISTRY_ARTIFACT_IMMUTABLE,
@@ -981,6 +991,27 @@ pub(super) fn validate_runtime_identity_conflict(
         }
     }
     Ok(())
+}
+
+fn artifact_is_exclusively_bundled(
+    transaction: &Transaction<'_>,
+    identity: &ModuleIdentity,
+) -> Result<bool, RegistryError> {
+    let bundled_source = super::module_source_name(ModuleSource::Bundled);
+    transaction
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM artifact_sources
+                 WHERE module_id = ?1 AND content_digest = ?2 AND source = ?3
+            ) AND NOT EXISTS(
+                SELECT 1 FROM artifact_sources
+                 WHERE module_id = ?1 AND content_digest = ?2 AND source <> ?3
+            )",
+            params![identity.id, identity.content_digest, bundled_source,],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|value| value != 0)
+        .map_err(transaction_error)
 }
 
 fn load_runtime_artifact_by_identity(
