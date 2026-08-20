@@ -86,6 +86,8 @@ pub enum Command {
         #[command(subcommand)]
         command: StateCommand,
     },
+    /// Read-only diagnosis of installed executables and local Shipctl state.
+    Doctor(DoctorArgs),
     /// Print the Shipctl and control-protocol versions.
     Version,
     /// Internal installed-resource probe used by package verification only.
@@ -472,6 +474,17 @@ pub enum InstancesCommand {
 #[derive(Debug, Args)]
 pub struct RuntimeRootArgs {
     /// Override the local instance discovery directory.
+    #[arg(long, value_name = "PATH")]
+    pub runtime_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct DoctorArgs {
+    /// Override the durable state root to inspect without changing it.
+    #[arg(long, value_name = "PATH")]
+    pub state_root: Option<PathBuf>,
+
+    /// Override the local instance discovery root to inspect without changing it.
     #[arg(long, value_name = "PATH")]
     pub runtime_root: Option<PathBuf>,
 }

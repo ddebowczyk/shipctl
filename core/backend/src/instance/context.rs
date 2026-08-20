@@ -222,6 +222,42 @@ pub fn resolve_state_root_read_only(
     let environment = nonempty_path_env(STATE_DIR_ENV)?;
     let platform_default = home.join(crate::workspace::migration::HOME_DIR_NAME);
     let (path, source) = select_state_root(explicit, environment.as_deref(), &platform_default);
+    read_only_directory(path, source, "state root")
+}
+
+/// Resolve the established explicit/environment/default runtime-root precedence
+/// without creating or otherwise mutating the selected directory.
+pub fn resolve_runtime_root_read_only(
+    explicit: Option<&Path>,
+) -> Result<(PathBuf, RootSource), String> {
+    let environment = nonempty_path_env(RUNTIME_DIR_ENV)?;
+    let (platform_default, source) = match dirs::runtime_dir() {
+        Some(path) => (path.join("shipctl"), RootSource::PlatformDefault),
+        None => (
+            dirs::cache_dir()
+                .ok_or_else(|| {
+                    "Could not find a platform runtime or cache directory for Shipctl".to_string()
+                })?
+                .join("shipctl/runtime"),
+            RootSource::CacheFallback,
+        ),
+    };
+    let (path, source) = explicit
+        .map(|path| (path, RootSource::Explicit))
+        .or_else(|| {
+            environment
+                .as_deref()
+                .map(|path| (path, RootSource::Environment))
+        })
+        .unwrap_or((&platform_default, source));
+    read_only_directory(path, source, "runtime root")
+}
+
+fn read_only_directory(
+    path: &Path,
+    source: RootSource,
+    label: &str,
+) -> Result<(PathBuf, RootSource), String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -232,7 +268,7 @@ pub fn resolve_state_root_read_only(
     let resolved = if absolute.exists() {
         absolute.canonicalize().map_err(|error| {
             format!(
-                "Failed to canonicalize state root {}: {error}",
+                "Failed to canonicalize {label} {}: {error}",
                 absolute.display()
             )
         })?
@@ -427,6 +463,17 @@ mod tests {
         let (resolved, source) = resolve_state_root_read_only(Some(&state_root)).unwrap();
 
         assert_eq!(resolved, state_root);
+        assert_eq!(source, RootSource::Explicit);
+        assert!(!resolved.exists());
+    }
+
+    #[test]
+    fn read_only_runtime_root_resolution_does_not_create_the_selected_path() {
+        let (_, runtime_root) = roots("offline-runtime-read");
+
+        let (resolved, source) = resolve_runtime_root_read_only(Some(&runtime_root)).unwrap();
+
+        assert_eq!(resolved, runtime_root);
         assert_eq!(source, RootSource::Explicit);
         assert!(!resolved.exists());
     }

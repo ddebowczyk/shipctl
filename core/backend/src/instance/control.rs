@@ -1366,6 +1366,17 @@ impl InstanceDirectory {
         }
     }
 
+    /// Inspect instance descriptors and control endpoints without reclaiming
+    /// stale runtime files. This is suitable for a diagnostic command whose
+    /// default contract is strictly read-only.
+    pub fn discover_read_only(&self) -> DiscoveryReport {
+        let (instances, problems) = self.scan_read_only();
+        DiscoveryReport {
+            instances: instances.into_iter().map(|(_, record)| record).collect(),
+            problems,
+        }
+    }
+
     pub fn inspect(&self, selector: Option<&str>) -> Result<InstanceRecord, ControlError> {
         let (instances, _) = self.scan();
         let descriptor = select_instance(instances, selector)?;
@@ -1815,6 +1826,25 @@ impl InstanceDirectory {
         Vec<(StoredDescriptor, InstanceRecord)>,
         Vec<DiscoveryProblem>,
     ) {
+        self.scan_with_reclamation(true)
+    }
+
+    fn scan_read_only(
+        &self,
+    ) -> (
+        Vec<(StoredDescriptor, InstanceRecord)>,
+        Vec<DiscoveryProblem>,
+    ) {
+        self.scan_with_reclamation(false)
+    }
+
+    fn scan_with_reclamation(
+        &self,
+        reclaim_dead: bool,
+    ) -> (
+        Vec<(StoredDescriptor, InstanceRecord)>,
+        Vec<DiscoveryProblem>,
+    ) {
         let descriptor_directory = self.runtime_root.join("instances");
         let mut live = Vec::new();
         let mut problems = Vec::new();
@@ -1852,7 +1882,7 @@ impl InstanceDirectory {
                         != Some(descriptor.instance.process_started_at);
                     let endpoint_is_owned = descriptor.instance.runtime_root == self.runtime_root
                         && descriptor.endpoint == endpoint_name(descriptor.instance.instance_id);
-                    let reclaimed = if identity_is_dead {
+                    let reclaimed = if reclaim_dead && identity_is_dead {
                         remove_if_present(&path);
                         if endpoint_is_owned {
                             remove_endpoint_artifact(&descriptor.endpoint);
@@ -3537,7 +3567,15 @@ mod tests {
         };
         write_descriptor_atomically(&path, &stale).unwrap();
 
-        let report = InstanceDirectory::new(context.runtime_root, context.build).discover();
+        let directory = InstanceDirectory::new(context.runtime_root, context.build);
+        let read_only_report = directory.discover_read_only();
+
+        assert!(read_only_report.instances.is_empty());
+        assert_eq!(read_only_report.problems.len(), 1);
+        assert!(!read_only_report.problems[0].reclaimed);
+        assert!(path.exists());
+
+        let report = directory.discover();
 
         assert!(report.instances.is_empty());
         assert_eq!(report.problems.len(), 1);

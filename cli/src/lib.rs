@@ -1,4 +1,5 @@
 mod args;
+mod doctor;
 mod headless_kernel;
 mod headless_runner;
 mod instances;
@@ -125,6 +126,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
         Some(CliCommand::Schedule { command }) => run_schedules(command, cli.output, cli.full),
         Some(CliCommand::Operations { command }) => run_operations(command, cli.output),
         Some(CliCommand::State { command }) => run_state(command, cli.output),
+        Some(CliCommand::Doctor(args)) => doctor::run(args, cli.output),
         Some(CliCommand::Version) => {
             print_version(cli.output);
             ExitCode::SUCCESS
@@ -1132,6 +1134,7 @@ fn operation_hint(args: &[OsString]) -> &str {
             ("state", "verify") => "state.verify",
             _ => "cli",
         },
+        (Some("doctor"), _) => "doctor.inspect",
         (Some("version"), _) | (Some("--version"), _) | (Some("-V"), _) => "cli.version",
         _ => "cli",
     }
@@ -2365,6 +2368,31 @@ mod tests {
         let cli = Cli::try_parse_from(["shipctl"]).unwrap();
         assert!(cli.command.is_none());
         assert!(!cli.version);
+    }
+
+    #[test]
+    fn doctor_parses_explicit_read_only_roots() {
+        let cli = Cli::try_parse_from([
+            "shipctl",
+            "doctor",
+            "--state-root",
+            "/tmp/shipctl-state",
+            "--runtime-root",
+            "/tmp/shipctl-runtime",
+        ])
+        .unwrap();
+        let Some(CliCommand::Doctor(args)) = cli.command else {
+            panic!("expected doctor command")
+        };
+        assert_eq!(args.state_root, Some(PathBuf::from("/tmp/shipctl-state")));
+        assert_eq!(
+            args.runtime_root,
+            Some(PathBuf::from("/tmp/shipctl-runtime"))
+        );
+        assert_eq!(
+            operation_hint(&[OsString::from("doctor")]),
+            "doctor.inspect"
+        );
     }
 
     /// Bare `shipctl ui` must reach the same detached start path as

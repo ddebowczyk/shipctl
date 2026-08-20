@@ -469,6 +469,7 @@ fn snapshot_providers(
         Arc::new(
             shipctl_core::module_control::artifact_snapshot::ModuleArtifactSnapshotProvider::new(
                 paths.module_artifact_root.clone(),
+                paths.module_registry_database.clone(),
             ),
         ),
         Arc::new(SchedulerSnapshotProvider::new(paths.schedule_root.clone())),
