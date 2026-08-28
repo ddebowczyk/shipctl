@@ -34,6 +34,7 @@ export interface AssistantLaunchPreparation {
 /** A snapshot is deliberately in-memory: it scopes one pending capture only. */
 export interface AssistantCaptureSnapshot {
   readonly knownTranscriptPaths: ReadonlySet<string>;
+  readonly resourceRelativePath: string;
 }
 
 export interface AssistantCaptureStrategy {
@@ -63,14 +64,26 @@ type JsonRecord = Readonly<Record<string, unknown>>;
 
 const CLAUDE_MODEL_ALIASES = ["fable", "opus", "sonnet", "haiku"] as const;
 const CODEX_CAPTURE_RESOURCE_ID = "codex-session-transcripts";
-const CODEX_CAPTURE_REQUEST = {
-  kind: "tree",
-  resourceId: CODEX_CAPTURE_RESOURCE_ID,
-  relativePath: ".codex/sessions",
-  maxFiles: 256,
-  maxBytesPerFile: 512 * 1024,
-  extensions: ["jsonl"],
-} as const;
+type AssistantResourceTreeRequest = Extract<
+  AssistantResourceReadInput["request"],
+  { readonly kind: "tree" }
+>;
+
+function codexCaptureRelativePath(at: Date = new Date()): string {
+  const day = at.toISOString().slice(0, 10).replaceAll("-", "/");
+  return `.codex/sessions/${day}`;
+}
+
+function codexCaptureRequest(relativePath: string): AssistantResourceTreeRequest {
+  return {
+    kind: "tree",
+    resourceId: CODEX_CAPTURE_RESOURCE_ID,
+    relativePath,
+    maxFiles: 256,
+    extensions: ["jsonl"],
+    metadataOnly: true,
+  };
+}
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -169,9 +182,29 @@ async function readFile(
   return result.content;
 }
 
+async function readFirstLine(
+  resources: AssistantProviderPolicyResources,
+  resourceId: string,
+  relativePath: string,
+): Promise<string> {
+  const result = await resources.readResource({
+    request: {
+      kind: "file",
+      resourceId,
+      relativePath,
+      maxBytes: 256 * 1024,
+      firstLineOnly: true,
+    },
+  });
+  if (result.kind !== "file" || result.resourceId !== resourceId) {
+    throw new Error("Assistant resource response did not match its request");
+  }
+  return result.content;
+}
+
 async function readTree(
   resources: AssistantProviderPolicyResources,
-  request: typeof CODEX_CAPTURE_REQUEST,
+  request: AssistantResourceTreeRequest,
 ): Promise<readonly { readonly relativePath: string; readonly content: string }[]> {
   const result = await resources.readResource({ request });
   if (result.kind !== "tree" || result.resourceId !== request.resourceId) {
@@ -276,8 +309,24 @@ async function piModels(resources: AssistantProviderPolicyResources): Promise<re
 async function codexCaptureSnapshot(
   resources: AssistantProviderPolicyResources,
 ): Promise<AssistantCaptureSnapshot> {
-  const files = await readTree(resources, CODEX_CAPTURE_REQUEST);
-  return Object.freeze({ knownTranscriptPaths: new Set(files.map(({ relativePath }) => relativePath)) });
+  const resourceRelativePath = codexCaptureRelativePath();
+  const files = await readTree(resources, codexCaptureRequest(resourceRelativePath));
+  return Object.freeze({
+    knownTranscriptPaths: new Set(
+      files.map(({ relativePath }) => `${resourceRelativePath}/${relativePath}`),
+    ),
+    resourceRelativePath,
+  });
+}
+
+function scopedCodexFiles(
+  resourceRelativePath: string,
+  files: readonly { readonly relativePath: string; readonly content: string }[],
+) {
+  return files.map(({ relativePath, content }) => ({
+    relativePath: `${resourceRelativePath}/${relativePath}`,
+    content,
+  }));
 }
 
 function normalizedPath(value: string): string {
@@ -321,8 +370,32 @@ const codexCapture: AssistantCaptureStrategy = Object.freeze({
     snapshot: AssistantCaptureSnapshot,
     resources: AssistantProviderPolicyResources,
   ) {
-    const files = await readTree(resources, CODEX_CAPTURE_REQUEST);
-    return selectCodexCaptureIdentity(snapshot.knownTranscriptPaths, record.launchRepoPath, files);
+    const currentRelativePath = codexCaptureRelativePath();
+    const resourceRelativePaths = snapshot.resourceRelativePath === currentRelativePath
+      ? [currentRelativePath]
+      : [snapshot.resourceRelativePath, currentRelativePath];
+    const files = (await Promise.all(resourceRelativePaths.map(async (resourceRelativePath) => (
+      scopedCodexFiles(
+        resourceRelativePath,
+        await readTree(resources, codexCaptureRequest(resourceRelativePath)),
+      )
+    )))).flat();
+    const candidates = files.filter(({ relativePath }) => (
+      !snapshot.knownTranscriptPaths.has(relativePath)
+    ));
+    const candidateContents = await Promise.all(candidates.map(async ({ relativePath }) => ({
+      relativePath,
+      content: await readFirstLine(
+        resources,
+        CODEX_CAPTURE_RESOURCE_ID,
+        relativePath,
+      ),
+    })));
+    return selectCodexCaptureIdentity(
+      snapshot.knownTranscriptPaths,
+      record.launchRepoPath,
+      candidateContents,
+    );
   },
 });
 

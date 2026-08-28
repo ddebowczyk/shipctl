@@ -73,7 +73,7 @@ function singleStackDocument(): UiWorkspaceDocument {
   };
 }
 
-test("single-stack semantic views join the host tab strip", () => {
+test("single-stack semantic views project into the host panel tab row", () => {
   const workspace = canvas(singleStackDocument());
 
   assert.deepEqual(projectSingleStackWorkspaceTabs(workspace), [

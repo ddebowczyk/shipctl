@@ -266,7 +266,9 @@ function transportError(error: unknown): SemanticServiceError<AssistantLaunchErr
   ) {
     return {
       code: error.code,
-      message: "Assistant launch request failed",
+      message: "message" in error && requiredText(error.message)
+        ? error.message
+        : "Assistant launch request failed",
       retryable: "retryable" in error && error.retryable === true,
     };
   }
@@ -377,9 +379,9 @@ function validResourceRead(input: AssistantResourceReadInput): boolean {
   const request = input.request;
   if (!requiredText(request.resourceId, 128) || !safeRelativePath(request.relativePath)) return false;
   if (request.kind === "file") {
-    return request.maxBytes === undefined || (
+    return (request.maxBytes === undefined || (
       Number.isSafeInteger(request.maxBytes) && request.maxBytes > 0
-    );
+    )) && (request.firstLineOnly === undefined || typeof request.firstLineOnly === "boolean");
   }
   return request.kind === "tree"
     && (request.maxFiles === undefined || (Number.isSafeInteger(request.maxFiles) && request.maxFiles > 0))
@@ -387,7 +389,8 @@ function validResourceRead(input: AssistantResourceReadInput): boolean {
       || (Number.isSafeInteger(request.maxBytesPerFile) && request.maxBytesPerFile > 0))
     && (request.extensions === undefined
       || (Array.isArray(request.extensions)
-        && request.extensions.every((extension) => /^[A-Za-z0-9]{1,32}$/.test(extension))));
+        && request.extensions.every((extension) => /^[A-Za-z0-9]{1,32}$/.test(extension))))
+    && (request.metadataOnly === undefined || typeof request.metadataOnly === "boolean");
 }
 
 function validResourceWrite(input: AssistantResourceWriteInput): boolean {

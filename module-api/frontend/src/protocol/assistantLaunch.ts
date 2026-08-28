@@ -135,6 +135,8 @@ export type AssistantResourceReadRequest =
     readonly resourceId: string;
     readonly relativePath: string;
     readonly maxBytes?: number;
+    /** Read only the first UTF-8 line within maxBytes. */
+    readonly firstLineOnly?: boolean;
   }
   | {
     readonly kind: "tree";
@@ -143,6 +145,8 @@ export type AssistantResourceReadRequest =
     readonly maxFiles?: number;
     readonly maxBytesPerFile?: number;
     readonly extensions?: readonly string[];
+    /** Return bounded paths with empty content without reading file bodies. */
+    readonly metadataOnly?: boolean;
   };
 
 export interface AssistantResourceReadInput {

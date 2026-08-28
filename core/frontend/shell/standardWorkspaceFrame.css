@@ -62,6 +62,11 @@ body.theme-clear .app-shell__frame {
   content: none;
 }
 
+.workspace-tab-bars {
+  min-width: 0;
+  flex-shrink: 0;
+}
+
 .tab-bar {
   position: relative;
   display: flex;
@@ -69,6 +74,10 @@ body.theme-clear .app-shell__frame {
   overflow: hidden;
   padding: 6px 0 0;
   margin-bottom: 8px;
+}
+
+.tab-bar--with-panel-row {
+  margin-bottom: 0;
 }
 
 .tab-bar::after {
@@ -101,4 +110,82 @@ body.theme-clear .app-shell__frame {
   opacity: 0.8;
   align-self: flex-end;
   margin-bottom: 1px;
+}
+
+.workspace-panel-tab-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 34px;
+  overflow-x: auto;
+  padding: 4px 0 5px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--overlay) 8%, transparent);
+}
+
+.workspace-panel-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 25px;
+  max-width: 192px;
+  padding: 3px 24px 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.workspace-panel-tab:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.workspace-panel-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--status-running) 75%, transparent);
+  outline-offset: 1px;
+}
+
+.workspace-panel-tab.active {
+  border-color: color-mix(in srgb, var(--status-running) 32%, transparent);
+  background: color-mix(in srgb, var(--status-running) 12%, transparent);
+  color: var(--text-primary);
+}
+
+.workspace-panel-tab__close {
+  position: absolute;
+  right: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 9999px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.workspace-panel-tab:hover .workspace-panel-tab__close,
+.workspace-panel-tab.active .workspace-panel-tab__close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.workspace-panel-tab__close:hover {
+  background: var(--surface-active);
+  color: var(--text-primary);
 }

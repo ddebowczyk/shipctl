@@ -1,6 +1,6 @@
 import type { WorkspaceCanvas } from "./canvasBridge.ts";
 
-/** One semantic workspace view that can share the host's primary tab strip. */
+/** One semantic workspace view projected into the host's project-panel tab row. */
 export interface WorkspaceTabProjection {
   readonly id: string;
   readonly label: string;

@@ -38,6 +38,8 @@ pub enum AssistantResourceReadRequest {
         relative_path: String,
         #[serde(default)]
         max_bytes: Option<usize>,
+        #[serde(default)]
+        first_line_only: bool,
     },
     Tree {
         resource_id: String,
@@ -48,6 +50,8 @@ pub enum AssistantResourceReadRequest {
         max_bytes_per_file: Option<usize>,
         #[serde(default)]
         extensions: Option<Vec<String>>,
+        #[serde(default)]
+        metadata_only: bool,
     },
 }
 
@@ -133,14 +137,22 @@ pub fn read(input: AssistantResourceReadInput) -> Result<AssistantResourceReadRe
             resource_id,
             relative_path,
             max_bytes,
+            first_line_only,
         } => {
             validate_resource_id(&resource_id)?;
             Ok(AssistantResourceReadResult::File {
                 resource_id,
-                content: read_text(
-                    &relative_path,
-                    bounded(max_bytes, DEFAULT_FILE_BYTES, MAX_FILE_BYTES),
-                )?,
+                content: if first_line_only {
+                    read_first_line(
+                        &relative_path,
+                        bounded(max_bytes, DEFAULT_FILE_BYTES, MAX_FILE_BYTES),
+                    )?
+                } else {
+                    read_text(
+                        &relative_path,
+                        bounded(max_bytes, DEFAULT_FILE_BYTES, MAX_FILE_BYTES),
+                    )?
+                },
             })
         }
         AssistantResourceReadRequest::Tree {
@@ -149,6 +161,7 @@ pub fn read(input: AssistantResourceReadInput) -> Result<AssistantResourceReadRe
             max_files,
             max_bytes_per_file,
             extensions,
+            metadata_only,
         } => {
             validate_resource_id(&resource_id)?;
             Ok(AssistantResourceReadResult::Tree {
@@ -158,6 +171,7 @@ pub fn read(input: AssistantResourceReadInput) -> Result<AssistantResourceReadRe
                     bounded(max_files, DEFAULT_TREE_FILES, MAX_TREE_FILES),
                     bounded(max_bytes_per_file, DEFAULT_FILE_BYTES, MAX_FILE_BYTES),
                     extensions.as_deref(),
+                    metadata_only,
                 )?,
             })
         }
@@ -412,11 +426,26 @@ fn read_text(relative_path: &str, maximum: usize) -> Result<String, String> {
     fs::read_to_string(path).map_err(|_| "Assistant resource is not valid UTF-8 text".to_string())
 }
 
+fn read_first_line(relative_path: &str, maximum: usize) -> Result<String, String> {
+    let (_, path) = resolved_existing_path(relative_path)?;
+    let file = fs::File::open(path).map_err(|_| "Assistant resource is unavailable".to_string())?;
+    let mut reader = BufReader::new(file.take((maximum + 1) as u64));
+    let mut content = Vec::new();
+    reader
+        .read_until(b'\n', &mut content)
+        .map_err(|_| "Assistant resource is unavailable".to_string())?;
+    if content.len() > maximum {
+        return Err("Assistant resource line exceeds its declared byte bound".to_string());
+    }
+    String::from_utf8(content).map_err(|_| "Assistant resource is not valid UTF-8 text".to_string())
+}
+
 fn read_tree(
     relative_path: &str,
     maximum_files: usize,
     maximum_file_bytes: usize,
     extensions: Option<&[String]>,
+    metadata_only: bool,
 ) -> Result<Vec<AssistantResourceFile>, String> {
     let (home, candidate) = home_candidate(relative_path)?;
     let root = match candidate.canonicalize() {
@@ -460,7 +489,11 @@ fn read_tree(
                 .replace('\\', "/");
             Ok(AssistantResourceFile {
                 relative_path,
-                content: read_text_path(&path, maximum_file_bytes)?,
+                content: if metadata_only {
+                    String::new()
+                } else {
+                    read_text_path(&path, maximum_file_bytes)?
+                },
             })
         })
         .collect()
@@ -631,6 +664,7 @@ mod tests {
                 resource_id: "fixture".to_string(),
                 relative_path: "../outside".to_string(),
                 max_bytes: None,
+                first_line_only: false,
             },
         });
         assert!(result.is_err());
@@ -668,11 +702,63 @@ mod tests {
                 max_files: None,
                 max_bytes_per_file: None,
                 extensions: None,
+                metadata_only: false,
             },
         });
         assert!(matches!(
             result,
             Ok(super::AssistantResourceReadResult::Tree { files, .. }) if files.is_empty()
+        ));
+    }
+
+    #[test]
+    fn metadata_listing_and_first_line_read_do_not_depend_on_file_length() {
+        let sequence = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let relative_directory = format!(
+            ".shipctl-assistant-resource-test-{}-{sequence}",
+            std::process::id(),
+        );
+        let directory = dirs::home_dir()
+            .expect("test home directory")
+            .join(&relative_directory);
+        fs::create_dir_all(&directory).expect("resource fixture directory");
+        fs::write(
+            directory.join("rollout.jsonl"),
+            format!("{{\"type\":\"session_meta\"}}\n{}", "x".repeat(1_024)),
+        )
+        .expect("resource fixture");
+
+        let listing = read(AssistantResourceReadInput {
+            request: AssistantResourceReadRequest::Tree {
+                resource_id: "fixture".to_string(),
+                relative_path: relative_directory.clone(),
+                max_files: Some(1),
+                max_bytes_per_file: Some(8),
+                extensions: Some(vec!["jsonl".to_string()]),
+                metadata_only: true,
+            },
+        });
+        let first_line = read(AssistantResourceReadInput {
+            request: AssistantResourceReadRequest::File {
+                resource_id: "fixture".to_string(),
+                relative_path: format!("{relative_directory}/rollout.jsonl"),
+                max_bytes: Some(64),
+                first_line_only: true,
+            },
+        });
+        fs::remove_dir_all(&directory).expect("resource fixture cleanup");
+
+        assert!(matches!(
+            listing,
+            Ok(super::AssistantResourceReadResult::Tree { files, .. })
+                if files.len() == 1
+                    && files[0].relative_path == "rollout.jsonl"
+                    && files[0].content.is_empty()
+        ));
+        assert!(matches!(
+            first_line,
+            Ok(super::AssistantResourceReadResult::File { content, .. })
+                if content == "{\"type\":\"session_meta\"}\n"
         ));
     }
 

@@ -223,6 +223,21 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function structuredErrorMessage(error: unknown): string | null {
+  if (
+    typeof error !== "object"
+    || error === null
+    || !("code" in error)
+    || typeof error.code !== "string"
+    || !("message" in error)
+    || typeof error.message !== "string"
+    || error.message.trim().length === 0
+    || error.message.length > 4_096
+    || /[\u0000-\u001f\u007f]/.test(error.message)
+  ) return null;
+  return error.message;
+}
+
 class TerminalSessionsFailure extends Error {
   readonly code: TerminalSessionsErrorCode;
 
@@ -251,7 +266,7 @@ function transportError(error: unknown): SemanticServiceError<TerminalSessionsEr
   }
   return failure(
     TERMINAL_SESSIONS_ERROR_CODES.transportFailed,
-    "The terminal session transport failed",
+    structuredErrorMessage(error) ?? "The terminal session transport failed",
   );
 }
 

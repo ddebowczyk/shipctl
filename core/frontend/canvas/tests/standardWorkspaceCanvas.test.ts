@@ -153,3 +153,21 @@ test("the shell owns standard chrome and passes only the semantic workspace to t
   assert.match(source, /<CanvasHost adapter=\{canvasAdapter\} workspace=\{workspaceCanvas\} \/>/);
   assert.doesNotMatch(source, /legacy\/|createCanvasModel|CanvasActions|CanvasPorts/);
 });
+
+test("the shell separates session tabs from styled project panel tabs", async () => {
+  const [tabsSource, frameStyles] = await Promise.all([
+    readFile("core/frontend/shell/StandardWorkspaceTabs.tsx", "utf8"),
+    readFile("core/frontend/shell/standardWorkspaceFrame.css", "utf8"),
+  ]);
+
+  assert.match(tabsSource, /aria-label="Terminal and agent session tabs"/);
+  assert.match(tabsSource, /className="workspace-panel-tab-bar"/);
+  assert.match(tabsSource, /aria-label="Commands and project panel tabs"/);
+  assert.ok(
+    tabsSource.indexOf("workspace-panel-tab-bar")
+      > tabsSource.indexOf("Terminal and agent session tabs"),
+  );
+  assert.match(frameStyles, /\.workspace-panel-tab\s*\{/);
+  assert.match(frameStyles, /\.workspace-panel-tab\.active\s*\{/);
+  assert.match(frameStyles, /var\(--status-running\)/);
+});

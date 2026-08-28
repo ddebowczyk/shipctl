@@ -318,13 +318,14 @@ export default function StandardWorkspaceTabs({
     : [];
 
   return (
-    <div className="tab-bar">
-      <div
-        ref={containerRef}
-        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
-        role="tablist"
-        aria-label="Workspace tabs"
-      >
+    <div className="workspace-tab-bars">
+      <div className={`tab-bar${workspaceTabs.length > 0 ? " tab-bar--with-panel-row" : ""}`}>
+        <div
+          ref={containerRef}
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+          role="tablist"
+          aria-label="Terminal and agent session tabs"
+        >
         {tabs.map((tab, index) => {
           const isActive = tab.id === activeTabId && !globalSurfaceOpen;
           const isDragging = tab.id === dragTabId;
@@ -400,55 +401,63 @@ export default function StandardWorkspaceTabs({
           );
         })}
 
-        {workspaceTabs.map((tab) => {
-          const panel = panels.find(({ id }) => id === tab.viewTypeId);
-          return (
-            <div
-              key={tab.id}
-              className={`tab ${tab.selected ? "active" : ""}`}
-              onClick={() => onSelectWorkspaceTab(tab.id)}
-              onKeyDown={(event) => handleActionKey(event, () => onSelectWorkspaceTab(tab.id))}
-              role="tab"
-              tabIndex={0}
-              aria-selected={tab.selected}
-              aria-label={`Open tab ${tab.label}`}
-            >
-              {panel ? panelIcon(panel, 12) : <PanelsTopLeft size={12} />}
-              <span className="truncate max-w-32">{tab.label}</span>
-              {tab.closeable && (
-                <button
-                  className="tab-close"
-                  aria-label={`Close tab ${tab.label}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCloseWorkspaceTab(tab.id);
-                  }}
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          );
-        })}
-
-        <NewSessionButton
-          onNewTerminal={onNewTerminal}
-          panels={panels}
-          onOpenPanel={onOpenPanel}
-          onOpenInEditor={onOpenInEditor}
-        />
+          <NewSessionButton
+            onNewTerminal={onNewTerminal}
+            panels={panels}
+            onOpenPanel={onOpenPanel}
+            onOpenInEditor={onOpenInEditor}
+          />
+        </div>
+        {projectName && (
+          <span className="tab-bar__breadcrumb">
+            {projectName}
+            {branch && (
+              <>
+                <span className="tab-bar__breadcrumb-on">on</span>
+                <GitBranch size={15} className="tab-bar__breadcrumb-icon" style={branchIconColor ? { color: branchIconColor } : undefined} />
+                {branch}
+              </>
+            )}
+          </span>
+        )}
       </div>
-      {projectName && (
-        <span className="tab-bar__breadcrumb">
-          {projectName}
-          {branch && (
-            <>
-              <span className="tab-bar__breadcrumb-on">on</span>
-              <GitBranch size={15} className="tab-bar__breadcrumb-icon" style={branchIconColor ? { color: branchIconColor } : undefined} />
-              {branch}
-            </>
-          )}
-        </span>
+      {workspaceTabs.length > 0 && (
+        <div
+          className="workspace-panel-tab-bar"
+          role="tablist"
+          aria-label="Commands and project panel tabs"
+        >
+          {workspaceTabs.map((tab) => {
+            const panel = panels.find(({ id }) => id === tab.viewTypeId);
+            return (
+              <div
+                key={tab.id}
+                className={`workspace-panel-tab${tab.selected ? " active" : ""}`}
+                onClick={() => onSelectWorkspaceTab(tab.id)}
+                onKeyDown={(event) => handleActionKey(event, () => onSelectWorkspaceTab(tab.id))}
+                role="tab"
+                tabIndex={0}
+                aria-selected={tab.selected}
+                aria-label={`Open panel ${tab.label}`}
+              >
+                {panel ? panelIcon(panel, 12) : <PanelsTopLeft size={12} />}
+                <span className="truncate max-w-32">{tab.label}</span>
+                {tab.closeable && (
+                  <button
+                    className="workspace-panel-tab__close"
+                    aria-label={`Close panel ${tab.label}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCloseWorkspaceTab(tab.id);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
       {tabMenu && tabMenuTab && createPortal(
         <ContextMenu

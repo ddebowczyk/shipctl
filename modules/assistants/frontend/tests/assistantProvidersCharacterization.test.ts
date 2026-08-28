@@ -102,6 +102,100 @@ test("Codex transcript capture is plugin-owned, exact, and refuses ambiguity", (
   ]), /will not guess/);
 });
 
+test("Codex transcript capture scans only the bounded UTC day partition", async () => {
+  const requests: Array<{ readonly relativePath: string; readonly maxFiles?: number }> = [];
+  const resources = {
+    async readResource(input: { request: { resourceId: string; relativePath: string; maxFiles?: number } }) {
+      requests.push(input.request);
+      return {
+        kind: "tree" as const,
+        resourceId: input.request.resourceId,
+        files: [{ relativePath: "rollout.jsonl", content: "" }],
+      };
+    },
+    async writeResource() {},
+    async executeResource() {
+      return { resourceId: "fixture", stdout: "", stderr: "", status: 0 };
+    },
+  };
+  const capture = policy.createAssistantProviderPolicyCatalog().get("codex")?.capture;
+  const snapshot = await capture?.snapshot(resources);
+
+  assert.match(snapshot?.resourceRelativePath ?? "", /^\.codex\/sessions\/\d{4}\/\d{2}\/\d{2}$/);
+  assert.deepEqual(requests, [{
+    relativePath: snapshot?.resourceRelativePath,
+    maxFiles: 256,
+    kind: "tree",
+    resourceId: "codex-session-transcripts",
+    extensions: ["jsonl"],
+    metadataOnly: true,
+  }]);
+  assert.deepEqual([...snapshot!.knownTranscriptPaths], [
+    `${snapshot?.resourceRelativePath}/rollout.jsonl`,
+  ]);
+});
+
+test("Codex capture reads only the first line of newly listed transcripts", async () => {
+  let treeReads = 0;
+  const fileReads: string[] = [];
+  const resources = {
+    async readResource(input: {
+      request: {
+        kind: "tree" | "file";
+        resourceId: string;
+        relativePath: string;
+        metadataOnly?: boolean;
+        firstLineOnly?: boolean;
+      };
+    }) {
+      if (input.request.kind === "tree") {
+        assert.equal(input.request.metadataOnly, true);
+        treeReads += 1;
+        return {
+          kind: "tree" as const,
+          resourceId: input.request.resourceId,
+          files: treeReads === 1
+            ? [{ relativePath: "old.jsonl", content: "" }]
+            : [
+                { relativePath: "old.jsonl", content: "" },
+                { relativePath: "new.jsonl", content: "" },
+              ],
+        };
+      }
+      assert.equal(input.request.firstLineOnly, true);
+      fileReads.push(input.request.relativePath);
+      return {
+        kind: "file" as const,
+        resourceId: input.request.resourceId,
+        content: '{"type":"session_meta","payload":{"id":"new","cwd":"/repo"}}\n',
+      };
+    },
+    async writeResource() {},
+    async executeResource() {
+      return { resourceId: "fixture", stdout: "", stderr: "", status: 0 };
+    },
+  };
+  const capture = policy.createAssistantProviderPolicyCatalog().get("codex")?.capture;
+  const snapshot = await capture?.snapshot(resources);
+  const identity = await capture?.findIdentity({
+    recordId: "record" as never,
+    provider: "codex" as never,
+    launchRepoPath: "/repo",
+    placementProjectPath: "/repo",
+    label: "Codex",
+    sessionMode: "safe",
+    model: null,
+    captureState: "pending",
+    restoreOnNextLaunch: false,
+    startedAt: 1,
+    updatedAt: 1,
+  }, snapshot!, resources);
+
+  assert.equal(identity, "new");
+  assert.equal(treeReads, 2);
+  assert.deepEqual(fileReads, [`${snapshot?.resourceRelativePath}/new.jsonl`]);
+});
+
 test("an externally declared fixture policy can launch and capture through generic ports", async () => {
   const defaultCatalog = policy.createAssistantProviderPolicyCatalog();
   const reads: string[] = [];
@@ -134,7 +228,10 @@ test("an externally declared fixture policy can launch and capture through gener
         const result = await port.readResource({
           request: { kind: "tree", resourceId: "fixture-transcripts", relativePath: ".fixture" },
         });
-        return { knownTranscriptPaths: new Set(result.files.map((file) => file.relativePath)) };
+        return {
+          knownTranscriptPaths: new Set(result.files.map((file) => file.relativePath)),
+          resourceRelativePath: ".fixture",
+        };
       },
       async findIdentity(_record: unknown, _snapshot: unknown, port: typeof resources) {
         const result = await port.readResource({

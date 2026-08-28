@@ -110,13 +110,16 @@ function session(): ModuleTerminalSession {
   };
 }
 
-function fixture(grants = [
-  "terminal.start",
-  "terminal.attach",
-  "terminal.input",
-  "terminal.resize",
-  "terminal.stop",
-]) {
+function fixture(
+  grants = [
+    "terminal.start",
+    "terminal.attach",
+    "terminal.input",
+    "terminal.resize",
+    "terminal.stop",
+  ],
+  managedLaunchError: Error | null = null,
+) {
   const queue = new OccurrenceQueue();
   const writes: number[] = [];
   const resizes: Array<{ attachmentId: string; columns: number; rows: number }> = [];
@@ -128,6 +131,10 @@ function fixture(grants = [
     getDimensions: () => ({ columns: 80, rows: 24 }),
     list: () => [session()],
     launch: async () => session(),
+    launchManaged: async () => {
+      if (managedLaunchError) throw managedLaunchError;
+      return session();
+    },
     update: async () => session(),
     focus: async () => session(),
     stop: async () => session(),
@@ -320,5 +327,28 @@ test("terminal-session adapter orders lifecycle events and denies absent grants"
   });
   assert.equal(denied.result.ok, false);
   assert.equal(denied.result.error.code, "terminal-sessions.activation.denied");
+  await current.activation.dispose();
+});
+
+test("terminal-session adapter preserves a bounded structured launch failure", async () => {
+  const launchError = Object.assign(
+    new Error("The assistant activation is no longer active"),
+    { code: "assistant-launch.activation-disposed" },
+  );
+  const current = fixture(undefined, launchError);
+  const outcome = await current.service.startManagedSession.execute({
+    projectPath: "/workspace",
+    moduleSessionId: SESSION_ID as never,
+    ownerKey: "fixture:terminal",
+    cwd: "/workspace",
+    label: "Fixture terminal",
+    columns: 80,
+    rows: 24,
+    start: async () => ({ terminalId: TERMINAL_ID as never }),
+  });
+
+  assert.equal(outcome.result.ok, false);
+  assert.equal(outcome.result.error.code, "terminal-sessions.transport.failed");
+  assert.equal(outcome.result.error.message, "The assistant activation is no longer active");
   await current.activation.dispose();
 });
