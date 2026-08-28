@@ -1713,6 +1713,13 @@ fn driver_error(error: TerminalDriverError) -> TerminalError {
     io_error(format!("Selected terminal driver failed: {error}"))
 }
 
+fn runtime_stopped() -> TerminalError {
+    TerminalError::new(
+        TerminalErrorCode::RuntimeStopped,
+        "Terminal runtime is no longer available",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1746,11 +1753,4 @@ mod tests {
             Some(std::ffi::OsStr::new("1"))
         );
     }
-}
-
-fn runtime_stopped() -> TerminalError {
-    TerminalError::new(
-        TerminalErrorCode::RuntimeStopped,
-        "Terminal runtime is no longer available",
-    )
 }
