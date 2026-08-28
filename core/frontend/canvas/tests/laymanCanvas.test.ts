@@ -145,5 +145,6 @@ test("uses the approved React source and hosts contributed views through the wor
   assert.match(source, /import "react-layman\/styles\.css"/);
   assert.match(source, /WorkspaceViewHost workspace=\{workspace\}/);
   assert.match(source, /TerminalStage visible=/);
+  assert.match(source, /display: semanticViewSelected \? "none" : "flex"/);
   assert.doesNotMatch(source, /shipctl\.legacy-canvas|CanvasModel|CanvasActions|CanvasPorts|@tauri-apps|invoke\(/);
 });

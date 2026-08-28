@@ -255,7 +255,7 @@ export default function LaymanCanvas({ controller, workspace }: LaymanCanvasProp
         style={{ position: "relative", height: "100%", minHeight: 0, minWidth: 0 }}
         data-canvas-adapter="layman"
       >
-        <div className="absolute inset-0" style={{ display: semanticViewSelected ? "none" : "block" }}>
+        <div className="absolute inset-0" style={{ display: semanticViewSelected ? "none" : "flex" }}>
           <TerminalStage visible={!semanticViewSelected} />
         </div>
         <div className="absolute inset-0" style={{ display: semanticViewSelected ? "block" : "none" }}>
