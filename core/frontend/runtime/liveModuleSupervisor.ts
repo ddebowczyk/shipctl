@@ -267,6 +267,9 @@ export class LiveModuleSupervisor<
     if (this.#disposed) return;
     const catalog = await this.#options.getCatalog();
     const recovery = this.#reconciler.accepted === null ? recoveryCatalog(catalog) : null;
+    let rejectedRecovery: Awaited<ReturnType<
+      LivePluginReconciler<LiveModuleFamily<WorkspaceContributions>>["reconcile"]
+    >> | undefined;
     if (recovery !== null) {
       const recoveredDesired = desiredSnapshot(recovery);
       const currentDesired = desiredSnapshot(catalog);
@@ -279,11 +282,28 @@ export class LiveModuleSupervisor<
       if (recovery.registryRevision < catalog.registryRevision
         || !sameDesiredModules(recoveredDesired, currentDesired)) {
         this.#catalogs.set(recovery.registryRevision, recovery);
-        await this.#reportResult(await this.#reconciler.reconcile(recoveredDesired));
+        const recoveryResult = await this.#reconciler.reconcile(recoveredDesired);
+        if (recoveryResult.disposition === "rejected") {
+          // Recovery is a private fallback attempt. A superseding desired graph
+          // may still be valid (for example after a bundled artifact upgrade),
+          // so do not persist or notify about the obsolete candidate unless no
+          // newer reconciliation result can describe the startup failure.
+          rejectedRecovery = recoveryResult;
+        } else {
+          await this.#reportResult(recoveryResult);
+        }
       }
     }
     this.#catalogs.set(catalog.registryRevision, catalog);
-    await this.#reportResult(await this.#reconciler.reconcile(desiredSnapshot(catalog)));
+    const currentResult = await this.#reconciler.reconcile(desiredSnapshot(catalog));
+    await this.#reportResult(currentResult);
+    if (
+      rejectedRecovery !== undefined
+      && currentResult.disposition !== "applied"
+      && currentResult.disposition !== "rejected"
+    ) {
+      await this.#reportResult(rejectedRecovery);
+    }
     for (const revision of this.#catalogs.keys()) {
       if (revision <= catalog.registryRevision) this.#catalogs.delete(revision);
     }

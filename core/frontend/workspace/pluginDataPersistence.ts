@@ -4,22 +4,31 @@ import {
   type PluginDataRevision,
   type PluginDataService,
   type ModuleJsonValue,
+  type UiWorkspaceDocument,
+  type WorkspaceNode,
   type WorkspacePersistedRecord,
   type WorkspaceRevision,
+  type WorkspaceStackNode,
 } from "@shipctl/module-api";
 
-import { parseWorkspacePersistedRecord } from "./document.ts";
+import { parseUiWorkspaceDocument, parseWorkspacePersistedRecord } from "./document.ts";
 import type { WorkspacePersistencePort } from "./persistence.ts";
 
 /**
- * Schema 2 is the canonical plugin-owned record. Schema 1 is reserved for a
+ * Schema 3 is the canonical plugin-owned record. Schema 1 is reserved for a
  * read-only legacy record-map value and the brief pre-release wrapper shape;
- * both migrate through generic plugin-data provenance before the authority
- * consumes them.
+ * schema 2 is the first canonical wrapper, whose workspace may still contain
+ * the retired compatibility canvas. Both migrate through generic plugin-data
+ * provenance before the authority consumes them.
  */
-const WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION = 2;
+const WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION = 3;
+const PREVIOUS_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION = 2;
 const LEGACY_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION = 1;
-const WORKSPACE_PLUGIN_DATA_MIGRATION_ID = "workspace-document-record-v1-to-plugin-data-v2";
+const WORKSPACE_PLUGIN_DATA_MIGRATION_IDS = Object.freeze({
+  [LEGACY_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION]: "workspace-document-record-v1-to-plugin-data-v3",
+  [PREVIOUS_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION]: "workspace-remove-retired-canvas-v2-to-v3",
+});
+const RETIRED_COMPATIBILITY_VIEW_TYPE_ID = "shipctl.legacy-canvas";
 const GLOBAL_SCOPE = { kind: "global" } as const;
 
 interface WorkspacePluginDataValue {
@@ -110,10 +119,75 @@ function toPluginDataValue(record: Pick<
   }) as unknown as ModuleJsonValue;
 }
 
-function legacyPluginDataValue(record: PluginDataRecord, workspaceId: string): ModuleJsonValue {
+function pruneRetiredStack(
+  stack: WorkspaceStackNode,
+  retiredInstanceIds: ReadonlySet<string>,
+): WorkspaceStackNode | null {
+  const instanceIds = stack.instanceIds.filter((instanceId) => !retiredInstanceIds.has(instanceId));
+  if (instanceIds.length === 0) return null;
+  return {
+    ...stack,
+    instanceIds,
+    selectedInstanceId: retiredInstanceIds.has(stack.selectedInstanceId)
+      ? instanceIds[0]!
+      : stack.selectedInstanceId,
+  };
+}
+
+function pruneRetiredNode(
+  node: WorkspaceNode,
+  retiredInstanceIds: ReadonlySet<string>,
+): WorkspaceNode | null {
+  if (node.kind === "stack") return pruneRetiredStack(node, retiredInstanceIds);
+  const first = pruneRetiredNode(node.first, retiredInstanceIds);
+  const second = pruneRetiredNode(node.second, retiredInstanceIds);
+  if (first === null) return second;
+  if (second === null) return first;
+  return { ...node, first, second };
+}
+
+function collectStackIds(node: WorkspaceNode | null, stackIds: Set<string>): void {
+  if (node === null) return;
+  if (node.kind === "stack") {
+    stackIds.add(node.stackId);
+    return;
+  }
+  collectStackIds(node.first, stackIds);
+  collectStackIds(node.second, stackIds);
+}
+
+/** Removes only the host compatibility view retired with the semantic workspace rollout. */
+function withoutRetiredCompatibilityCanvas(document: UiWorkspaceDocument): UiWorkspaceDocument {
+  const retiredInstanceIds = new Set(
+    document.instances
+      .filter(({ viewTypeId }) => viewTypeId === RETIRED_COMPATIBILITY_VIEW_TYPE_ID)
+      .map(({ instanceId }) => instanceId),
+  );
+  if (retiredInstanceIds.size === 0) return document;
+
+  const root = document.root === null ? null : pruneRetiredNode(document.root, retiredInstanceIds);
+  const floating = document.floating.flatMap((item) => {
+    const stack = pruneRetiredStack(item.stack, retiredInstanceIds);
+    return stack === null ? [] : [{ ...item, stack }];
+  });
+  const stackIds = new Set<string>();
+  collectStackIds(root, stackIds);
+  for (const item of floating) stackIds.add(item.stack.stackId);
+  return parseUiWorkspaceDocument({
+    ...document,
+    instances: document.instances.filter(({ instanceId }) => !retiredInstanceIds.has(instanceId)),
+    root,
+    floating,
+    maximizedStackId: document.maximizedStackId !== null && stackIds.has(document.maximizedStackId)
+      ? document.maximizedStackId
+      : null,
+  });
+}
+
+function migrationPluginDataValue(record: PluginDataRecord, workspaceId: string): ModuleJsonValue {
   let legacy: WorkspacePersistedRecord;
   try {
-    if (
+    if (record.schemaVersion === LEGACY_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION &&
       record.value !== null
       && typeof record.value === "object"
       && !Array.isArray(record.value)
@@ -125,8 +199,9 @@ function legacyPluginDataValue(record: PluginDataRecord, workspaceId: string): M
       legacy = parseWorkspacePersistedRecord(record.value);
     } else {
       // This accommodates an unpublished schema-1 wrapper created before the
-      // canonical plugin-data migration existed.
-      const value = asValue(record.value, LEGACY_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION);
+      // canonical plugin-data migration existed, as well as schema 2 records
+      // written before the compatibility canvas was retired.
+      const value = asValue(record.value, record.schemaVersion);
       legacy = parseWorkspacePersistedRecord({
         storageSchemaVersion: WORKSPACE_PERSISTENCE_SCHEMA_VERSION,
         workspaceId,
@@ -144,7 +219,10 @@ function legacyPluginDataValue(record: PluginDataRecord, workspaceId: string): M
   if (legacy.workspaceId !== workspaceId) {
     throw new WorkspacePluginDataPersistenceError("Legacy workspace plugin data record belongs to another workspace.");
   }
-  return toPluginDataValue(legacy);
+  return toPluginDataValue({
+    ...legacy,
+    document: withoutRetiredCompatibilityCanvas(legacy.document),
+  });
 }
 
 function pluginDataError(error: { readonly code: string; readonly message: string }): WorkspacePluginDataPersistenceError {
@@ -226,18 +304,22 @@ export class PluginDataWorkspacePersistence implements WorkspacePersistencePort 
     if (record.schemaVersion === WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION) {
       return toWorkspaceRecord(record, workspaceId);
     }
-    if (record.schemaVersion !== LEGACY_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION) {
+    if (
+      record.schemaVersion !== LEGACY_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION
+      && record.schemaVersion !== PREVIOUS_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION
+    ) {
       throw new WorkspacePluginDataPersistenceError("Workspace plugin data record uses an unsupported schema.");
     }
+    const migrationId = WORKSPACE_PLUGIN_DATA_MIGRATION_IDS[record.schemaVersion];
     const outcome = await this.#pluginData.migrateRecords.execute({
-      migrationId: WORKSPACE_PLUGIN_DATA_MIGRATION_ID,
+      migrationId,
       records: [{
         scope: GLOBAL_SCOPE,
         key: key(workspaceId),
         expectedRevision: record.revision,
-        fromSchemaVersion: LEGACY_WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION,
+        fromSchemaVersion: record.schemaVersion,
         toSchemaVersion: WORKSPACE_PLUGIN_DATA_SCHEMA_VERSION,
-        value: legacyPluginDataValue(record, workspaceId),
+        value: migrationPluginDataValue(record, workspaceId),
       }],
     });
     if (outcome.result.ok) {

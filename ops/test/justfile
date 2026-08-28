@@ -12,6 +12,7 @@ fast:
     cd ../.. && pnpm exec node --test core/frontend/host/tests/workspaceContributionCatalog.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/acceptedWorkspaceCatalogController.test.ts
     cd ../.. && pnpm exec node --test core/frontend/workspace/tests/pluginDataPersistence.test.ts
+    cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/runtime/tests/*.test.ts
     cd ../.. && pnpm exec node --test core/frontend/configuration/tests/runtime.test.ts
     cd ../.. && pnpm exec node --test core/frontend/shell/tests/commandRegistry.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/assistants/frontend/tests/*.test.ts

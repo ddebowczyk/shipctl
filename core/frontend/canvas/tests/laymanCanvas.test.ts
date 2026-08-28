@@ -142,6 +142,7 @@ test("uses the approved React source and hosts contributed views through the wor
 
   const source = await readFile("core/frontend/canvas/layman/LaymanCanvas.tsx", "utf8");
   assert.match(source, /from "react-layman"/);
+  assert.match(source, /import "react-layman\/styles\.css"/);
   assert.match(source, /WorkspaceViewHost workspace=\{workspace\}/);
   assert.match(source, /TerminalStage visible=/);
   assert.doesNotMatch(source, /shipctl\.legacy-canvas|CanvasModel|CanvasActions|CanvasPorts|@tauri-apps|invoke\(/);

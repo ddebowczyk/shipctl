@@ -98,6 +98,46 @@ function legacyWorkspaceRecord(): PluginDataRecord["value"] {
   } as PluginDataRecord["value"];
 }
 
+function previousWorkspaceRecord(): PluginDataRecord["value"] {
+  return {
+    schemaVersion: 2,
+    workspaceId: WORKSPACE_ID,
+    originId: "runtime.catalog:24",
+    catalogRevision: 24,
+    document: {
+      schemaVersion: 2,
+      workspaceId: WORKSPACE_ID,
+      instances: [{
+        instanceId: "shipctl.canvas.compatibility",
+        viewTypeId: "shipctl.legacy-canvas",
+        ownerModuleId: "core",
+        ownerActivationId: "core@host#workspace",
+        resource: { kind: "global" },
+        label: "Terminal",
+        availability: { kind: "missing-definition", lastKnownViewTypeId: "shipctl.legacy-canvas", catalogRevision: 24 },
+        lifecycle: "placed",
+      }, {
+        instanceId: "shipctl.assistants.launcher",
+        viewTypeId: "shipctl.assistants.launcher",
+        ownerModuleId: "shipctl.assistants",
+        ownerActivationId: "shipctl.assistants@1#fixture",
+        resource: { kind: "global" },
+        label: "New Agent",
+        availability: { kind: "available" },
+        lifecycle: "placed",
+      }],
+      root: {
+        kind: "stack",
+        stackId: "shipctl.workspace.primary",
+        instanceIds: ["shipctl.canvas.compatibility", "shipctl.assistants.launcher"],
+        selectedInstanceId: "shipctl.canvas.compatibility",
+      },
+      floating: [],
+      maximizedStackId: null,
+    },
+  } as PluginDataRecord["value"];
+}
+
 test("workspace persistence imports a legacy record once into its canonical plugin-data namespace", async () => {
   const trace: FakePluginDataTrace[] = [];
   const host = new SemanticServiceTestHost([createFakePluginDataServiceProvider({
@@ -140,12 +180,67 @@ test("workspace persistence imports a legacy record once into its canonical plug
     });
     assert.equal(canonical.result.ok, true);
     if (canonical.result.ok) {
-      assert.equal(canonical.result.value?.schemaVersion, 2);
+      assert.equal(canonical.result.value?.schemaVersion, 3);
       assert.equal(canonical.result.value?.revision, 1);
       assert.deepEqual(canonical.result.value?.migrations, [{
-        migrationId: "workspace-document-record-v1-to-plugin-data-v2",
+        migrationId: "workspace-document-record-v1-to-plugin-data-v3",
         fromSchemaVersion: 1,
-        toSchemaVersion: 2,
+        toSchemaVersion: 3,
+      }]);
+    }
+  } finally {
+    await activation.dispose();
+  }
+});
+
+test("workspace persistence removes the retired compatibility canvas without discarding other views", async () => {
+  const trace: FakePluginDataTrace[] = [];
+  const host = new SemanticServiceTestHost([createFakePluginDataServiceProvider({
+    trace,
+    records: [{
+      ownerModuleId: WORKSPACE_PLUGIN_MODULE_ID,
+      scope: SCOPE,
+      key: WORKSPACE_PLUGIN_DATA_KEY(WORKSPACE_ID),
+      schemaVersion: 2,
+      revision: 4,
+      value: previousWorkspaceRecord(),
+    }],
+  })]);
+  const activation = host.activate(
+    createTestActivationIdentity(WORKSPACE_PLUGIN_MODULE_ID),
+    admission(),
+  );
+  try {
+    const pluginData = activation.context.services.require(pluginDataService);
+    const persistence = new PluginDataWorkspacePersistence(pluginData);
+
+    const migrated = await persistence.load(WORKSPACE_ID);
+
+    assert.ok(migrated);
+    assert.equal(migrated.revision, 5);
+    assert.deepEqual(
+      migrated.document.instances.map(({ instanceId }) => instanceId),
+      ["shipctl.assistants.launcher"],
+    );
+    assert.deepEqual(migrated.document.root, {
+      kind: "stack",
+      stackId: "shipctl.workspace.primary",
+      instanceIds: ["shipctl.assistants.launcher"],
+      selectedInstanceId: "shipctl.assistants.launcher",
+    });
+    assert.equal(trace.filter((entry) => entry.operation === "migrate").length, 1);
+
+    const canonical = await pluginData.readRecord.execute({
+      scope: SCOPE,
+      key: WORKSPACE_PLUGIN_DATA_KEY(WORKSPACE_ID),
+    });
+    assert.equal(canonical.result.ok, true);
+    if (canonical.result.ok) {
+      assert.equal(canonical.result.value?.schemaVersion, 3);
+      assert.deepEqual(canonical.result.value?.migrations, [{
+        migrationId: "workspace-remove-retired-canvas-v2-to-v3",
+        fromSchemaVersion: 2,
+        toSchemaVersion: 3,
       }]);
     }
   } finally {

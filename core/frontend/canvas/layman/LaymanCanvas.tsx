@@ -17,6 +17,7 @@ import {
   type LaymanState,
   type LaymanTabProps,
 } from "react-layman";
+import "react-layman/styles.css";
 
 import { WorkspaceViewHost } from "@shipctl/core/host/views";
 import { TerminalStage } from "@shipctl/core/terminal-host/views";
