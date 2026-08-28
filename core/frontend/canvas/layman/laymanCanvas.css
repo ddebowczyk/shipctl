@@ -1,0 +1,16 @@
+.canvas-layman .layman-root {
+  --layman-separator-handle-color: var(--text-muted);
+  --layman-toolbar-background: transparent;
+  --layman-toolbar-hover-background: var(--surface-hover);
+  --layman-toolbar-button-hover-background: var(--surface-hover);
+  --layman-window-background: transparent;
+  --layman-tab-text-color: var(--text-secondary);
+  --layman-close-tab-color: color-mix(in srgb, var(--status-crashed) 30%, transparent);
+  --layman-accent-color: var(--status-running);
+  --layman-border-radius: var(--radius-sm);
+  --layman-floating-shadow: var(--glass-shadow);
+}
+
+.canvas-layman .layman-toolbar .tab.selected .tab-selector {
+  color: var(--text-primary);
+}

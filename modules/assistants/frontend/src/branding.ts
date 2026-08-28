@@ -26,10 +26,11 @@ export function assistantPresentation(
   captureState: AssistantCaptureState | null = null,
 ): ModuleTerminalSessionPresentation {
   const src = assistantLogoSrc[provider];
+  const className = getAssistantLogoClass(provider);
   return {
     showInSessionList: true,
     ...(src
-      ? { icon: { src, alt: provider, className: getAssistantLogoClass(provider) } }
+      ? { icon: { src, alt: provider, ...(className ? { className } : {}) } }
       : {}),
     ...(captureState === "pending"
       ? { badge: { label: "saving", title: "Identifying this session for restore", tone: "muted" } as const }

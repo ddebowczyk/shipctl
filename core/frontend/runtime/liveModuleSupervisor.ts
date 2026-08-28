@@ -186,8 +186,11 @@ function recoveryCatalog(catalog: RuntimeModuleCatalog): RuntimeModuleCatalog | 
   };
 }
 
-function activationId(descriptor: RuntimeModuleDescriptor): string {
-  return `${descriptor.moduleId}@${descriptor.version}#${descriptor.contentDigest}`;
+function activationId(
+  descriptor: RuntimeModuleDescriptor,
+  registryRevision: number,
+): string {
+  return `${descriptor.moduleId}@${descriptor.version}#${descriptor.contentDigest}:r${registryRevision}`;
 }
 
 function definitionModuleId(definition: ShipctlPluginDefinition): string {
@@ -371,7 +374,9 @@ export class LiveModuleSupervisor<
         `${failure.message} (${loaded.failures.length} artifact failure(s))`,
         {
           moduleId: failure.moduleId,
-          activationId: failedDescriptor === undefined ? undefined : activationId(failedDescriptor),
+          activationId: failedDescriptor === undefined
+            ? undefined
+            : activationId(failedDescriptor, catalog.registryRevision),
         },
       );
     }
@@ -379,7 +384,10 @@ export class LiveModuleSupervisor<
       catalog.modules.map((descriptor) => [descriptor.moduleId, descriptor]),
     );
     const activationIdsByModule = new Map(
-      catalog.modules.map((descriptor) => [descriptor.moduleId, activationId(descriptor)]),
+      catalog.modules.map((descriptor) => [
+        descriptor.moduleId,
+        activationId(descriptor, catalog.registryRevision),
+      ]),
     );
     const legacyMessageActivations = this.#options.createMessageActivations(
       loaded.modules,

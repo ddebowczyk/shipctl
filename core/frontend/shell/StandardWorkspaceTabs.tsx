@@ -18,6 +18,7 @@ import { useRepoStore } from "@shipctl/core/projects";
 import { buildProjectMoveMenuItems } from "@shipctl/core/projects/views";
 import { useProjectFactsMap } from "@shipctl/core/host";
 import type { UnifiedTab } from "@shipctl/core/platform";
+import type { WorkspaceTabProjection } from "@shipctl/core/workspace";
 
 const PANEL_ICONS = {
   "folder-tree": FolderTree,
@@ -154,6 +155,9 @@ export interface StandardWorkspaceTabsProps {
   readonly onMoveTab: (tabId: string, destinationPath: string) => void | Promise<void>;
   readonly onDragProjectChange: (projectPath: string | null) => void;
   readonly globalSurfaceOpen: boolean;
+  readonly workspaceTabs: readonly WorkspaceTabProjection[];
+  readonly onSelectWorkspaceTab: (instanceId: string) => void;
+  readonly onCloseWorkspaceTab: (instanceId: string) => void;
 }
 
 export default function StandardWorkspaceTabs({
@@ -167,6 +171,9 @@ export default function StandardWorkspaceTabs({
   onMoveTab,
   onDragProjectChange,
   globalSurfaceOpen,
+  workspaceTabs,
+  onSelectWorkspaceTab,
+  onCloseWorkspaceTab,
 }: StandardWorkspaceTabsProps) {
   const activeProjectPath = useRepoStore((state) => state.activeRepoPath);
   const projectState = useTerminalStore(
@@ -389,6 +396,37 @@ export default function StandardWorkspaceTabs({
               >
                 ×
               </button>
+            </div>
+          );
+        })}
+
+        {workspaceTabs.map((tab) => {
+          const panel = panels.find(({ id }) => id === tab.viewTypeId);
+          return (
+            <div
+              key={tab.id}
+              className={`tab ${tab.selected ? "active" : ""}`}
+              onClick={() => onSelectWorkspaceTab(tab.id)}
+              onKeyDown={(event) => handleActionKey(event, () => onSelectWorkspaceTab(tab.id))}
+              role="tab"
+              tabIndex={0}
+              aria-selected={tab.selected}
+              aria-label={`Open tab ${tab.label}`}
+            >
+              {panel ? panelIcon(panel, 12) : <PanelsTopLeft size={12} />}
+              <span className="truncate max-w-32">{tab.label}</span>
+              {tab.closeable && (
+                <button
+                  className="tab-close"
+                  aria-label={`Close tab ${tab.label}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloseWorkspaceTab(tab.id);
+                  }}
+                >
+                  ×
+                </button>
+              )}
             </div>
           );
         })}

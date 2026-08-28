@@ -1,6 +1,7 @@
 import type {
   ModuleHostServices,
   ModuleSettingsSnapshot,
+  ModuleSkillsSnapshot,
 } from "@shipctl/module-api";
 
 import type { ProjectSettingsPatch } from "@shipctl/core/configuration";
@@ -52,8 +53,12 @@ function getSettingsSnapshot(): ModuleSettingsSnapshot {
   return settingsSnapshot;
 }
 
+const EMPTY_SKILLS_SNAPSHOT: ModuleSkillsSnapshot = Object.freeze({
+  byProject: Object.freeze({}),
+});
+
 const skillsProvider = moduleSkillsProvider() ?? {
-  getSnapshot: () => ({ byProject: {} }),
+  getSnapshot: () => EMPTY_SKILLS_SNAPSHOT,
   subscribe: () => () => undefined,
   install: async () => {
     throw new Error("Skills capability is unavailable in this build");

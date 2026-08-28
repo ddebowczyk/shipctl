@@ -141,8 +141,14 @@ test("uses the approved React source and hosts contributed views through the wor
   assert.equal(LAYMAN_SOURCE_REVISION, LAYMAN_GITHUB_REVISION);
 
   const source = await readFile("core/frontend/canvas/layman/LaymanCanvas.tsx", "utf8");
+  const themeBridge = await readFile("core/frontend/canvas/layman/laymanCanvas.css", "utf8");
   assert.match(source, /from "react-layman"/);
   assert.match(source, /import "react-layman\/styles\.css"/);
+  assert.match(source, /import "\.\/laymanCanvas\.css"/);
+  assert.match(source, /position: "relative", flex: 1, height: "100%"/);
+  assert.match(themeBridge, /--layman-window-background: transparent/);
+  assert.match(themeBridge, /--layman-tab-text-color: var\(--text-secondary\)/);
+  assert.match(themeBridge, /--layman-accent-color: var\(--status-running\)/);
   assert.match(source, /WorkspaceViewHost workspace=\{workspace\}/);
   assert.match(source, /TerminalStage visible=/);
   assert.match(source, /display: semanticViewSelected \? "none" : "flex"/);

@@ -191,9 +191,18 @@ test("Claude and Codex launch only through the managed terminal seam", async () 
     ]);
     assert.deepEqual(current.assistantTraces.map(({ operation }) => operation), ["start-session"]);
     const request = current.terminalTraces.find(({ operation }) => operation === "start-managed")
-      ?.request.input as { readonly ownerKey: string; readonly moduleSessionId: string };
+      ?.request.input as {
+        readonly ownerKey: string;
+        readonly moduleSessionId: string;
+        readonly presentation: {
+          readonly showInSessionList: boolean;
+          readonly icon: Readonly<Record<string, unknown>>;
+        };
+      };
     assert.equal(request.ownerKey, "assistants:claude");
     assert.match(request.moduleSessionId, /^assistants:/);
+    assert.equal(request.presentation.showInSessionList, true);
+    assert.equal("className" in request.presentation.icon, false);
     assert.equal(current.terminal.host.sessions()[0]?.moduleId, "shipctl.assistants");
   } finally {
     await current.controller.dispose();

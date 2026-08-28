@@ -18,6 +18,7 @@ import {
 import { matchesPanelShortcut } from "../panelShortcuts.ts";
 
 type ModuleComposition = typeof import("../moduleComposition.ts");
+type ModuleHostServicesModule = typeof import("../moduleHostServices.ts");
 type StaticPluginRuntime = typeof import("../../runtime/cordis/staticPluginRuntime.ts");
 
 let vite: ViteDevServer;
@@ -39,6 +40,7 @@ let moduleProjectLayoutContributions: ModuleComposition["moduleProjectLayoutCont
 let moduleSettingsContributions: ModuleComposition["moduleSettingsContributions"];
 let moduleSkillsProvider: ModuleComposition["moduleSkillsProvider"];
 let modulePanelMigrationAliases: ModuleComposition["modulePanelMigrationAliases"];
+let MODULE_HOST_SERVICES: ModuleHostServicesModule["MODULE_HOST_SERVICES"];
 let notifyModulesFilesystemChanged: ModuleComposition["notifyModulesFilesystemChanged"];
 let notifyModulesBeforeShutdown: ModuleComposition["notifyModulesBeforeShutdown"];
 let notifyModulesProjectOpened: ModuleComposition["notifyModulesProjectOpened"];
@@ -80,6 +82,9 @@ before(async () => {
   ({ createMessagesServiceProvider } = await vite.ssrLoadModule(
     "/core/frontend/platform/messages.ts",
   ));
+  ({ MODULE_HOST_SERVICES } = await vite.ssrLoadModule(
+    "/core/frontend/host/moduleHostServices.ts",
+  ) as ModuleHostServicesModule);
   ({ SemanticServiceRegistry } = await vite.ssrLoadModule(
     "/core/frontend/runtime/semanticServiceRuntime.ts",
   ));
@@ -674,6 +679,13 @@ test("Skills provider selection is optional, singular, and module-owned", () => 
   assert.throws(
     () => moduleSkillsProvider([fixtureModule, fixtureModule]),
     /Only one enabled module/,
+  );
+});
+
+test("the unavailable Skills service exposes a stable empty snapshot", () => {
+  assert.equal(
+    MODULE_HOST_SERVICES.skills.getSnapshot(),
+    MODULE_HOST_SERVICES.skills.getSnapshot(),
   );
 });
 

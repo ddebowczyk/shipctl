@@ -18,11 +18,13 @@ import {
   type LaymanTabProps,
 } from "react-layman";
 import "react-layman/styles.css";
+import "./laymanCanvas.css";
 
 import { WorkspaceViewHost } from "@shipctl/core/host/views";
 import { TerminalStage } from "@shipctl/core/terminal-host/views";
 import {
   selectedWorkspaceInstanceIds,
+  workspaceNeedsInternalTabStrip,
   type WorkspaceCanvas,
 } from "@shipctl/core/workspace";
 
@@ -48,6 +50,11 @@ const LAYMAN_CANVAS_VIEW = {
   viewId: "shipctl.canvas",
   ariaLabel: "Shipctl canvas",
   showTabs: true,
+} as const;
+
+const LAYMAN_CANVAS_SINGLE_STACK_VIEW = {
+  ...LAYMAN_CANVAS_VIEW,
+  showTabs: false,
 } as const;
 
 const LAYMAN_CANVAS_VIEW_STYLE = {
@@ -252,7 +259,7 @@ export default function LaymanCanvas({ controller, workspace }: LaymanCanvasProp
       <div
         ref={setHost}
         className="canvas-layman"
-        style={{ position: "relative", height: "100%", minHeight: 0, minWidth: 0 }}
+        style={{ position: "relative", flex: 1, height: "100%", minHeight: 0, minWidth: 0 }}
         data-canvas-adapter="layman"
       >
         <div className="absolute inset-0" style={{ display: semanticViewSelected ? "none" : "flex" }}>
@@ -261,7 +268,9 @@ export default function LaymanCanvas({ controller, workspace }: LaymanCanvasProp
         <div className="absolute inset-0" style={{ display: semanticViewSelected ? "block" : "none" }}>
           <LaymanView
             controller={resolvedController}
-            config={LAYMAN_CANVAS_VIEW}
+            config={workspaceNeedsInternalTabStrip(workspace)
+              ? LAYMAN_CANVAS_VIEW
+              : LAYMAN_CANVAS_SINGLE_STACK_VIEW}
             components={LAYMAN_CANVAS_COMPONENTS}
             style={LAYMAN_CANVAS_VIEW_STYLE}
           />

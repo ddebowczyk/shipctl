@@ -1490,12 +1490,7 @@ fn spawn_child(
         command.arg(argument);
     }
     command.cwd(&request.cwd);
-    for (key, value) in request.environment.drain() {
-        command.env(key, value);
-    }
-    command.env("TERM", "xterm-256color");
-    command.env("TERM_PROGRAM", "iTerm.app");
-    command.env("COLORTERM", "truecolor");
+    apply_terminal_environment(&mut command, &mut request.environment);
 
     let mut child = pair
         .slave
@@ -1544,6 +1539,22 @@ fn spawn_child(
         terminator: Some(terminator),
         child_pid,
     })
+}
+
+fn apply_terminal_environment(
+    command: &mut CommandBuilder,
+    environment: &mut HashMap<String, String>,
+) {
+    let explicit_no_color = environment.contains_key("NO_COLOR");
+    for (key, value) in environment.drain() {
+        command.env(key, value);
+    }
+    if !explicit_no_color {
+        command.env_remove("NO_COLOR");
+    }
+    command.env("TERM", "xterm-256color");
+    command.env("TERM_PROGRAM", "iTerm.app");
+    command.env("COLORTERM", "truecolor");
 }
 
 fn spawn_subscriber(
@@ -1700,6 +1711,41 @@ fn io_error(message: impl Into<String>) -> TerminalError {
 
 fn driver_error(error: TerminalDriverError) -> TerminalError {
     io_error(format!("Selected terminal driver failed: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use portable_pty::CommandBuilder;
+
+    use super::apply_terminal_environment;
+
+    #[test]
+    fn interactive_terminals_remove_only_inherited_no_color() {
+        let mut inherited = CommandBuilder::new("/usr/bin/env");
+        inherited.env("NO_COLOR", "1");
+        apply_terminal_environment(&mut inherited, &mut HashMap::new());
+        assert_eq!(inherited.get_env("NO_COLOR"), None);
+        assert_eq!(
+            inherited.get_env("TERM"),
+            Some(std::ffi::OsStr::new("xterm-256color"))
+        );
+        assert_eq!(
+            inherited.get_env("COLORTERM"),
+            Some(std::ffi::OsStr::new("truecolor"))
+        );
+
+        let mut requested = CommandBuilder::new("/usr/bin/env");
+        apply_terminal_environment(
+            &mut requested,
+            &mut HashMap::from([("NO_COLOR".to_string(), "1".to_string())]),
+        );
+        assert_eq!(
+            requested.get_env("NO_COLOR"),
+            Some(std::ffi::OsStr::new("1"))
+        );
+    }
 }
 
 fn runtime_stopped() -> TerminalError {

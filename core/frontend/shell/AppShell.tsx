@@ -15,6 +15,7 @@ import {
   type CanvasAdapterView,
 } from "@shipctl/core/canvas/views";
 import {
+  projectSingleStackWorkspaceTabs,
   selectedWorkspaceInstanceIds,
   workspaceGlobalInstanceId,
   workspaceProjectInstanceId,
@@ -894,6 +895,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   } : null, [activeRepoPath]);
   const semanticWorkspaceOpen = workspaceCanvas !== undefined
     && selectedSemanticWorkspaceView(workspaceCanvas) !== undefined;
+  const workspaceTabs = projectSingleStackWorkspaceTabs(workspaceCanvas);
   const visibleGlobalSurfaceId = selectedGlobalView
     ? selectedGlobalView.instance.viewTypeId as ContributionId
     : activeGlobalSurfaceId;
@@ -990,6 +992,19 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
                   onMoveTab={handleMoveTab}
                   onDragProjectChange={setTabDropProjectPath}
                   globalSurfaceOpen={semanticWorkspaceOpen || activeGlobalSurfaceId !== null}
+                  workspaceTabs={workspaceTabs}
+                  onSelectWorkspaceTab={(instanceId) => {
+                    void scheduleWorkspaceGlobalAction(async (canvas) => {
+                      await canvas.execute({ kind: "select", instanceId });
+                      return true;
+                    });
+                  }}
+                  onCloseWorkspaceTab={(instanceId) => {
+                    void scheduleWorkspaceGlobalAction(async (canvas) => {
+                      await canvas.execute({ kind: "close", instanceId });
+                      return true;
+                    });
+                  }}
                 />
               )}
               trailing={diffPanelVisible && activePanelProject ? (

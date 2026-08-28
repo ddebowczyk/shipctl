@@ -74,3 +74,8 @@ export type {
   WorkspaceCanvasProjection,
   WorkspaceCanvasView,
 } from "./canvasBridge.ts";
+export {
+  projectSingleStackWorkspaceTabs,
+  workspaceNeedsInternalTabStrip,
+} from "./workspaceTabProjection.ts";
+export type { WorkspaceTabProjection } from "./workspaceTabProjection.ts";
