@@ -3,6 +3,7 @@ packages:
   - "module-api/frontend"
   - "modules/*/frontend"
   - "examples/module-fixture/frontend"
+  - "ops/modularity/fixtures/panel-host"
 
 allowBuilds:
   esbuild: true
