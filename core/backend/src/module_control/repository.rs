@@ -1092,6 +1092,10 @@ impl ArtifactRepositoryLease {
             ));
         }
         secure_open_file(&file, &path)?;
+        #[allow(
+            clippy::incompatible_msrv,
+            reason = "fs4 file locking is the cross-process lease primitive"
+        )]
         file.lock().map_err(|error| {
             ArtifactRepositoryError::new(
                 ARTIFACT_REPOSITORY_LOCK_UNAVAILABLE,

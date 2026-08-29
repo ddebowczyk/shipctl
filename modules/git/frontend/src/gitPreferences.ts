@@ -72,6 +72,11 @@ export function configureGitPreferences(activation: ModuleActivationContext | nu
   }
 }
 
+export function releaseGitPreferences(activation: ModuleActivationContext): void {
+  if (activeActivation !== activation) return;
+  configureGitPreferences(null);
+}
+
 export async function loadGitPreferences(): Promise<GitPreferences | null> {
   const outcome = await activeService().readRecord.execute({
     scope: { kind: "global" },

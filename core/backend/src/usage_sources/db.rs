@@ -173,6 +173,10 @@ fn ensure_columns(conn: &Connection, table: &str, columns: &[(&str, &str)]) -> R
     Ok(())
 }
 
+#[allow(
+    clippy::let_and_return,
+    reason = "the rusqlite row iterator must drop before the statement"
+)]
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     let pragma = format!("PRAGMA table_info({table})");
     let mut stmt = match conn.prepare(&pragma) {

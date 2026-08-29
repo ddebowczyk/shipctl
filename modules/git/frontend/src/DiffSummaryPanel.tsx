@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type {
   ProjectLayoutContributionProps,
   SemanticEventLease,
@@ -11,7 +18,10 @@ import {
   type FileTreeIconConfig,
 } from "@pierre/trees";
 import { useGitStore } from "./store";
-import { useGitPanelStore } from "./panelStore";
+import {
+  resizedDiffStripWidth,
+  useGitPanelStore,
+} from "./panelStore";
 import { gitClientFor } from "./gitClient";
 import type { ChangedFile, DiffFileStat } from "./types";
 
@@ -57,6 +67,22 @@ interface TooltipState {
   file: ChangedFile;
   stat: DiffFileStat | undefined;
   rect: DOMRect;
+}
+
+interface DiffStripResizeState {
+  pointerId: number;
+  startPointerX: number;
+  startWidth: number;
+  availableWidth: number;
+}
+
+function availableDiffStripWidth(strip: HTMLDivElement): number {
+  const stripRect = strip.getBoundingClientRect();
+  const precedingElement = strip.previousElementSibling;
+  if (precedingElement instanceof HTMLElement) {
+    return stripRect.right - precedingElement.getBoundingClientRect().left;
+  }
+  return strip.parentElement?.getBoundingClientRect().width ?? stripRect.width;
 }
 
 function DiffTooltip({ tip }: { tip: TooltipState }) {
@@ -109,10 +135,14 @@ export default function DiffSummaryPanel({
   const repoSelectedPath = panelState?.repoSelectedPath ?? null;
   const viewerMode = panelState?.viewerMode ?? "file";
   const repoPreferredDiffArea = panelState?.repoPreferredDiffArea ?? {};
+  const diffStripWidth = useGitPanelStore((s) => s.diffStripWidth);
+  const setDiffStripWidth = useGitPanelStore((s) => s.setDiffStripWidth);
 
   const [files, setFiles] = useState<readonly ChangedFile[]>([]);
   const [statsMap, setStatsMap] = useState<Map<string, DiffFileStat>>(new Map());
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStateRef = useRef<DiffStripResizeState | null>(null);
 
   const canLoad = !!activeProjectPath && !!gitStatus?.isRepository;
 
@@ -204,10 +234,71 @@ export default function DiffSummaryPanel({
 
   const handleMouseLeave = useCallback(() => setTooltip(null), []);
 
+  const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const strip = event.currentTarget.parentElement;
+    if (!(strip instanceof HTMLDivElement)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startWidth = strip.getBoundingClientRect().width;
+    resizeStateRef.current = {
+      pointerId: event.pointerId,
+      startPointerX: event.clientX,
+      startWidth,
+      availableWidth: availableDiffStripWidth(strip),
+    };
+    setTooltip(null);
+    setIsResizing(true);
+  }, []);
+
+  const handleResizePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const resizeState = resizeStateRef.current;
+    if (resizeState?.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setDiffStripWidth(resizedDiffStripWidth(
+      resizeState.startWidth,
+      resizeState.startPointerX,
+      event.clientX,
+      resizeState.availableWidth,
+    ));
+  }, [setDiffStripWidth]);
+
+  const finishResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (resizeStateRef.current?.pointerId !== event.pointerId) return;
+    resizeStateRef.current = null;
+    setIsResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  const handleResizeLostPointerCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (resizeStateRef.current?.pointerId !== event.pointerId) return;
+    resizeStateRef.current = null;
+    setIsResizing(false);
+  }, []);
+
   if (!activeProjectPath || !gitStatus?.isRepository) return null;
 
   return (
-    <div className="diff-strip" onMouseLeave={handleMouseLeave}>
+    <div
+      className={`diff-strip${isResizing ? " diff-strip--resizing" : ""}`}
+      style={{ width: diffStripWidth }}
+      onMouseLeave={handleMouseLeave}
+    >
+      <div
+        className="diff-strip__resize-handle"
+        role="separator"
+        aria-label="Resize Git changes strip"
+        aria-orientation="vertical"
+        onPointerDown={handleResizePointerDown}
+        onPointerMove={handleResizePointerMove}
+        onPointerUp={finishResize}
+        onPointerCancel={finishResize}
+        onLostPointerCapture={handleResizeLostPointerCapture}
+      />
       <div className="diff-strip__header">
         <Diff size={14} className="diff-strip__header-icon" />
       </div>

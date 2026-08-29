@@ -1,5 +1,18 @@
 import { create } from "zustand";
 
+export const MIN_DIFF_STRIP_WIDTH = 56;
+
+export function resizedDiffStripWidth(
+  startWidth: number,
+  startPointerX: number,
+  currentPointerX: number,
+  availableWidth: number,
+): number {
+  const maximumWidth = Math.max(MIN_DIFF_STRIP_WIDTH, availableWidth);
+  const requestedWidth = startWidth + startPointerX - currentPointerX;
+  return Math.min(maximumWidth, Math.max(MIN_DIFF_STRIP_WIDTH, requestedWidth));
+}
+
 export interface ProjectPanelState {
   repoSelectedPath: string | null;
   repoExpanded: string[];
@@ -21,7 +34,9 @@ const DEFAULT_STATE: ProjectPanelState = {
 };
 
 interface GitPanelStore {
+  diffStripWidth: number;
   perRepo: Record<string, ProjectPanelState>;
+  setDiffStripWidth: (width: number) => void;
   setRepoSelection: (repo: string, path: string | null) => void;
   setRepoExpanded: (repo: string, expanded: string[]) => void;
   setLeftSearch: (repo: string, search: string) => void;
@@ -36,7 +51,9 @@ interface GitPanelStore {
 }
 
 export const useGitPanelStore = create<GitPanelStore>((set) => ({
+  diffStripWidth: MIN_DIFF_STRIP_WIDTH,
   perRepo: {},
+  setDiffStripWidth: (width) => set({ diffStripWidth: width }),
   setRepoSelection: (repo, path) => set((state) => ({
     perRepo: { ...state.perRepo, [repo]: { ...(state.perRepo[repo] ?? DEFAULT_STATE), repoSelectedPath: path } },
   })),

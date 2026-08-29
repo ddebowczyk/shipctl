@@ -17,6 +17,7 @@ import {
   configureGitPreferences,
   DEFAULT_GIT_PREFERENCES,
   loadGitPreferences,
+  releaseGitPreferences,
   useGitPreferencesStore,
   validateGitPreferences,
   type GitPreferences,
@@ -213,7 +214,7 @@ export async function activateGitRuntime(
     active = false;
     await projectSubscription?.dispose();
     for (const projectId of [...currentProjectIds]) await releaseProject(projectId);
-    configureGitPreferences(null);
+    releaseGitPreferences(activation);
   };
 
   try {

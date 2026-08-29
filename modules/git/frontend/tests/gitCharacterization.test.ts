@@ -22,6 +22,7 @@ type ModuleApiTesting = typeof import("@shipctl/module-api/testing");
 let vite: ViteDevServer;
 let useGitStore: GitStoreModule["useGitStore"];
 let useGitPanelStore: GitPanelStoreModule["useGitPanelStore"];
+let resizedDiffStripWidth: GitPanelStoreModule["resizedDiffStripWidth"];
 let gitRuntime: GitRuntimeModule;
 let gitPreferences: GitPreferencesModule;
 let gitClientFor: GitClientModule["gitClientFor"];
@@ -76,7 +77,7 @@ before(async () => {
   ({ useGitStore } = await vite.ssrLoadModule(
     "/modules/git/frontend/src/store.ts",
   ) as GitStoreModule);
-  ({ useGitPanelStore } = await vite.ssrLoadModule(
+  ({ useGitPanelStore, resizedDiffStripWidth } = await vite.ssrLoadModule(
     "/modules/git/frontend/src/panelStore.ts",
   ) as GitPanelStoreModule);
   gitRuntime = await vite.ssrLoadModule(
@@ -103,7 +104,7 @@ after(async () => {
 beforeEach(() => {
   activations = [];
   useGitStore.setState({ projectGitStatus: {} });
-  useGitPanelStore.setState({ perRepo: {} });
+  useGitPanelStore.setState({ diffStripWidth: 56, perRepo: {} });
   gitPreferences.configureGitPreferences(null);
 });
 
@@ -376,6 +377,19 @@ test("Git preferences use the activation-derived plugin-data namespace and rejec
   assert.deepEqual(gitPreferences.useGitPreferencesStore.getState().preferences, preferences);
 });
 
+test("disposing a replaced runtime keeps the current Git preferences service active", async () => {
+  const replaced = await activateRuntime();
+  const current = await activateRuntime();
+
+  await replaced.activation.dispose();
+
+  assert.deepEqual(
+    await gitPreferences.updateGitPreferences({ autoImportWorktrees: false }),
+    { autoImportWorktrees: false },
+  );
+  await current.activation.dispose();
+});
+
 test("generic host project chrome has no direct Git state dependency", () => {
   const files = [
     "../../../../core/frontend/shell/AppShell.tsx",
@@ -401,6 +415,7 @@ test("generic host project chrome has no direct Git state dependency", () => {
 
 test("panel state is process-local, project-keyed, and preserves independent fields", () => {
   const panel = useGitPanelStore.getState();
+  panel.setDiffStripWidth(180);
   panel.setRepoSelection("/alpha", "src/main.ts");
   panel.setRepoExpanded("/alpha", ["src"]);
   panel.setLeftSearch("/alpha", "main");
@@ -424,4 +439,11 @@ test("panel state is process-local, project-keyed, and preserves independent fie
     "README.md",
   );
   assert.equal(useGitPanelStore.getState().perRepo["/beta"].viewerMode, "file");
+  assert.equal(useGitPanelStore.getState().diffStripWidth, 180);
+});
+
+test("diff strip resizing follows a left-edge drag and stays within live layout bounds", () => {
+  assert.equal(resizedDiffStripWidth(56, 900, 800, 720), 156);
+  assert.equal(resizedDiffStripWidth(156, 800, 1000, 720), 56);
+  assert.equal(resizedDiffStripWidth(156, 800, -100, 720), 720);
 });

@@ -16,6 +16,7 @@ fast:
     cd ../.. && pnpm exec node --test core/frontend/configuration/tests/runtime.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 core/frontend/platform/tests/assistantLaunch.test.ts core/frontend/platform/tests/terminalSessions.test.ts
     cd ../.. && pnpm exec node --test core/frontend/shell/tests/commandRegistry.test.ts
+    cd ../.. && pnpm exec node --test core/frontend/shared/tests/*.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/assistants/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test --test-concurrency=1 modules/commands/frontend/tests/*.test.ts
     cd ../.. && pnpm exec node --test core/frontend/host/tests/globalSurfaces.test.ts

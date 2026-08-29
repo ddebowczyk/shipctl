@@ -24,7 +24,7 @@ import {
 } from "@shipctl/core/workspace";
 import { NoticeCenter } from "../shared/views.ts";
 import { PanelLeft, PanelRight } from "lucide-react";
-import { useRepoStore } from "../projects/index.ts";
+import { useProjectSettingsStore, useRepoStore } from "../projects/index.ts";
 import { TERMINAL_CLIENT_RUNTIME, useTerminalStore } from "../terminal-host/index.ts";
 import { BUILTIN_GLOBAL_SURFACE_IDS } from "../shared/index.ts";
 import { useUIStore } from "../shared/index.ts";
@@ -164,6 +164,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     workspaceContributions,
   } = runtimeSnapshot.family;
   const lastTabCycleAtRef = useRef(0);
+  const quitDialogOpenRef = useRef(false);
 
   const canvasSurfaceCatalog = workspaceContributions.canvasSurfaceCatalog;
   const modulePanelContributions = useMemo(
@@ -328,10 +329,20 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
 
   const { setActiveTab } = useTerminalStore.getState();
 
-  const { activeGlobalSurfaceId, sidebarVisible, diffPanelVisible } = useUIStore(useShallow((s) => ({
+  const {
+    activeGlobalSurfaceId,
+    leftSidebarVisible,
+    rightSidebarVisible,
+    usagePanelVisible,
+    trailingStripVisible,
+    projectsPanelVisible,
+  } = useUIStore(useShallow((s) => ({
     activeGlobalSurfaceId: s.activeGlobalSurfaceId,
-    sidebarVisible: s.sidebarVisible,
-    diffPanelVisible: s.diffPanelVisible,
+    leftSidebarVisible: s.leftSidebarVisible,
+    rightSidebarVisible: s.rightSidebarVisible,
+    usagePanelVisible: s.usagePanelVisible,
+    trailingStripVisible: s.trailingStripVisible,
+    projectsPanelVisible: s.projectsPanelVisible,
   })));
 
   const { loadSettings: loadEditorSettings } = useEditorStore.getState();
@@ -687,12 +698,45 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     return handleOpenPanel(panel);
   }, [canvasSurfaceCatalog, handleOpenPanel]);
 
+  const handleQuitRequest = useCallback(async (runningSessionCount: number) => {
+    if (quitDialogOpenRef.current) return;
+    quitDialogOpenRef.current = true;
+    try {
+      const confirmed = await confirmApplicationQuit(runningSessionCount);
+      if (!confirmed) return;
+      try {
+        await beforeShutdown();
+        await shutdownAndQuit();
+      } catch (error) {
+        pushNotice({
+          tone: "error",
+          title: "Couldn’t safely stop sessions",
+          message: getErrorMessage(error),
+        });
+      }
+    } finally {
+      quitDialogOpenRef.current = false;
+    }
+  }, [beforeShutdown, pushNotice]);
+
+  const requestQuitFromRenderer = useCallback(() => handleQuitRequest(
+    TERMINAL_CLIENT_RUNTIME.descriptors()
+      .filter((descriptor) => descriptor.lifecycle === "running")
+      .length,
+  ), [handleQuitRequest]);
+
   const coreCommands = useMemo<readonly CommandContribution[]>(() => [
     {
       id: "core.settings",
       moduleId: "core",
       label: "Settings…",
       run: async () => { await toggleSemanticGlobalSurface(BUILTIN_GLOBAL_SURFACE_IDS.settings); },
+    },
+    {
+      id: "core.quit",
+      moduleId: "core",
+      label: "Quit Shipctl",
+      run: requestQuitFromRenderer,
     },
     {
       id: "terminal.new-semantic",
@@ -723,10 +767,45 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
       },
     },
     {
-      id: "core.toggle-sidebar",
+      id: "core.toggle-right-sidebar",
       moduleId: "core",
-      label: "Toggle Sidebar",
-      run: () => useUIStore.getState().toggleSidebar(),
+      label: "Toggle Right Sidebar",
+      run: () => useUIStore.getState().toggleRightSidebar(),
+    },
+    {
+      id: "core.toggle-left-sidebar",
+      moduleId: "core",
+      label: "Toggle Left Sidebar",
+      run: () => useUIStore.getState().toggleLeftSidebar(),
+    },
+    {
+      id: "core.toggle-usage-panel",
+      moduleId: "core",
+      label: "Toggle Usage Panel",
+      run: () => useUIStore.getState().toggleUsagePanel(),
+    },
+    {
+      id: "core.toggle-agents-panel",
+      moduleId: "core",
+      label: "Toggle Agents Panel",
+      run: async () => {
+        const store = useProjectSettingsStore.getState();
+        await store.updateSettings({
+          showAgentSessionsInSidebar: !store.settings.showAgentSessionsInSidebar,
+        });
+      },
+    },
+    {
+      id: "core.toggle-git-panel",
+      moduleId: "core",
+      label: "Toggle Git Panel",
+      run: () => useUIStore.getState().toggleTrailingStrip(),
+    },
+    {
+      id: "core.toggle-projects-panel",
+      moduleId: "core",
+      label: "Toggle Projects Panel",
+      run: () => useUIStore.getState().toggleProjectsPanel(),
     },
     {
       id: "core.next-tab",
@@ -745,6 +824,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
     handleNewModuleSession,
     handleNewShell,
     handleOpenInEditor,
+    requestQuitFromRenderer,
     toggleSemanticGlobalSurface,
   ]);
 
@@ -819,31 +899,10 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   }, [durableUiStateLoaded, repos, activeRepoPath, handleSelectRepo]);
 
   // All native exit routes are confirmed, including Cmd+Q with no active PTYs.
-  const quitDialogOpenRef = useRef(false);
   useEffect(() => {
-    const unlisten = observeQuitRequests(async (count) => {
-      if (quitDialogOpenRef.current) return;
-      quitDialogOpenRef.current = true;
-      try {
-        const confirmed = await confirmApplicationQuit(count);
-        if (confirmed) {
-          try {
-            await beforeShutdown();
-            await shutdownAndQuit();
-          } catch (error) {
-            pushNotice({
-              tone: "error",
-              title: "Couldn’t safely stop sessions",
-              message: getErrorMessage(error),
-            });
-          }
-        }
-      } finally {
-        quitDialogOpenRef.current = false;
-      }
-    });
+    const unlisten = observeQuitRequests(handleQuitRequest);
     return () => { unlisten.then((f) => f()); };
-  }, [beforeShutdown, pushNotice]);
+  }, [handleQuitRequest]);
 
   // The native menu emits stable command IDs. The registry owns their static
   // dispatch, so this listener stays a transport edge instead of a command switch.
@@ -858,6 +917,12 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
   // page instead of the native application menu.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === "q" && event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        void requestQuitFromRenderer();
+        return;
+      }
       if (event.key === "Tab" && (event.metaKey || event.ctrlKey) && !event.altKey) {
         event.preventDefault();
         event.stopPropagation();
@@ -874,7 +939,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [cycleTabs, handleOpenPanel, modulePanelContributions]);
+  }, [cycleTabs, handleOpenPanel, modulePanelContributions, requestQuitFromRenderer]);
 
   const selectedProjectView = workspaceCanvas
     ? selectedProjectWorkspaceView(workspaceCanvas)
@@ -929,20 +994,20 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
             >
               <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-0.5 z-20">
                 <button
-                  onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleSidebar(); }}
+                  onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleLeftSidebar(); }}
                   onMouseDown={(e) => e.stopPropagation()}
-                  className={`p-1 rounded transition-opacity hover:opacity-70 ${sidebarVisible ? "opacity-40" : "opacity-15"}`}
-                  title={sidebarVisible ? "Hide sidebar (Cmd+B)" : "Show sidebar (Cmd+B)"}
-                  aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
+                  className={`p-1 rounded transition-opacity hover:opacity-70 ${leftSidebarVisible ? "opacity-40" : "opacity-15"}`}
+                  title={leftSidebarVisible ? "Hide left sidebar (Cmd+B)" : "Show left sidebar (Cmd+B)"}
+                  aria-label={leftSidebarVisible ? "Hide left sidebar" : "Show left sidebar"}
                 >
                   <PanelLeft size={20} />
                 </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleDiffPanel(); }}
+                  onClick={(e) => { e.stopPropagation(); useUIStore.getState().toggleRightSidebar(); }}
                   onMouseDown={(e) => e.stopPropagation()}
-                  className={`p-1 rounded transition-opacity hover:opacity-70 ${diffPanelVisible ? "opacity-40" : "opacity-15"}`}
-                  title={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
-                  aria-label={diffPanelVisible ? "Hide diff panel" : "Show diff panel"}
+                  className={`p-1 rounded transition-opacity hover:opacity-70 ${rightSidebarVisible ? "opacity-40" : "opacity-15"}`}
+                  title={rightSidebarVisible ? "Hide right sidebar" : "Show right sidebar"}
+                  aria-label={rightSidebarVisible ? "Hide right sidebar" : "Show right sidebar"}
                 >
                   <PanelRight size={20} />
                 </button>
@@ -950,7 +1015,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
             </div>
 
             <StandardWorkspaceFrame
-              navigation={sidebarVisible ? (
+              navigation={leftSidebarVisible ? (
                 <StandardWorkspaceNavigation
                   repos={repos}
                   groups={groups}
@@ -959,6 +1024,8 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
                   activePanelId={activePanelId}
                   activePanelProjectPath={activePanelProjectPath}
                   activeGlobalSurfaceId={visibleGlobalSurfaceId}
+                  usagePanelVisible={usagePanelVisible}
+                  projectsPanelVisible={projectsPanelVisible}
                   onSelectRepo={handleSelectRepo}
                   onAddProject={handleAddProject}
                   onRemoveProject={handleRemoveProject}
@@ -1007,7 +1074,7 @@ export default function AppShell({ canvasAdapter, canvasAdapterId }: AppShellPro
                   }}
                 />
               )}
-              trailing={diffPanelVisible && activePanelProject ? (
+              trailing={rightSidebarVisible && trailingStripVisible && activePanelProject ? (
                 <ModuleProjectLayoutSurfaces project={activePanelProject} />
               ) : undefined}
             >

@@ -346,6 +346,10 @@ impl TerminalCloseTicket {
     }
 }
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "actor commands carry complete typed terminal updates across the private channel"
+)]
 enum RuntimeCommand {
     Write {
         data: Vec<u8>,
@@ -508,6 +512,10 @@ struct RuntimeActor {
 }
 
 impl RuntimeActor {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "actor initialization keeps each runtime dependency explicit"
+    )]
     fn initialize(
         record: Arc<TerminalRecord>,
         mut request: TerminalLaunchRequest,

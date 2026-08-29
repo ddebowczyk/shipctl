@@ -41,7 +41,7 @@ export function assistantProviderId(value: string): AssistantProviderId {
 
 /** Opaque plugin policy data, validated only as bounded durable text by the host. */
 export type AssistantSessionMode = string;
-export type AssistantIdentityState = "pending" | "ready" | "failed";
+export type AssistantIdentityState = "pending" | "assigned" | "ready" | "failed";
 
 /**
  * A generic launch description. A captured-session-id placeholder is resolved
@@ -95,7 +95,7 @@ export interface StartAssistantSessionInput {
   /**
    * A plugin may assign identity before process start when its own policy
    * supports it. The host stores it as opaque bounded text and marks the
-   * record ready without special-casing a provider.
+   * record assigned until the plugin confirms that the provider persisted it.
    */
   readonly initialSessionIdentity?: string;
   readonly terminal: AssistantTerminalStartContext;

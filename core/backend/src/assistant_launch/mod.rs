@@ -85,6 +85,7 @@ pub struct AssistantLaunchError {
 #[serde(rename_all = "lowercase")]
 pub enum CaptureState {
     Pending,
+    Assigned,
     Ready,
     Failed,
 }
@@ -193,7 +194,7 @@ impl AssistantSessionRegistry {
             session_mode,
             model,
             capture_state: if initial_session_identity.is_some() {
-                CaptureState::Ready
+                CaptureState::Assigned
             } else {
                 CaptureState::Pending
             },
@@ -219,7 +220,10 @@ impl AssistantSessionRegistry {
         )?;
         self.mutate(|state| {
             let record = find_record_mut(state, record_id)?;
-            if record.capture_state != CaptureState::Pending {
+            if record.capture_state != CaptureState::Pending
+                && !(record.capture_state == CaptureState::Assigned
+                    && record.provider_session_id.as_deref() == Some(provider_session_id.as_str()))
+            {
                 return Err("Assistant session capture is no longer pending".to_string());
             }
             record.provider_session_id = Some(provider_session_id.clone());
@@ -293,8 +297,10 @@ impl AssistantSessionRegistry {
                     .sessions
                     .iter()
                     .filter(|record| {
-                        record.capture_state == CaptureState::Ready
-                            && record.provider_session_id.is_some()
+                        matches!(
+                            record.capture_state,
+                            CaptureState::Assigned | CaptureState::Ready
+                        ) && record.provider_session_id.is_some()
                             && record.restore_on_next_launch
                     })
                     .cloned()
@@ -312,7 +318,10 @@ impl AssistantSessionRegistry {
             .iter()
             .find(|record| {
                 record.record_id == record_id
-                    && record.capture_state == CaptureState::Ready
+                    && matches!(
+                        record.capture_state,
+                        CaptureState::Assigned | CaptureState::Ready
+                    )
                     && record.provider_session_id.is_some()
                     && record.restore_on_next_launch
             })
@@ -331,8 +340,10 @@ impl AssistantSessionRegistry {
             return Err("Assistant restore records are frozen during shutdown".to_string());
         }
         let record = find_record_mut(&mut state, record_id)?;
-        if record.capture_state != CaptureState::Ready
-            || record.provider_session_id.is_none()
+        if !matches!(
+            record.capture_state,
+            CaptureState::Assigned | CaptureState::Ready
+        ) || record.provider_session_id.is_none()
             || !record.restore_on_next_launch
         {
             return Err("Assistant restore record is not ready".to_string());
@@ -353,7 +364,11 @@ impl AssistantSessionRegistry {
     pub fn rearm_for_restore(&self, record_id: &str) -> Result<(), String> {
         self.mutate(|state| {
             let record = find_record_mut(state, record_id)?;
-            if record.capture_state != CaptureState::Ready || record.provider_session_id.is_none() {
+            if !matches!(
+                record.capture_state,
+                CaptureState::Assigned | CaptureState::Ready
+            ) || record.provider_session_id.is_none()
+            {
                 return Err("Assistant restore record is not ready".to_string());
             }
             record.restore_on_next_launch = true;
@@ -369,7 +384,10 @@ impl AssistantSessionRegistry {
             .lock()
             .map_err(|_| "Assistant session registry lock was poisoned".to_string())?;
         state.manifest.sessions.retain(|record| {
-            record.capture_state == CaptureState::Ready && record.provider_session_id.is_some()
+            matches!(
+                record.capture_state,
+                CaptureState::Assigned | CaptureState::Ready
+            ) && record.provider_session_id.is_some()
         });
         for record in &mut state.manifest.sessions {
             record.restore_on_next_launch = true;
@@ -1120,9 +1138,35 @@ mod tests {
         let record = registry
             .prepare(request(&root, Some("fixture-session-1")))
             .unwrap();
-        assert_eq!(record.capture_state, CaptureState::Ready);
+        assert_eq!(record.capture_state, CaptureState::Assigned);
         assert_eq!(
             record.provider_session_id.as_deref(),
+            Some("fixture-session-1")
+        );
+        registry.begin_preserving_shutdown().unwrap();
+        let restorable = registry.list_restorable();
+        assert_eq!(restorable.len(), 1);
+        assert_eq!(restorable[0].capture_state, CaptureState::Assigned);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn confirms_only_the_exact_plugin_assigned_identity() {
+        let root = fixture_dir("confirmed-assigned-identity");
+        let registry = AssistantSessionRegistry::new(root.join("assistant-sessions.json"));
+        let assigned = registry
+            .prepare(request(&root, Some("fixture-session-1")))
+            .unwrap();
+
+        assert!(registry
+            .confirm_capture(&assigned.record_id, "another-session".to_string())
+            .is_err());
+        let ready = registry
+            .confirm_capture(&assigned.record_id, "fixture-session-1".to_string())
+            .unwrap();
+        assert_eq!(ready.capture_state, CaptureState::Ready);
+        assert_eq!(
+            ready.provider_session_id.as_deref(),
             Some("fixture-session-1")
         );
         let _ = fs::remove_dir_all(root);

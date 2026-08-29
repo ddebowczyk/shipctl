@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, forwardRef } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
+import { dismissContextMenuForPointerTarget } from "./contextMenuDismissal.ts";
 
 export interface ContextMenuItem {
   label: string;
@@ -36,21 +37,16 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
   }, [x, y]);
 
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        // Don't close if clicking inside a portaled submenu
-        const target = e.target as HTMLElement;
-        if (target.closest?.(".context-menu--submenu")) return;
-        onClose();
-      }
+    const handlePointerDown = (event: PointerEvent) => {
+      dismissContextMenuForPointerTarget(event.target, onClose);
     };
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", handleClick, true);
+    document.addEventListener("pointerdown", handlePointerDown, true);
     document.addEventListener("keydown", handleKey);
     return () => {
-      document.removeEventListener("mousedown", handleClick, true);
+      document.removeEventListener("pointerdown", handlePointerDown, true);
       document.removeEventListener("keydown", handleKey);
     };
   }, [onClose]);
@@ -118,9 +114,11 @@ function SubmenuItem({ item, autoFocus, onClose }: SubmenuItemProps) {
 
   const handleLeave = useCallback((e: React.MouseEvent) => {
     const related = e.relatedTarget as Node | null;
+    const relatedElement = related instanceof Element ? related : related?.parentElement;
     if (
       submenuRef.current?.contains(related) ||
-      itemRef.current?.contains(related)
+      itemRef.current?.contains(related) ||
+      relatedElement?.closest(".context-menu--submenu")
     ) {
       return;
     }
@@ -238,6 +236,16 @@ const SubmenuPanel = forwardRef<HTMLDivElement, SubmenuPanelProps>(
         {items.map((child, i) => {
           if (child.separator) {
             return <div key={`sep-${i}`} className="context-menu__separator" />;
+          }
+          if (child.children && child.children.length > 0) {
+            return (
+              <SubmenuItem
+                key={child.label}
+                item={child}
+                autoFocus={i === 0}
+                onClose={onClose}
+              />
+            );
           }
           return (
             <button

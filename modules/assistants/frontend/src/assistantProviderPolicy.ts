@@ -35,10 +35,15 @@ export interface AssistantLaunchPreparation {
 export interface AssistantCaptureSnapshot {
   readonly knownTranscriptPaths: ReadonlySet<string>;
   readonly resourceRelativePath: string;
+  readonly expectedSessionIdentity?: string;
 }
 
 export interface AssistantCaptureStrategy {
-  snapshot(resources: AssistantProviderPolicyResources): Promise<AssistantCaptureSnapshot>;
+  snapshot(
+    launchRepoPath: string,
+    resources: AssistantProviderPolicyResources,
+    expectedSessionIdentity?: string,
+  ): Promise<AssistantCaptureSnapshot>;
   findIdentity(
     record: AssistantRecoveryRecord,
     snapshot: AssistantCaptureSnapshot,
@@ -63,6 +68,7 @@ export interface AssistantProviderPolicyCatalog {
 type JsonRecord = Readonly<Record<string, unknown>>;
 
 const CLAUDE_MODEL_ALIASES = ["fable", "opus", "sonnet", "haiku"] as const;
+const CLAUDE_CAPTURE_RESOURCE_ID = "claude-session-transcripts";
 const CODEX_CAPTURE_RESOURCE_ID = "codex-session-transcripts";
 type AssistantResourceTreeRequest = Extract<
   AssistantResourceReadInput["request"],
@@ -151,7 +157,7 @@ function claudeResume(record: AssistantRecoveryRecord): AssistantProcessLaunch {
     program: "claude",
     arguments: [
       ...commandArguments(record.model ?? undefined, restoreMode(record), "--dangerously-skip-permissions"),
-      "--resume",
+      record.captureState === "assigned" ? "--session-id" : "--resume",
       { kind: "captured-session-id" },
     ],
   };
@@ -307,6 +313,7 @@ async function piModels(resources: AssistantProviderPolicyResources): Promise<re
 }
 
 async function codexCaptureSnapshot(
+  _launchRepoPath: string,
   resources: AssistantProviderPolicyResources,
 ): Promise<AssistantCaptureSnapshot> {
   const resourceRelativePath = codexCaptureRelativePath();
@@ -318,6 +325,85 @@ async function codexCaptureSnapshot(
     resourceRelativePath,
   });
 }
+
+function claudeProjectRelativePath(launchRepoPath: string): string {
+  const projectKey = normalizedPath(launchRepoPath).replace(/[^A-Za-z0-9-]/g, "-");
+  return `.claude/projects/${projectKey}`;
+}
+
+function claudeCaptureRequest(relativePath: string): AssistantResourceTreeRequest {
+  return {
+    kind: "tree",
+    resourceId: CLAUDE_CAPTURE_RESOURCE_ID,
+    relativePath,
+    maxFiles: 256,
+    extensions: ["jsonl"],
+    metadataOnly: true,
+  };
+}
+
+async function claudeCaptureSnapshot(
+  launchRepoPath: string,
+  resources: AssistantProviderPolicyResources,
+  expectedSessionIdentity?: string,
+): Promise<AssistantCaptureSnapshot> {
+  const resourceRelativePath = claudeProjectRelativePath(launchRepoPath);
+  if (expectedSessionIdentity) {
+    return Object.freeze({
+      knownTranscriptPaths: new Set<string>(),
+      resourceRelativePath,
+      expectedSessionIdentity,
+    });
+  }
+  const files = await readTree(resources, claudeCaptureRequest(resourceRelativePath));
+  return Object.freeze({
+    knownTranscriptPaths: new Set(files.map(({ relativePath }) => relativePath)),
+    resourceRelativePath,
+  });
+}
+
+function claudeIdentityFromPath(relativePath: string): string | null {
+  const match = /(?:^|\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i
+    .exec(relativePath);
+  return match?.[1] ?? null;
+}
+
+export function selectClaudeCaptureIdentity(
+  knownTranscriptPaths: ReadonlySet<string>,
+  files: readonly { readonly relativePath: string }[],
+  expectedSessionIdentity?: string,
+): string | null {
+  if (expectedSessionIdentity) {
+    return files.some(({ relativePath }) => (
+      claudeIdentityFromPath(relativePath) === expectedSessionIdentity
+    )) ? expectedSessionIdentity : null;
+  }
+  const candidates = files.flatMap(({ relativePath }) => (
+    knownTranscriptPaths.has(relativePath)
+      ? []
+      : [claudeIdentityFromPath(relativePath)].filter((value): value is string => value !== null)
+  ));
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  throw new Error(
+    `Found ${candidates.length} new Claude sessions for this directory; Shipctl will not guess which identity was persisted`,
+  );
+}
+
+const claudeCapture: AssistantCaptureStrategy = Object.freeze({
+  snapshot: claudeCaptureSnapshot,
+  async findIdentity(_record, snapshot, resources) {
+    const files = await readTree(
+      resources,
+      claudeCaptureRequest(snapshot.resourceRelativePath),
+    );
+    return selectClaudeCaptureIdentity(
+      snapshot.knownTranscriptPaths,
+      files,
+      snapshot.expectedSessionIdentity,
+    );
+  },
+});
 
 function scopedCodexFiles(
   resourceRelativePath: string,
@@ -405,6 +491,7 @@ const DEFAULT_PROVIDER_POLICIES: readonly AssistantProviderPolicy[] = Object.fre
     restorable: true,
     prepareNew: claudePreparation,
     prepareResume: claudeResume,
+    capture: claudeCapture,
     models: claudeModels,
   },
   {

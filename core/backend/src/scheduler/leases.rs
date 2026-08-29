@@ -139,6 +139,10 @@ struct ScheduleSourceMessage<'a> {
 }
 
 #[derive(Clone)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "lease sources retain either durable or declared schedule ownership"
+)]
 enum LeaseSource {
     Durable(PathBuf),
     Declared(ScheduleDefinition),

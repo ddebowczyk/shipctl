@@ -304,6 +304,8 @@ enum SchedulerMutationReservation {
     Follower(watch::Receiver<Option<SchedulerMutationOutcome>>),
 }
 
+type ScheduleDeliveryListener = Arc<dyn Fn(ScheduleDeliveryObservation) + Send + Sync>;
+
 struct SchedulerServiceInner {
     context: InstanceContext,
     schedule_root: PathBuf,
@@ -316,8 +318,7 @@ struct SchedulerServiceInner {
     jobs: Mutex<SchedulerJobs>,
     shutdown: watch::Sender<bool>,
     mutations: AsyncMutex<BTreeMap<Uuid, SchedulerMutationEntry>>,
-    delivery_listeners:
-        Mutex<BTreeMap<Uuid, Arc<dyn Fn(ScheduleDeliveryObservation) + Send + Sync>>>,
+    delivery_listeners: Mutex<BTreeMap<Uuid, ScheduleDeliveryListener>>,
 }
 
 /// Instance-local schedule configuration service.
@@ -1300,6 +1301,10 @@ impl SchedulerService {
     /// that attempt obsolete. Dropping the pending `send` future on any such
     /// event preserves bounded-channel backpressure without letting stale work
     /// enqueue after refresh, withdrawal, or shutdown.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "delivery observes each independent cancellation source explicitly"
+    )]
     async fn deliver_with_controls(
         &self,
         definition: &ScheduleDefinition,
@@ -2414,6 +2419,10 @@ mod tests {
         }
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "test fixture parameters mirror the serialized schedule contract"
+    )]
     fn write_schedule(
         root: &Path,
         filename: &str,

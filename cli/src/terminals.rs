@@ -369,7 +369,7 @@ fn run_release_anchor(args: TerminalAnchorIdArgs, output: OutputFormat) -> ExitC
         args.target.runtime.runtime_root.as_deref(),
         &args.target.instance,
         args.terminal_id,
-        SemanticDriverRequest::ReleaseAnchor { id: anchor.clone() },
+        SemanticDriverRequest::ReleaseAnchor { id: anchor },
     )
     .and_then(decode_semantic_response);
     let result = released.map(|released| TerminalAnchorReleaseView {

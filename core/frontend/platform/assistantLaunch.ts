@@ -433,7 +433,7 @@ function normalizedRecord(value: NativeAssistantRecoveryRecord): AssistantRecove
     || !requiredText(value.label, 256)
     || !requiredText(value.sessionMode, 128)
     || (value.model !== null && !requiredText(value.model, 256))
-    || !["pending", "ready", "failed"].includes(String(value.captureState))
+    || !["pending", "assigned", "ready", "failed"].includes(String(value.captureState))
     || typeof value.restoreOnNextLaunch !== "boolean"
     || !Number.isSafeInteger(value.startedAt)
     || Number(value.startedAt) < 0

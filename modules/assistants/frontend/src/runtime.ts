@@ -135,7 +135,9 @@ function capturePendingSession(
   client: AssistantLaunchClient,
 ) {
   const record = metadata.record;
-  if (record?.captureState !== "pending" || !assistantProviderPolicy(record.provider)?.capture) return;
+  if (!record
+    || !["pending", "assigned"].includes(record.captureState)
+    || !assistantProviderPolicy(record.provider)?.capture) return;
   let attempts = 0;
 
   const attemptCapture = async () => {
@@ -157,6 +159,11 @@ function capturePendingSession(
         return;
       }
 
+      if (record.captureState === "assigned") {
+        clearTimer(captureTimers, session.id);
+        return;
+      }
+
       const failed = await client.failSessionCapture(record.recordId);
       pendingCaptures.delete(record.recordId);
       await updateMetadata(activation, session.id, { ...metadata, record: failed });
@@ -167,6 +174,7 @@ function capturePendingSession(
       });
     } catch (error) {
       clearTimer(captureTimers, session.id);
+      if (record.captureState === "assigned") return;
       pendingCaptures.delete(record.recordId);
       const failed = await client.failSessionCapture(record.recordId).catch(() => null);
       if (failed) {
@@ -310,7 +318,13 @@ export async function launchAssistant(
       rows: dimensions.rows,
       start: async (context) => {
         const preparation = prepareNew({ mode, model });
-        const snapshot = policy.capture === undefined ? null : await policy.capture.snapshot(client);
+        const snapshot = policy.capture === undefined
+          ? null
+          : await policy.capture.snapshot(
+            projectPath,
+            client,
+            preparation.initialSessionIdentity,
+          );
         const spawned = await client.spawnAssistantSession(
           {
             provider: policy.id,
@@ -325,7 +339,10 @@ export async function launchAssistant(
           context,
         );
         if (snapshot) {
-          pendingCaptures.set(spawned.record.recordId, { record: spawned.record, snapshot });
+          pendingCaptures.set(spawned.record.recordId, {
+            record: spawned.record,
+            snapshot,
+          });
         }
         return {
           terminalId: spawned.terminalId,
@@ -374,7 +391,13 @@ async function resumeRecord(
     columns: dimensions.columns,
     rows: dimensions.rows,
     start: async (context) => {
+      const snapshot = record.captureState === "assigned" && policy.capture
+        ? await policy.capture.snapshot(record.launchRepoPath, client)
+        : null;
       const spawned = await client.resumeAssistantSession(record.recordId, launch, context);
+      if (snapshot) {
+        pendingCaptures.set(spawned.record.recordId, { record: spawned.record, snapshot });
+      }
       return {
         terminalId: spawned.terminalId,
         ownerMetadata: { ...metadata, record: spawned.record },

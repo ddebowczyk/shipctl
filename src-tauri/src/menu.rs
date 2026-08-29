@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use shipctl_core::menu::{
     compile_native_menu, NativeMenuCompileInput, NativeMenuEntry, NativeMenuModel, NativeMenuRole,
-    NativeMenuSection, NativeMenuSectionId,
+    NativeMenuSection, NativeMenuSectionId, NativeMenuSubmenu,
 };
 use tauri::menu::{
     AboutMetadata, AboutMetadataBuilder, MenuBuilder, MenuItem, Submenu, SubmenuBuilder,
@@ -87,8 +87,24 @@ fn append_entry<'a>(
             )?;
             Ok(builder.item(&item))
         }
+        NativeMenuEntry::Submenu(submenu) => {
+            let submenu = build_nested_submenu(app, submenu, version)?;
+            Ok(builder.item(&submenu))
+        }
         NativeMenuEntry::Role(role) => append_role(builder, *role, version),
     }
+}
+
+fn build_nested_submenu(
+    app: &AppHandle<Wry>,
+    submenu: &NativeMenuSubmenu,
+    version: &Option<String>,
+) -> tauri::Result<Submenu<Wry>> {
+    let mut builder = SubmenuBuilder::with_id(app, submenu.id.as_str(), submenu.label.as_str());
+    for entry in &submenu.entries {
+        builder = append_entry(builder, app, entry, version)?;
+    }
+    builder.build()
 }
 
 fn append_role<'a>(

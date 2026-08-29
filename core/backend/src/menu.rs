@@ -63,13 +63,11 @@ pub struct NativeMenuModel {
 
 impl NativeMenuModel {
     pub fn command_ids(&self) -> impl Iterator<Item = &str> {
-        self.sections
-            .iter()
-            .flat_map(|section| section.entries.iter())
-            .filter_map(|entry| match entry {
-                NativeMenuEntry::Command(command) => Some(command.id.as_str()),
-                NativeMenuEntry::Role(_) | NativeMenuEntry::Separator => None,
-            })
+        let mut command_ids = Vec::new();
+        for section in &self.sections {
+            collect_command_ids(&section.entries, &mut command_ids);
+        }
+        command_ids.into_iter()
     }
 
     pub fn section(&self, id: NativeMenuSectionId) -> Option<&NativeMenuSection> {
@@ -110,8 +108,16 @@ impl NativeMenuSectionId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NativeMenuEntry {
     Command(NativeMenuCommand),
+    Submenu(NativeMenuSubmenu),
     Separator,
     Role(NativeMenuRole),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeMenuSubmenu {
+    pub id: String,
+    pub label: String,
+    pub entries: Vec<NativeMenuEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,7 +239,7 @@ pub fn compile_native_menu(
                     NativeMenuEntry::Role(NativeMenuRole::HideOthers),
                     NativeMenuEntry::Role(NativeMenuRole::ShowAll),
                     NativeMenuEntry::Separator,
-                    NativeMenuEntry::Role(NativeMenuRole::Quit),
+                    command("core.quit", "Quit Shipctl", Some("CmdOrCtrl+Q")),
                 ],
             },
             NativeMenuSection {
@@ -266,7 +272,28 @@ pub fn compile_native_menu(
                         Some("CmdOrCtrl+Shift+Tab"),
                     ),
                     NativeMenuEntry::Separator,
-                    command("core.toggle-sidebar", "Toggle Sidebar", Some("CmdOrCtrl+B")),
+                    submenu(
+                        "shipctl.view.sidebars",
+                        "Sidebars",
+                        vec![
+                            command("core.toggle-right-sidebar", "Toggle Right Sidebar", None),
+                            command(
+                                "core.toggle-left-sidebar",
+                                "Toggle Left Sidebar",
+                                Some("CmdOrCtrl+B"),
+                            ),
+                        ],
+                    ),
+                    submenu(
+                        "shipctl.view.panels",
+                        "Panels",
+                        vec![
+                            command("core.toggle-usage-panel", "Toggle Usage Panel", None),
+                            command("core.toggle-agents-panel", "Toggle Agents Panel", None),
+                            command("core.toggle-git-panel", "Toggle Git Panel", None),
+                            command("core.toggle-projects-panel", "Toggle Projects Panel", None),
+                        ],
+                    ),
                     NativeMenuEntry::Separator,
                     NativeMenuEntry::Role(NativeMenuRole::Fullscreen),
                 ],
@@ -302,6 +329,30 @@ fn command(
     })
 }
 
+fn submenu(
+    id: &'static str,
+    label: &'static str,
+    entries: Vec<NativeMenuEntry>,
+) -> NativeMenuEntry {
+    NativeMenuEntry::Submenu(NativeMenuSubmenu {
+        id: id.to_string(),
+        label: label.to_string(),
+        entries,
+    })
+}
+
+fn collect_command_ids<'a>(entries: &'a [NativeMenuEntry], command_ids: &mut Vec<&'a str>) {
+    for entry in entries {
+        match entry {
+            NativeMenuEntry::Command(command) => command_ids.push(command.id.as_str()),
+            NativeMenuEntry::Submenu(submenu) => {
+                collect_command_ids(&submenu.entries, command_ids);
+            }
+            NativeMenuEntry::Role(_) | NativeMenuEntry::Separator => {}
+        }
+    }
+}
+
 fn core_command_ids(semantic_terminal_available: bool) -> BTreeSet<String> {
     [
         semantic_terminal_available.then_some("terminal.new-semantic"),
@@ -309,9 +360,15 @@ fn core_command_ids(semantic_terminal_available: bool) -> BTreeSet<String> {
         Some("core.new-session"),
         Some("core.open-in-editor"),
         Some("core.settings"),
+        Some("core.quit"),
         Some("core.next-tab"),
         Some("core.previous-tab"),
-        Some("core.toggle-sidebar"),
+        Some("core.toggle-right-sidebar"),
+        Some("core.toggle-left-sidebar"),
+        Some("core.toggle-usage-panel"),
+        Some("core.toggle-agents-panel"),
+        Some("core.toggle-git-panel"),
+        Some("core.toggle-projects-panel"),
     ]
     .into_iter()
     .flatten()
@@ -401,7 +458,24 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 NativeMenuEntry::Command(command) => Some(command.id.as_str()),
-                NativeMenuEntry::Role(_) | NativeMenuEntry::Separator => None,
+                NativeMenuEntry::Submenu(_)
+                | NativeMenuEntry::Role(_)
+                | NativeMenuEntry::Separator => None,
+            })
+            .collect()
+    }
+
+    fn submenu_commands(submenu: &NativeMenuSubmenu) -> Vec<(&str, &str)> {
+        submenu
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                NativeMenuEntry::Command(command) => {
+                    Some((command.id.as_str(), command.label.as_str()))
+                }
+                NativeMenuEntry::Submenu(_)
+                | NativeMenuEntry::Role(_)
+                | NativeMenuEntry::Separator => None,
             })
             .collect()
     }
@@ -428,6 +502,7 @@ mod tests {
             menu.command_ids().collect::<Vec<_>>(),
             vec![
                 "core.settings",
+                "core.quit",
                 "terminal.new-semantic",
                 "terminal.new-thin",
                 "core.new-session",
@@ -435,7 +510,79 @@ mod tests {
                 "core.open-in-editor",
                 "core.next-tab",
                 "core.previous-tab",
-                "core.toggle-sidebar",
+                "core.toggle-right-sidebar",
+                "core.toggle-left-sidebar",
+                "core.toggle-usage-panel",
+                "core.toggle-agents-panel",
+                "core.toggle-git-panel",
+                "core.toggle-projects-panel",
+            ]
+        );
+    }
+
+    #[test]
+    fn routes_quit_through_an_explicit_confirmable_command() {
+        let menu = compile_native_menu(NativeMenuCompileInput {
+            semantic_terminal_available: true,
+            contributions: Vec::new(),
+        })
+        .unwrap();
+        let app_entries = &menu.section(NativeMenuSectionId::App).unwrap().entries;
+        let quit = app_entries
+            .iter()
+            .find_map(|entry| match entry {
+                NativeMenuEntry::Command(command) if command.id == "core.quit" => Some(command),
+                _ => None,
+            })
+            .expect("app menu should expose the confirmable quit command");
+
+        assert_eq!(quit.label, "Quit Shipctl");
+        assert_eq!(quit.accelerator.as_deref(), Some("CmdOrCtrl+Q"));
+        assert!(!app_entries
+            .iter()
+            .any(|entry| matches!(entry, NativeMenuEntry::Role(NativeMenuRole::Quit))));
+    }
+
+    #[test]
+    fn groups_sidebar_and_panel_visibility_commands_under_view() {
+        let menu = compile_native_menu(NativeMenuCompileInput {
+            semantic_terminal_available: true,
+            contributions: Vec::new(),
+        })
+        .unwrap();
+        let submenus = menu
+            .section(NativeMenuSectionId::View)
+            .unwrap()
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                NativeMenuEntry::Submenu(submenu) => Some(submenu),
+                NativeMenuEntry::Command(_)
+                | NativeMenuEntry::Role(_)
+                | NativeMenuEntry::Separator => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(submenus.len(), 2);
+        assert_eq!(submenus[0].id, "shipctl.view.sidebars");
+        assert_eq!(submenus[0].label, "Sidebars");
+        assert_eq!(submenus[1].id, "shipctl.view.panels");
+        assert_eq!(submenus[1].label, "Panels");
+
+        assert_eq!(
+            submenu_commands(submenus[0]),
+            vec![
+                ("core.toggle-right-sidebar", "Toggle Right Sidebar"),
+                ("core.toggle-left-sidebar", "Toggle Left Sidebar"),
+            ]
+        );
+        assert_eq!(
+            submenu_commands(submenus[1]),
+            vec![
+                ("core.toggle-usage-panel", "Toggle Usage Panel"),
+                ("core.toggle-agents-panel", "Toggle Agents Panel"),
+                ("core.toggle-git-panel", "Toggle Git Panel"),
+                ("core.toggle-projects-panel", "Toggle Projects Panel"),
             ]
         );
     }

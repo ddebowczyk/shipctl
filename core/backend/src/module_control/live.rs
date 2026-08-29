@@ -1336,6 +1336,10 @@ fn runtime_diagnostic(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "diagnostic records mirror the activation transaction fields one-for-one"
+)]
 fn activation_diagnostic(
     code: &str,
     severity: DiagnosticSeverity,

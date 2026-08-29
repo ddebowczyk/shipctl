@@ -182,6 +182,10 @@ pub struct PendingArtifactInstall {
 /// treat it as already completed, or clean an orphaned stage.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "install resolution preserves the complete durable receipt for callers"
+)]
 pub enum PendingArtifactInstallResolution {
     Absent,
     Pending(PendingArtifactInstall),
@@ -1778,6 +1782,10 @@ fn load_pending_installs(
         .collect()
 }
 
+#[allow(
+    clippy::unnecessary_map_or,
+    reason = "is_none_or is newer than the supported Rust MSRV"
+)]
 pub(super) fn validate_catalog_snapshot(
     artifacts: &[RegisteredArtifact],
     runtime_artifacts: &[RuntimeArtifactCatalogEntry],

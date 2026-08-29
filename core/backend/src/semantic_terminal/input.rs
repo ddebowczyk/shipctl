@@ -376,55 +376,6 @@ impl TerminalMouseEvent {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fractional_browser_geometry_preserves_cell_boundaries() {
-        let cell_width = 10.836_914_062_5;
-        let surface = TerminalSurfaceGeometry {
-            screen_width: 80.0 * cell_width,
-            screen_height: 24.0 * 20.25,
-            cell_width,
-            cell_height: 20.25,
-            padding_top: 0.0,
-            padding_bottom: 0.0,
-            padding_left: 0.0,
-            padding_right: 0.0,
-        };
-        let boundary_column = 17.0;
-        let boundary_row = 9.0;
-
-        let (position, size) = surface
-            .normalize(boundary_column * cell_width, boundary_row * 20.25)
-            .expect("fractional CSS pixels are valid terminal geometry");
-
-        assert_eq!(size.cell_width, 11);
-        assert_eq!(size.screen_width, 80 * size.cell_width);
-        assert_eq!(position.x, boundary_column as f32 * size.cell_width as f32);
-        assert_eq!(size.cell_height, 20);
-        assert_eq!(size.screen_height, 24 * size.cell_height);
-        assert_eq!(position.y, boundary_row as f32 * size.cell_height as f32);
-    }
-
-    #[test]
-    fn unusable_browser_geometry_is_rejected_before_ghostty() {
-        let surface = TerminalSurfaceGeometry {
-            screen_width: 800.0,
-            screen_height: 480.0,
-            cell_width: 0.0,
-            cell_height: 20.0,
-            padding_top: 0.0,
-            padding_bottom: 0.0,
-            padding_left: 0.0,
-            padding_right: 0.0,
-        };
-
-        assert!(surface.normalize(25.0, 21.0).is_err());
-    }
-}
-
 /// The physical key a W3C code name refers to.
 ///
 /// The table is the whole mapping the pinned parser exposes, so a client can
@@ -610,4 +561,53 @@ fn key_from_code(code: &str) -> Option<Key> {
         "Paste" => Key::Paste,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fractional_browser_geometry_preserves_cell_boundaries() {
+        let cell_width = 10.836_914_062_5;
+        let surface = TerminalSurfaceGeometry {
+            screen_width: 80.0 * cell_width,
+            screen_height: 24.0 * 20.25,
+            cell_width,
+            cell_height: 20.25,
+            padding_top: 0.0,
+            padding_bottom: 0.0,
+            padding_left: 0.0,
+            padding_right: 0.0,
+        };
+        let boundary_column = 17.0;
+        let boundary_row = 9.0;
+
+        let (position, size) = surface
+            .normalize(boundary_column * cell_width, boundary_row * 20.25)
+            .expect("fractional CSS pixels are valid terminal geometry");
+
+        assert_eq!(size.cell_width, 11);
+        assert_eq!(size.screen_width, 80 * size.cell_width);
+        assert_eq!(position.x, boundary_column as f32 * size.cell_width as f32);
+        assert_eq!(size.cell_height, 20);
+        assert_eq!(size.screen_height, 24 * size.cell_height);
+        assert_eq!(position.y, boundary_row as f32 * size.cell_height as f32);
+    }
+
+    #[test]
+    fn unusable_browser_geometry_is_rejected_before_ghostty() {
+        let surface = TerminalSurfaceGeometry {
+            screen_width: 800.0,
+            screen_height: 480.0,
+            cell_width: 0.0,
+            cell_height: 20.0,
+            padding_top: 0.0,
+            padding_bottom: 0.0,
+            padding_left: 0.0,
+            padding_right: 0.0,
+        };
+
+        assert!(surface.normalize(25.0, 21.0).is_err());
+    }
 }

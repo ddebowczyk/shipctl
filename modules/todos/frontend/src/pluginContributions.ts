@@ -11,6 +11,7 @@ import {
 import {
   configureTodoPreferences,
   loadTodoPreferences,
+  releaseTodoPreferences,
   useTodoPreferencesStore,
   type TodoPreferences,
   DEFAULT_TODO_PREFERENCES,
@@ -117,10 +118,10 @@ export async function activateTodosRuntime(
     return async () => {
       if (activeRefresh === active) activeRefresh = null;
       await subscription.dispose();
-      configureTodoPreferences(null);
+      releaseTodoPreferences(activation);
     };
   } catch (error) {
-    configureTodoPreferences(null);
+    releaseTodoPreferences(activation);
     throw error;
   }
 }

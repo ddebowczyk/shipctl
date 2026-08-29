@@ -52,7 +52,7 @@ test("the artifact owns provider launch and recovery policy", () => {
   assert.equal(claude?.restorable, true);
   assert.equal(codex?.restorable, true);
   assert.equal(pi?.restorable, false);
-  assert.equal(claude?.capture, undefined);
+  assert.equal(typeof claude?.capture?.snapshot, "function");
   assert.equal(typeof codex?.capture?.snapshot, "function");
 
   const claudeLaunch = claude?.prepareNew?.({ mode: "yolo", model: "sonnet" });
@@ -66,6 +66,32 @@ test("the artifact owns provider launch and recovery policy", () => {
     "--session-id",
     claudeLaunch.initialSessionIdentity,
   ]);
+  const claudeRecord = {
+    recordId: "claude-record" as never,
+    provider: "claude" as never,
+    launchRepoPath: "/repo",
+    placementProjectPath: "/repo",
+    label: "Claude Code",
+    sessionMode: "standard",
+    model: null,
+    restoreOnNextLaunch: true,
+    startedAt: 1,
+    updatedAt: 1,
+  } as const;
+  assert.deepEqual(claude?.prepareResume?.({
+    ...claudeRecord,
+    captureState: "assigned",
+  }), {
+    program: "claude",
+    arguments: ["--session-id", { kind: "captured-session-id" }],
+  });
+  assert.deepEqual(claude?.prepareResume?.({
+    ...claudeRecord,
+    captureState: "ready",
+  }), {
+    program: "claude",
+    arguments: ["--resume", { kind: "captured-session-id" }],
+  });
 
   assert.deepEqual(codex?.prepareNew?.({ mode: "yolo", model: "gpt-5" }), {
     launch: { program: "codex", arguments: ["--model", "gpt-5", "--yolo"] },
@@ -86,6 +112,60 @@ test("the artifact owns provider launch and recovery policy", () => {
     program: "codex",
     arguments: ["--model", "gpt-5", "--yolo", "resume", { kind: "captured-session-id" }],
   });
+});
+
+test("Claude transcript capture distinguishes an assigned blank identity from a persisted one", () => {
+  const known = new Set(["old.jsonl"]);
+  const files = [
+    { relativePath: "old.jsonl" },
+    { relativePath: "797dd84f-fcfc-4110-b7ce-965d1d755152.jsonl" },
+  ];
+  assert.equal(policy.selectClaudeCaptureIdentity(
+    known,
+    files,
+    "797dd84f-fcfc-4110-b7ce-965d1d755152",
+  ), "797dd84f-fcfc-4110-b7ce-965d1d755152");
+  assert.equal(policy.selectClaudeCaptureIdentity(
+    known,
+    [{ relativePath: "old.jsonl" }],
+    "797dd84f-fcfc-4110-b7ce-965d1d755152",
+  ), null);
+  assert.equal(policy.selectClaudeCaptureIdentity(known, files),
+    "797dd84f-fcfc-4110-b7ce-965d1d755152");
+});
+
+test("Claude confirms its assigned identity only after the exact project transcript exists", async () => {
+  const requests: Array<{ readonly relativePath: string }> = [];
+  const resources = {
+    async readResource(input: { request: { resourceId: string; relativePath: string } }) {
+      requests.push(input.request);
+      return {
+        kind: "tree" as const,
+        resourceId: input.request.resourceId,
+        files: [{
+          relativePath: "797dd84f-fcfc-4110-b7ce-965d1d755152.jsonl",
+          content: "",
+        }],
+      };
+    },
+    async writeResource() {},
+    async executeResource() {
+      return { resourceId: "fixture", stdout: "", stderr: "", status: 0 };
+    },
+  };
+  const capture = policy.createAssistantProviderPolicyCatalog().get("claude")?.capture;
+  const snapshot = await capture?.snapshot(
+    "/Users/ddebowczyk/projects/_hustle",
+    resources,
+    "797dd84f-fcfc-4110-b7ce-965d1d755152",
+  );
+  assert.equal(requests.length, 0);
+  const identity = await capture?.findIdentity({} as never, snapshot!, resources);
+
+  assert.equal(identity, "797dd84f-fcfc-4110-b7ce-965d1d755152");
+  assert.deepEqual(requests.map(({ relativePath }) => relativePath), [
+    ".claude/projects/-Users-ddebowczyk-projects--hustle",
+  ]);
 });
 
 test("Codex transcript capture is plugin-owned, exact, and refuses ambiguity", () => {
@@ -119,7 +199,7 @@ test("Codex transcript capture scans only the bounded UTC day partition", async 
     },
   };
   const capture = policy.createAssistantProviderPolicyCatalog().get("codex")?.capture;
-  const snapshot = await capture?.snapshot(resources);
+  const snapshot = await capture?.snapshot("/repo", resources);
 
   assert.match(snapshot?.resourceRelativePath ?? "", /^\.codex\/sessions\/\d{4}\/\d{2}\/\d{2}$/);
   assert.deepEqual(requests, [{
@@ -176,7 +256,7 @@ test("Codex capture reads only the first line of newly listed transcripts", asyn
     },
   };
   const capture = policy.createAssistantProviderPolicyCatalog().get("codex")?.capture;
-  const snapshot = await capture?.snapshot(resources);
+  const snapshot = await capture?.snapshot("/repo", resources);
   const identity = await capture?.findIdentity({
     recordId: "record" as never,
     provider: "codex" as never,
@@ -224,7 +304,7 @@ test("an externally declared fixture policy can launch and capture through gener
       arguments: ["resume", { kind: "captured-session-id" as const }],
     }),
     capture: {
-      async snapshot(port: typeof resources) {
+      async snapshot(_launchRepoPath: string, port: typeof resources) {
         const result = await port.readResource({
           request: { kind: "tree", resourceId: "fixture-transcripts", relativePath: ".fixture" },
         });
@@ -249,7 +329,7 @@ test("an externally declared fixture policy can launch and capture through gener
   assert.deepEqual(declared?.prepareNew?.({ mode: "fixture" }), {
     launch: { program: "fixture-cli", arguments: ["start"] },
   });
-  const snapshot = await declared?.capture?.snapshot(resources);
+  const snapshot = await declared?.capture?.snapshot("/repo", resources);
   const identity = await declared?.capture?.findIdentity({} as never, snapshot!, resources);
   assert.equal(identity, "fixture-session");
   assert.deepEqual(reads, ["fixture-transcripts", "fixture-transcripts"]);

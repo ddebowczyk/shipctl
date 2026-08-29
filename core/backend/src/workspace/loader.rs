@@ -1,5 +1,5 @@
-use std::fs;
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,8 +9,18 @@ use super::config::{
 use crate::state::paths::ShipctlPaths;
 use crate::state::DurableWriteBarrier;
 
-type ConfigCache = Option<(GlobalConfig, SystemTime)>;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ConfigRevision {
+    modified: SystemTime,
+    length: u64,
+}
 
+type ConfigCache = Option<(GlobalConfig, ConfigRevision)>;
+
+/// Global config writes use a sidecar advisory lock shared by Shipctl
+/// processes. Editors that ignore the lock are not blocked, so mutations also
+/// compare the file revision before committing and return a retryable error if
+/// an external edit was observed.
 pub struct GlobalStore {
     paths: ShipctlPaths,
     cache: Mutex<ConfigCache>,
@@ -78,22 +88,20 @@ fn load_global_config_at(path: &Path, cache: &mut ConfigCache) -> Result<GlobalC
         return Ok(GlobalConfig::default());
     }
 
-    let mtime = fs::metadata(&path)
-        .and_then(|m| m.modified())
-        .unwrap_or(UNIX_EPOCH);
+    let revision = config_revision(path)?;
 
-    if let Some((cached, cached_mtime)) = cache.as_ref() {
-        if *cached_mtime == mtime {
+    if let Some((cached, cached_revision)) = cache.as_ref() {
+        if *cached_revision == revision {
             return Ok(cached.clone());
         }
     }
 
     let content =
-        fs::read_to_string(&path).map_err(|e| format!("Failed to read global config: {e}"))?;
+        fs::read_to_string(path).map_err(|e| format!("Failed to read global config: {e}"))?;
     let config: GlobalConfig = serde_yaml::from_str(&content)
         .map_err(|e| format!("Failed to parse global config: {e}"))?;
 
-    *cache = Some((config.clone(), mtime));
+    *cache = Some((config.clone(), revision));
 
     Ok(config)
 }
@@ -104,7 +112,9 @@ pub fn save_global_config(store: &GlobalStore, config: &GlobalConfig) -> Result<
         .cache
         .lock()
         .map_err(|_| "Global config lock is poisoned".to_string())?;
-    save_global_config_at(&store.paths.global_config, config, &mut cache)
+    with_global_config_lock(&store.paths.global_config, || {
+        save_global_config_at(&store.paths.global_config, config, &mut cache)
+    })
 }
 
 fn save_global_config_at(
@@ -119,12 +129,9 @@ fn save_global_config_at(
 
     let yaml =
         serde_yaml::to_string(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
-    fs::write(&path, &yaml).map_err(|e| format!("Failed to write global config: {e}"))?;
+    fs::write(path, &yaml).map_err(|e| format!("Failed to write global config: {e}"))?;
 
-    // Update cache with the config we just wrote
-    if let Ok(mtime) = fs::metadata(&path).and_then(|m| m.modified()) {
-        *cache = Some((config.clone(), mtime));
-    }
+    *cache = Some((config.clone(), config_revision(path)?));
 
     Ok(())
 }
@@ -142,13 +149,66 @@ fn mutate_global_config_at<T>(
     cache: &Mutex<ConfigCache>,
     mutation: impl FnOnce(&mut GlobalConfig) -> Result<T, String>,
 ) -> Result<T, String> {
-    let mut cache = cache
-        .lock()
-        .map_err(|_| "Global config lock is poisoned".to_string())?;
-    let mut config = load_global_config_at(path, &mut cache)?;
-    let result = mutation(&mut config)?;
-    save_global_config_at(path, &config, &mut cache)?;
-    Ok(result)
+    with_global_config_lock(path, || {
+        let mut cache = cache
+            .lock()
+            .map_err(|_| "Global config lock is poisoned".to_string())?;
+        let mut config = load_global_config_at(path, &mut cache)?;
+        let revision = config_revision(path)?;
+        let result = mutation(&mut config)?;
+        if config_revision(path)? != revision {
+            return Err(
+                "Global config changed outside Shipctl while it was being edited; retry the mutation"
+                    .to_string(),
+            );
+        }
+        save_global_config_at(path, &config, &mut cache)?;
+        Ok(result)
+    })
+}
+
+fn global_config_lock_path(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.lock", path.display()))
+}
+
+fn with_global_config_lock<T>(
+    path: &Path,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let lock_path = global_config_lock_path(path);
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create global config lock directory: {error}"))?;
+    }
+    let lock_file: File = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|error| format!("Failed to open global config lock: {error}"))?;
+    fs4::FileExt::lock(&lock_file)
+        .map_err(|error| format!("Failed to acquire global config lock: {error}"))?;
+    let result = operation();
+    let _ = fs4::FileExt::unlock(&lock_file);
+    result
+}
+
+fn config_revision(path: &Path) -> Result<ConfigRevision, String> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ConfigRevision {
+                modified: UNIX_EPOCH,
+                length: 0,
+            });
+        }
+        Err(error) => return Err(format!("Failed to inspect global config: {error}")),
+    };
+    Ok(ConfigRevision {
+        modified: metadata.modified().unwrap_or(UNIX_EPOCH),
+        length: metadata.len(),
+    })
 }
 
 pub fn load_global_capability_data(
@@ -291,8 +351,7 @@ pub fn migrate_old_projects(store: &GlobalStore) -> Result<(), String> {
 
     let mut global_config = GlobalConfig::default();
 
-    let entries =
-        fs::read_dir(&old_dir).map_err(|e| format!("Failed to read old projects: {e}"))?;
+    let entries = fs::read_dir(old_dir).map_err(|e| format!("Failed to read old projects: {e}"))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("Failed to read entry: {e}"))?;
@@ -551,21 +610,22 @@ mod tests {
             "shipctl-global-config-atomic-{}-{unique}.yml",
             std::process::id()
         ));
-        let cache: Arc<Mutex<ConfigCache>> = Arc::new(Mutex::new(None));
+        let first_cache: Arc<Mutex<ConfigCache>> = Arc::new(Mutex::new(None));
+        let second_cache: Arc<Mutex<ConfigCache>> = Arc::new(Mutex::new(None));
 
         let mut initial = GlobalConfig::default();
         initial.capability_data.insert(
             "futureCapability".to_string(),
             serde_json::json!({ "density": "compact" }),
         );
-        save_global_config_at(&path, &initial, &mut cache.lock().unwrap()).unwrap();
+        save_global_config_at(&path, &initial, &mut first_cache.lock().unwrap()).unwrap();
 
         let (first_entered_tx, first_entered_rx) = mpsc::channel();
         let (release_first_tx, release_first_rx) = mpsc::channel();
         let first_path = path.clone();
-        let first_cache = Arc::clone(&cache);
+        let first_cache_for_thread = Arc::clone(&first_cache);
         let first = thread::spawn(move || {
-            mutate_global_config_at(&first_path, &first_cache, |config| {
+            mutate_global_config_at(&first_path, &first_cache_for_thread, |config| {
                 config.repos.push(crate::workspace::config::RepoEntry {
                     path: "/tmp/first-repo".to_string(),
                     group: None,
@@ -583,10 +643,10 @@ mod tests {
         let (second_started_tx, second_started_rx) = mpsc::channel();
         let (second_entered_tx, second_entered_rx) = mpsc::channel();
         let second_path = path.clone();
-        let second_cache = Arc::clone(&cache);
+        let second_cache_for_thread = Arc::clone(&second_cache);
         let second = thread::spawn(move || {
             second_started_tx.send(()).unwrap();
-            mutate_global_config_at(&second_path, &second_cache, |config| {
+            mutate_global_config_at(&second_path, &second_cache_for_thread, |config| {
                 second_entered_tx.send(()).unwrap();
                 config.replace_capability_value(
                     "exampleCapability",
@@ -612,7 +672,7 @@ mod tests {
             .expect("second mutation should enter after the first commits");
         second.join().unwrap().unwrap();
 
-        let final_config = load_global_config_at(&path, &mut cache.lock().unwrap()).unwrap();
+        let final_config = load_global_config_at(&path, &mut first_cache.lock().unwrap()).unwrap();
         assert!(final_config
             .repos
             .iter()
@@ -626,6 +686,51 @@ mod tests {
             Some(serde_json::json!({ "density": "compact" }))
         );
 
-        fs::remove_file(path).unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::remove_file(format!("{}.lock", path.display())).unwrap();
+    }
+
+    #[test]
+    fn external_edit_is_rejected_instead_of_overwritten() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "shipctl-global-config-external-{}-{unique}.yml",
+            std::process::id()
+        ));
+        let cache = Arc::new(Mutex::new(None));
+        save_global_config_at(&path, &GlobalConfig::default(), &mut cache.lock().unwrap()).unwrap();
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let worker_path = path.clone();
+        let worker_cache = Arc::clone(&cache);
+        let worker = thread::spawn(move || {
+            mutate_global_config_at(&worker_path, &worker_cache, |config| {
+                config.groups.push(crate::workspace::config::GroupEntry {
+                    id: "shipctl-edit".to_string(),
+                    name: "Shipctl".to_string(),
+                    order: 0,
+                });
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+        assert!(entered_rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        fs::write(&path, "version: 1\nexternalKey: preserved\n").unwrap();
+        release_tx.send(()).unwrap();
+
+        assert!(worker
+            .join()
+            .unwrap()
+            .unwrap_err()
+            .contains("changed outside Shipctl"));
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("externalKey: preserved"));
+        fs::remove_file(&path).unwrap();
+        fs::remove_file(format!("{}.lock", path.display())).unwrap();
     }
 }

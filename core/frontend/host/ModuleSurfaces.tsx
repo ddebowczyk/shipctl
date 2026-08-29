@@ -228,11 +228,15 @@ function SidebarSurface({
 
 export function ModuleSidebarSurfaces({
   onToggleGlobalSurface,
+  hiddenSurfaceIds,
 }: {
   readonly onToggleGlobalSurface: (surfaceId: ContributionId) => void;
+  readonly hiddenSurfaceIds?: ReadonlySet<ContributionId>;
 }) {
   const { catalog, moduleActivations } = useAcceptedWorkspaceContributionRuntime();
-  const contributions = catalog.canvasSurfaceCatalog.sidebar();
+  const contributions = catalog.canvasSurfaceCatalog.sidebar().filter(
+    (contribution) => !hiddenSurfaceIds?.has(contribution.surfaceId),
+  );
   return contributions.map((contribution) => (
     <SidebarSurface
       key={canvasSurfaceComponentKey(contribution)}

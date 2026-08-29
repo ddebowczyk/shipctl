@@ -11,6 +11,9 @@ fmt:
 clippy-soft:
     node bin/clippy-soft.mjs
 
+clippy:
+    cargo clippy --workspace --all-targets -- -D warnings
+
 schemas:
     node bin/check-schemas.mjs
 

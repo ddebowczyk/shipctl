@@ -264,7 +264,7 @@ function sessionRecord(
     label: requiredText(input.label),
     sessionMode: input.sessionMode,
     model: input.model ?? null,
-    captureState: input.initialSessionIdentity === undefined ? "pending" : "ready",
+    captureState: input.initialSessionIdentity === undefined ? "pending" : "assigned",
     restoreOnNextLaunch: false,
     startedAt: now,
     updatedAt: now,
@@ -322,7 +322,8 @@ export function createFakeAssistantLaunchServiceProvider(
           requiredText(input.terminal.moduleSessionId);
           requiredText(input.launch.program);
           const current = requireRecord(input.recordId);
-          if (current.captureState !== "ready" || !current.restoreOnNextLaunch) {
+          if (!["assigned", "ready"].includes(current.captureState)
+            || !current.restoreOnNextLaunch) {
             throw new FakeAssistantLaunchFailure(
               "assistant-launch.session-not-recoverable",
               "Assistant session is not ready for recovery",
@@ -347,7 +348,8 @@ export function createFakeAssistantLaunchServiceProvider(
           async ({ recordId, providerSessionId }) => {
             const current = requireRecord(recordId);
             requiredText(providerSessionId);
-            if (current.captureState !== "pending") {
+            if (current.captureState !== "pending"
+              && current.captureState !== "assigned") {
               throw new FakeAssistantLaunchFailure(
                 "assistant-launch.session-not-recoverable",
                 "Assistant session identity is no longer pending",
@@ -433,7 +435,7 @@ export function createFakeAssistantLaunchServiceProvider(
           options,
           async ({ recordId }) => {
             const current = requireRecord(recordId);
-            if (current.captureState !== "ready") {
+            if (!["assigned", "ready"].includes(current.captureState)) {
               throw new FakeAssistantLaunchFailure(
                 "assistant-launch.session-not-recoverable",
                 "Assistant session is not ready for recovery",
@@ -452,7 +454,8 @@ export function createFakeAssistantLaunchServiceProvider(
           "assistant.session-record",
           options,
           () => [...records.values()].filter(
-            (record) => record.captureState === "ready" && record.restoreOnNextLaunch,
+            (record) => ["assigned", "ready"].includes(record.captureState)
+              && record.restoreOnNextLaunch,
           ),
         ),
         takeStartupWarning: operation(
@@ -473,7 +476,7 @@ export function createFakeAssistantLaunchServiceProvider(
           options,
           () => {
             for (const [recordId, current] of records) {
-              if (current.captureState !== "ready") {
+              if (!["assigned", "ready"].includes(current.captureState)) {
                 records.delete(recordId);
               } else {
                 records.set(recordId, Object.freeze({

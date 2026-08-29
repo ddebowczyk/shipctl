@@ -80,6 +80,11 @@ export function configureTodoPreferences(activation: ModuleActivationContext | n
   }
 }
 
+export function releaseTodoPreferences(activation: ModuleActivationContext): void {
+  if (activeActivation !== activation) return;
+  configureTodoPreferences(null);
+}
+
 export async function loadTodoPreferences(): Promise<TodoPreferences | null> {
   const outcome = await activeService().readRecord.execute({
     scope: { kind: "global" },

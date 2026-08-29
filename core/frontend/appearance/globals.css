@@ -367,7 +367,36 @@ select {
  * Keeping the scope on the sidebar prevents manual sidebar tuning from changing
  * the workspace, tabs, settings panel, or terminal renderer. */
 .app-sidebar {
+  position: relative;
+  min-width: 1px;
   font-size: var(--text-body);
+}
+.app-sidebar--resizing {
+  user-select: none;
+}
+.app-sidebar__resize-handle {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.app-sidebar__resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background 100ms ease;
+}
+.app-sidebar__resize-handle:hover::after,
+.app-sidebar--resizing .app-sidebar__resize-handle::after {
+  background: var(--border-active);
 }
 .app-sidebar button,
 .app-sidebar input {

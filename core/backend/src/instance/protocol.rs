@@ -538,6 +538,10 @@ pub struct ControlEvent {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "wire payload variants intentionally retain complete typed event values"
+)]
 pub enum ControlEventPayload {
     ModuleOperation(ModuleOperation),
     Terminal(TerminalControlEvent),

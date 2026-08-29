@@ -172,3 +172,16 @@ test("preferences use the activation-derived plugin-data namespace and fail clos
   assert.deepEqual(todoPreferences.useTodoPreferencesStore.getState().preferences, preferences);
   await runtime.activation.dispose();
 });
+
+test("disposing a replaced runtime keeps the current to-do preferences service active", async () => {
+  const replaced = await activateRuntime();
+  const current = await activateRuntime();
+
+  await replaced.activation.dispose();
+
+  assert.deepEqual(
+    await todoPreferences.updateTodoPreferences({ showTodos: false, todoFileStyle: "list" }),
+    { showTodos: false, todoFileStyle: "list" },
+  );
+  await current.activation.dispose();
+});

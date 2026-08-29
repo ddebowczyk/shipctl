@@ -234,6 +234,10 @@ pub struct TerminalDescriptor {
 /// can recover after dropping any earlier notification.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "registry notifications carry complete descriptors for resync-free consumers"
+)]
 pub enum TerminalRegistryEvent {
     Upserted { descriptor: TerminalDescriptor },
     Removed { terminal_id: TerminalId },

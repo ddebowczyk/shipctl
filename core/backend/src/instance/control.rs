@@ -3426,7 +3426,6 @@ mod tests {
     }
 
     /// Semantic driver socket behavior is verified by the semantic-terminal module.
-
     #[cfg(unix)]
     #[test]
     fn live_terminal_attachment_does_not_block_server_shutdown() {

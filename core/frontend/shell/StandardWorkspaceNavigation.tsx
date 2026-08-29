@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type {
   ContributionId,
   GlobalNavigationContribution,
   PanelContribution,
 } from "@shipctl/module-api";
-import type { RepoInfo, RepoGroup } from "@shipctl/core/platform";
+import { getErrorMessage, type RepoInfo, type RepoGroup } from "@shipctl/core/platform";
 import { useTerminalStore } from "@shipctl/core/terminal-host";
 import {
   AgentSessionList,
@@ -14,10 +22,32 @@ import { useProjectFactsMap } from "@shipctl/core/host";
 import { ModuleSidebarSurfaces } from "@shipctl/core/host/views";
 import { useProjectSettingsStore } from "@shipctl/core/projects";
 import { ProjectList } from "@shipctl/core/projects/views";
+import { useNoticeStore } from "@shipctl/core/shared";
 import { SidebarSectionToggle } from "@shipctl/core/shared/views";
 
 import StandardWorkspaceNavigationFooter from "./StandardWorkspaceNavigationFooter.tsx";
+import { resizedStandardWorkspaceNavigationWidth } from "./standardWorkspaceNavigationSizing.ts";
 import { useStandardWorkspaceSettingsStore } from "./useStandardWorkspaceSettingsStore.ts";
+
+const USAGE_SURFACE_ID = "core.usage" as ContributionId;
+const HIDDEN_USAGE_SURFACE_IDS: ReadonlySet<ContributionId> = new Set([USAGE_SURFACE_ID]);
+
+interface NavigationResizeState {
+  pointerId: number;
+  startPointerX: number;
+  startWidth: number;
+  currentWidth: number;
+  availableWidth: number;
+}
+
+function availableNavigationWidth(navigation: HTMLDivElement): number {
+  const navigationRect = navigation.getBoundingClientRect();
+  const followingElement = navigation.nextElementSibling;
+  if (followingElement instanceof HTMLElement) {
+    return navigationRect.width + followingElement.getBoundingClientRect().width;
+  }
+  return navigation.parentElement?.getBoundingClientRect().width ?? navigationRect.width;
+}
 
 export interface StandardWorkspaceNavigationProps {
   readonly repos: readonly RepoInfo[];
@@ -27,6 +57,8 @@ export interface StandardWorkspaceNavigationProps {
   readonly activePanelId: ContributionId | null;
   readonly activePanelProjectPath: string | null;
   readonly activeGlobalSurfaceId: ContributionId | null;
+  readonly usagePanelVisible: boolean;
+  readonly projectsPanelVisible: boolean;
   readonly onSelectRepo: (repoPath: string) => void | Promise<boolean>;
   readonly onAddProject: (repoPath: string) => Promise<void>;
   readonly onRemoveProject: (repoPath: string) => void | Promise<void>;
@@ -54,6 +86,8 @@ export default function StandardWorkspaceNavigation({
   activePanelId,
   activePanelProjectPath,
   activeGlobalSurfaceId,
+  usagePanelVisible,
+  projectsPanelVisible,
   onSelectRepo,
   onAddProject,
   onRemoveProject,
@@ -82,7 +116,12 @@ export default function StandardWorkspaceNavigation({
   const loadProjectSettings = useProjectSettingsStore((state) => state.loadSettings);
   const sidebarSettings = useStandardWorkspaceSettingsStore((state) => state.settings);
   const sidebarSettingsLoaded = useStandardWorkspaceSettingsStore((state) => state.hasLoaded);
+  const sidebarSettingsSaving = useStandardWorkspaceSettingsStore((state) => state.isSaving);
   const loadSidebarSettings = useStandardWorkspaceSettingsStore((state) => state.loadSettings);
+  const updateSidebarSettings = useStandardWorkspaceSettingsStore((state) => state.updateSettings);
+  const [previewSidebarWidth, setPreviewSidebarWidth] = useState<number | null>(null);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  const navigationResizeStateRef = useRef<NavigationResizeState | null>(null);
 
   // Only subscribe to the fields that affect the sidebar activity indicators.
   // Returns a stable string so the selector doesn't trigger re-renders when
@@ -175,20 +214,102 @@ export default function StandardWorkspaceNavigation({
     if (!sidebarSettingsLoaded) void loadSidebarSettings();
   }, [sidebarSettingsLoaded, loadSidebarSettings]);
 
+  const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || sidebarSettingsSaving) return;
+    const navigation = event.currentTarget.parentElement;
+    if (!(navigation instanceof HTMLDivElement)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startWidth = navigation.getBoundingClientRect().width;
+    navigationResizeStateRef.current = {
+      pointerId: event.pointerId,
+      startPointerX: event.clientX,
+      startWidth,
+      currentWidth: startWidth,
+      availableWidth: availableNavigationWidth(navigation),
+    };
+    setPreviewSidebarWidth(startWidth);
+    setIsResizingSidebar(true);
+  }, [sidebarSettingsSaving]);
+
+  const handleResizePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const resizeState = navigationResizeStateRef.current;
+    if (resizeState?.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const width = resizedStandardWorkspaceNavigationWidth(
+      resizeState.startWidth,
+      resizeState.startPointerX,
+      event.clientX,
+      resizeState.availableWidth,
+    );
+    resizeState.currentWidth = width;
+    setPreviewSidebarWidth(width);
+  }, []);
+
+  const handleResizePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const resizeState = navigationResizeStateRef.current;
+    if (resizeState?.pointerId !== event.pointerId) return;
+    navigationResizeStateRef.current = null;
+    setIsResizingSidebar(false);
+    if (resizeState.currentWidth !== resizeState.startWidth) {
+      void updateSidebarSettings({ width: resizeState.currentWidth }).catch((error) => {
+        useNoticeStore.getState().pushNotice({
+          tone: "error",
+          title: "Couldn't save sidebar width",
+          message: getErrorMessage(error),
+        });
+      });
+    }
+    setPreviewSidebarWidth(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, [updateSidebarSettings]);
+
+  const cancelResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (navigationResizeStateRef.current?.pointerId !== event.pointerId) return;
+    navigationResizeStateRef.current = null;
+    setPreviewSidebarWidth(null);
+    setIsResizingSidebar(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  const handleResizeLostPointerCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (navigationResizeStateRef.current?.pointerId !== event.pointerId) return;
+    navigationResizeStateRef.current = null;
+    setPreviewSidebarWidth(null);
+    setIsResizingSidebar(false);
+  }, []);
+
   const sidebarStyle = useMemo(() => ({
-    width: `${sidebarSettings.width}px`,
+    width: `${previewSidebarWidth ?? sidebarSettings.width}px`,
     fontFamily: sidebarSettings.fontFamily,
     "--text-body": `${sidebarSettings.fontSize}px`,
     "--text-label": `${Math.max(10, sidebarSettings.fontSize - 2)}px`,
     "--text-badge": `${Math.max(9, sidebarSettings.fontSize - 3)}px`,
-  }) as CSSProperties, [sidebarSettings]);
+  }) as CSSProperties, [previewSidebarWidth, sidebarSettings]);
 
   return (
     <div
-      className="app-sidebar shrink-0 flex flex-col h-full pr-4 mr-4 border-r border-[var(--glass-border)]"
+      className={`app-sidebar${isResizingSidebar ? " app-sidebar--resizing" : ""} shrink-0 flex flex-col h-full pr-4 mr-4 border-r border-[var(--glass-border)]`}
       style={sidebarStyle}
       onContextMenu={(event) => event.preventDefault()}
     >
+      <div
+        className="app-sidebar__resize-handle"
+        role="separator"
+        aria-label="Resize left navigation"
+        aria-orientation="vertical"
+        onPointerDown={handleResizePointerDown}
+        onPointerMove={handleResizePointerMove}
+        onPointerUp={handleResizePointerUp}
+        onPointerCancel={cancelResize}
+        onLostPointerCapture={handleResizeLostPointerCapture}
+      />
       <div className="flex-1 overflow-y-auto min-h-0">
         {projectSettings.showAgentSessionsInSidebar && (
           <AgentSessionList
@@ -199,42 +320,45 @@ export default function StandardWorkspaceNavigation({
             onMoveTab={onMoveTab}
           />
         )}
-        <div className="sidebar-section px-2 pb-2">
-          <SidebarSectionToggle
-            label="Projects"
-            collapsed={projectsCollapsed}
-            badge={repos.length}
-            onToggle={handleToggleProjects}
-          />
-          {!projectsCollapsed && (
-            <ProjectList
-              repos={[...repos]}
-              groups={[...groups]}
-              activeRepoPath={activeRepoPath}
-              activeTabId={activeTabId}
-              activePanelId={activePanelId}
-              activePanelProjectPath={activePanelProjectPath}
-              projectActivity={projectActivity}
-              onSelectRepo={onSelectRepo}
-              onAddProject={onAddProject}
-              onRemoveProject={onRemoveProject}
-              onNewModuleSession={onNewModuleSession}
-              onOpenInEditor={onOpenInEditor}
-              onSelectTab={onSelectTab}
-              onCloseTab={onCloseTab}
-              onMoveTab={onMoveTab}
-              onNewShell={onNewShell}
-              onRenameGroup={onRenameGroup}
-              onDeleteGroup={onDeleteGroup}
-              onMoveToGroup={onMoveToGroup}
-              onOpenPanel={onOpenPanel}
-              tabDropProjectPath={tabDropProjectPath}
+        {projectsPanelVisible && (
+          <div className="sidebar-section px-2 pb-2">
+            <SidebarSectionToggle
+              label="Projects"
+              collapsed={projectsCollapsed}
+              badge={repos.length}
+              onToggle={handleToggleProjects}
             />
-          )}
-        </div>
+            {!projectsCollapsed && (
+              <ProjectList
+                repos={[...repos]}
+                groups={[...groups]}
+                activeRepoPath={activeRepoPath}
+                activeTabId={activeTabId}
+                activePanelId={activePanelId}
+                activePanelProjectPath={activePanelProjectPath}
+                projectActivity={projectActivity}
+                onSelectRepo={onSelectRepo}
+                onAddProject={onAddProject}
+                onRemoveProject={onRemoveProject}
+                onNewModuleSession={onNewModuleSession}
+                onOpenInEditor={onOpenInEditor}
+                onSelectTab={onSelectTab}
+                onCloseTab={onCloseTab}
+                onMoveTab={onMoveTab}
+                onNewShell={onNewShell}
+                onRenameGroup={onRenameGroup}
+                onDeleteGroup={onDeleteGroup}
+                onMoveToGroup={onMoveToGroup}
+                onOpenPanel={onOpenPanel}
+                tabDropProjectPath={tabDropProjectPath}
+              />
+            )}
+          </div>
+        )}
       </div>
       <ModuleSidebarSurfaces
         onToggleGlobalSurface={onToggleGlobalSurface}
+        hiddenSurfaceIds={usagePanelVisible ? undefined : HIDDEN_USAGE_SURFACE_IDS}
       />
       <StandardWorkspaceNavigationFooter
         navigation={globalNavigation}

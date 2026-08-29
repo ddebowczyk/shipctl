@@ -44,6 +44,10 @@ pub(crate) fn event_audience(event: &TerminalEvent) -> EventAudience {
 /// One ordered effect of a runtime operation. The actor applies these in order;
 /// the order is part of the decision, not of the application.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "runtime effects preserve the exact public terminal event payload"
+)]
 pub(crate) enum RuntimeEffect {
     /// Bytes the parser generated in answer to the child. They go to the PTY
     /// writer. They are never delivered to a subscriber.

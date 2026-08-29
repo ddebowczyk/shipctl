@@ -13,3 +13,34 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 rust-version = "1.88"
+
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
+
+[profile.dev.package."*"]
+# Schema compilation walks the JSON Schema 2020-12 meta-schema during both
+# development packaging and architecture tests. Optimising dependencies keeps
+# that validation responsive while preserving debuggable local code.
+opt-level = 1
+debug = false
+
+[profile.dev.build-override]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+incremental = false
+# Generic dependency code is monomorphised in the test crate, so the workspace
+# test targets need the same minimum optimisation as their dependencies.
+opt-level = 1
+
+[profile.test.package."*"]
+# Keep the same dependency optimisation as development builds. In particular,
+# unoptimised hashbrown 0.17 generic insertions make the provider property
+# suites effectively non-terminating on Apple Silicon.
+opt-level = 1
+debug = false
+
+[profile.test.build-override]
+debug = false

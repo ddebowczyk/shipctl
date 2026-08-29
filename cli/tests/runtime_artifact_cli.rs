@@ -475,6 +475,10 @@ fn compiled_cli_admits_disabled_runtime_artifacts_and_rejects_unsafe_candidates(
     fs::remove_dir_all(root).unwrap();
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "fixture parameters cover the archive contract dimensions under test"
+)]
 fn fixture_archive(
     module_id: &str,
     capability_id: &str,
